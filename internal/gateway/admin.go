@@ -33,7 +33,8 @@ type Admin struct {
 	updateMu     sync.Mutex
 	mu           sync.Mutex
 	sessions     map[[32]byte]time.Time
-	attempts     []time.Time
+	attempts     map[string]routeAttempts
+	activeLogins int
 	logs         *Logs
 	maintenance  *Maintenance
 	onlineUpdate onlineUpdateJob
@@ -42,9 +43,10 @@ type Admin struct {
 }
 
 func NewAdmin(store *Store, proxy *Proxy, certs *Certificates, jobs *Jobs, adminPort int) *Admin {
+	proxy.adminPort = adminPort
 	proxy.defense = newIPDefense(store)
 	proxy.ConfigureState(store.Snapshot())
-	return &Admin{store: store, proxy: proxy, certs: certs, jobs: jobs, started: time.Now(), ports: store.Snapshot().Config, adminPort: adminPort, sessions: map[[32]byte]time.Time{}, domainDNS: newDomainDNS(store)}
+	return &Admin{store: store, proxy: proxy, certs: certs, jobs: jobs, started: time.Now(), ports: store.Snapshot().Config, adminPort: adminPort, sessions: map[[32]byte]time.Time{}, attempts: map[string]routeAttempts{}, domainDNS: newDomainDNS(store)}
 }
 
 func jsonResponse(w http.ResponseWriter, code int, value any) {
@@ -61,6 +63,10 @@ func apiError(w http.ResponseWriter, code int, message string) {
 }
 
 func decodeBody(w http.ResponseWriter, r *http.Request, v any) bool {
+	controller := http.NewResponseController(w)
+	if controller.SetReadDeadline(time.Now().Add(15*time.Second)) == nil {
+		defer controller.SetReadDeadline(time.Time{})
+	}
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 128<<10))
 	decoder.DisallowUnknownFields()
 	if decoder.Decode(v) != nil || decoder.Decode(&struct{}{}) != io.EOF {
@@ -295,6 +301,10 @@ func (a *Admin) Handler() http.Handler {
 
 func (a *Admin) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Sec-Fetch-Site") == "cross-site" || !a.requestOriginAllowed(r) {
+			apiError(w, 403, "管理请求来源未获允许")
+			return
+		}
 		cookie, err := r.Cookie("gatehouse_session")
 		if err != nil {
 			apiError(w, 401, "请先登录")
@@ -318,21 +328,27 @@ func (a *Admin) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 func (a *Admin) login(w http.ResponseWriter, r *http.Request) {
 	a.mu.Lock()
 	now := time.Now()
-	active := a.attempts[:0]
-	for _, t := range a.attempts {
-		if now.Sub(t) < time.Minute {
-			active = append(active, t)
+	for ip, attempt := range a.attempts {
+		if now.Sub(attempt.started) >= time.Minute {
+			delete(a.attempts, ip)
 		}
 	}
-	a.attempts = active
-	if len(a.attempts) >= 8 {
+	ip := remoteIP(r.RemoteAddr)
+	attempt := a.attempts[ip]
+	if a.activeLogins >= 2 || attempt.count >= 8 || (attempt.count == 0 && len(a.attempts) >= 1024) {
 		a.mu.Unlock()
 		w.Header().Set("Retry-After", "60")
 		apiError(w, 429, "登录尝试过于频繁，请一分钟后再试")
 		return
 	}
-	a.attempts = append(a.attempts, now)
+	if attempt.count == 0 {
+		attempt.started = now
+	}
+	attempt.count++
+	a.attempts[ip] = attempt
+	a.activeLogins++
 	a.mu.Unlock()
+	defer func() { a.mu.Lock(); a.activeLogins--; a.mu.Unlock() }()
 	var input struct {
 		Password string `json:"password"`
 	}

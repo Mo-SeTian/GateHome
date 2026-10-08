@@ -24,6 +24,8 @@ func TestSecurityAuditAllAdminEndpointsRequireSession(t *testing.T) {
 		{"POST", "/api/maintenance/backup"}, {"POST", "/api/maintenance/inspect-update"},
 		{"POST", "/api/maintenance/inspect-backup"}, {"POST", "/api/maintenance/apply-update"},
 		{"POST", "/api/maintenance/apply-restore"},
+		{"POST", "/api/maintenance/check-online-update"}, {"POST", "/api/maintenance/download-online-update"}, {"GET", "/api/maintenance/online-update-status"},
+		{"POST", "/api/service-discovery"}, {"GET", "/api/service-discovery/missing"}, {"POST", "/api/service-discovery/missing/cancel"}, {"GET", "/api/service-discovery/missing/icon/80"},
 		{"POST", "/api/route-images/upload"}, {"POST", "/api/route-images/import"}, {"GET", "/api/route-images/missing"}, {"HEAD", "/api/route-images/missing"},
 	}
 	for _, endpoint := range endpoints {
@@ -53,6 +55,64 @@ func TestSecurityAuditAllAdminEndpointsRequireSession(t *testing.T) {
 	}
 	if !reflect.DeepEqual(before, a.store.Snapshot()) {
 		t.Fatal("unauthenticated requests changed persistent state")
+	}
+}
+
+func TestManagementCookieIsolationFromBusinessUpstreams(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		for _, cookie := range r.Cookies() {
+			if cookie.Name == "gatehouse_session" || strings.HasPrefix(cookie.Name, routeCookiePrefix) {
+				t.Error("protected session reached a business upstream")
+			}
+		}
+		if r.Header.Get("Cookie") != "business_session=TEST_ONLY_BUSINESS" {
+			t.Error("business cookies were unexpectedly changed")
+		}
+		w.Header().Add("Set-Cookie", "gatehouse_session=TEST_ONLY_FORGED; Path=/")
+		w.Header().Add("Set-Cookie", "business_session=TEST_ONLY_NEW; Path=/")
+		w.WriteHeader(200)
+	}))
+	defer backend.Close()
+	c := DefaultConfig()
+	c.Routes = []Route{{GroupID: "default", Host: "service.example.test", Upstream: backend.URL, Enabled: true}}
+	p := NewProxy(c, nil)
+	r := httptest.NewRequest("GET", "http://service.example.test/", nil)
+	r.Header.Add("Cookie", "gatehouse_session=TEST_ONLY_ADMIN; business_session=TEST_ONLY_BUSINESS")
+	r.Header.Add("Cookie", routeCookiePrefix+"test=TEST_ONLY_ROUTE; gatehouse_session=TEST_ONLY_DUPLICATE")
+	w := httptest.NewRecorder()
+	p.ServeHTTP(w, r)
+	if w.Code != 200 || len(w.Result().Cookies()) != 1 || w.Result().Cookies()[0].Name != "business_session" {
+		t.Fatal("business backend could overwrite a protected session")
+	}
+}
+
+func TestAdminCrossOriginReadsAndIndependentLoginLimits(t *testing.T) {
+	a, h := testAdmin(t)
+	cookie := loginForTest(t, h)
+	for _, path := range []string{"/api/config", "/api/status", "/api/maintenance", "/api/logs"} {
+		if w := adminRequest(h, "GET", path, nil, cookie, "https://evil.example.test"); w.Code != 403 {
+			t.Fatal("cross-origin read with a session was accepted")
+		}
+	}
+	r := httptest.NewRequest("GET", "http://localhost:16666/api/config", nil)
+	r.AddCookie(cookie)
+	r.Header.Set("Sec-Fetch-Site", "cross-site")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != 403 {
+		t.Fatal("cross-site navigation could read configuration")
+	}
+	// A hostile connection must not exhaust the limit of an unrelated client.
+	for i := 0; i < 8; i++ {
+		request := httptest.NewRequest("POST", "http://localhost:16666/api/login", strings.NewReader(`{"password":"TEST_ONLY_WRONG"}`))
+		request.RemoteAddr = "192.0.2.10:1234"
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("X-Gatehouse-Request", "1")
+		h.ServeHTTP(httptest.NewRecorder(), request)
+	}
+	loginForTest(t, h)
+	if len(a.attempts) > 1024 || a.activeLogins != 0 {
+		t.Fatal("login limiter did not release resources")
 	}
 }
 

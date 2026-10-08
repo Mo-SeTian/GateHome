@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -28,6 +29,8 @@ func TestAdminReverseProxyOriginAndSecureSession(t *testing.T) {
 	a, h := testAdmin(t)
 	backend := httptest.NewServer(h)
 	defer backend.Close()
+	_, backendPort, _ := net.SplitHostPort(strings.TrimPrefix(backend.URL, "http://"))
+	a.proxy.adminPort, _ = strconv.Atoi(backendPort)
 	c := a.store.Snapshot().Config
 	c.Routes = []Route{{GroupID: "default", Host: "console.example.test", Upstream: backend.URL, Enabled: true, TLS: true}}
 	a.proxy.Configure(c)

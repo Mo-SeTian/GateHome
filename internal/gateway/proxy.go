@@ -34,6 +34,7 @@ type Proxy struct {
 	defense       *IPDefense
 	wafSlots      chan struct{}
 	wafMemory     *semaphore.Weighted
+	adminPort     int
 }
 
 func NewProxy(c Config, subscriptions *Subscriptions) *Proxy {
@@ -64,6 +65,7 @@ func (p *Proxy) configurePrepared(c Config, hashes map[string]string, firewalls 
 		}
 		u, _ := url.Parse(r.Upstream)
 		upstream := u
+		adminUpstream := p.adminPort > 0 && upstream.Port() == fmt.Sprint(p.adminPort) && (upstream.Hostname() == "127.0.0.1" || upstream.Hostname() == "::1")
 		h := &httputil.ReverseProxy{
 			Rewrite: func(pr *httputil.ProxyRequest) {
 				pr.SetURL(upstream)
@@ -74,12 +76,20 @@ func (p *Proxy) configurePrepared(c Config, hashes map[string]string, firewalls 
 				pr.Out.Header.Del("X-Real-IP")
 				pr.Out.Header.Del("CF-Connecting-IP")
 				stripRouteCookies(pr.Out)
+				if !adminUpstream {
+					stripAdminCookies(pr.Out)
+				}
 				pr.SetXForwarded()
 			},
 			Transport: &http.Transport{Proxy: nil, DialContext: (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
 				ForceAttemptHTTP2: true, MaxIdleConns: 100, IdleConnTimeout: 90 * time.Second, TLSHandshakeTimeout: 10 * time.Second, ResponseHeaderTimeout: 60 * time.Second},
-			ModifyResponse: stripRouteResponseCookies,
-			ErrorLog:       log.New(io.Discard, "", 0),
+			ModifyResponse: func(response *http.Response) error {
+				if !adminUpstream {
+					stripAdminResponseCookies(response)
+				}
+				return stripRouteResponseCookies(response)
+			},
+			ErrorLog: log.New(io.Discard, "", 0),
 			ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 				p.Failures.Add(1)
 				http.Error(w, "后端服务暂不可用", http.StatusBadGateway)
