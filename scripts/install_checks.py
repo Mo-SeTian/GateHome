@@ -45,10 +45,18 @@ from pathlib import Path
 args=sys.argv[1:]
 url=next(a for a in args if a.startswith('https://'))
 output=args[args.index('-o')+1]
-shutil.copy2(Path(os.environ['QA_ASSETS'])/url.rsplit('/',1)[-1],output)
+name=url.rsplit('/',1)[-1]
+if name.endswith('.tar.gz'):
+    counter=Path(os.environ['QA_CURL_COUNTER'])
+    count=int(counter.read_text())+1 if counter.exists() else 1
+    counter.write_text(str(count))
+    if count <= int(os.environ.get('QA_DOWNLOAD_FAILURES','0')):
+        Path(output).write_bytes(b'TEST_ONLY_PARTIAL_DOWNLOAD')
+        sys.exit(56)
+shutil.copy2(Path(os.environ['QA_ASSETS'])/name,output)
 ''')
     fake_curl.chmod(0o755)
-    environment = os.environ | {'QA_PREFIX': str(prefix), 'QA_LEGACY': str(legacy), 'QA_PACKAGE': str(package), 'QA_ASSETS': str(assets), 'QA_SYSTEMD': str(temp / 'systemd'), 'TMPDIR': str(temp / 'tmp'), 'PATH': str(temp) + os.pathsep + os.environ['PATH']}
+    environment = os.environ | {'QA_PREFIX': str(prefix), 'QA_LEGACY': str(legacy), 'QA_PACKAGE': str(package), 'QA_ASSETS': str(assets), 'QA_SYSTEMD': str(temp / 'systemd'), 'QA_CURL_COUNTER': str(temp / 'curl-attempts'), 'TMPDIR': str(temp / 'tmp'), 'PATH': str(temp) + os.pathsep + os.environ['PATH']}
     # Privilege and systemd commands are the only mocked installation operations.
     shell = '''source "$QA_PACKAGE/install.sh"
 INSTALL_DIR="$QA_PREFIX"; CONFIG_DIR="$INSTALL_DIR/config"; LOG_DIR="$INSTALL_DIR/log"; DATA_DIR="$INSTALL_DIR/data"
@@ -131,6 +139,19 @@ trap '[[ -z "$DOWNLOAD_DIR" ]] || rm -rf -- "$DOWNLOAD_DIR"' EXIT
 
     execute('SOURCE_DIR=""; load_package amd64; test -f "$SOURCE_DIR/dist/gatehouse-linux-amd64"')
     execute('SOURCE_DIR=""; load_package arm64; test -f "$SOURCE_DIR/dist/gatehouse-linux-arm64"')
+    counter = temp / 'curl-attempts'
+    counter.unlink()
+    environment['QA_DOWNLOAD_FAILURES'] = '1'
+    execute('SOURCE_DIR=""; load_package amd64; cmp "$SOURCE_DIR/dist/gatehouse-linux-amd64" "$QA_PACKAGE/dist/gatehouse-linux-amd64"')
+    assert counter.read_text() == '2', 'SSL read failure was not retried.'
+    counter.unlink()
+    environment['QA_DOWNLOAD_FAILURES'] = '4'
+    environment['QA_PREFIX'] = str(temp / 'network-failed-install')
+    execute('SOURCE_DIR=""; install_gatehouse', success=False)
+    assert counter.read_text() == '4' and not (temp / 'network-failed-install').exists()
+    assert not list((temp / 'tmp').iterdir()), 'Partial download files were retained.'
+    print('Installer: curl 56 partial download retries cleanly; repeated failure leaves installation untouched: PASS')
+    environment['QA_DOWNLOAD_FAILURES'] = '0'
     archive = assets / 'gatehome-linux-amd64.tar.gz'
     archive.write_bytes(archive.read_bytes() + b'TEST_ONLY_CORRUPTION')
     execute('SOURCE_DIR=""; load_package amd64', success=False)

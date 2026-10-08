@@ -37,6 +37,21 @@ ensure_ca_certificates() {
   fi
 }
 
+download_file() {
+  local url="$1" target="$2" attempt
+  for ((attempt=1; attempt<=4; attempt++)); do
+    if curl --proto '=https' --proto-redir '=https' --tlsv1.2 --http1.1 -fLsS --connect-timeout 10 --max-time 300 "$url" -o "$target"; then
+      return
+    fi
+    rm -f -- "$target"
+    if [[ "$attempt" -lt 4 ]]; then
+      printf '下载连接失败，2 秒后重试（%s/4）……\n' "$((attempt+1))" >&2
+      sleep 2
+    fi
+  done
+  fail 'GitHub 下载失败。请检查 github.com 与 release-assets.githubusercontent.com 的网络或代理规则后重试；尚未修改已有安装。'
+}
+
 load_package() {
   local arch="$1" name="gatehome-linux-$1.tar.gz"
   if [[ -n "$SOURCE_DIR" && -f "$SOURCE_DIR/dist/gatehouse-linux-$arch" && -f "$SOURCE_DIR/VERSION" && -f "$SOURCE_DIR/SHA256SUMS" ]]; then
@@ -46,8 +61,8 @@ load_package() {
   DOWNLOAD_DIR="$(mktemp -d)"
   local base='https://github.com/Mo-SeTian/GateHome/releases/latest/download'
   printf '下载最新 Linux %s 安装包……\n' "$arch"
-  curl --proto '=https' --tlsv1.2 -fLsS --retry 3 --connect-timeout 10 "$base/$name" -o "$DOWNLOAD_DIR/$name"
-  curl --proto '=https' --tlsv1.2 -fLsS --retry 3 --connect-timeout 10 "$base/gatehome-SHA256SUMS" -o "$DOWNLOAD_DIR/checksums"
+  download_file "$base/$name" "$DOWNLOAD_DIR/$name"
+  download_file "$base/gatehome-SHA256SUMS" "$DOWNLOAD_DIR/checksums"
   awk -v name="$name" '$2 == name { print }' "$DOWNLOAD_DIR/checksums" > "$DOWNLOAD_DIR/expected"
   [[ "$(wc -l < "$DOWNLOAD_DIR/expected")" -eq 1 ]] || fail '安装包校验清单不完整。'
   (cd -- "$DOWNLOAD_DIR" && sha256sum -c expected >/dev/null) || fail '安装包 SHA-256 校验失败。'
