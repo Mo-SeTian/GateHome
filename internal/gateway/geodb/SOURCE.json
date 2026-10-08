@@ -1,0 +1,27 @@
+{
+  "source": "https://github.com/lionsoul2014/ip2region",
+  "commit": "02f04aa559acd954d94f77086e8ebe32483b365b",
+  "retrieved": "2026-10-08",
+  "files": {
+    "LICENSE.md": {
+      "size": 12976,
+      "sha256": "fe01f2f8fcaafac539154e6aa80b0b7f8af54e01dc4d52322f72971991c6280e"
+    },
+    "ip2region_v4.xdb.gz": {
+      "size": 4269521,
+      "sha256": "fd3074f32158e58faa489947a1ce6da635ef4b35be3d2deb56dc89108a59bdd3",
+      "uncompressed": {
+        "size": 11122501,
+        "sha256": "f5ccf366678c91394ac5e469f93b624d5df290e7353c748b920c6b84ffc4e551"
+      }
+    },
+    "ip2region_v6.xdb.gz": {
+      "size": 7258475,
+      "sha256": "48c178c003219495e7df5b85c2fbf26d8ec4ac9f289664905763215c18335ae9",
+      "uncompressed": {
+        "size": 37277813,
+        "sha256": "939f6b46bd2b8bec3cf7c5ceb8ba782266ae9b1f35b5ba7916700dec0b7506ed"
+      }
+    }
+  }
+}

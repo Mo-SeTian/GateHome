@@ -1,0 +1,25 @@
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import vm from 'node:vm';
+const source=readFileSync(new URL('../internal/gateway/web/app.js',import.meta.url),'utf8');
+const helper=source.slice(source.indexOf('function routeImageHTML('),source.indexOf('function openRoute('));
+const old='a'.repeat(64),next='b'.repeat(64),elements={image:{value:old},image_url:{value:'http://127.0.0.1/icon'},image_file:{value:'',files:[]}};
+const form={elements,dataset:{dirty:'false'},querySelectorAll:()=>[]},dialog={open:true};
+const feedback={textContent:'',focus(){}},preview={innerHTML:''},status={textContent:''};
+const pending=[];
+const context=vm.createContext({busy:false,icon:()=>'<svg></svg>',FormData:class {append(){}},api:()=>new Promise((resolve,reject)=>pending.push({resolve,reject})),
+  $:selector=>({'#route-form':form,'#route-dialog':dialog,'#route-image-error':feedback,'#route-image-preview':preview,'#route-image-status':status}[selector])});
+vm.runInContext('let routeImageRequest=0,routeImagePending=false;'+helper,context);
+assert.match(vm.runInContext('routeImageHTML('+JSON.stringify(old)+')',context),/^<img src="\/api\/route-images\/[a-f0-9]{64}"/);
+for(const bad of ['https://evil.example/a.png','../state.json','"><svg onload=alert(1)>','a'.repeat(63),null]) assert.equal(vm.runInContext('routeImageHTML('+JSON.stringify(bad)+')',context),'');
+const run=()=>vm.runInContext("loadRouteImage('url')",context);
+const failed=run();assert.match(status.textContent,/正在处理/);assert.equal(elements.image.value,old);
+pending[0].reject(new Error('测试失败'));assert.equal(await failed,false);assert.equal(elements.image.value,old);assert.equal(feedback.textContent,'测试失败');
+const canceled=run();vm.runInContext('++routeImageRequest;routeImagePending=false;',context);dialog.open=false;
+pending[1].resolve({id:next});assert.equal(await canceled,false);assert.equal(elements.image.value,old);
+dialog.open=true;const stale=run();vm.runInContext('++routeImageRequest;routeImagePending=false;',context);const latest=run();
+pending[3].resolve({id:next});assert.equal(await latest,true);pending[2].resolve({id:'c'.repeat(64)});await stale;
+assert.equal(elements.image.value,next);assert.equal(elements.image_url.value,'');assert.equal(form.dataset.dirty,'true');
+vm.runInContext('clearRouteImage()',context);assert.equal(elements.image.value,'');assert.equal(preview.innerHTML,'<svg></svg>');
+assert.match(source,/image:e\.image\.value/);assert.match(source,/image:row\.use_image\?row\.image_id/);
+console.log('Images: local-only references; failure retains prior image; cancel/reopen ignores stale replies; saved and scanned rules retain image IDs: PASS');

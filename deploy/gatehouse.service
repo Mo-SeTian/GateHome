@@ -1,0 +1,27 @@
+[Unit]
+Description=Gatehouse DDNS and reverse proxy
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=gatehouse
+Group=gatehouse
+StateDirectory=gatehouse
+StateDirectoryMode=0700
+WorkingDirectory=/var/lib/gatehouse
+ExecStart=/opt/gatehouse/launcher -supervise -managed-root /opt/gatehouse/app -data /var/lib/gatehouse -admin 0.0.0.0:16666
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/gatehouse/app
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+
+[Install]
+WantedBy=multi-user.target

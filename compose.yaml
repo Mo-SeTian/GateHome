@@ -1,0 +1,19 @@
+name: gatehouse
+services:
+  gatehouse:
+    build: .
+    image: gatehouse:local
+    restart: unless-stopped
+    # Linux host mode preserves the source IP for access policies.
+    network_mode: host
+    volumes:
+      - gatehouse-data:/data
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s
+
+volumes:
+  gatehouse-data:
