@@ -290,7 +290,7 @@ func (m *Maintenance) rollbackTransition() error {
 	if json.Unmarshal(b, &previous) != nil {
 		return errors.New("回滚数据无效")
 	}
-	for _, target := range restoreTargets(m.paths, true) {
+	for _, target := range restoreTargets(m.paths, true, nil) {
 		if err := os.RemoveAll(target.path + ".restore-old"); err != nil {
 			return err
 		}

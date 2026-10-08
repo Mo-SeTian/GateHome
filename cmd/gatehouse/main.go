@@ -180,6 +180,7 @@ func run() error {
 	}
 	jobs.Start(ctx)
 	subscriptions.Start(ctx)
+	logs.Start(ctx)
 	if *managedRoot != "" {
 		if err := gateway.MarkServiceReady(maintenance); err != nil {
 			return errors.New("启动检查状态写入失败")

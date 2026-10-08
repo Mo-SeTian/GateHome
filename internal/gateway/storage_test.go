@@ -52,6 +52,9 @@ func TestSplitStorageMigrationAndReopen(t *testing.T) {
 
 func TestSplitStorageBackupRestoreAndRollback(t *testing.T) {
 	paths, original := splitStorageFixture(t)
+	if err := atomicWrite(paths.file("logs/calls.jsonl.100"), original.Files["logs/calls.jsonl.1"]); err != nil {
+		t.Fatal(err)
+	}
 	before, err := snapshotDiskPaths(paths)
 	if err != nil {
 		t.Fatal(err)
@@ -67,6 +70,7 @@ func TestSplitStorageBackupRestoreAndRollback(t *testing.T) {
 	original.State.Config.Groups[0].Name = "恢复后的组"
 	state, _ := json.Marshal(original.State)
 	original.Files["logs/calls.jsonl"] = []byte(`{"id":9,"message":"TEST_ONLY_RESTORED"}` + "\n")
+	original.Files["logs/calls.jsonl.200"] = []byte(`{"id":8,"message":"TEST_ONLY_RESTORED_ARCHIVE"}` + "\n")
 	writeJSON(filepath.Join(m.dir, "restore-staged.json"), diskBackup{State: state, Certificates: original.Certificates, Files: original.Files})
 	writeJSON(filepath.Join(m.dir, "operation.json"), maintenanceOperation{Kind: "restore", Version: Version})
 	if transition, err := m.beginTransition(); err != nil || !transition {
@@ -79,6 +83,13 @@ func TestSplitStorageBackupRestoreAndRollback(t *testing.T) {
 	data, _ := os.ReadFile(paths.file("logs/calls.jsonl"))
 	if !bytes.Equal(data, original.Files["logs/calls.jsonl"]) {
 		t.Fatal("restored log remained in a different directory")
+	}
+	if _, err := os.Stat(paths.file("logs/calls.jsonl.100")); !os.IsNotExist(err) {
+		t.Fatal("restoration retained a stale log archive")
+	}
+	data, _ = os.ReadFile(paths.file("logs/calls.jsonl.200"))
+	if !bytes.Equal(data, original.Files["logs/calls.jsonl.200"]) {
+		t.Fatal("restoration omitted a log archive")
 	}
 	if err := m.rollbackTransition(); err != nil {
 		t.Fatal("split-directory rollback failed:", err)

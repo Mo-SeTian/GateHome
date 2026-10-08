@@ -166,6 +166,7 @@ type Config struct {
 	ACME          ACMEConfig          `json:"acme"`
 	OutboundProxy OutboundProxyConfig `json:"outbound_proxy"`
 	AdminAccess   AdminAccessConfig   `json:"admin_access"`
+	LogRetention  LogRetentionConfig  `json:"log_retention"`
 }
 
 type State struct {
@@ -189,7 +190,7 @@ type Store struct {
 
 func DefaultConfig() Config {
 	return Config{Groups: []ProxyGroup{{ID: "default", Name: "默认组", Enabled: true, HTTPPort: 18080, HTTPSPort: 18443}}, Subscriptions: []Subscription{}, Firewalls: []Firewall{}, Routes: []Route{},
-		DDNS: DDNSConfig{Groups: []DDNSGroup{}},
+		DDNS: DDNSConfig{Groups: []DDNSGroup{}}, LogRetention: defaultLogRetention,
 		ACME: ACMEConfig{Staging: true, DNSGroups: map[string]string{}, Requests: []CertificateRequest{}}}
 }
 
@@ -326,6 +327,10 @@ func migrateState(s *State) bool {
 
 func migrateConfig(c *Config) bool {
 	migrated := false
+	if c.LogRetention == (LogRetentionConfig{}) {
+		c.LogRetention = defaultLogRetention
+		migrated = true
+	}
 	if c.DDNS.Groups == nil {
 		old := c.DDNS
 		c.DDNS = DDNSConfig{Groups: []DDNSGroup{}}
@@ -663,6 +668,9 @@ func validDomain(s string) bool {
 func inZone(host, zone string) bool { return host == zone || strings.HasSuffix(host, "."+zone) }
 
 func Validate(c Config) error {
+	if err := validateLogRetention(c.LogRetention); err != nil {
+		return err
+	}
 	if err := validateAdminAccess(c.AdminAccess); err != nil {
 		return err
 	}

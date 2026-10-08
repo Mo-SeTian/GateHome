@@ -142,7 +142,7 @@ func (l *Logs) Statistics(hours int, rule string, now time.Time) AccessStatistic
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	result.RetainedEntries, result.WriteError = len(l.entries), l.writeError
+	result.RetainedEntries, result.WriteError = len(l.entries), l.writeError || l.cleanupError
 	if len(l.entries) > 0 {
 		result.RetainedFrom = l.entries[0].Time
 	}

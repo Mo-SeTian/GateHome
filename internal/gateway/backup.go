@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -77,7 +78,14 @@ func snapshotBackupPaths(paths StoragePaths, state State) (backupPayload, error)
 		total += len(data)
 		b.Certificates[e.Name()] = data
 	}
-	names := []string{"logs/calls.jsonl", "logs/calls.jsonl.1"}
+	logNames, err := logFileNames(paths.Log)
+	if err != nil {
+		return b, errors.New("日志目录读取失败")
+	}
+	names := []string{}
+	for _, name := range logNames {
+		names = append(names, "logs/"+name)
+	}
 	for _, subscription := range state.Config.Subscriptions {
 		names = append(names, "subscriptions/"+subscription.ID+".json")
 	}
@@ -243,14 +251,32 @@ type restoreTarget struct {
 	directory  bool
 }
 
-func restoreTargets(paths StoragePaths, full bool) []restoreTarget {
+func restoreTargets(paths StoragePaths, full bool, incoming map[string][]byte) []restoreTarget {
 	targets := []restoreTarget{{"certificates", paths.directory("certificates"), true}}
 	if full {
 		for _, name := range []string{"route-images", "subscriptions"} {
 			targets = append(targets, restoreTarget{name, paths.directory(name), true})
 		}
 		if paths.splitLogs() {
-			for _, name := range []string{"logs/calls.jsonl", "logs/calls.jsonl.1"} {
+			names := map[string]bool{"logs/calls.jsonl": true, "logs/calls.jsonl.1": true}
+			entries, _ := os.ReadDir(paths.Log)
+			for _, entry := range entries {
+				name := strings.TrimSuffix(entry.Name(), ".restore-old")
+				if _, ok := logFileNumber(name); ok {
+					names["logs/"+name] = true
+				}
+			}
+			for name := range incoming {
+				if strings.HasPrefix(name, "logs/") && safeBackupFile(name) {
+					names[name] = true
+				}
+			}
+			ordered := make([]string, 0, len(names))
+			for name := range names {
+				ordered = append(ordered, name)
+			}
+			sort.Strings(ordered)
+			for _, name := range ordered {
 				targets = append(targets, restoreTarget{name, paths.file(name), false})
 			}
 		} else {
@@ -290,7 +316,7 @@ func restoreFilesPaths(paths StoragePaths, state []byte, certificates, files map
 		}
 		return filepath.Join(stage, filepath.FromSlash(name))
 	}
-	targets := restoreTargets(paths, files != nil)
+	targets := restoreTargets(paths, files != nil, files)
 	for _, target := range targets {
 		if target.directory {
 			if err := os.Mkdir(staged(target.name), 0700); err != nil {

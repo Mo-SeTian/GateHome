@@ -57,7 +57,7 @@ func (a *Admin) maintenanceRoutes(mux *http.ServeMux) {
 			apiError(w, 409, "维护功能不可用或正在执行操作")
 			return
 		}
-		// Keep both rotated log files at the same complete-record snapshot.
+		// Keep all rotated log files at the same complete-record snapshot.
 		if a.logs != nil {
 			a.logs.mu.Lock()
 		}

@@ -41,13 +41,16 @@ type LogEntry struct {
 }
 
 type Logs struct {
-	mu         sync.Mutex
-	store      *Store
-	path       string
-	entries    []LogEntry
-	lastID     int64
-	size       int64
-	writeError bool
+	mu           sync.Mutex
+	store        *Store
+	path         string
+	entries      []LogEntry
+	lastID       int64
+	size         int64
+	totalSize    int64
+	lastCleanup  time.Time
+	writeError   bool
+	cleanupError bool
 }
 
 type LogFilter struct {
@@ -67,7 +70,17 @@ func NewLogsAt(dir string, store *Store) (*Logs, error) {
 		return nil, err
 	}
 	l := &Logs{store: store, path: filepath.Join(dir, "calls.jsonl"), entries: []LogEntry{}}
-	for _, path := range []string{l.path + ".1", l.path} {
+	names, err := logFileNames(dir)
+	if err != nil {
+		return nil, err
+	}
+	for _, name := range names {
+		path := filepath.Join(dir, name)
+		info, err := os.Lstat(path)
+		if err != nil || !info.Mode().IsRegular() || info.Size() > maxLogBytes {
+			return nil, errors.New("日志文件类型或大小无效")
+		}
+		l.totalSize += info.Size()
 		file, err := os.Open(path)
 		if errors.Is(err, os.ErrNotExist) {
 			continue
@@ -90,10 +103,14 @@ func NewLogsAt(dir string, store *Store) (*Logs, error) {
 			}
 		}
 		file.Close()
+		if err := scanner.Err(); err != nil {
+			return nil, err
+		}
 	}
 	if info, err := os.Stat(l.path); err == nil {
 		l.size = info.Size()
 	}
+	_ = l.Cleanup(time.Now())
 	return l, nil
 }
 
@@ -177,6 +194,7 @@ func (l *Logs) Add(e LogEntry) {
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	c := l.retention()
 	l.lastID++
 	e.ID = l.lastID
 	e.Time = time.Now()
@@ -190,12 +208,12 @@ func (l *Logs) Add(e LogEntry) {
 		return
 	}
 	data = append(data, '\n')
-	if l.size+int64(len(data)) > maxLogBytes {
-		if err := os.Rename(l.path, l.path+".1"); err != nil {
+	limit := int64(c.MaxSizeMB) << 20
+	if l.size > 0 && l.size+int64(len(data)) > min(int64(maxLogBytes), limit/4) {
+		if err := l.rotateLocked(e.Time); err != nil {
 			l.writeError = true
 			return
 		}
-		l.size = 0
 	}
 	file, err := os.OpenFile(l.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	if err != nil {
@@ -205,7 +223,11 @@ func (l *Logs) Add(e LogEntry) {
 	n, err := file.Write(data)
 	file.Close()
 	l.size += int64(n)
+	l.totalSize += int64(n)
 	l.writeError = err != nil
+	if err == nil && (l.totalSize > limit || e.Time.Sub(l.lastCleanup) >= time.Minute) {
+		l.cleanupError = l.cleanupLocked(c, e.Time) != nil
+	}
 }
 
 func (l *Logs) List(category, result string, before int64, limit int) ([]LogEntry, int64, bool) {
@@ -232,7 +254,7 @@ func (l *Logs) Query(f LogFilter, before int64, limit int) ([]LogEntry, int64, b
 		}
 		rows = append(rows, e)
 	}
-	return rows, next, l.writeError
+	return rows, next, l.writeError || l.cleanupError
 }
 
 func matchesLog(e LogEntry, f LogFilter) bool {
@@ -314,5 +336,5 @@ func (l *Logs) Page(f LogFilter, page, size int, through int64) LogPage {
 	pages := max(1, (len(rows)+size-1)/size)
 	page = min(page, pages)
 	start := (page - 1) * size
-	return LogPage{Entries: rows[start:min(start+size, len(rows))], Page: page, Size: size, Total: len(rows), Pages: pages, Through: through, WriteError: l.writeError}
+	return LogPage{Entries: rows[start:min(start+size, len(rows))], Page: page, Size: size, Total: len(rows), Pages: pages, Through: through, WriteError: l.writeError || l.cleanupError}
 }

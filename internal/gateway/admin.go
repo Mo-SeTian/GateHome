@@ -464,6 +464,7 @@ func (a *Admin) putConfig(w http.ResponseWriter, r *http.Request) {
 		a.proxy.subscriptions.Trigger("")
 	}
 	state := a.store.Snapshot()
+	_ = a.logs.Cleanup(time.Now())
 	a.proxy.configurePrepared(state.Config, state.RoutePasswordHashes, prepared)
 	a.certs.Reload()
 	a.jobs.Trigger("ddns")
@@ -486,6 +487,7 @@ func (a *Admin) status(w http.ResponseWriter, r *http.Request) {
 		"listeners":        a.ports.Groups,
 		"restart_required": listenerSignature(c) != listenerSignature(a.ports),
 		"subscriptions":    subscriptions,
+		"log_storage":      a.logs.StorageStatus(),
 		"jobs":             jobs, "events": events, "certificates": a.certs.Status(),
 	})
 }

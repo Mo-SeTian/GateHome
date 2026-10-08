@@ -12,8 +12,9 @@ import (
 )
 
 func safeBackupFile(name string) bool {
-	if name == "logs/calls.jsonl" || name == "logs/calls.jsonl.1" {
-		return true
+	if strings.HasPrefix(name, "logs/") {
+		_, ok := logFileNumber(strings.TrimPrefix(name, "logs/"))
+		return ok
 	}
 	if strings.HasPrefix(name, "route-images/") && strings.HasSuffix(name, ".img") {
 		return routeImageID.MatchString(strings.TrimSuffix(strings.TrimPrefix(name, "route-images/"), ".img"))
