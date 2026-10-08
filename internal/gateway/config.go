@@ -167,6 +167,7 @@ type Config struct {
 	OutboundProxy OutboundProxyConfig `json:"outbound_proxy"`
 	AdminAccess   AdminAccessConfig   `json:"admin_access"`
 	LogRetention  LogRetentionConfig  `json:"log_retention"`
+	Dashboard     DashboardConfig     `json:"dashboard"`
 }
 
 type State struct {
@@ -668,6 +669,9 @@ func validDomain(s string) bool {
 func inZone(host, zone string) bool { return host == zone || strings.HasSuffix(host, "."+zone) }
 
 func Validate(c Config) error {
+	if err := validateDashboard(c.Dashboard); err != nil {
+		return err
+	}
 	if err := validateLogRetention(c.LogRetention); err != nil {
 		return err
 	}

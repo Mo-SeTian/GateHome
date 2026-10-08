@@ -77,7 +77,7 @@ func stripRouteCookies(r *http.Request) {
 	for _, header := range r.Header.Values("Cookie") {
 		for _, part := range strings.Split(header, ";") {
 			name, _, _ := strings.Cut(strings.TrimSpace(part), "=")
-			if !strings.HasPrefix(name, routeCookiePrefix) {
+			if !strings.HasPrefix(strings.TrimSpace(name), routeCookiePrefix) {
 				values = append(values, strings.TrimSpace(part))
 			}
 		}
@@ -93,7 +93,7 @@ func stripRouteResponseCookies(response *http.Response) error {
 	response.Header.Del("Set-Cookie")
 	for _, value := range values {
 		name, _, _ := strings.Cut(strings.TrimSpace(value), "=")
-		if !strings.HasPrefix(name, routeCookiePrefix) {
+		if !strings.HasPrefix(strings.TrimSpace(name), routeCookiePrefix) {
 			response.Header.Add("Set-Cookie", value)
 		}
 	}

@@ -15,7 +15,7 @@ func TestSecurityAuditAllAdminEndpointsRequireSession(t *testing.T) {
 	before := a.store.Snapshot()
 	endpoints := []struct{ method, path string }{
 		{"GET", "/api/config"}, {"HEAD", "/api/config"}, {"PUT", "/api/config"},
-		{"GET", "/api/status"}, {"GET", "/api/logs"}, {"GET", "/api/statistics"},
+		{"GET", "/api/status"}, {"GET", "/api/dashboard"}, {"GET", "/api/logs"}, {"GET", "/api/statistics"},
 		{"GET", "/api/ip-blocks"}, {"POST", "/api/ip-blocks"}, {"DELETE", "/api/ip-blocks"},
 		{"GET", "/api/ddns/records?refresh=1"}, {"GET", "/api/ddns/network"}, {"POST", "/api/ddns/network"},
 		{"POST", "/api/logout"}, {"POST", "/api/ddns/example/run"},

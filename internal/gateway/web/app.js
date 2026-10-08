@@ -89,7 +89,7 @@ function toast(message) {
   $('#toast').textContent = message; $('#toast').hidden = false; if(!reducedMotion.matches) {$('#toast').getAnimations().forEach(a=>a.cancel());$('#toast').animate([{opacity:0,translate:'0 8px'},{opacity:1,translate:'0 0'}],{duration:180,easing:'ease-out'});}
   clearTimeout(toastTimer); toastTimer = setTimeout(() => { $('#toast').hidden = true; }, 4500);
 }
-function showLogin() { setNavigation(false,false); $('#login').hidden = false; $('#app').hidden = true; document.querySelectorAll('dialog').forEach(d=>d.close()); config = undefined; renderedPage='';clearTimeout(onlineUpdate.timer);onlineUpdate.request++;onlineUpdate.phase='';onlineUpdate.job=null;onlineUpdate.release=null;onlineUpdate.error='';abandonDiscovery();for(const state of Object.values(securityEvents)) {state.request++;state.view=null;state.filters=emptyEventFilters();state.applied=emptyEventFilters();state.loading=false;state.error='';} }
+function showLogin() { resetDashboard();setNavigation(false,false); $('#login').hidden = false; $('#app').hidden = true; document.querySelectorAll('dialog').forEach(d=>d.close()); config = undefined; renderedPage='';clearTimeout(onlineUpdate.timer);onlineUpdate.request++;onlineUpdate.phase='';onlineUpdate.job=null;onlineUpdate.release=null;onlineUpdate.error='';abandonDiscovery();for(const state of Object.values(securityEvents)) {state.request++;state.view=null;state.filters=emptyEventFilters();state.applied=emptyEventFilters();state.loading=false;state.error='';} }
 function applyConfig(data) { config = data.config; revision = data.revision; dnsCredentialsConfigured=data.dns_credentials_configured||{}; certificateCredentialsConfigured=data.certificate_credentials_configured||{};routePasswordsConfigured=data.route_passwords_configured||{}; proxyPasswordConfigured=data.proxy_password_configured; ipRequest++;dnsRecordsRequest++;dnsRecords={};dnsRecordsError=''; if(networkInfo) networkInfo.groups={}; }
 async function save(next, dnsTokens, proxyPassword, certificateTokens, routePasswords) {
   const payload = {config:next, revision};
@@ -149,14 +149,14 @@ function objectMenu(label, buttons) {
 function routeTable(accessOnly = false, overview = false, groupID = '') {
   const rows=config.routes.map((r,i)=>({r,i})).filter(({r})=>!groupID||r.group_id===groupID).slice(0,overview?4:100);
   if (!rows.length) return empty('还没有代理服务', '添加一个子域名，将它连接到你的 NAS、相册或其他内网服务。', addRouteButton(groupID));
-  const workspace=page==='routes',headers=accessOnly?['服务 / 域名','防火墙','策略状态','运行状态','操作']:['服务 / 域名','内网服务地址','协议','防火墙','访问账号','运行状态','操作'];
+  const workspace=page==='routes',headers=accessOnly?['服务 / 域名','防火墙','策略状态','运行状态','操作']:['服务 / 域名','服务地址','协议','防火墙','访问账号','运行状态','操作'];
   return `<div class="table-wrap ${workspace?'proxy-table':'service-table'}"><table><thead><tr>${headers.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.map(({r,i}) => {
     const f=config.firewalls.find(f=>f.id===r.firewall_id),waiting=f&&firewallWaiting(f),key=r.group_id+'/'+r.host;
     const edit=`<button class="text-button" data-action="edit-route" data-index="${i}">编辑</button>`;
     const identity=`<div class="service-cell"><span class="service-icon">${icon('server')}${routeImageHTML(r.image)}</span><div><b>${esc(r.name||r.host)}</b><small class="mono">${esc(r.host)}</small>${groupID?'':`<small>${esc(groupName(r.group_id))}</small>`}</div></div>`;
     const status=badge(routeActive(r)?'已启用':r.enabled?'组已停用':'已停用',routeActive(r)?'':'gray');
     const controls=`<div class="table-actions">${edit}${overview?'':objectMenu(r.name||r.host,`<button class="text-button" data-action="toggle-route" data-index="${i}">${r.enabled?'停用':'启用'}</button><button class="text-button danger" data-action="delete-route" data-index="${i}">删除服务</button>`)}</div>`;
-    return `<tr data-route-key="${esc(key)}"><td>${identity}</td>${accessOnly?`<td>${esc(f?.name||'未配置')}</td><td>${f?badge(waiting?'等待订阅，暂拒访问':'规则可用',waiting?'amber':'')+`<small>未命中${actionLabel(f.default_action)}</small>`:'不限制来源 IP'}</td>`:`<td class="mono">${esc(r.upstream)}</td><td><span class="protocol">${r.tls?'HTTPS':'HTTP'}</span></td><td>${esc(f?.name||'未配置')}</td><td>${r.auth?.enabled?'独立账号':'公开访问'}</td>`}<td>${status}</td><td>${controls}</td></tr>`;
+    return `<tr data-route-key="${esc(key)}"><td>${identity}</td>${accessOnly?`<td>${esc(f?.name||'未配置')}</td><td>${f?badge(waiting?'等待订阅，暂拒访问':'规则可用',waiting?'amber':'')+`<small>未命中${actionLabel(f.default_action)}</small>`:'不限制来源 IP'}</td>`:`<td class="service-address">${serviceAddressHTML(r)}</td><td><span class="protocol">${r.tls?'HTTPS':'HTTP'}</span></td><td>${esc(f?.name||'未配置')}</td><td>${r.auth?.enabled?'独立账号':'公开访问'}</td>`}<td>${status}</td><td>${controls}</td></tr>`;
   }).join('')}</tbody></table></div>`;
 }
 function firewallsHTML() {
@@ -215,16 +215,8 @@ function subscriptionsHTML() {
     panel('快捷添加','mayaxcn/china-ip-list 提供中国大陆地址分配列表；省份列表可通过自定义链接添加。','<div class="panel-body preset-actions"><button class="secondary" data-action="preset-subscription" data-family="4">中国大陆 IPv4</button><button class="secondary" data-action="preset-subscription" data-family="6">中国大陆 IPv6</button><a class="inline-icon-link" href="https://github.com/mayaxcn/china-ip-list" target="_blank" rel="noopener noreferrer">查看来源 <span data-icon="external-link"></span><span class="sr-only">（在新标签页打开）</span></a></div>') +
     panel('已配置订阅','更新频率、条目数量与运行结果。',rows?`<div class="table-wrap"><table><thead><tr><th>订阅名称 / 来源</th><th>条目数</th><th>状态</th><th>最近成功更新</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></div>`:empty('还没有 IP 订阅','添加一个通用 HTTPS 链接，或使用上方中国 IP 快捷入口。',actions));
 }
-function overviewHTML() {
-  const enabled=config.routes.filter(routeActive).length;
-  const stats=[['代理服务',enabled,'个',`${config.groups.length} 个反代组 · ${config.routes.length} 条域名规则`,'routes'],['累计请求',status.requests||0,'次','本次启动后的业务请求','activity'],['有效证书',(status.certificates||[]).filter(c=>c.ready).length,'张',config.acme.staging?'当前使用测试环境':'Let’s Encrypt 正式环境','certificate'],['访问拦截',status.blocked||0,'次','按来源 IP 执行访问策略','shield']];
-  const modules=[['globe','动态域名 DDNS',`${config.ddns.groups.length} 个任务组 · ${config.ddns.groups.filter(g=>g.enabled).length} 个已启用`,jobBadge('ddns',config.ddns.groups.some(g=>g.enabled))],['certificate','SSL 自动续期','DNS-01 验证 · 每小时检查',jobBadge('acme',config.acme.enabled)],['shield','防火墙策略',`${config.firewalls.length} 个防火墙 · ${config.routes.filter(r=>r.firewall_id).length} 条规则引用`,'<button class="text-button" data-page="access">管理 '+icon('arrow')+'</button>'],['download','IP 订阅',`${config.subscriptions.length} 个订阅 · ${(status.subscriptions||[]).filter(s=>s.ready).length} 个有效缓存`,'<button class="text-button" data-page="subscriptions">管理 '+icon('arrow')+'</button>']];
-  return heading('WORKSPACE / OVERVIEW','网络概览','掌握网关运行状态，管理通往家庭服务的每一条连接。',addRouteButton())+
-    `<div class="stats">${stats.map(s=>`<div class="stat"><span class="stat-label">${s[0]}</span><span class="stat-icon">${icon(s[4])}</span><div class="stat-value">${s[1].toLocaleString()}<small>${s[2]}</small></div><span class="stat-foot">${s[3]}</span></div>`).join('')}</div>`+
-    panel('监听入口','按反代组查看当前配置与运行状态。',`<div class="listener-summary">${config.groups.map(g=>`<div><b>${esc(g.name)}</b>${groupBadge(g)}<small>${esc(portsText(g))}</small></div>`).join('')||'<p>尚未创建反代组。</p>'}</div>`,'<button class="secondary" data-page="routes">管理服务 '+icon('arrow')+'</button>')+
-    `<div class="two-col">${panel('基础服务','域名、安全与访问策略，协同运行。',modules.map(([name,title,note,action])=>`<div class="module-row"><div class="module-icon">${icon(name)}</div><div><b>${title}</b><small>${note}</small></div>${action}</div>`).join(''))}${panel('最近活动','来自 DDNS 与证书任务的实际运行结果。',eventsHTML())}</div>`+
-    panel('代理服务','域名与内网服务之间的连接。',routeTable(false,true),'<button class="secondary" data-page="routes">查看全部 '+icon('arrow')+'</button>');
-}
+function overviewHTML() { return dashboardHTML(); }
+
 function ddnsMode(mode) { return {ipv4:'IPv4（A）',ipv6:'IPv6（AAAA）',dual:'IPv4 + IPv6'}[mode]; }
 function ddnsGroupStatus(g) { return status.jobs?.['ddns:'+g.id]; }
 function ddnsBadge(g) { const job=ddnsGroupStatus(g), failed=job&&!job.running&&new Date(job.last_success)<new Date(job.last_run);return !g.enabled?badge('已停用','gray'):!job?badge('等待运行','gray'):job.running?badge('同步中'):failed?badge('同步失败','amber'):badge('同步正常'); }
@@ -709,6 +701,7 @@ function render() {
   }
   renderedPage=page;
   if(changed&&page==='settings') loadOnlineUpdateStatus();
+  if(changed&&page==='overview') loadDashboard();
   if(page==='ddns') {loadIPInfo().catch(e=>{if($('#ip-results')) $('#ip-results').textContent=e.message;});loadDNSRecords();}
 }
 async function refreshStatus() {
@@ -1039,6 +1032,7 @@ document.addEventListener('submit',event=>{
   event.preventDefault(); const form=event.target;
   if(form.id==='login-form') return submitForm(form,async()=>{ const password=form.elements.password.value; form.elements.password.value=''; await api('login','POST',{password}); await load(); });
   if(!config) return;
+  if(form.id==='dashboard-form') return submitForm(form,saveDashboardSettings);
   if(form.dataset.eventFilters) {
     const kind=form.dataset.eventFilters;securityEvents[kind].filters={...emptyEventFilters(),...Object.fromEntries(new FormData(form))};
     return loadSecurityEvents(kind).catch(e=>toast(e.message));
@@ -1122,6 +1116,8 @@ document.addEventListener('click',async event=>{
   const action=button.dataset.action;
   if(action==='close-dialog') { closeDialog(button.closest('dialog')); return; }
   if(!config||busy) return;
+  if(action==='configure-dashboard') return openDashboardSettings();
+  if(action==='move-widget') return moveDashboardWidget(button.dataset.widget,Number(button.dataset.direction));
   if(action==='toggle-group-panel') return toggleGroupPanel(button);
   if(action==='discover-services') return openDiscovery(button.dataset.group);
   if(action==='start-discovery') return startDiscovery();
@@ -1306,10 +1302,11 @@ reducedMotion.addEventListener('change',()=>{
 hydrateIcons();setNavigation(false,false);
 load().catch(e=>{ showLogin(); if(e.message!=='请先登录') $('#login-error').textContent=e.message; });
 setInterval(async()=>{
-  if(!config||document.hidden||busy) return;
+  if(!config||document.hidden||busy||dashboardDrag||dashboardSaving) return;
   try {
     await refreshStatus();
-    if((page==='overview'||page==='subscriptions'||page==='access')&&!document.querySelector('dialog[open]')) render();
+    if(page==='overview'&&!dashboardDrag&&!dashboardSaving&&!document.querySelector('dialog[open]')) await loadDashboard();
+    if((page==='subscriptions'||page==='access')&&!document.querySelector('dialog[open]')) render();
     if(page==='ddns') config.ddns.groups.forEach(g=>{const badgeElement=$('[data-ddns-status="'+g.id+'"]');if(badgeElement) badgeElement.innerHTML=ddnsBadge(g);const summary=$('[data-ddns-summary="'+g.id+'"]');if(summary) summary.textContent=ddnsSummary(g);const button=$('[data-ddns-run="'+g.id+'"]');if(button) button.disabled=!g.enabled||!!ddnsGroupStatus(g)?.running;});
     if(page==='ddns') await Promise.all([loadIPInfo(),loadDNSRecords()]);
     if(page==='certificates') {const target=$('#certificate-table'),focused=target.contains(document.activeElement)?focusSelector(document.activeElement):'';target.innerHTML=certificateTable();hydrateIcons(target);if(focused) $(focused,target)?.focus({preventScroll:true});}

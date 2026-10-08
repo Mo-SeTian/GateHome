@@ -11,7 +11,7 @@ func stripAdminCookies(r *http.Request) {
 	for _, header := range r.Header.Values("Cookie") {
 		for _, part := range strings.Split(header, ";") {
 			name, _, _ := strings.Cut(strings.TrimSpace(part), "=")
-			if name != "gatehouse_session" {
+			if strings.TrimSpace(name) != "gatehouse_session" {
 				values = append(values, strings.TrimSpace(part))
 			}
 		}
@@ -27,7 +27,7 @@ func stripAdminResponseCookies(response *http.Response) {
 	response.Header.Del("Set-Cookie")
 	for _, value := range values {
 		name, _, _ := strings.Cut(strings.TrimSpace(value), "=")
-		if name != "gatehouse_session" {
+		if strings.TrimSpace(name) != "gatehouse_session" {
 			response.Header.Add("Set-Cookie", value)
 		}
 	}
