@@ -59,7 +59,10 @@ type LogFilter struct {
 }
 
 func NewLogs(dir string, store *Store) (*Logs, error) {
-	dir = filepath.Join(dir, "logs")
+	return NewLogsAt(filepath.Join(dir, "logs"), store)
+}
+
+func NewLogsAt(dir string, store *Store) (*Logs, error) {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, err
 	}

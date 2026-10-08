@@ -26,6 +26,7 @@ type maintenanceStage struct {
 type Maintenance struct {
 	mu          sync.Mutex
 	dir, appDir string
+	paths       StoragePaths
 	supervised  bool
 	backupFiles bool
 	stage       *maintenanceStage
@@ -34,11 +35,15 @@ type Maintenance struct {
 }
 
 func NewMaintenance(data, appDir string) (*Maintenance, error) {
-	dir := filepath.Join(data, "maintenance")
+	return NewMaintenancePaths(legacyStorage(data), appDir)
+}
+
+func NewMaintenancePaths(paths StoragePaths, appDir string) (*Maintenance, error) {
+	dir := filepath.Join(paths.Data, "maintenance")
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, err
 	}
-	return &Maintenance{dir: dir, appDir: appDir, supervised: os.Getenv("GATEHOUSE_SUPERVISED") == "1", backupFiles: os.Getenv("GATEHOUSE_BACKUP_FILES") == "1", restart: make(chan struct{}, 1)}, nil
+	return &Maintenance{dir: dir, appDir: appDir, paths: paths, supervised: os.Getenv("GATEHOUSE_SUPERVISED") == "1", backupFiles: os.Getenv("GATEHOUSE_BACKUP_FILES") == "1", restart: make(chan struct{}, 1)}, nil
 }
 
 func (m *Maintenance) Available() bool {
@@ -219,8 +224,7 @@ func (m *Maintenance) beginTransition() (bool, error) {
 	if json.Unmarshal(b, &op) != nil || (op.Kind != "update" && op.Kind != "restore") {
 		return false, errors.New("维护请求无效")
 	}
-	dataDir := filepath.Dir(m.dir)
-	previous, err := snapshotDisk(dataDir)
+	previous, err := snapshotDiskPaths(m.paths)
 	if err != nil {
 		return false, err
 	}
@@ -270,7 +274,7 @@ func (m *Maintenance) beginTransition() (bool, error) {
 		}
 		fields["revision"], _ = json.Marshal(oldRevision.Revision + 1)
 		state, _ := json.Marshal(fields)
-		if err := restoreFiles(dataDir, state, restored.Certificates, restored.Files); err != nil {
+		if err := restoreFilesPaths(m.paths, state, restored.Certificates, restored.Files); err != nil {
 			return true, err
 		}
 	}
@@ -286,12 +290,12 @@ func (m *Maintenance) rollbackTransition() error {
 	if json.Unmarshal(b, &previous) != nil {
 		return errors.New("回滚数据无效")
 	}
-	for _, name := range []string{"certificates", "route-images", "logs", "subscriptions"} {
-		if err := os.RemoveAll(filepath.Join(filepath.Dir(m.dir), name+".restore-old")); err != nil {
+	for _, target := range restoreTargets(m.paths, true) {
+		if err := os.RemoveAll(target.path + ".restore-old"); err != nil {
 			return err
 		}
 	}
-	if err := restoreFiles(filepath.Dir(m.dir), previous.State, previous.Certificates, previous.Files); err != nil {
+	if err := restoreFilesPaths(m.paths, previous.State, previous.Certificates, previous.Files); err != nil {
 		return err
 	}
 	if err := copyProgram(filepath.Join(m.appDir, "gatehouse.previous"), filepath.Join(m.appDir, "gatehouse")); err != nil {

@@ -1,4 +1,6 @@
 /data/
+/config/
+/log/
 /dist/
 /.local/
 .env

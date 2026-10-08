@@ -9,12 +9,17 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 )
 
 // The immutable launcher remains outside the directory writable by the service.
 func Supervise(ctx context.Context, data, appDir, admin string) error {
+	return SupervisePaths(ctx, legacyStorage(data), appDir, admin)
+}
+
+func SupervisePaths(ctx context.Context, paths StoragePaths, appDir, admin string) error {
 	if appDir == "" {
 		return errors.New("启动程序需要 -managed-root")
 	}
@@ -31,7 +36,12 @@ func Supervise(ctx context.Context, data, appDir, admin string) error {
 			return errors.New("程序初始化失败")
 		}
 	}
-	m, err := NewMaintenance(data, appDir)
+	if os.Getenv("GATEHOUSE_CONTAINER") == "1" {
+		if err := syncContainerProgram(ctx, binary); err != nil {
+			return err
+		}
+	}
+	m, err := NewMaintenancePaths(paths, appDir)
 	if err != nil {
 		return err
 	}
@@ -62,7 +72,14 @@ func Supervise(ctx context.Context, data, appDir, admin string) error {
 			json.Unmarshal(b, &op)
 			expectedVersion = op.Version
 		}
-		cmd := exec.Command(binary, "-data", data, "-admin", admin, "-managed-root", appDir)
+		args := []string{"-data", paths.Data, "-admin", admin, "-managed-root", appDir}
+		if filepath.Clean(paths.Config) != filepath.Clean(paths.Data) {
+			args = append(args, "-config", paths.Config)
+		}
+		if paths.splitLogs() {
+			args = append(args, "-log", paths.Log)
+		}
+		cmd := exec.Command(binary, args...)
 		cmd.Env = append(os.Environ(), "GATEHOUSE_SUPERVISED=1", "GATEHOUSE_BACKUP_FILES=1")
 		if err := os.Remove(filepath.Join(m.dir, "ready.json")); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return errors.New("旧启动检查状态清理失败")
@@ -151,6 +168,30 @@ func Supervise(ctx context.Context, data, appDir, admin string) error {
 			return errors.New("服务子进程退出")
 		}
 	}
+}
+
+// Retain newer Web updates, but replace an older persisted worker on image upgrade.
+func syncContainerProgram(ctx context.Context, binary string) error {
+	probe, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	output, err := exec.CommandContext(probe, binary, "-version").Output()
+	if err != nil {
+		return errors.New("持久化程序版本读取失败")
+	}
+	comparison, err := compareVersions(strings.TrimSpace(string(output)), Version)
+	if err != nil {
+		return errors.New("持久化程序版本无效")
+	}
+	if comparison < 0 {
+		executable, err := os.Executable()
+		if err != nil {
+			return err
+		}
+		if err := copyProgram(executable, binary); err != nil {
+			return errors.New("镜像升级时程序替换失败")
+		}
+	}
+	return nil
 }
 
 func stopChild(cmd *exec.Cmd, done <-chan error) {

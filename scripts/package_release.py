@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 import shutil
 import tempfile
+import tarfile
 import zipfile
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -15,7 +16,7 @@ if not re.fullmatch(r"(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,
     raise SystemExit("Invalid VERSION")
 
 # Generated artifacts and private runtime data are never part of a release.
-excluded = {".git", ".local", "data", "dist", "版本", "更新版本", "__pycache__", ".DS_Store", "state.json", "calls.jsonl", "backup.enc", "restore-staged.json", "rollback.json", "ui-redesign-2026-10-08", "waf-0.0.16", "security-records-0.0.17", "service-discovery-0.0.18", "route-images-backup-0.0.19", "design-qa.md"}
+excluded = {".git", ".local", ".agents", "skills-lock.json", "config", "log", "data", "dist", "版本", "更新版本", "__pycache__", ".DS_Store", "state.json", "calls.jsonl", "backup.enc", "restore-staged.json", "rollback.json", "ui-redesign-2026-10-08", "waf-0.0.16", "security-records-0.0.17", "service-discovery-0.0.18", "route-images-backup-0.0.19", "design-qa.md"}
 def private(path):
     return any(part in excluded or part.startswith(".env") for part in path.parts) or path.suffix in {".key", ".pem", ".test"}
 
@@ -77,3 +78,24 @@ with zipfile.ZipFile(temporary, "w", compression=zipfile.ZIP_DEFLATED, compressl
 temporary.replace(archive)
 print("Version directory:", destination.relative_to(ROOT))
 print("Update ZIP:", archive.relative_to(ROOT))
+
+# Architecture-specific packages keep curl installs independent of a compiler.
+assets = [archive]
+for arch in ("amd64", "arm64"):
+    asset = updates / ("gatehome-linux-" + arch + ".tar.gz")
+    with tempfile.TemporaryDirectory(prefix=".install-", dir=updates) as temp:
+        package = Path(temp)
+        for name in ("VERSION", "install.sh", "deploy/gatehouse.service", "dist/gatehouse-linux-" + arch):
+            target = package / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(destination / name, target)
+        checksum = next(line for line in checksums if line.endswith("dist/gatehouse-linux-" + arch))
+        (package / "SHA256SUMS").write_text(checksum + "\n")
+        with tarfile.open(asset.with_suffix(".pending"), "w:gz") as tar:
+            for item in sorted(package.rglob("*")):
+                if item.is_file():
+                    tar.add(item, arcname=item.relative_to(package).as_posix())
+        asset.with_suffix(".pending").replace(asset)
+    assets.append(asset)
+    print("Linux install archive:", asset.relative_to(ROOT))
+(updates / "gatehome-SHA256SUMS").write_text("".join(hashlib.sha256(asset.read_bytes()).hexdigest() + "  " + asset.name + "\n" for asset in assets))

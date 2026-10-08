@@ -201,7 +201,7 @@ func (a *Admin) routeImageRoutes(mux *http.ServeMux) {
 			apiError(w, 409, "正在执行维护操作")
 			return
 		}
-		dir := filepath.Dir(a.store.path)
+		dir := a.store.paths.Data
 		id, err := storeRouteImage(dir, data)
 		if err != nil {
 			apiError(w, 400, err.Error())
@@ -266,7 +266,7 @@ func (a *Admin) routeImageRoutes(mux *http.ServeMux) {
 		respond(w, data)
 	}))
 	mux.HandleFunc("GET /api/route-images/{id}", a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
-		data, err := readRouteImage(filepath.Dir(a.store.path), r.PathValue("id"))
+		data, err := readRouteImage(a.store.paths.Data, r.PathValue("id"))
 		if err != nil {
 			http.NotFound(w, r)
 			return

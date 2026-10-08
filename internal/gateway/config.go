@@ -183,6 +183,7 @@ type State struct {
 type Store struct {
 	mu    sync.RWMutex
 	path  string
+	paths StoragePaths
 	state State
 }
 
@@ -193,13 +194,18 @@ func DefaultConfig() Config {
 }
 
 func OpenStore(dir string) (*Store, error) {
+	return OpenStorePaths(legacyStorage(dir))
+}
+
+func OpenStorePaths(paths StoragePaths) (*Store, error) {
+	dir := paths.Config
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, err
 	}
 	if err := os.Chmod(dir, 0700); err != nil {
 		return nil, err
 	}
-	s := &Store{path: filepath.Join(dir, "state.json")}
+	s := &Store{path: paths.file("state.json"), paths: paths}
 	b, err := os.ReadFile(s.path)
 	if errors.Is(err, os.ErrNotExist) {
 		s.state.Config = DefaultConfig()
@@ -519,7 +525,7 @@ func (s *Store) UpdateRouteCredentials(c Config, tokens, certificateTokens map[s
 	}
 	for _, route := range c.Routes {
 		if route.Image != "" {
-			if _, err := readRouteImage(filepath.Dir(s.path), route.Image); err != nil {
+			if _, err := readRouteImage(s.paths.Data, route.Image); err != nil {
 				return errors.New("反代图片不存在或已失效，请重新选择图片")
 			}
 		}

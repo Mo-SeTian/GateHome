@@ -2,6 +2,9 @@
 name: gatehouse
 services:
   gatehouse:
+    depends_on:
+      storage-init:
+        condition: service_completed_successfully
     build: .
     image: gatehouse:local
     restart: unless-stopped
@@ -11,7 +14,9 @@ services:
       - "18080:18080"
       - "18443:18443"
     volumes:
-      - gatehouse-data:/data
+      - ./config:/config
+      - ./log:/log
+      - ./data:/data
     read_only: true
     cap_drop:
       - ALL
@@ -19,5 +24,22 @@ services:
       - no-new-privileges:true
     stop_grace_period: 30s
 
-volumes:
-  gatehouse-data:
+  storage-init:
+    image: gatehouse:local
+    user: "0:0"
+    network_mode: none
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["chown -R 10001:10001 /config /log /data && chmod 700 /config /log /data"]
+    volumes:
+      - ./config:/config
+      - ./log:/log
+      - ./data:/data
+    read_only: true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - FOWNER
+      - DAC_OVERRIDE
+    security_opt:
+      - no-new-privileges:true

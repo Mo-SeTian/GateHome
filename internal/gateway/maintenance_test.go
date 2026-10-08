@@ -230,7 +230,8 @@ func TestMaintenanceAPIBackupAuthAndUploadCSRF(t *testing.T) {
 	if w := adminRequest(h, "POST", "/api/maintenance/backup", map[string]string{"password": "TEST_ONLY_BACKUP_PASSWORD"}, nil, ""); w.Code != 401 {
 		t.Fatal("unauthenticated backup access")
 	}
-	w := adminRequest(h, "POST", "/api/maintenance/backup", map[string]string{"password": "TEST_ONLY_BACKUP_PASSWORD"}, cookie, "")
+	password := strings.Repeat("TEST_ONLY_", 1024)
+	w := adminRequest(h, "POST", "/api/maintenance/backup", map[string]string{"password": password}, cookie, "")
 	if w.Code != 200 || w.Header().Get("Content-Type") != "application/zip" {
 		t.Fatal("backup download failed")
 	}
@@ -239,7 +240,7 @@ func TestMaintenanceAPIBackupAuthAndUploadCSRF(t *testing.T) {
 		writer := multipart.NewWriter(&buf)
 		file, _ := writer.CreateFormFile("file", "backup.zip")
 		io.Copy(file, bytes.NewReader(w.Body.Bytes()))
-		writer.WriteField("password", "TEST_ONLY_BACKUP_PASSWORD")
+		writer.WriteField("password", password)
 		writer.Close()
 		r := httptest.NewRequest("POST", "http://localhost:16666/api/maintenance/inspect-backup", &buf)
 		r.Header.Set("Content-Type", writer.FormDataContentType())

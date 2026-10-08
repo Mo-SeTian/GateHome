@@ -7,7 +7,6 @@ import (
 	"mime"
 	"net"
 	"net/http"
-	"path/filepath"
 	"runtime"
 	"strconv"
 	"time"
@@ -62,7 +61,7 @@ func (a *Admin) maintenanceRoutes(mux *http.ServeMux) {
 		if a.logs != nil {
 			a.logs.mu.Lock()
 		}
-		payload, err := snapshotBackup(filepath.Dir(a.store.path), a.store.Snapshot())
+		payload, err := snapshotBackupPaths(a.store.paths, a.store.Snapshot())
 		if a.logs != nil {
 			a.logs.mu.Unlock()
 		}
@@ -188,7 +187,7 @@ func maintenanceUpload(w http.ResponseWriter, r *http.Request) ([]byte, string, 
 			data, err = readUpload(part, maxUpdateBytes)
 		case "password":
 			var b []byte
-			b, err = readUpload(part, 256)
+			b, err = io.ReadAll(part)
 			password = string(b)
 			clear(b)
 		default:

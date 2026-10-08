@@ -29,6 +29,8 @@ func main() {
 
 func run() error {
 	data := flag.String("data", "./data", "数据目录")
+	config := flag.String("config", "", "配置目录；留空沿用数据目录")
+	logsDir := flag.String("log", "", "日志目录；留空沿用数据目录下的 logs")
 	adminAddr := flag.String("admin", "0.0.0.0:16666", "管理界面监听地址")
 	version := flag.Bool("version", false, "显示版本")
 	supervise := flag.Bool("supervise", false, "启动维护管理程序")
@@ -38,18 +40,25 @@ func run() error {
 		fmt.Println(gateway.Version)
 		return nil
 	}
+	paths, err := gateway.PrepareStorage(*data, *config, *logsDir)
+	if err != nil {
+		return errors.New("持久化目录准备或旧数据迁移失败：" + err.Error())
+	}
 	if *supervise && flag.NArg() == 0 {
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer cancel()
-		return gateway.Supervise(ctx, *data, *managedRoot, *adminAddr)
+		return gateway.SupervisePaths(ctx, paths, *managedRoot, *adminAddr)
 	}
-	store, err := gateway.OpenStore(*data)
+	store, err := gateway.OpenStorePaths(paths)
 	if err != nil {
 		return errors.New("无法打开数据目录或配置文件，请检查权限和配置格式")
 	}
 	if flag.NArg() > 0 {
+		if flag.NArg() == 1 && flag.Arg(0) == "migrate" {
+			return nil
+		}
 		if flag.Arg(0) != "init" {
-			return errors.New("支持的命令：init（设置或重置管理密码）；参数须放在命令前")
+			return errors.New("支持的命令：init（设置或重置管理密码）、migrate（迁移旧目录）；参数须放在命令前")
 		}
 		if !term.IsTerminal(int(os.Stdin.Fd())) {
 			return errors.New("请在交互终端运行 init，Docker 使用 docker compose run --rm gatehouse init")
@@ -109,12 +118,12 @@ func run() error {
 		return errors.New("无法打开证书目录")
 	}
 	jobs := gateway.NewJobs(store, certs)
-	logs, err := gateway.NewLogs(*data, store)
+	logs, err := gateway.NewLogsAt(paths.Log, store)
 	if err != nil {
 		return errors.New("无法打开日志目录")
 	}
 	admin := gateway.NewAdmin(store, proxy, certs, jobs, adminPort)
-	maintenance, err := gateway.NewMaintenance(*data, *managedRoot)
+	maintenance, err := gateway.NewMaintenancePaths(paths, *managedRoot)
 	if err != nil {
 		return errors.New("无法打开维护目录")
 	}

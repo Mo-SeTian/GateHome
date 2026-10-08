@@ -38,9 +38,14 @@ type backupManifest struct {
 }
 
 func snapshotBackup(dir string, state State) (backupPayload, error) {
+	return snapshotBackupPaths(legacyStorage(dir), state)
+}
+
+func snapshotBackupPaths(paths StoragePaths, state State) (backupPayload, error) {
+	dir := paths.Data
 	b := backupPayload{State: state, Certificates: map[string][]byte{}, Files: map[string][]byte{}}
 	for _, name := range []string{"certificates", "logs", "subscriptions", "route-images"} {
-		info, err := os.Lstat(filepath.Join(dir, name))
+		info, err := os.Lstat(paths.directory(name))
 		if errors.Is(err, os.ErrNotExist) {
 			continue
 		}
@@ -84,7 +89,7 @@ func snapshotBackup(dir string, state State) (backupPayload, error) {
 		}
 	}
 	for _, name := range names {
-		path := filepath.Join(dir, filepath.FromSlash(name))
+		path := paths.file(name)
 		info, err := os.Lstat(path)
 		if errors.Is(err, os.ErrNotExist) && !strings.HasPrefix(name, "route-images/") {
 			continue
@@ -118,9 +123,6 @@ func safeCertificateName(name string) bool {
 }
 
 func encodeBackup(payload backupPayload, password string) ([]byte, error) {
-	if len(password) < 12 || len(password) > 256 {
-		return nil, errors.New("备份密码须为 12–256 字节")
-	}
 	plain, err := json.Marshal(payload)
 	if err != nil || len(plain) > maxBackupBytes {
 		return nil, errors.New("备份内容超过 64 MiB")
@@ -181,9 +183,6 @@ func decodeBackup(data []byte, password string) (backupPayload, backupManifest, 
 	if len(files) != 2 || len(metadata) > 4096 || json.Unmarshal(metadata, &m) != nil || (m.Format != "gatehouse-backup-v1" && m.Format != "gatehouse-backup-v2") || m.Encryption != "AES-256-GCM+scrypt-N32768-r8-p1" || len(m.Salt) != 16 || len(m.Nonce) != 12 {
 		return payload, m, errors.New("不是受支持的加密备份包")
 	}
-	if len(password) < 12 || len(password) > 256 {
-		return payload, m, errors.New("请输入有效的备份密码")
-	}
 	comparison, err := compareVersions(m.Version, Version)
 	if err != nil || comparison > 0 {
 		return payload, m, errors.New("备份来自更高或不支持的版本，请先更新程序")
@@ -239,32 +238,74 @@ func restorePayload(dir string, payload backupPayload) error {
 	return restoreFiles(dir, state, payload.Certificates, payload.Files)
 }
 
+type restoreTarget struct {
+	name, path string
+	directory  bool
+}
+
+func restoreTargets(paths StoragePaths, full bool) []restoreTarget {
+	targets := []restoreTarget{{"certificates", paths.directory("certificates"), true}}
+	if full {
+		for _, name := range []string{"route-images", "subscriptions"} {
+			targets = append(targets, restoreTarget{name, paths.directory(name), true})
+		}
+		if paths.splitLogs() {
+			for _, name := range []string{"logs/calls.jsonl", "logs/calls.jsonl.1"} {
+				targets = append(targets, restoreTarget{name, paths.file(name), false})
+			}
+		} else {
+			targets = append(targets, restoreTarget{"logs", paths.Log, true})
+		}
+	}
+	return targets
+}
+
 func restoreFiles(dir string, state []byte, certificates, files map[string][]byte) error {
+	return restoreFilesPaths(legacyStorage(dir), state, certificates, files)
+}
+
+func restoreFilesPaths(paths StoragePaths, state []byte, certificates, files map[string][]byte) error {
 	if !json.Valid(state) {
 		return errors.New("配置数据无效")
 	}
-	directories := []string{"certificates"}
-	if files != nil {
-		directories = append(directories, "route-images", "logs", "subscriptions")
-	}
-	stage, err := os.MkdirTemp(dir, ".restore-files-")
+	stage, err := os.MkdirTemp(paths.Data, ".restore-files-")
 	if err != nil {
 		return err
 	}
 	defer os.RemoveAll(stage)
-	for _, name := range directories {
-		if os.Mkdir(filepath.Join(stage, name), 0700) != nil {
-			return errors.New("恢复目录准备失败")
+	logStage := ""
+	if files != nil && paths.splitLogs() {
+		if err := os.MkdirAll(paths.Log, 0700); err != nil {
+			return err
 		}
-		if _, err := os.Lstat(filepath.Join(dir, name) + ".restore-old"); !errors.Is(err, os.ErrNotExist) {
-			return errors.New("发现未处理的旧恢复目录")
+		logStage, err = os.MkdirTemp(paths.Log, ".restore-files-")
+		if err != nil {
+			return err
+		}
+		defer os.RemoveAll(logStage)
+	}
+	staged := func(name string) string {
+		if logStage != "" && strings.HasPrefix(name, "logs/") {
+			return filepath.Join(logStage, strings.TrimPrefix(name, "logs/"))
+		}
+		return filepath.Join(stage, filepath.FromSlash(name))
+	}
+	targets := restoreTargets(paths, files != nil)
+	for _, target := range targets {
+		if target.directory {
+			if err := os.Mkdir(staged(target.name), 0700); err != nil {
+				return errors.New("恢复目录准备失败")
+			}
+		}
+		if _, err := os.Lstat(target.path + ".restore-old"); !errors.Is(err, os.ErrNotExist) {
+			return errors.New("发现未处理的旧恢复目录或文件")
 		}
 	}
 	for name, data := range certificates {
 		if !safeCertificateName(name) {
 			return errors.New("无效的证书文件名")
 		}
-		if err := atomicWrite(filepath.Join(stage, "certificates", name), data); err != nil {
+		if err := atomicWrite(staged("certificates/"+name), data); err != nil {
 			return err
 		}
 	}
@@ -272,12 +313,12 @@ func restoreFiles(dir string, state []byte, certificates, files map[string][]byt
 		if !safeBackupFile(name) {
 			return errors.New("无效的备份数据路径")
 		}
-		if err := atomicWrite(filepath.Join(stage, filepath.FromSlash(name)), data); err != nil {
+		if err := atomicWrite(staged(name), data); err != nil {
 			return err
 		}
 	}
 	type replacement struct {
-		name   string
+		path   string
 		hadOld bool
 	}
 	replaced := []replacement{}
@@ -288,40 +329,45 @@ func restoreFiles(dir string, state []byte, certificates, files map[string][]byt
 		}
 		for i := len(replaced) - 1; i >= 0; i-- {
 			item := replaced[i]
-			path := filepath.Join(dir, item.name)
-			os.RemoveAll(path)
+			os.RemoveAll(item.path)
 			if item.hadOld {
-				os.Rename(path+".restore-old", path)
+				os.Rename(item.path+".restore-old", item.path)
 			}
 		}
 	}()
-	for _, name := range directories {
-		path := filepath.Join(dir, name)
-		info, err := os.Lstat(path)
+	for _, target := range targets {
+		info, err := os.Lstat(target.path)
 		hadOld := err == nil
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
 		if hadOld {
-			if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-				return errors.New("恢复目标须为普通目录")
+			if info.Mode()&os.ModeSymlink != 0 || (target.directory && !info.IsDir()) || (!target.directory && !info.Mode().IsRegular()) {
+				return errors.New("恢复目标类型无效")
 			}
-			if err := os.Rename(path, path+".restore-old"); err != nil {
+			if err := os.Rename(target.path, target.path+".restore-old"); err != nil {
 				return err
 			}
 		}
-		replaced = append(replaced, replacement{name, hadOld})
-		if err := os.Rename(filepath.Join(stage, name), path); err != nil {
+		replaced = append(replaced, replacement{target.path, hadOld})
+		_, err = os.Stat(staged(target.name))
+		if errors.Is(err, os.ErrNotExist) && !target.directory {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if err := os.Rename(staged(target.name), target.path); err != nil {
 			return err
 		}
 	}
-	if err := atomicWrite(filepath.Join(dir, "state.json"), state); err != nil {
+	if err := atomicWrite(paths.file("state.json"), state); err != nil {
 		return err
 	}
 	committed = true
 	for _, item := range replaced {
 		if item.hadOld {
-			if err := os.RemoveAll(filepath.Join(dir, item.name) + ".restore-old"); err != nil {
+			if err := os.RemoveAll(item.path + ".restore-old"); err != nil {
 				return err
 			}
 		}
@@ -330,7 +376,11 @@ func restoreFiles(dir string, state []byte, certificates, files map[string][]byt
 }
 
 func snapshotDisk(dir string) (diskBackup, error) {
-	state, err := os.ReadFile(filepath.Join(dir, "state.json"))
+	return snapshotDiskPaths(legacyStorage(dir))
+}
+
+func snapshotDiskPaths(paths StoragePaths) (diskBackup, error) {
+	state, err := os.ReadFile(paths.file("state.json"))
 	if err != nil || !json.Valid(state) {
 		return diskBackup{}, errors.New("当前配置无法备份")
 	}
@@ -338,6 +388,6 @@ func snapshotDisk(dir string) (diskBackup, error) {
 	if json.Unmarshal(state, &typed) != nil {
 		return diskBackup{}, errors.New("当前配置无法备份")
 	}
-	payload, err := snapshotBackup(dir, typed)
+	payload, err := snapshotBackupPaths(paths, typed)
 	return diskBackup{State: state, Certificates: payload.Certificates, Files: payload.Files}, err
 }

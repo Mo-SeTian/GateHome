@@ -2,7 +2,7 @@
 
 一个自托管的反向代理与 DDNS 综合管理工具。Go 单进程，中文管理界面内嵌，无需 Node.js、数据库或额外 Web 服务器。
 
-当前版本为 **0.0.19**。目前支持多个 DNS 组分别配置根域名、服务商和凭据（当前支持 Cloudflare），以及 HTTP / HTTPS / WebSocket 代理。访问控制属于代理层，不修改 Linux 的 nftables / iptables。
+当前版本为 **0.0.20**。目前支持多个 DNS 组分别配置根域名、服务商和凭据（当前支持 Cloudflare），以及 HTTP / HTTPS / WebSocket 代理。访问控制属于代理层，不修改 Linux 的 nftables / iptables。
 
 ## 网络结构
 
@@ -32,7 +32,17 @@ docker compose run --rm gatehouse init
 docker compose up -d
 ```
 
-`init` 交互设置管理密码，输入不回显，长度 12–72 字节。配置、Token、账户密钥和证书持久化到 `gatehouse-data` 命名卷。
+`init` 交互设置管理密码，输入不回显，长度 12–72 字节。Compose 使用三个宿主机文件夹持久化，并自动为它们设置运行用户权限：
+
+| 宿主机目录 | 容器目录 | 内容 |
+| --- | --- | --- |
+| `./config` | `/config` | 配置、管理员和服务账号密码哈希、DNS 凭据、IP 冻结名单 |
+| `./log` | `/log` | 项目、反代、防火墙和安全事件日志，以及轮转日志 |
+| `./data` | `/data` | 证书与 ACME 账户、服务图片、订阅缓存、维护数据、可更新的程序 |
+
+保留这三个文件夹，删除容器、重新构建镜像或重新安装后即可恢复原有配置、凭据和日志。有 `config/state.json` 时直接执行 `docker compose up -d`，无需再次运行 `init`；`init` 会重置管理员密码。迁移到另一台机器时，先停止容器，再完整复制三个文件夹。可以修改 Compose 中左侧宿主机路径，容器内的三个路径保持不变。
+
+`storage-init` 只负责初始化挂载目录的所有权，完成后退出。业务容器始终以 UID/GID `10001` 运行，并保留只读根文件系统与全部 capability 移除配置。
 
 默认使用 Linux host 网络，保留真实客户端 IP，无需 `privileged` 或 `NET_ADMIN` 权限。业务监听 `18080` / `18443`，管理界面监听 `0.0.0.0:16666`。
 
@@ -56,9 +66,42 @@ docker compose run --rm gatehouse init
 docker compose up -d
 ```
 
+### 从旧版 Docker 命名卷迁移
+
+先停止旧服务，使用 `docker volume ls` 确认原数据卷名称，不要删除旧卷。下面以 `gatehouse_gatehouse-data` 为例；实际名称不同请替换：
+
+```sh
+docker compose down
+docker volume inspect gatehouse_gatehouse-data
+mkdir -p config log data
+docker compose build
+docker run --rm --user 0 --entrypoint /bin/sh \
+  --mount type=volume,source=gatehouse_gatehouse-data,target=/legacy,readonly \
+  --mount type=bind,source="$(pwd)/data",target=/target \
+  gatehouse:local -c 'cp -a /legacy/. /target/'
+docker compose up -d
+```
+
+首次启动会将旧 `/data/state.json` 迁移到 `/config/state.json`，旧 `/data/logs/` 迁移到 `/log/`，其余数据继续保留在 `/data`。原卷保持完整；目标存在不同内容时停止迁移，避免覆盖已有数据。迁移期间服务必须保持停止。
+
 ## Linux 安装 / 卸载（systemd）
 
-执行 `make release` 后生成的 **`版本/0.0.19/`** 包含完整源码、部署文件、安装脚本及 Linux amd64 / arm64 程序。把整个目录复制到 Linux 主机，在目录中运行：
+直接通过 GitHub 安装最新发布版本（支持 Debian 等使用 systemd 的 Linux）：
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Mo-SeTian/GateHome/main/install.sh | sudo bash -s -- install
+```
+
+也可先下载再执行，方便检查脚本：
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Mo-SeTian/GateHome/main/install.sh -o /tmp/gatehome-install.sh
+sudo bash /tmp/gatehome-install.sh install
+```
+
+脚本自动选择 amd64 / arm64，从 GitHub Releases 下载对应程序并校验 SHA-256，无需在服务器上安装 Go、Python 或 Node.js。首次安装在终端设置管理员密码，输入不回显。
+
+离线安装可使用 `make release` 生成的 **`版本/0.0.20/`** 完整目录，或解压 Release 中对应架构的 `gatehome-linux-*.tar.gz`，然后运行：
 
 ```sh
 sudo bash install.sh
@@ -66,15 +109,22 @@ sudo bash install.sh
 
 菜单选择 `1` 安装或重新安装，`2` 卸载。无需在目标主机安装 Go、Python 或 Node.js。支持使用 systemd 的 amd64 / arm64 Linux；脚本检查程序 SHA-256，创建 `gatehouse` 系统用户，首次安装交互设置管理密码，缺少 CA 证书时安装 `ca-certificates`。
 
-程序安装到 `/opt/gatehouse`，全部运行数据保存在 `/var/lib/gatehouse`。服务使用普通用户运行。只读的 `launcher` 管理可更新的子程序，Web 更新无需给服务 root 或 sudo 权限。默认管理监听为 `0.0.0.0:16666`，在局域网设备浏览器中打开 `http://服务器局域网IP:16666` 即可访问，无需 SSH 隧道。安装脚本也会列出主机 IPv4 地址。
+默认安装目录为 `/etc/gatehome`，采用与 Docker 相同的分类：
+
+- `/etc/gatehome/config`：配置、账号密码哈希、凭据、IP 冻结名单。
+- `/etc/gatehome/log`：全部项目、反代、防火墙与安全事件日志、轮转日志。
+- `/etc/gatehome/data`：证书、ACME 账户、服务图片、订阅缓存及维护数据。
+- `/etc/gatehome/launcher`、`/etc/gatehome/app`：启动器和可更新的业务程序。
+
+重新安装会保留三个持久化目录及管理员密码。旧 `/var/lib/gatehouse` 数据会在停服后复制并迁移，原目录保留。服务使用普通用户运行。只读的 `launcher` 管理可更新的子程序，Web 更新无需给服务 root 或 sudo 权限。默认管理监听为 `0.0.0.0:16666`，在局域网设备浏览器中打开 `http://服务器局域网IP:16666` 即可访问，无需 SSH 隧道。安装脚本也会列出主机 IPv4 地址。
 
 安装完成后，`systemctl status gatehouse` 查看状态，`journalctl -u gatehouse` 查看启动诊断，`systemctl restart gatehouse` 使监听变更生效。
 
-卸载会先要求输入 `UNINSTALL`，移除程序及 systemd 服务，默认保留配置、Token、证书和日志。只有另行输入 `DELETE DATA` 才永久删除数据。重新安装使用保留的数据，不会重置密码。修改管理员密码时先停止服务，再运行：
+卸载会先要求输入 `UNINSTALL`，移除程序及 systemd 服务，默认保留配置、Token、证书和日志。只有另行输入 `DELETE DATA` 才永久删除 `config`、`log`、`data` 三个目录。重新安装使用保留的数据，不会重置密码。修改管理员密码时先停止服务，再运行：
 
 ```sh
 sudo systemctl stop gatehouse
-sudo -u gatehouse /opt/gatehouse/app/gatehouse -data /var/lib/gatehouse init
+sudo -u gatehouse /etc/gatehome/app/gatehouse -config /etc/gatehome/config -log /etc/gatehome/log -data /etc/gatehome/data init
 sudo systemctl start gatehouse
 ```
 
@@ -93,6 +143,8 @@ cd GateHome
 
 ```sh
 make test
+make build
+python3 scripts/install_checks.py
 make release
 ```
 
@@ -100,6 +152,8 @@ make release
 
 - `版本/<版本号>/`：完整项目文件与两个架构的 Linux 程序，含 `install.sh`、`SHA256SUMS` 和 `manifest.json`。
 - `更新版本/gatehouse-<版本号>-update.zip`：可在软件设置页上传的更新包，根目录含清单、源码和程序。
+- `更新版本/gatehome-linux-amd64.tar.gz`、`gatehome-linux-arm64.tar.gz`：curl 安装使用的独立架构包。
+- `更新版本/gatehome-SHA256SUMS`：发布文件的 SHA-256 清单。
 
 打包排除运行数据、`.env`、私钥、`.local`、Git 历史及生成的版本目录；配置和真实凭据只通过加密备份导出。不要把运行配置复制到源码目录。
 
@@ -107,17 +161,17 @@ make release
 
 应用时短暂停止业务服务，保存旧程序、配置和证书，由启动程序替换并重启；新服务在 20 秒内未通过启动检查会回滚；新版启动器同时回滚配置、证书、已保存服务图片、日志与订阅缓存。维护期间不接受配置写入。完成后刷新页面重新登录，设置页底部显示运行版本。Linux 安装脚本和更新后的 Docker 部署均支持此流程；普通直接启动的程序可导出备份、检查 ZIP，需改为上述启动方式后才可应用维护操作。
 
-Docker 的可更新程序保存在命名卷 `/data/app`，镜像中的启动程序保持只读。已有旧镜像须先用本项目新 Dockerfile 重建部署以启用维护管理。Docker 镜像本身、启动程序和 Compose 端口映射由安装部署管理，Web 更新替换业务程序。
+Docker 的可更新程序保存在持久化目录 `/data/app`，镜像中的启动程序保持只读。重建镜像时，如果镜像版本更高会自动更新旧业务程序；已通过网页更新到更高版本的程序会保留，不会降级。已有旧镜像须先用本项目新 Dockerfile 重建部署以启用维护管理。Docker 镜像本身、启动程序和 Compose 端口映射由安装部署管理，Web 更新替换业务程序。
 
 ## 加密备份与恢复
 
-在 **设置 → 备份与恢复** 输入至少 12 字节的备份密码并下载 ZIP。备份覆盖全部已保存的业务数据：所有配置项、各 DNS 组与证书任务凭据、出站代理密码、管理员和每个服务的密码哈希、IP 冻结名单、证书与 ACME 账户私钥、反代服务图片、当前及轮转日志、已配置订阅的下载缓存。登录会话、未保存的扫描结果及图片、维护暂存文件和程序文件不包含在内。单个备份内容上限为 64 MiB，超出时明确失败，不截断数据。
+在 **设置 → 备份与恢复** 填写备份密码并下载 ZIP；密码没有长度限制，也可以留空，留空时恢复也无需填写密码。备份覆盖全部已保存的业务数据：所有配置项、各 DNS 组与证书任务凭据、出站代理密码、管理员和每个服务的密码哈希、IP 冻结名单、证书与 ACME 账户私钥、反代服务图片、当前及轮转日志、已配置订阅的下载缓存。登录会话、未保存的扫描结果及图片、维护暂存文件和程序文件不包含在内。单个备份内容上限为 64 MiB，超出时明确失败，不截断数据。
 
 新备份使用 `gatehouse-backup-v2` 格式，旧程序明确拒绝，新版本继续支持 `gatehouse-backup-v1` 旧备份。ZIP 内是清单和 AES-256-GCM 加密数据，密钥由 scrypt 从备份密码派生。普通解压工具不会显示明文配置，需要在 Gatehouse 中输入导出时的密码恢复。请分别保存 ZIP 和密码，忘记备份密码无法解密。备份密码不持久化、不记日志；运行所需凭据仍保存在本机权限 `0600` 的配置文件里。
 
 上传备份并输入密码，软件先校验和显示配置数量预览，确认后才恢复。新备份恢复覆盖配置、凭据、冻结名单、证书、服务图片、日志和订阅缓存，使用备份时的管理员密码重新登录。0.0.18 及以前的备份继续支持，保留它们未包含的现有日志和缓存；检查页面明确显示覆盖范围。拒绝损坏、密码不正确、来自更高版本或端口冲突的备份。启动检查失败会恢复维护前的数据和程序；旧订阅缓存只在来源匹配时使用。
 
-**旧安装需更新一次启动器才能完整恢复新备份**：Web 更新只替换业务程序，无法更新 `/opt/gatehouse/launcher`。请在 `版本/0.0.19` 运行 `sudo bash install.sh`，选择安装；已有数据和密码保留。Docker 部署需用新版 Dockerfile 重建镜像并保留原数据卷。启动器未更新时，检查页面提示原因并禁用完整恢复，后端也拒绝操作，避免悄悄漏掉图片、日志和缓存。之后继续正常使用网页更新。
+**旧安装需更新一次启动器及部署布局**：Web 更新只替换业务程序。Linux 请重新执行上述 curl 安装命令，或在 `版本/0.0.20` 运行 `sudo bash install.sh`；已有数据和密码保留。Docker 请按旧卷迁移说明保留数据，再使用新版 Dockerfile 和 Compose 重建部署。启动器未更新时，检查页面提示原因并禁用完整恢复，后端也拒绝操作，避免悄悄漏掉图片、日志和缓存。之后继续正常使用网页更新。
 
 备份覆盖检查及图片使用见 [服务图片与备份覆盖说明](docs/route-images-backup-0.0.19.md)。
 
@@ -181,7 +235,7 @@ Docker 的可更新程序保存在命名卷 `/data/app`，镜像中的启动程�
 - 管理员密码使用 bcrypt；登录使用 12 小时 HttpOnly / SameSite=Strict 会话，支持退出登录、登录限速、请求来源校验。重启使所有会话失效。
 - 保存配置有版本检查，多页面旧配置不会悄悄覆盖新配置。代理与访问策略立即生效，监听端口及反代组监听启停重启后生效。旧版本的全局端口及代理规则会自动迁移到“默认组”，保留密码、Token 与证书。
 - 请求计数和最近 60 条任务事件保存在内存，重启清零。调用日志另行持久化，见下文；不记录请求正文、查询参数、认证头、密码、Token 或外部服务原始错误正文。
-- 备份完整数据目录或 Docker 命名卷，并限制备份访问权限。删除路由不删除已有证书文件；恢复同域名时可继续使用有效证书。
+- 备份完整的 `config`、`log`、`data` 三个目录，并限制备份访问权限。删除路由不删除已有证书文件；恢复同域名时可继续使用有效证书。
 
 ## 出站代理
 
@@ -401,3 +455,11 @@ make build
 - 更新包：`更新版本/gatehouse-0.0.18-update.zip`；完整 Linux amd64 / arm64 目录：`版本/0.0.18/`。
 
 验证：`go test -race ./...`、`go vet ./...`、四个前端检查脚本及浏览器桌面和手机流程实测。新增覆盖目标与端口校验、HTTP / HTTPS 识别、同目标重定向、图标限制、取消扫描、管理员认证与 CSRF、配置隔离、批量域名校验、网页信息转义以及关闭弹窗时的异步响应。
+
+
+## 0.0.20 安装与持久化
+
+- 提供 GitHub curl 安装入口与 amd64 / arm64 独立安装包，默认 Linux 路径改为 `/etc/gatehome`。
+- Linux 与 Docker 均分开保存 `config`、`log`、`data`，重新安装保留配置、凭据、证书、图片、订阅缓存及日志。旧布局支持停服迁移，冲突时保留数据并停止。
+- 加密备份、维护恢复及回滚支持三个独立挂载目录，备份格式继续兼容旧版本。
+- 备份密码取消前后端长度限制，包括短密码、长密码、中文和留空；恢复使用导出时相同的密码。管理员和反代服务登录密码规则保持原有设置。
