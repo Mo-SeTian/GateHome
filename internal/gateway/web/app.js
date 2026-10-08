@@ -12,7 +12,7 @@ function icon(name) { return `<svg class="icon" viewBox="0 0 24 24" fill="none" 
 function hydrateIcons(scope=document) {
   scope.querySelectorAll('[data-icon]').forEach(el=>{el.innerHTML=icon(el.dataset.icon);});
   scope.querySelectorAll('.field-help>summary,.ip-monitor-settings>summary').forEach(el=>{if(!el.querySelector('svg')) el.insertAdjacentHTML('beforeend',icon('chevron-down'));});
-  const actions={'add-ip-block':'shield','remove-firewall-group':'trash','move-firewall-group-up':'chevron-up','move-firewall-group-down':'chevron-down','configure-certificates':'settings','filter-ip-blocks':'filter','apply-log-filters':'filter','reset-log-filters':'refresh','release-ip-block':'unlock','export-statistics':'download','preset-subscription':'download','restart-service':'refresh','run-ddns':'refresh','go-firewalls':'shield','apply-maintenance':'upload'};
+  const actions={'add-ip-block':'shield','remove-firewall-group':'trash','move-firewall-group-up':'chevron-up','move-firewall-group-down':'chevron-down','configure-certificates':'settings','filter-ip-blocks':'filter','apply-log-filters':'filter','reset-log-filters':'refresh','release-ip-block':'unlock','export-statistics':'download','preset-subscription':'download','restart-service':'refresh','run-ddns':'refresh','go-firewalls':'shield','apply-maintenance':'upload','check-online-update':'refresh','install-online-update':'download'};
   scope.querySelectorAll('button[data-action],button[data-job],button[type="submit"]').forEach(el=>{
     if(el.querySelector('svg')) return;
     const action=el.dataset.action||'',name=actions[action]||(action.startsWith('refresh-')||el.dataset.job?'refresh':action.startsWith('add-')?'plus':action.startsWith('edit-')?'edit':action.startsWith('delete-')?'trash':action.startsWith('toggle-')?(el.textContent.trim().startsWith('启用')?'play':'pause'):el.type==='submit'?({'backup-form':'download','restore-form':'upload','update-form':'upload','ip-block-form':'shield'}[el.form?.id]||'save'):'');
@@ -60,6 +60,7 @@ function setNavigation(open,restoreFocus=true) {
 }
 let ipBlockView={entries:[]},ipBlockRule='',ipBlockSearch='',ipBlockPage=1,ipBlockRequest=0,ipBlockError='',ipBlockReceived=0;
 let maintenancePreview=null;
+const onlineUpdate={release:null,phase:'',error:'',job:null,timer:null,request:0};
 let logRequest=0;
 const discovery={request:0,timer:null,scan:null,rows:new Map(),pending:false};
 let routeImageRequest=0,routeImagePending=false;
@@ -88,7 +89,7 @@ function toast(message) {
   $('#toast').textContent = message; $('#toast').hidden = false; if(!reducedMotion.matches) {$('#toast').getAnimations().forEach(a=>a.cancel());$('#toast').animate([{opacity:0,translate:'0 8px'},{opacity:1,translate:'0 0'}],{duration:180,easing:'ease-out'});}
   clearTimeout(toastTimer); toastTimer = setTimeout(() => { $('#toast').hidden = true; }, 4500);
 }
-function showLogin() { setNavigation(false,false); $('#login').hidden = false; $('#app').hidden = true; document.querySelectorAll('dialog').forEach(d=>d.close()); config = undefined; renderedPage=''; abandonDiscovery();for(const state of Object.values(securityEvents)) {state.request++;state.view=null;state.filters=emptyEventFilters();state.applied=emptyEventFilters();state.loading=false;state.error='';} }
+function showLogin() { setNavigation(false,false); $('#login').hidden = false; $('#app').hidden = true; document.querySelectorAll('dialog').forEach(d=>d.close()); config = undefined; renderedPage='';clearTimeout(onlineUpdate.timer);onlineUpdate.request++;onlineUpdate.phase='';onlineUpdate.job=null;onlineUpdate.release=null;onlineUpdate.error='';abandonDiscovery();for(const state of Object.values(securityEvents)) {state.request++;state.view=null;state.filters=emptyEventFilters();state.applied=emptyEventFilters();state.loading=false;state.error='';} }
 function applyConfig(data) { config = data.config; revision = data.revision; dnsCredentialsConfigured=data.dns_credentials_configured||{}; certificateCredentialsConfigured=data.certificate_credentials_configured||{};routePasswordsConfigured=data.route_passwords_configured||{}; proxyPasswordConfigured=data.proxy_password_configured; ipRequest++;dnsRecordsRequest++;dnsRecords={};dnsRecordsError=''; if(networkInfo) networkInfo.groups={}; }
 async function save(next, dnsTokens, proxyPassword, certificateTokens, routePasswords) {
   const payload = {config:next, revision};
@@ -386,12 +387,61 @@ function certificatesHTML() {
     (a.staging?'<div class="hint amber">当前使用测试环境，签发的证书不被浏览器信任。完成验证后，可在证书配置中切换到正式环境。</div>':'')+
     '<p class="form-note certificate-note">一项任务的多个域名申请为同一张证书。泛域名仅覆盖一级子域名；需要同时覆盖根域名时，请一并添加根域名。</p>'+`<div id="certificate-table">${certificateTable()}</div>`;
 }
+function onlineUpdateHTML() {
+  const release=onlineUpdate.release,pending=!!onlineUpdate.phase,supported=status.maintenance_available;
+  const available=release?.update_available&&release.version!==status.version;
+  const message=onlineUpdate.job?.phase==='checking'?'正在确认本次更新版本…':({checking:'正在通过服务器检查 GitHub 最新正式版…',downloading:'1 / 3 · 正在后台下载，当前服务继续运行…',applying:'2 / 3 · 正在校验更新包并安排重启…'}[onlineUpdate.phase]||'');
+  const progress=onlineUpdate.phase==='downloading'&&onlineUpdate.job?.total?`<div class="online-update-progress"><progress max="${onlineUpdate.job.total}" value="${onlineUpdate.job.downloaded}" aria-label="更新包下载进度"></progress><span>${Math.min(100,Math.floor(100*onlineUpdate.job.downloaded/onlineUpdate.job.total))}% · ${(onlineUpdate.job.downloaded/1048576).toFixed(1)} / ${(onlineUpdate.job.total/1048576).toFixed(1)} MiB</span></div>`:'';
+  return panel('在线更新','从 GateHome 的 GitHub 正式发布获取更新，使用设置中已保存的出站代理。',`<div class="panel-body online-update" aria-busy="${pending}"><ul class="info-list"><li><span>当前版本</span><b>v${esc(status.version||'加载中')}</b></li><li><span>更新连接</span><b>${config.outbound_proxy?.enabled?'使用已保存的出站代理':'直接连接 GitHub'}</b></li><li><span>最新正式版</span><b>${release?'v'+esc(release.version):'尚未检查'}</b></li>${release?`<li><span>发布时间 / 更新包</span><b>${date(release.published_at)} · ${(release.size/1048576).toFixed(1)} MiB</b></li>`:''}${onlineUpdate.job?.version?`<li><span>本次更新版本</span><b>v${esc(onlineUpdate.job.version)}</b></li>`:''}</ul><p class="form-note">下载后检查 GitHub SHA-256、包内文件哈希、版本和主机架构。更新时短暂中断服务，新版本启动检查失败会回滚。下载任务在服务器后台执行，刷新页面可继续查看进度。</p>${!supported?'<p class="form-note">当前启动方式支持检查版本；在线安装及自动重启需要 Linux 安装脚本或新版 Docker。</p>':''}<p class="online-update-status" role="status" aria-live="polite">${esc(message||(release?(available?'有新版本可用。':'当前版本已是最新，或高于最新正式版。'):''))}</p>${progress}<p class="error" role="alert">${esc(onlineUpdate.error)}</p><div class="form-actions"><button type="button" class="secondary" data-action="check-online-update" ${pending?'disabled':''}>${onlineUpdate.phase==='checking'?'检查中…':'检查更新'}</button><button type="button" class="primary" data-action="install-online-update" ${pending||!available||!supported||status.maintenance_busy?'disabled':''}>${pending&&onlineUpdate.phase!=='checking'?'更新中…':'更新并重启'}</button>${release?`<a href="${esc(release.release_url)}" target="_blank" rel="noopener noreferrer">${icon('external-link')}发行说明</a>`:''}</div></div>`);
+}
+function renderOnlineUpdate() {
+  const root=$('#online-update');if(!root||!config) return;
+  root.innerHTML=onlineUpdateHTML();hydrateIcons(root);
+}
+async function checkOnlineUpdate() {
+  if(onlineUpdate.phase) return;
+  clearTimeout(onlineUpdate.timer);onlineUpdate.request++;onlineUpdate.job=null;
+  onlineUpdate.phase='checking';onlineUpdate.error='';onlineUpdate.release=null;renderOnlineUpdate();
+  try {onlineUpdate.release=await api('maintenance/check-online-update','POST',{});}
+  catch(error) {onlineUpdate.error=error.message;}
+  finally {onlineUpdate.phase='';renderOnlineUpdate();}
+}
+async function installOnlineUpdate() {
+  const release=onlineUpdate.release;
+  if(onlineUpdate.phase||!release?.update_available||release.version===status.version) return;
+  if(!confirm('更新至 v'+release.version+' 并重启服务？下载和校验期间继续运行，重启会短暂中断连接。')) return;
+  onlineUpdate.phase='downloading';onlineUpdate.error='';renderOnlineUpdate();
+  try {
+    onlineUpdate.job=await api('maintenance/download-online-update','POST',{version:release.version});
+    maintenancePreview=null;await loadOnlineUpdateStatus();
+  } catch(error) {onlineUpdate.phase='';onlineUpdate.error=error.message;renderOnlineUpdate();}
+}
+async function loadOnlineUpdateStatus() {
+  clearTimeout(onlineUpdate.timer);
+  if(!config) return;
+  const request=++onlineUpdate.request;
+  try {
+    const job=await api('maintenance/online-update-status');
+    if(request!==onlineUpdate.request||!config) return;
+    onlineUpdate.job=job.phase?job:null;onlineUpdate.error=job.error||'';
+    if(job.phase==='restarting') {showLogin();toast('3 / 3 · 更新已安排，服务正在重启，稍候重新登录查看版本。');return;}
+    onlineUpdate.phase=job.phase==='verifying'?'applying':['checking','downloading'].includes(job.phase)?'downloading':'';
+    if(onlineUpdate.phase) onlineUpdate.timer=setTimeout(loadOnlineUpdateStatus,1500);
+    renderOnlineUpdate();
+  } catch(error) {
+    if(request!==onlineUpdate.request||!config) return;
+    onlineUpdate.error='进度查询暂时失败，正在重试：'+error.message;
+    if(onlineUpdate.phase) onlineUpdate.timer=setTimeout(loadOnlineUpdateStatus,2000);
+    renderOnlineUpdate();
+  }
+}
 function maintenanceHTML() {
   const supported=status.maintenance_available;
   const preview=maintenancePreview;
   const detail=!preview?'':`<div class="maintenance-preview"><b>${preview.kind==='update'?'更新包 v'+esc(preview.version):'备份 v'+esc(preview.version)}</b>${preview.kind==='restore'?`<p>${preview.groups} 个反代组 · ${preview.routes} 个服务 · ${preview.ddns_groups} 个 DDNS 组 · ${preview.firewalls} 个防火墙 · ${preview.subscriptions} 个订阅<br>${preview.images||0} 张服务图片 · ${preview.certificates||0} 个证书文件 · ${preview.log_entries||0} 条日志 · ${preview.subscription_caches||0} 个订阅缓存<br>${preview.includes_files?'':'此旧备份未包含日志、缓存与图片；恢复时保留服务器现有文件。<br>'}备份时间：${date(preview.created_at)} · ${preview.token_configured?'含 Cloudflare Token':'未配置 Cloudflare Token'}</p>`:''}<p>${esc(preview.message)}</p><button class="primary" data-action="apply-maintenance" ${!preview.can_apply?'disabled':''}>${preview.kind==='update'?'应用更新并重启':'恢复数据并重启'}</button></div>`;
   const backupDetail=preview?.kind==='restore'?detail:'',updateDetail=preview?.kind==='update'?detail:'';
   return panel('备份与恢复','备份配置与凭据、证书、服务图片、日志和订阅缓存。',`<div class="panel-body two-col maintenance-forms"><form id="backup-form"><h3>下载加密备份</h3><label>备份密码<input name="password" type="password" autocomplete="new-password"></label><label>再次输入备份密码<input name="confirm_password" type="password" autocomplete="new-password"></label><p class="form-note">密码不限长度，可以留空；留空时恢复也无需填写密码。请保存设置的密码，恢复时需保持一致。ZIP 内的数据使用 AES-256-GCM 加密，含反代访问密码、IP 冻结名单与全部已保存的业务数据。登录会话、未保存的扫描结果和维护临时文件不备份。</p><p class="error" role="alert"></p><div class="form-actions"><button class="primary" type="submit">下载备份 ZIP</button></div></form><form id="restore-form"><h3>上传备份</h3><label>备份 ZIP<input name="file" type="file" accept=".zip,application/zip" required></label><label>导出时的备份密码<input name="password" type="password" autocomplete="off"></label><p class="form-note">密码不限长度；导出时留空，这里也留空。先检查备份再确认恢复。恢复后使用备份时的管理员密码重新登录。</p><p class="error" role="alert"></p><div class="form-actions"><button class="secondary" type="submit">检查备份</button></div></form></div>${backupDetail}`) +
+    `<div id="online-update">${onlineUpdateHTML()}</div>` +
     panel('上传版本更新','使用本项目“更新版本”目录生成的 ZIP；只接受更高版本。',`<form id="update-form" class="panel-body"><label>更新 ZIP<input name="file" type="file" accept=".zip,application/zip" required></label><p class="form-note">检查版本、文件哈希和主机架构后再应用。只使用你信任的项目更新包；哈希校验用于检查文件完整性。</p><p class="form-note">${supported?'维护时短暂停止服务，新程序启动检查失败会回滚。':'此部署可导出备份及检查上传包。应用更新或恢复需要 Linux 安装脚本或新版 Docker 启动方式。'}</p><p class="error" role="alert"></p><div class="form-actions"><button type="submit" class="secondary">检查更新包</button></div></form>${updateDetail}`) +
     `<div class="app-version"><b>Gatehouse</b><button class="secondary" data-action="restart-service" ${!supported?'disabled':''}>重启服务</button><span>版本 ${esc(status.version||'加载中')}</span></div>`;
 }
@@ -420,7 +470,7 @@ function settingsHTML() {
   const p=config.outbound_proxy;
   return heading('SETTINGS','系统设置','集中配置各组监听端口和后台请求代理。','<button class="primary" data-action="add-group"><span data-icon="plus"></span>添加反代组</button>') +
     adminAccessHTML()+logRetentionHTML()+
-    panel('出站代理服务器','用于订阅、Cloudflare API、证书 HTTP 请求及公网 DNS 解析；保存后立即生效。',`<form id="outbound-form" class="panel-body"><div class="toggle-row"><div><b>启用出站代理</b><p>公网 IP 探测及内网反向代理连接保持直连。</p></div><label class="switch"><input name="enabled" type="checkbox" ${p.enabled?'checked':''}><span></span><span class="sr-only">启用出站代理</span></label></div><div class="form-grid"><label class="span-2">代理地址<input name="url" value="${esc(p.url)}" placeholder="http://127.0.0.1:7890"><small>支持 HTTP、HTTPS、SOCKS5 / SOCKS5H，需填写端口。地址中不要填写账号密码。Docker 内的 127.0.0.1 指容器自身。</small></label><label>代理用户名（可选）<input name="username" value="${esc(p.username)}" autocomplete="off"></label><label>代理密码（可选）<input name="password" type="password" autocomplete="new-password" placeholder="${proxyPasswordConfigured?'已配置，留空保留':'无需认证可留空'}"><small>密码不回显；变更服务器或用户名后需重新填写。</small></label><label class="check-label span-2"><input name="clear_password" type="checkbox">清除已保存的代理密码</label></div><p class="form-note">代理连接失败时会记录错误，不自动退回直连。证书 DNS 传播检查仍需直接访问 DNS 服务。</p><p class="error" role="alert"></p><div class="form-actions"><button type="submit" class="primary">保存代理设置</button></div></form>`) +
+    panel('出站代理服务器','用于在线更新、订阅、Cloudflare API、证书 HTTP 请求及公网 DNS 解析；保存后立即生效。',`<form id="outbound-form" class="panel-body"><div class="toggle-row"><div><b>启用出站代理</b><p>公网 IP 探测及内网反向代理连接保持直连。</p></div><label class="switch"><input name="enabled" type="checkbox" ${p.enabled?'checked':''}><span></span><span class="sr-only">启用出站代理</span></label></div><div class="form-grid"><label class="span-2">代理地址<input name="url" value="${esc(p.url)}" placeholder="http://127.0.0.1:7890"><small>支持 HTTP、HTTPS、SOCKS5 / SOCKS5H，需填写端口。地址中不要填写账号密码。Docker 内的 127.0.0.1 指容器自身。</small></label><label>代理用户名（可选）<input name="username" value="${esc(p.username)}" autocomplete="off"></label><label>代理密码（可选）<input name="password" type="password" autocomplete="new-password" placeholder="${proxyPasswordConfigured?'已配置，留空保留':'无需认证可留空'}"><small>密码不回显；变更服务器或用户名后需重新填写。</small></label><label class="check-label span-2"><input name="clear_password" type="checkbox">清除已保存的代理密码</label></div><p class="form-note">代理连接失败时会记录错误，不自动退回直连。证书 DNS 传播检查仍需直接访问 DNS 服务。</p><p class="error" role="alert"></p><div class="form-actions"><button type="submit" class="primary">保存代理设置</button></div></form>`) +
     '<div class="hint">爱快为每组分别配置 TCP 映射。例如外网 18443 映射到第一组 HTTPS 18443，外网 19443 映射到第二组 HTTPS 19443。修改监听或组启停状态后需重启服务。</div>' +
     panel('反代组监听','HTTP / HTTPS 填写 0 即关闭该协议。',rows?`<div class="table-wrap"><table><thead><tr><th>反代组</th><th>HTTP</th><th>HTTPS</th><th>状态</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></div>`:empty('还没有反代组','到反向代理页面创建组和域名规则。')) +
     panel('部署提示','根据运行方式确认网络连接。','<div class="panel-body"><ul class="info-list"><li><span>管理入口</span><b>默认 0.0.0.0:16666，可通过服务器 IP 访问</b></li><li><span>Docker bridge</span><b>为各组非零端口添加 compose.bridge.yaml 映射</b></li><li><span>IP 黑白名单</span><b>Linux Docker 推荐 host 网络，保留来源 IP</b></li><li><span>订阅更新</span><b>立即应用规则，无需重启</b></li><li><span>爱快映射</span><b>按组映射业务端口；管理可使用 SSH 隧道</b></li></ul></div>') + maintenanceHTML();
@@ -658,6 +708,7 @@ function render() {
     if(!reducedMotion.matches) content.querySelectorAll('.stat-value').forEach((el,i)=>{if(values[i]!==el.textContent) el.animate([{opacity:.4},{opacity:1}],{duration:160});});
   }
   renderedPage=page;
+  if(changed&&page==='settings') loadOnlineUpdateStatus();
   if(page==='ddns') {loadIPInfo().catch(e=>{if($('#ip-results')) $('#ip-results').textContent=e.message;});loadDNSRecords();}
 }
 async function refreshStatus() {
@@ -1117,6 +1168,8 @@ document.addEventListener('click',async event=>{
       await save(next);render();
     }
     if(action==='refresh-public-ip') {await loadIPInfo(true);toast('公网 IP 检测已安排，DNS 记录按组同步任务更新');}
+    if(action==='check-online-update') await checkOnlineUpdate();
+    if(action==='install-online-update') await installOnlineUpdate();
     if(action==='restart-service') {if(!confirm('重启会短暂中断服务，监听端口变更将生效。确认重启？')) return;const result=await api('maintenance/restart','POST',{});toast(result.message);showLogin();}
     if(action==='apply-maintenance') {
       const preview=maintenancePreview;if(!preview?.can_apply) throw new Error('请先检查可用的维护包');

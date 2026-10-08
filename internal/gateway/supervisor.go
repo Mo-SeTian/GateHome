@@ -57,7 +57,10 @@ func SupervisePaths(ctx context.Context, paths StoragePaths, appDir, admin strin
 				return errors.New("维护回滚失败")
 			}
 		} else {
-			return errors.New("维护准备失败")
+			if err := m.finishTransition(); err != nil {
+				return errors.New("维护准备失败且取消操作失败")
+			}
+			log.Print("维护准备失败，已取消操作并保留原版本")
 		}
 		transition = false
 	}
@@ -161,8 +164,12 @@ func SupervisePaths(ctx context.Context, paths StoragePaths, appDir, admin strin
 				}
 				transition = false
 			} else {
-				return errors.New("维护准备失败")
+				if err := m.finishTransition(); err != nil {
+					return errors.New("维护准备失败且取消操作失败")
+				}
 			}
+			log.Print("维护失败，已取消操作并重新启动原版本")
+			continue
 		}
 		if !transition {
 			return errors.New("服务子进程退出")

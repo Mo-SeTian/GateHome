@@ -66,6 +66,10 @@ func (m *Maintenance) requestRestart() {
 }
 
 func (m *Maintenance) inspectUpdate(data []byte) (map[string]any, error) {
+	return m.inspectUpdateVersion(data, "")
+}
+
+func (m *Maintenance) inspectUpdateVersion(data []byte, expectedVersion string) (map[string]any, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.busy {
@@ -74,6 +78,9 @@ func (m *Maintenance) inspectUpdate(data []byte) (map[string]any, error) {
 	version, binary, err := inspectRelease(data, releaseArch())
 	if err != nil {
 		return nil, err
+	}
+	if expectedVersion != "" && version != expectedVersion {
+		return nil, errors.New("更新包版本与 GitHub 正式版本不一致，请重新检查版本")
 	}
 	id, err := stageID()
 	if err != nil {

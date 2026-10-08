@@ -23,21 +23,22 @@ import (
 var webFiles embed.FS
 
 type Admin struct {
-	store       *Store
-	proxy       *Proxy
-	certs       *Certificates
-	jobs        *Jobs
-	started     time.Time
-	ports       Config
-	adminPort   int
-	updateMu    sync.Mutex
-	mu          sync.Mutex
-	sessions    map[[32]byte]time.Time
-	attempts    []time.Time
-	logs        *Logs
-	maintenance *Maintenance
-	domainDNS   *domainDNS
-	discovery   serviceDiscovery
+	store        *Store
+	proxy        *Proxy
+	certs        *Certificates
+	jobs         *Jobs
+	started      time.Time
+	ports        Config
+	adminPort    int
+	updateMu     sync.Mutex
+	mu           sync.Mutex
+	sessions     map[[32]byte]time.Time
+	attempts     []time.Time
+	logs         *Logs
+	maintenance  *Maintenance
+	onlineUpdate onlineUpdateJob
+	domainDNS    *domainDNS
+	discovery    serviceDiscovery
 }
 
 func NewAdmin(store *Store, proxy *Proxy, certs *Certificates, jobs *Jobs, adminPort int) *Admin {
@@ -78,6 +79,7 @@ func (a *Admin) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/config", a.requireAuth(a.putConfig))
 	mux.HandleFunc("GET /api/status", a.requireAuth(a.status))
 	a.maintenanceRoutes(mux)
+	a.onlineUpdateRoutes(mux)
 	a.networkRoutes(mux)
 	a.domainDNSRoutes(mux)
 	a.statisticsRoutes(mux)
@@ -254,7 +256,7 @@ func (a *Admin) Handler() http.Handler {
 		files.ServeHTTP(w, r)
 	})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/api/") && r.URL.Path != "/api/status" && r.URL.Path != "/api/logs" && r.URL.Path != "/api/statistics" && r.URL.Path != "/api/ddns/records" && !(r.Method == "GET" && (r.URL.Path == "/api/ip-blocks" || strings.HasPrefix(r.URL.Path, "/api/service-discovery/") || strings.HasPrefix(r.URL.Path, "/api/route-images/"))) {
+		if strings.HasPrefix(r.URL.Path, "/api/") && r.URL.Path != "/api/status" && r.URL.Path != "/api/logs" && r.URL.Path != "/api/statistics" && r.URL.Path != "/api/ddns/records" && r.URL.Path != "/api/maintenance/online-update-status" && !(r.Method == "GET" && (r.URL.Path == "/api/ip-blocks" || strings.HasPrefix(r.URL.Path, "/api/service-discovery/") || strings.HasPrefix(r.URL.Path, "/api/route-images/"))) {
 			started := time.Now()
 			logged := &loggedResponseWriter{ResponseWriter: w}
 			w = logged
