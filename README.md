@@ -99,6 +99,18 @@ curl -fsSL https://raw.githubusercontent.com/Mo-SeTian/GateHome/main/install.sh 
 sudo bash /tmp/gatehome-install.sh install
 ```
 
+通过代理安装时，外层 curl 和安装脚本都需要指定代理。将下面的 `YOUR_PROXY_HOST:7890` 替换为可从服务器访问的代理地址和端口：
+
+```sh
+GATEHOME_INSTALL_PROXY='http://YOUR_PROXY_HOST:7890'
+curl --proxy "$GATEHOME_INSTALL_PROXY" --noproxy '' --http1.1 -fsSL \
+  https://raw.githubusercontent.com/Mo-SeTian/GateHome/main/install.sh \
+  -o /tmp/gatehome-install.sh && \
+sudo bash /tmp/gatehome-install.sh install --proxy "$GATEHOME_INSTALL_PROXY"
+```
+
+脚本的 `--proxy` 也可写成 `-x`，安装包及校验文件均使用同一代理。支持 curl 的 HTTP、HTTPS 和 SOCKS 代理地址；例如 SOCKS5 可使用 `socks5h://YOUR_PROXY_HOST:1080`，域名由代理解析。显式代理参数优先于已有代理环境变量及 `NO_PROXY`；不传参数时继续遵循 curl 的 `https_proxy`、`HTTPS_PROXY`、`ALL_PROXY` 等环境变量及 `NO_PROXY`。此参数只用于安装下载，不写入 Gatehouse 配置或 systemd 服务，也不回显代理地址。
+
 脚本自动选择 amd64 / arm64，从 GitHub Releases 下载对应程序并校验 SHA-256，无需在服务器上安装 Go、Python 或 Node.js。首次安装在终端设置管理员密码，输入不回显。
 
 下载使用 HTTP/1.1；TLS 连接中断等下载错误会清除残缺文件并重试，最多尝试 4 次。下载和校验成功后才修改安装。如果出现 `curl: (56)` / `unexpected eof while reading`，说明下载连接提前断开；请检查服务器的网络或代理规则。使用 MSM 等分流工具时，安装需要访问 `raw.githubusercontent.com`、`github.com` 和 `release-assets.githubusercontent.com`。仍无法下载时，可在其他能访问 GitHub 的设备下载下面的安装包，复制到服务器离线安装。

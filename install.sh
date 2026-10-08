@@ -11,6 +11,7 @@ DATA_DIR="$INSTALL_DIR/data"
 LEGACY_DATA_DIR=/var/lib/gatehouse
 SERVICE_FILE=/etc/systemd/system/gatehouse.service
 DOWNLOAD_DIR=""
+INSTALL_PROXY=""
 
 fail() { printf '%s\n' "$1" >&2; exit 1; }
 require_linux() {
@@ -39,8 +40,12 @@ ensure_ca_certificates() {
 
 download_file() {
   local url="$1" target="$2" attempt
+  local proxy_args=(--show-error)
+  if [[ -n "$INSTALL_PROXY" ]]; then
+    proxy_args=(--proxy "$INSTALL_PROXY" --noproxy "" --stderr /dev/null)
+  fi
   for ((attempt=1; attempt<=4; attempt++)); do
-    if curl --proto '=https' --proto-redir '=https' --tlsv1.2 --http1.1 -fLsS --connect-timeout 10 --max-time 300 "$url" -o "$target"; then
+    if curl "${proxy_args[@]}" --proto '=https' --proto-redir '=https' --tlsv1.2 --http1.1 -fLs --connect-timeout 10 --max-time 300 "$url" -o "$target"; then
       return
     fi
     rm -f -- "$target"
@@ -156,7 +161,22 @@ uninstall_gatehouse() {
 
 main() {
   trap '[[ -z "$DOWNLOAD_DIR" ]] || rm -rf -- "$DOWNLOAD_DIR"' EXIT
-  local choice="${1:-menu}"
+  local choice=menu
+  while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+      --proxy|-x)
+        [[ "$#" -ge 2 && -n "$2" && "$2" != -* ]] || fail '请在 --proxy 后填写代理地址，例如 http://YOUR_PROXY_HOST:7890。'
+        INSTALL_PROXY="$2"
+        shift 2
+        ;;
+      install|uninstall|menu|0|1|2)
+        [[ "$choice" == menu ]] || fail '请只指定一个安装或卸载操作。'
+        choice="$1"
+        shift
+        ;;
+      *) fail '支持 install（安装）、uninstall（卸载），可添加 --proxy <代理地址> 或 -x <代理地址>。' ;;
+    esac
+  done
   if [[ "$choice" == menu ]]; then
     printf '\nGatehouse Linux 安装管理\n1. 安装 / 重新安装（保留配置）\n2. 卸载\n0. 退出\n'
     read -r -p '请选择 [0/1/2]：' choice < /dev/tty

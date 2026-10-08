@@ -43,6 +43,12 @@ with tempfile.TemporaryDirectory(prefix='gatehome-install-checks.') as temporary
 import os,sys,shutil
 from pathlib import Path
 args=sys.argv[1:]
+expected=os.environ.get('QA_EXPECT_PROXY')
+if expected is not None:
+    if '--proxy' not in args or args[args.index('--proxy')+1] != expected:
+        sys.exit(1)
+    if '--noproxy' not in args or args[args.index('--noproxy')+1] != '':
+        sys.exit(1)
 url=next(a for a in args if a.startswith('https://'))
 output=args[args.index('-o')+1]
 name=url.rsplit('/',1)[-1]
@@ -139,6 +145,17 @@ trap '[[ -z "$DOWNLOAD_DIR" ]] || rm -rf -- "$DOWNLOAD_DIR"' EXIT
 
     execute('SOURCE_DIR=""; load_package amd64; test -f "$SOURCE_DIR/dist/gatehouse-linux-amd64"')
     execute('SOURCE_DIR=""; load_package arm64; test -f "$SOURCE_DIR/dist/gatehouse-linux-arm64"')
+    environment['QA_DOWNLOAD_FAILURES'] = '0'
+    for option, proxy in (('--proxy', 'http://proxy.example.test:7890'), ('-x', 'socks5h://proxy.example.test:1080')):
+        environment['QA_EXPECT_PROXY'] = proxy
+        environment['NO_PROXY'] = '*'
+        output = execute('install_gatehouse() { SOURCE_DIR=""; load_package amd64; }; main install ' + option + ' "$QA_EXPECT_PROXY"')
+        assert proxy.encode() not in output, 'Proxy address was printed.'
+    environment.pop('QA_EXPECT_PROXY')
+    environment.pop('NO_PROXY')
+    execute('main install --proxy', success=False)
+    execute('main install uninstall', success=False)
+    print('Installer: HTTP/SOCKS proxy flags reach archive and checksum downloads, override NO_PROXY and remain private: PASS')
     counter = temp / 'curl-attempts'
     counter.unlink()
     environment['QA_DOWNLOAD_FAILURES'] = '1'
