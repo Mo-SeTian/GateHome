@@ -83,7 +83,7 @@ func SupervisePaths(ctx context.Context, paths StoragePaths, appDir, admin strin
 			args = append(args, "-log", paths.Log)
 		}
 		cmd := exec.Command(binary, args...)
-		cmd.Env = append(os.Environ(), "GATEHOUSE_SUPERVISED=1", "GATEHOUSE_BACKUP_FILES=1")
+		cmd.Env = append(os.Environ(), "GATEHOUSE_SUPERVISED=1", "GATEHOUSE_BACKUP_FILES=1", "GATEHOUSE_HOMEPAGE_FILES=1")
 		if err := os.Remove(filepath.Join(m.dir, "ready.json")); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return errors.New("旧启动检查状态清理失败")
 		}

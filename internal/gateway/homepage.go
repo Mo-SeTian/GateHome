@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -68,6 +69,31 @@ func homepageImages(c HomepageConfig) map[string]bool {
 		}
 	}
 	return images
+}
+
+// Older launchers snapshot only proxy-referenced icons. Their rollback would
+// remove homepage-only icons, and they cannot restore the new background path.
+func (m *Maintenance) checkHomepageFiles(incoming *HomepageConfig) error {
+	if m.homepageFiles {
+		return nil
+	}
+	var current struct {
+		Config struct {
+			Homepage HomepageConfig `json:"homepage"`
+		} `json:"config"`
+	}
+	data, err := os.ReadFile(m.paths.file("state.json"))
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return errors.New("当前首页配置无法检查")
+	}
+	if err == nil && json.Unmarshal(data, &current) != nil {
+		return errors.New("当前首页配置无效")
+	}
+	needsFiles := func(c HomepageConfig) bool { return c.Background != "" || len(homepageImages(c)) > 0 }
+	if needsFiles(current.Config.Homepage) || (incoming != nil && needsFiles(*incoming)) {
+		return errors.New("旧启动器不支持首页图片的完整恢复与回滚，请使用最新安装脚本更新启动器（保留 config、log、data），Docker 请保留目录后重建镜像")
+	}
+	return nil
 }
 
 func validateHomepage(c HomepageConfig, groups []ProxyGroup) error {

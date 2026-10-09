@@ -2,7 +2,7 @@
 
 一个自托管的反向代理与 DDNS 综合管理工具。Go 单进程，中文管理界面内嵌，无需 Node.js、数据库或额外 Web 服务器。
 
-当前版本为 **0.0.26**。目前支持多个 DNS 组分别配置根域名、服务商和凭据（当前支持 Cloudflare），以及 HTTP / HTTPS / WebSocket 代理。访问控制属于代理层，不修改 Linux 的 nftables / iptables。
+当前版本为 **0.0.27**。目前支持多个 DNS 组分别配置根域名、服务商和凭据（当前支持 Cloudflare），以及 HTTP / HTTPS / WebSocket 代理。访问控制属于代理层，不修改 Linux 的 nftables / iptables。
 
 ## 网络结构
 
@@ -115,7 +115,7 @@ sudo bash /tmp/gatehome-install.sh install --proxy "$GATEHOME_INSTALL_PROXY"
 
 下载使用 HTTP/1.1；TLS 连接中断等下载错误会清除残缺文件并重试，最多尝试 4 次。下载和校验成功后才修改安装。如果出现 `curl: (56)` / `unexpected eof while reading`，说明下载连接提前断开；请检查服务器的网络或代理规则。使用 MSM 等分流工具时，安装需要访问 `raw.githubusercontent.com`、`github.com` 和 `release-assets.githubusercontent.com`。仍无法下载时，可在其他能访问 GitHub 的设备下载下面的安装包，复制到服务器离线安装。
 
-离线安装可使用 `make release` 生成的 **`版本/0.0.26/`** 完整目录，或解压 Release 中对应架构的 `gatehome-linux-*.tar.gz`，然后运行：
+离线安装可使用 `make release` 生成的 **`版本/0.0.27/`** 完整目录，或解压 Release 中对应架构的 `gatehome-linux-*.tar.gz`，然后运行：
 
 ```sh
 sudo bash install.sh
@@ -538,3 +538,7 @@ make build
 Linux host 网络无需额外发布端口。Docker bridge 模式启用首页时，在 `compose.bridge.yaml` 的 `ports` 中添加 `16680:16680`（端口按你的设置替换），然后重新创建容器。首页提供 HTTP；公网访问可使用单独的 HTTPS 反代域名指向 `http://服务器IP:16680`。
 
 使用方式、自定义 CSS 示例及限制见 [GateHomePage 说明](docs/homepage-0.0.26.md)。
+
+## 0.0.27：首页图片与旧启动器兼容检查
+
+旧启动器的回滚快照只包含反代使用的图标，不能完整处理首页专用图标和背景。新版本检查启动器能力，在不兼容时阻止恢复、更新应用和维护重启，明确提示先升级启动器，避免丢失首页图片。Linux 请使用最新 curl 安装命令重新安装一次；Docker 保留三个挂载目录后更新镜像。配置、凭据和数据均保留。

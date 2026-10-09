@@ -24,14 +24,15 @@ type maintenanceStage struct {
 	Payload                   *backupPayload
 }
 type Maintenance struct {
-	mu          sync.Mutex
-	dir, appDir string
-	paths       StoragePaths
-	supervised  bool
-	backupFiles bool
-	stage       *maintenanceStage
-	busy        bool
-	restart     chan struct{}
+	mu            sync.Mutex
+	dir, appDir   string
+	paths         StoragePaths
+	supervised    bool
+	backupFiles   bool
+	homepageFiles bool
+	stage         *maintenanceStage
+	busy          bool
+	restart       chan struct{}
 }
 
 func NewMaintenance(data, appDir string) (*Maintenance, error) {
@@ -43,7 +44,7 @@ func NewMaintenancePaths(paths StoragePaths, appDir string) (*Maintenance, error
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, err
 	}
-	return &Maintenance{dir: dir, appDir: appDir, paths: paths, supervised: os.Getenv("GATEHOUSE_SUPERVISED") == "1", backupFiles: os.Getenv("GATEHOUSE_BACKUP_FILES") == "1", restart: make(chan struct{}, 1)}, nil
+	return &Maintenance{dir: dir, appDir: appDir, paths: paths, supervised: os.Getenv("GATEHOUSE_SUPERVISED") == "1", backupFiles: os.Getenv("GATEHOUSE_BACKUP_FILES") == "1", homepageFiles: os.Getenv("GATEHOUSE_HOMEPAGE_FILES") == "1", restart: make(chan struct{}, 1)}, nil
 }
 
 func (m *Maintenance) Available() bool {
@@ -98,7 +99,11 @@ func (m *Maintenance) inspectUpdateVersion(data []byte, expectedVersion string) 
 	} else if !m.Available() {
 		message = "更新包校验通过；应用更新需使用 Linux 安装脚本或新版 Docker 启动方式"
 	}
-	return map[string]any{"id": id, "version": version, "can_apply": m.Available() && comparison > 0, "message": message}, nil
+	compatible := m.checkHomepageFiles(nil)
+	if compatible != nil && m.Available() {
+		message = compatible.Error()
+	}
+	return map[string]any{"id": id, "version": version, "can_apply": m.Available() && comparison > 0 && compatible == nil, "message": message}, nil
 }
 
 func (m *Maintenance) inspectBackup(data []byte, password string, adminPort int) (map[string]any, error) {
@@ -125,10 +130,14 @@ func (m *Maintenance) inspectBackup(data []byte, password string, adminPort int)
 	m.stage = &maintenanceStage{ID: id, Kind: "restore", Version: Version, Created: time.Now()}
 	c := payload.State.Config
 	images, logs, caches := backupFileCounts(payload)
-	canApply := m.Available() && (payload.Files == nil || m.backupFiles)
+	compatible := m.checkHomepageFiles(&c.Homepage)
+	canApply := m.Available() && (payload.Files == nil || m.backupFiles) && compatible == nil
 	message := "恢复会覆盖当前配置和管理员账户；完成后使用备份时的管理员账号和管理密码登录"
 	if payload.Files != nil && !m.backupFiles && m.Available() {
 		message = "当前启动器不支持完整数据恢复。请使用此版本安装脚本更新启动器，再重新检查备份；仅网页更新程序不会更新启动器。"
+	}
+	if compatible != nil && m.Available() {
+		message = compatible.Error()
 	}
 	return map[string]any{"id": id, "version": manifest.Version, "created_at": manifest.CreatedAt, "can_apply": canApply, "routes": len(c.Routes), "groups": len(c.Groups), "homepage_groups": len(c.Homepage.Groups), "ddns_groups": len(c.DDNS.Groups), "firewalls": len(c.Firewalls), "subscriptions": len(c.Subscriptions), "certificates": len(payload.Certificates), "images": images, "log_entries": logs, "subscription_caches": caches, "includes_files": payload.Files != nil, "token_configured": payload.State.HasDNSToken(), "message": message}, nil
 }
@@ -157,15 +166,24 @@ func (m *Maintenance) schedule(id, kind string) error {
 			return errors.New("只可更新到更高版本")
 		}
 	}
-	if kind == "restore" && !m.backupFiles {
+	if kind == "restore" {
 		var payload diskBackup
 		data, err := os.ReadFile(filepath.Join(m.dir, "restore-staged.json"))
 		if err != nil || json.Unmarshal(data, &payload) != nil {
 			return errors.New("恢复暂存数据无效")
 		}
-		if payload.Files != nil {
+		if payload.Files != nil && !m.backupFiles {
 			return errors.New("请先使用此版本安装脚本更新启动器，才能完整恢复图片、日志和订阅缓存")
 		}
+		var state State
+		if json.Unmarshal(payload.State, &state) != nil {
+			return errors.New("恢复配置无效")
+		}
+		if err := m.checkHomepageFiles(&state.Config.Homepage); err != nil {
+			return err
+		}
+	} else if err := m.checkHomepageFiles(nil); err != nil {
+		return err
 	}
 	op := maintenanceOperation{Kind: kind, Version: m.stage.Version, Digest: m.stage.Digest}
 	if err := writeJSON(filepath.Join(m.dir, "operation.json"), op); err != nil {
@@ -183,6 +201,9 @@ func (m *Maintenance) scheduleRestart() error {
 	}
 	if m.busy {
 		return errors.New("正在执行维护操作")
+	}
+	if err := m.checkHomepageFiles(nil); err != nil {
+		return err
 	}
 	// Reapply the running program using the update protocol understood by 0.0.1 launchers.
 	binary, err := os.ReadFile(filepath.Join(m.appDir, "gatehouse"))

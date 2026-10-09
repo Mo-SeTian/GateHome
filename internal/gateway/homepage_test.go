@@ -307,3 +307,57 @@ func TestPrivateHomepageThroughSelfProxy(t *testing.T) {
 		t.Fatal("administrator account change did not revoke homepage login")
 	}
 }
+
+func TestHomepageLauncherCompatibilityAndRollback(t *testing.T) {
+	a, _ := testAdmin(t)
+	m, err := NewMaintenancePaths(a.store.paths, t.TempDir())
+	if err != nil {
+		t.Fatal("maintenance fixture failed")
+	}
+	m.homepageFiles = false
+	if m.checkHomepageFiles(nil) != nil {
+		t.Fatal("legacy launcher rejected configuration without homepage assets")
+	}
+	h := homepageFixture(t, a)
+	if m.checkHomepageFiles(&h) == nil {
+		t.Fatal("legacy launcher accepted incoming homepage assets")
+	}
+	c := a.store.Snapshot().Config
+	c.Homepage = h
+	if a.store.Update(c, nil, a.store.Snapshot().Revision) != nil {
+		t.Fatal("asset setup failed")
+	}
+	if m.checkHomepageFiles(nil) == nil {
+		t.Fatal("legacy launcher could discard current homepage icons during rollback")
+	}
+	t.Setenv("GATEHOUSE_HOMEPAGE_FILES", "1")
+	supported, err := NewMaintenancePaths(a.store.paths, m.appDir)
+	if err != nil || !supported.homepageFiles || supported.checkHomepageFiles(&h) != nil {
+		t.Fatal("new launcher capability rejected")
+	}
+	before, err := snapshotDiskPaths(a.store.paths)
+	if err != nil {
+		t.Fatal("snapshot failed")
+	}
+	atomicWrite(filepath.Join(supported.appDir, "gatehouse"), []byte("TEST_ONLY_OLD_PROGRAM"))
+	atomicWrite(filepath.Join(supported.dir, "update-staged"), []byte("TEST_ONLY_CORRUPT_UPDATE"))
+	writeJSON(filepath.Join(supported.dir, "operation.json"), maintenanceOperation{Kind: "update", Version: "0.0.99", Digest: "invalid"})
+	transitioned, err := supported.beginTransition()
+	if !transitioned || err == nil {
+		t.Fatal("corrupt update did not fail inside transition")
+	}
+	for name := range before.Files {
+		os.Remove(a.store.paths.file(name))
+	}
+	if supported.rollbackTransition() != nil {
+		t.Fatal("failed update rollback failed")
+	}
+	after, err := snapshotDiskPaths(a.store.paths)
+	var beforeState, afterState State
+	if json.Unmarshal(before.State, &beforeState) != nil || json.Unmarshal(after.State, &afterState) != nil {
+		t.Fatal("rollback configuration could not be decoded")
+	}
+	if err != nil || !reflect.DeepEqual(beforeState, afterState) || !reflect.DeepEqual(before.Files, after.Files) || !reflect.DeepEqual(before.Certificates, after.Certificates) {
+		t.Fatal("rollback omitted homepage configuration or assets")
+	}
+}
