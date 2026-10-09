@@ -506,7 +506,7 @@ func (a *Admin) status(w http.ResponseWriter, r *http.Request) {
 		subscriptions = a.proxy.subscriptions.Status()
 	}
 	jsonResponse(w, 200, map[string]any{
-		"version": Version, "maintenance_available": a.maintenance != nil && a.maintenance.Available(), "maintenance_busy": a.maintenance.Busy(),
+		"version": Version, "maintenance_available": a.maintenance != nil && a.maintenance.Available(), "maintenance_busy": a.maintenance.Busy(), "sunpanel_storage_supported": a.maintenance != nil && a.maintenance.SunPanelFilesSupported(),
 		"dns_providers":     []map[string]string{{"id": "cloudflare", "name": "Cloudflare"}},
 		"ip_query_defaults": map[string][]string{"ipv4": defaultIPEndpoints("A"), "ipv6": defaultIPEndpoints("AAAA")},
 		"uptime_seconds":    int(time.Since(a.started).Seconds()), "requests": a.proxy.Requests.Load(), "blocked": a.proxy.Blocked.Load(), "failures": a.proxy.Failures.Load(),

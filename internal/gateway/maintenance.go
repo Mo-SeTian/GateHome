@@ -58,6 +58,9 @@ func (m *Maintenance) Busy() bool {
 	defer m.mu.Unlock()
 	return m.busy
 }
+func (m *Maintenance) SunPanelFilesSupported() bool {
+	return m != nil && m.sunPanelFiles
+}
 func (m *Maintenance) RestartSignal() <-chan struct{} { return m.restart }
 func (m *Maintenance) requestRestart() {
 	select {
@@ -202,10 +205,8 @@ func (m *Maintenance) scheduleRestart() error {
 	if m.busy {
 		return errors.New("正在执行维护操作")
 	}
-	if err := m.checkSunPanelFiles(); err != nil {
-		return err
-	}
-	// Reapply the running program using the update protocol understood by 0.0.1 launchers.
+	// A plain restart does not mutate data, so legacy launchers can still apply it.
+	// Full update and restore operations remain guarded by checkSunPanelFiles.
 	binary, err := os.ReadFile(filepath.Join(m.appDir, "gatehouse"))
 	if err != nil {
 		return errors.New("当前程序读取失败")

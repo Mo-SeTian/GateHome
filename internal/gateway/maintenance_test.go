@@ -328,6 +328,30 @@ func TestRestartUsesCompatibleUpdateProtocol(t *testing.T) {
 	}
 }
 
+func TestRestartAllowsLegacyLauncherWithoutSunPanelRollback(t *testing.T) {
+	t.Setenv("GATEHOUSE_SUPERVISED", "1")
+	t.Setenv("GATEHOUSE_SUNPANEL_STORAGE", "0")
+	a, _ := testAdmin(t)
+	app := t.TempDir()
+	program := testELF(releaseArch())
+	if err := os.WriteFile(filepath.Join(app, "gatehouse"), program, 0750); err != nil {
+		t.Fatal(err)
+	}
+	m, err := NewMaintenance(filepath.Dir(a.store.path), app)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !m.Available() {
+		t.Skip("restart maintenance is only available on supervised Linux amd64/arm64 deployments")
+	}
+	if m.SunPanelFilesSupported() {
+		t.Fatal("legacy launcher unexpectedly reported Sun-Panel rollback support")
+	}
+	if err := m.scheduleRestart(); err != nil {
+		t.Fatalf("legacy launcher should still allow a plain restart: %v", err)
+	}
+}
+
 func TestRestartChecksNewPortsBeforeStoppingService(t *testing.T) {
 	listener, err := net.Listen("tcp", ":0")
 	if err != nil {

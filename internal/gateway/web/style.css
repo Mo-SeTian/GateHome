@@ -754,6 +754,36 @@ input[aria-invalid="true"] { border-color: var(--danger); }
 
 .hp-service-body{padding:22px 24px}.hp-service-body form{max-width:560px}.hp-service-body input[type=number]{max-width:240px}.hp-service-body .toggle-row{margin-bottom:20px}.hp-service-body button+span{margin-left:12px}@media(max-width:700px){.hp-service-body{padding:18px 16px}}
 
-.sunpanel-frame{display:block;width:100%;height:calc(100dvh - 180px);min-height:520px;border:1px solid var(--border);border-radius:16px;background:#fff;margin-top:20px}
-#sunpanel-form{max-width:560px}
-@media(max-width:640px){.sunpanel-frame{min-height:600px;border-radius:12px}}
+.sunpanel-page{max-width:1180px}
+.sunpanel-hero{display:flex;align-items:center;justify-content:space-between;gap:28px;padding:30px 32px;background:linear-gradient(118deg,#f5f7ff 0%,#fff 58%,#f5fbff 100%);border:1px solid #dfe5f7;border-radius:16px;box-shadow:var(--shadow)}
+.sunpanel-identity{display:flex;align-items:center;gap:20px;min-width:0}
+.sunpanel-logo{position:relative;display:inline-flex;align-items:center;justify-content:center;width:68px;height:68px;flex:0 0 68px;border-radius:20px;background:linear-gradient(145deg,#566bea,#3149c8);box-shadow:0 12px 24px #4256d52c;color:#fff;overflow:hidden}
+.sunpanel-logo-sun{position:absolute;width:28px;height:28px;border:4px solid currentColor;border-radius:50%;top:12px;left:19px}
+.sunpanel-logo-sun::before,.sunpanel-logo-sun::after{content:'';position:absolute;inset:-9px;border-top:3px solid currentColor;border-bottom:3px solid currentColor;border-radius:50%;transform:rotate(45deg)}
+.sunpanel-logo-sun::after{transform:rotate(-45deg)}
+.sunpanel-logo-panel{position:absolute;width:36px;height:20px;left:16px;bottom:11px;border:3px solid currentColor;border-radius:5px;background:#ffffff2b}
+.sunpanel-identity .eyebrow{margin-bottom:8px;color:#5265d4}
+.sunpanel-identity h2{font-size:23px;margin-bottom:8px}
+.sunpanel-identity p{font-size:13px;color:var(--muted);margin-bottom:12px}
+.sunpanel-runtime{display:flex;align-items:center;gap:8px;font-size:12px;color:#667085}.sunpanel-runtime.is-ready{color:#3e7659}
+.sunpanel-runtime .status-dot{width:8px;height:8px;background:#35a66c;box-shadow:0 0 0 4px #35a66c18}
+.sunpanel-runtime.is-off .status-dot{background:#9aa4b5;box-shadow:0 0 0 4px #9aa4b522}
+.sunpanel-status-toggle{display:flex;align-items:center;gap:10px;min-width:150px;padding:12px 14px;border:1px solid #d5dced;border-radius:12px;background:#fff;color:#667085;text-align:left;transition:all var(--motion-feedback)}
+.sunpanel-status-toggle:hover{border-color:#aab6dd;background:#fafbff}
+.sunpanel-status-toggle.is-enabled{border-color:#b9dfc8;background:#f3fbf5;color:#286446}
+.sunpanel-toggle-dot{width:11px;height:11px;border-radius:50%;background:#9aa4b5;box-shadow:0 0 0 4px #9aa4b522;flex-shrink:0}
+.sunpanel-status-toggle.is-enabled .sunpanel-toggle-dot{background:#35a66c;box-shadow:0 0 0 4px #35a66c1f}
+.sunpanel-status-toggle span:nth-child(2){font-size:13px;font-weight:650}
+.sunpanel-status-toggle small{display:block;margin-left:auto;font-size:10px;white-space:nowrap;color:inherit}
+.sunpanel-launch-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(260px,.62fr);gap:16px;margin:16px 0 24px}
+.sunpanel-launch{display:flex;align-items:center;gap:14px;min-height:92px;padding:16px 20px;border:1px solid #cfd7f4;border-radius:14px;background:#fff;color:var(--text);box-shadow:var(--shadow);transition:all var(--motion-feedback)}
+.sunpanel-launch:hover{border-color:#9ca9e9;background:#fafbff;box-shadow:0 8px 20px #4256d512;text-decoration:none;transform:translateY(-1px)}
+.sunpanel-launch .sunpanel-logo{width:48px;height:48px;flex-basis:48px;border-radius:14px;box-shadow:none}
+.sunpanel-launch .sunpanel-logo-sun{transform:scale(.68);top:6px;left:10px}.sunpanel-launch .sunpanel-logo-panel{transform:scale(.68);left:6px;bottom:6px}
+.sunpanel-launch>span:nth-child(2){flex:1;min-width:0}.sunpanel-launch b{display:block;font-size:15px}.sunpanel-launch small{display:block;margin-top:6px;color:var(--muted);font-size:11px}.sunpanel-launch>.icon{color:var(--primary)}
+.sunpanel-launch.is-disabled{border-style:dashed;opacity:.7;cursor:not-allowed}.sunpanel-launch.is-disabled:hover{transform:none;box-shadow:var(--shadow);background:#fff}
+.sunpanel-compatibility{display:flex;gap:12px;align-items:flex-start;margin:16px 0 20px;padding:14px 16px;border:1px solid #f0d7a2;border-radius:12px;background:#fffbf2;color:#765b20;font-size:12px;line-height:1.6}.sunpanel-compatibility b{flex:none;color:#664b13}.sunpanel-compatibility span{color:#806a3c}
+.sunpanel-url-card{display:flex;flex-direction:column;justify-content:center;padding:16px 20px;border:1px solid var(--border);border-radius:14px;background:#fff}.sunpanel-url-card .eyebrow{margin-bottom:8px;color:var(--muted)}.sunpanel-url-card code{font-size:13px;color:var(--text);background:#f4f6fb;padding:7px 9px}.sunpanel-url-card small{margin-top:8px;line-height:1.6}
+.sunpanel-columns{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px}.sunpanel-columns .panel{margin-bottom:20px}.sunpanel-port-field{max-width:360px}.sunpanel-port-field input{font-variant-numeric:tabular-nums}.sunpanel-guide{list-style:none;padding:0;margin:0}.sunpanel-guide li{display:flex;gap:12px;padding:13px 0;border-bottom:1px solid var(--border)}.sunpanel-guide li:last-child{border-bottom:0;padding-bottom:0}.sunpanel-guide>li>span{width:30px;height:30px;display:grid;place-items:center;border-radius:8px;background:var(--primary-soft);color:var(--primary);flex-shrink:0}.sunpanel-guide b,.sunpanel-guide small{display:block}.sunpanel-guide b{font-size:13px}.sunpanel-guide small{margin-top:5px;line-height:1.6}
+.sunpanel-preview{overflow:hidden}.sunpanel-frame{display:block;width:100%;height:calc(100dvh - 250px);min-height:560px;border:0;background:#fff}.sunpanel-preview-empty{display:flex;align-items:center;flex-direction:column;justify-content:center;min-height:310px;padding:32px;text-align:center;color:var(--muted)}.sunpanel-preview-icon{margin-bottom:16px}.sunpanel-preview-icon .sunpanel-logo{width:54px;height:54px;flex-basis:54px;border-radius:16px;transform:scale(.86)}.sunpanel-preview-empty b{color:var(--text);font-size:15px}.sunpanel-preview-empty p{margin:8px 0 0;font-size:12px}
+@media(max-width:760px){.sunpanel-hero{align-items:flex-start;flex-direction:column;padding:24px 20px}.sunpanel-status-toggle{width:100%}.sunpanel-launch-row,.sunpanel-columns{grid-template-columns:minmax(0,1fr)}.sunpanel-url-card{min-height:100px}.sunpanel-frame{min-height:620px}.sunpanel-identity{align-items:flex-start}.sunpanel-identity h2{font-size:20px}.sunpanel-compatibility{flex-direction:column;gap:4px}}

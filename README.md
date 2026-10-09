@@ -2,7 +2,7 @@
 
 一个自托管的反向代理与 DDNS 综合管理工具。Go 单进程，中文管理界面内嵌，无需 Node.js、数据库或额外 Web 服务器。
 
-当前版本为 **0.0.40**，安装包见 [v0.0.40 Release](https://github.com/Mo-SeTian/GateHome/releases/tag/v0.0.40)。程序和 systemd 服务名为 `gatehouse`。
+当前版本为 **0.0.41**，安装包见 [v0.0.41 Release](https://github.com/Mo-SeTian/GateHome/releases/tag/v0.0.41)。程序和 systemd 服务名为 `gatehouse`。
 
 ## 主要功能
 
@@ -129,7 +129,7 @@ sudo bash /tmp/gatehome-install.sh install --proxy "$GATEHOME_INSTALL_PROXY"
 
 下载使用 HTTP/1.1；TLS 连接中断等下载错误会清除残缺文件并重试，最多尝试 4 次。下载和校验成功后才修改安装。如果出现 `curl: (56)` / `unexpected eof while reading`，说明下载连接提前断开；请检查服务器的网络或代理规则。使用 MSM 等分流工具时，安装需要访问 `raw.githubusercontent.com`、`github.com` 和 `release-assets.githubusercontent.com`。仍无法下载时，可在其他能访问 GitHub 的设备下载下面的安装包，复制到服务器离线安装。
 
-离线安装可使用 `make release` 生成的 **`版本/0.0.40/`** 完整目录，或解压 Release 中对应架构的 `gatehome-linux-*.tar.gz`，然后运行：
+离线安装可使用 `make release` 生成的 **`版本/0.0.41/`** 完整目录，或解压 Release 中对应架构的 `gatehome-linux-*.tar.gz`，然后运行：
 
 ```sh
 sudo bash install.sh
@@ -204,7 +204,7 @@ Docker 的可更新程序保存在持久化目录 `/data/app`，镜像中的启�
 
 上传备份并输入密码，软件先校验和显示配置数量预览，确认后才恢复。新备份恢复覆盖配置、凭据、冻结名单、证书、服务图片、Sun-Panel 数据、日志和订阅缓存，使用备份时的管理员账号和管理密码重新登录。0.0.18 及以前的备份继续支持，保留它们未包含的现有日志和缓存；检查页面明确显示覆盖范围。拒绝损坏、密码不正确、来自更高版本或端口冲突的备份。启动检查失败会恢复维护前的数据和程序；旧订阅缓存只在来源匹配时使用。
 
-**旧安装需更新一次启动器及部署布局**：Web 更新只替换业务程序。Linux 请重新执行上述 curl 安装命令，或在最新离线安装目录运行 `sudo bash install.sh`；已有数据和密码保留。Docker 请按旧卷迁移说明保留数据，再使用新版 Dockerfile 和 Compose 重建部署。启动器未更新时，检查页面提示原因并禁用完整恢复，后端也拒绝操作，确保 `sunpanel`、图片、日志和缓存参与完整恢复与回滚。之后继续正常使用网页更新。
+**旧安装需更新一次启动器及部署布局**：Web 更新只替换业务程序。Linux 请重新执行上述 curl 安装命令，或在最新离线安装目录运行 `sudo bash install.sh`；已有数据和密码保留。Docker 请按旧卷迁移说明保留数据，再使用新版 Dockerfile 和 Compose 重建部署。启动器未更新时，普通“重启服务”仍可用；检查页面会提示并禁止涉及 `sunpanel`、图片、日志和缓存的完整恢复与失败回滚。完成一次启动器或镜像升级后，整站备份、恢复和回滚才会覆盖这些数据，之后继续正常使用网页更新。
 
 备份覆盖检查及图片使用见 [服务图片与备份覆盖说明](docs/route-images-backup-0.0.19.md)。
 
@@ -264,7 +264,7 @@ IP 归属地由内嵌 ip2region 双栈离线库查询，显示在日志 IP 下�
 
 感谢 [hslr-s/sun-panel](https://github.com/hslr-s/sun-panel)（作者：红烧猎人）。本项目引用并修改 **v1.3.0** 开源源码，保留其 [MIT 许可证](sunpanel/LICENSE)。全部源码位于 [`sunpanel/`](sunpanel/)，具体修改和上游提交见 [集成说明](sunpanel/INTEGRATION.md)。
 
-在 GateHome 的 **浏览器首页** 页面开启 Sun-Panel 并设置独立端口（默认 `16680`），保存后重启服务。管理页内嵌访问 `/sunpanel/`，也可将 `http://服务器IP:16680/` 设置为浏览器首页或新标签页地址。Sun-Panel 账号独立于 GateHome；首次登录信息见 [上游部署说明](https://doc.sun-panel.top/zh_cn/usage/quick_deploy.html)，登录后修改密码。
+在 GateHome 的 **浏览器首页** 页面开启 Sun-Panel 并设置独立端口（默认 `16680`），保存后重启服务。页面会用 Sun-Panel 图标卡片提供启动入口，并可在管理端预览；也可将 `http://服务器IP:16680/` 设置为浏览器首页或新标签页地址。Sun-Panel 账号独立于 GateHome；首次登录信息见 [上游部署说明](https://doc.sun-panel.top/zh_cn/usage/quick_deploy.html)，登录后修改密码。
 
 Docker host 网络无需额外映射。bridge 模式可用 `SUNPANEL_PORT=自定义端口 docker compose -f compose.bridge.yaml up -d` 映射端口，必须与管理页保存的端口一致。HTTPS 管理页使用同源嵌入路径；独立首页可经 HTTPS 反代访问。
 
