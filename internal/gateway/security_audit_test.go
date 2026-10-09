@@ -62,7 +62,7 @@ func TestSecurityAuditAllAdminEndpointsRequireSession(t *testing.T) {
 func TestManagementCookieIsolationFromBusinessUpstreams(t *testing.T) {
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		for _, cookie := range r.Cookies() {
-			if cookie.Name == "gatehouse_session" || strings.HasPrefix(cookie.Name, routeCookiePrefix) {
+			if cookie.Name == "gatehouse_session" || cookie.Name == "gatehomepage_session" || strings.HasPrefix(cookie.Name, routeCookiePrefix) {
 				t.Error("protected session reached a business upstream")
 			}
 		}
@@ -70,6 +70,7 @@ func TestManagementCookieIsolationFromBusinessUpstreams(t *testing.T) {
 			t.Error("business cookies were unexpectedly changed")
 		}
 		w.Header().Add("Set-Cookie", "gatehouse_session=TEST_ONLY_FORGED; Path=/")
+		w.Header().Add("Set-Cookie", "gatehomepage_session=TEST_ONLY_FORGED; Path=/")
 		w.Header().Add("Set-Cookie", "business_session=TEST_ONLY_NEW; Path=/")
 		w.WriteHeader(200)
 	}))
@@ -78,7 +79,7 @@ func TestManagementCookieIsolationFromBusinessUpstreams(t *testing.T) {
 	c.Routes = []Route{{GroupID: "default", Host: "service.example.test", Upstream: backend.URL, Enabled: true}}
 	p := NewProxy(c, nil)
 	r := httptest.NewRequest("GET", "http://service.example.test/", nil)
-	r.Header.Add("Cookie", "gatehouse_session=TEST_ONLY_ADMIN; business_session=TEST_ONLY_BUSINESS")
+	r.Header.Add("Cookie", "gatehouse_session=TEST_ONLY_ADMIN; gatehomepage_session=TEST_ONLY_HOME; business_session=TEST_ONLY_BUSINESS")
 	r.Header.Add("Cookie", routeCookiePrefix+"test=TEST_ONLY_ROUTE; gatehouse_session=TEST_ONLY_DUPLICATE")
 	w := httptest.NewRecorder()
 	p.ServeHTTP(w, r)

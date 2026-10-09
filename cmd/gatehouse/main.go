@@ -157,6 +157,11 @@ func run() error {
 			tlsGetters = append(tlsGetters, certs.ForGroup(group.ID))
 		}
 	}
+	if c.Homepage.Enabled {
+		addresses = append(addresses, ":"+strconv.Itoa(c.Homepage.Port))
+		handlers = append(handlers, admin.HomepageHandler())
+		tlsGetters = append(tlsGetters, nil)
+	}
 	var listeners []net.Listener
 	defer func() {
 		for _, l := range listeners {
@@ -242,6 +247,9 @@ func readAdminUsername(reader io.Reader, current string) (string, error) {
 }
 
 func validateConfigAdminPort(c gateway.Config, adminPort int) error {
+	if c.Homepage.Enabled && c.Homepage.Port == adminPort {
+		return errors.New("首页端口不能与管理端口相同")
+	}
 	for _, g := range c.Groups {
 		if g.HTTPPort == adminPort || g.HTTPSPort == adminPort {
 			return errors.New("管理端口不能与业务端口相同")

@@ -23,26 +23,27 @@ import (
 var webFiles embed.FS
 
 type Admin struct {
-	store        *Store
-	proxy        *Proxy
-	certs        *Certificates
-	jobs         *Jobs
-	started      time.Time
-	ports        Config
-	adminPort    int
-	updateMu     sync.Mutex
-	mu           sync.Mutex
-	authMu       sync.RWMutex
-	sessions     map[[32]byte]time.Time
-	attempts     map[string]routeAttempts
-	activeLogins int
-	logs         *Logs
-	maintenance  *Maintenance
-	onlineUpdate onlineUpdateJob
-	dashboard    dashboardCache
-	telemetry    telemetryCollector
-	domainDNS    *domainDNS
-	discovery    serviceDiscovery
+	store            *Store
+	proxy            *Proxy
+	certs            *Certificates
+	jobs             *Jobs
+	started          time.Time
+	ports            Config
+	adminPort        int
+	updateMu         sync.Mutex
+	mu               sync.Mutex
+	authMu           sync.RWMutex
+	sessions         map[[32]byte]time.Time
+	homepageSessions map[[32]byte]time.Time
+	attempts         map[string]routeAttempts
+	activeLogins     int
+	logs             *Logs
+	maintenance      *Maintenance
+	onlineUpdate     onlineUpdateJob
+	dashboard        dashboardCache
+	telemetry        telemetryCollector
+	domainDNS        *domainDNS
+	discovery        serviceDiscovery
 }
 
 func NewAdmin(store *Store, proxy *Proxy, certs *Certificates, jobs *Jobs, adminPort int) *Admin {
@@ -70,7 +71,11 @@ func decodeBody(w http.ResponseWriter, r *http.Request, v any) bool {
 	if controller.SetReadDeadline(time.Now().Add(15*time.Second)) == nil {
 		defer controller.SetReadDeadline(time.Time{})
 	}
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 128<<10))
+	limit := int64(128 << 10)
+	if r.URL.Path == "/api/config" {
+		limit = 1 << 20
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, limit))
 	decoder.DisallowUnknownFields()
 	if decoder.Decode(v) != nil || decoder.Decode(&struct{}{}) != io.EOF {
 		apiError(w, 400, "请求 JSON 格式错误或内容过大")
@@ -81,6 +86,7 @@ func decodeBody(w http.ResponseWriter, r *http.Request, v any) bool {
 
 func (a *Admin) Handler() http.Handler {
 	mux := http.NewServeMux()
+	a.homepageAdminRoutes(mux)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { jsonResponse(w, 200, map[string]bool{"ok": true}) })
 	mux.HandleFunc("POST /api/login", a.login)
 	mux.HandleFunc("POST /api/logout", a.requireAuth(a.logout))
@@ -260,7 +266,7 @@ func (a *Admin) Handler() http.Handler {
 	sub, _ := fs.Sub(webFiles, "web")
 	files := http.FileServer(http.FS(sub))
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/" && r.URL.Path != "/app.js" && r.URL.Path != "/style.css" && r.URL.Path != "/icons.svg" && r.URL.Path != "/dashboard.js" && r.URL.Path != "/china-outline.svg" {
+		if r.URL.Path != "/" && r.URL.Path != "/app.js" && r.URL.Path != "/style.css" && r.URL.Path != "/icons.svg" && r.URL.Path != "/dashboard.js" && r.URL.Path != "/china-outline.svg" && r.URL.Path != "/homepage-admin.js" {
 			http.NotFound(w, r)
 			return
 		}
@@ -289,7 +295,7 @@ func (a *Admin) Handler() http.Handler {
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
 		if r.Method != "GET" && r.Method != "HEAD" {
-			isUpload := r.URL.Path == "/api/maintenance/inspect-update" || r.URL.Path == "/api/maintenance/inspect-backup" || r.URL.Path == "/api/route-images/upload"
+			isUpload := r.URL.Path == "/api/maintenance/inspect-update" || r.URL.Path == "/api/maintenance/inspect-backup" || r.URL.Path == "/api/route-images/upload" || r.URL.Path == "/api/homepage-backgrounds/upload"
 			contentOK := strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") || (isUpload && strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data;"))
 			if r.Header.Get("X-Gatehouse-Request") != "1" || !contentOK {
 				apiError(w, 403, "请求来源验证失败")

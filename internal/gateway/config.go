@@ -154,6 +154,7 @@ func (c Config) CertificateRequest(id string) (CertificateRequest, bool) {
 }
 
 type Config struct {
+	Homepage HomepageConfig `json:"homepage"`
 	// Read-only compatibility fields for migrating the original on-disk format.
 	HTTPPort      int                 `json:"http_port,omitempty"`
 	HTTPSPort     int                 `json:"https_port,omitempty"`
@@ -191,7 +192,7 @@ type Store struct {
 }
 
 func DefaultConfig() Config {
-	return Config{Groups: []ProxyGroup{{ID: "default", Name: "默认组", Enabled: true, HTTPPort: 18080, HTTPSPort: 18443}}, Subscriptions: []Subscription{}, Firewalls: []Firewall{}, Routes: []Route{},
+	return Config{Homepage: defaultHomepage(), Groups: []ProxyGroup{{ID: "default", Name: "默认组", Enabled: true, HTTPPort: 18080, HTTPSPort: 18443}}, Subscriptions: []Subscription{}, Firewalls: []Firewall{}, Routes: []Route{},
 		DDNS: DDNSConfig{Groups: []DDNSGroup{}}, LogRetention: defaultLogRetention,
 		ACME: ACMEConfig{Staging: true, DNSGroups: map[string]string{}, Requests: []CertificateRequest{}}}
 }
@@ -337,6 +338,10 @@ func migrateState(s *State) bool {
 
 func migrateConfig(c *Config) bool {
 	migrated := false
+	if c.Homepage.Port == 0 && !c.Homepage.Enabled && len(c.Homepage.Groups) == 0 && c.Homepage.CustomCSS == "" && c.Homepage.Background == "" {
+		c.Homepage = defaultHomepage()
+		migrated = true
+	}
 	if c.LogRetention == (LogRetentionConfig{}) {
 		c.LogRetention = defaultLogRetention
 		migrated = true
@@ -492,6 +497,9 @@ func (c Config) TLSHosts() []string {
 
 func listenerSignature(c Config) string {
 	parts := []string{}
+	if c.Homepage.Enabled {
+		parts = append(parts, fmt.Sprintf("homepage:%d", c.Homepage.Port))
+	}
 	for _, g := range c.Groups {
 		if g.Enabled {
 			parts = append(parts, fmt.Sprintf("%s:%d:%d", g.ID, g.HTTPPort, g.HTTPSPort))
@@ -502,6 +510,9 @@ func listenerSignature(c Config) string {
 }
 
 func validateAdminPort(c Config, port int) error {
+	if c.Homepage.Enabled && c.Homepage.Port == port {
+		return errors.New("首页端口不能与管理端口相同")
+	}
 	for _, g := range c.Groups {
 		if g.HTTPPort == port || g.HTTPSPort == port {
 			return errors.New("业务端口不能与管理端口相同")
@@ -543,6 +554,16 @@ func (s *Store) UpdateRouteCredentials(c Config, tokens, certificateTokens map[s
 			if _, err := readRouteImage(s.paths.Data, route.Image); err != nil {
 				return errors.New("反代图片不存在或已失效，请重新选择图片")
 			}
+		}
+	}
+	for id := range homepageImages(c.Homepage) {
+		if _, err := readRouteImage(s.paths.Data, id); err != nil {
+			return errors.New("首页链接图片不存在，请重新选择")
+		}
+	}
+	if c.Homepage.Background != "" {
+		if _, err := readHomepageBackground(s.paths.Data, c.Homepage.Background); err != nil {
+			return errors.New("首页背景不存在，请重新选择")
 		}
 	}
 	hashes, err := hashRoutePasswords(c, routePasswords)
@@ -681,6 +702,9 @@ func validDomain(s string) bool {
 func inZone(host, zone string) bool { return host == zone || strings.HasSuffix(host, "."+zone) }
 
 func Validate(c Config) error {
+	if err := validateHomepage(c.Homepage, c.Groups); err != nil {
+		return err
+	}
 	if err := validateDashboard(c.Dashboard); err != nil {
 		return err
 	}

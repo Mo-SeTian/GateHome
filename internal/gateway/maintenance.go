@@ -130,7 +130,7 @@ func (m *Maintenance) inspectBackup(data []byte, password string, adminPort int)
 	if payload.Files != nil && !m.backupFiles && m.Available() {
 		message = "当前启动器不支持完整数据恢复。请使用此版本安装脚本更新启动器，再重新检查备份；仅网页更新程序不会更新启动器。"
 	}
-	return map[string]any{"id": id, "version": manifest.Version, "created_at": manifest.CreatedAt, "can_apply": canApply, "routes": len(c.Routes), "groups": len(c.Groups), "ddns_groups": len(c.DDNS.Groups), "firewalls": len(c.Firewalls), "subscriptions": len(c.Subscriptions), "certificates": len(payload.Certificates), "images": images, "log_entries": logs, "subscription_caches": caches, "includes_files": payload.Files != nil, "token_configured": payload.State.HasDNSToken(), "message": message}, nil
+	return map[string]any{"id": id, "version": manifest.Version, "created_at": manifest.CreatedAt, "can_apply": canApply, "routes": len(c.Routes), "groups": len(c.Groups), "homepage_groups": len(c.Homepage.Groups), "ddns_groups": len(c.DDNS.Groups), "firewalls": len(c.Firewalls), "subscriptions": len(c.Subscriptions), "certificates": len(payload.Certificates), "images": images, "log_entries": logs, "subscription_caches": caches, "includes_files": payload.Files != nil, "token_configured": payload.State.HasDNSToken(), "message": message}, nil
 }
 
 func stageID() (string, error) {

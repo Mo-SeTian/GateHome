@@ -111,12 +111,12 @@ trap '[[ -z "$DOWNLOAD_DIR" ]] || rm -rf -- "$DOWNLOAD_DIR"' EXIT
     def snapshot():
         return {file.relative_to(prefix).as_posix(): file.read_bytes() for folder in ('config', 'log', 'data') for file in (prefix / folder).rglob('*') if file.is_file()}
 
-    execute('install_gatehouse', 'TEST_ONLY_INSTALL_PASSWORD\nTEST_ONLY_INSTALL_PASSWORD\n')
+    execute('install_gatehouse', '\nTEST_ONLY_INSTALL_PASSWORD\nTEST_ONLY_INSTALL_PASSWORD\n')
     assert (prefix / 'config/state.json').is_file() and not (prefix / 'data/state.json').exists()
     for folder in ('log', 'data'): assert (prefix / folder).is_dir()
     (prefix / 'log/calls.jsonl').write_text('{"id":1,"message":"TEST_ONLY_LOG"}\n')
     (prefix / 'log/calls.jsonl.1').write_text('{"id":0,"message":"TEST_ONLY_ROTATED_LOG"}\n')
-    for folder in ('certificates', 'route-images', 'subscriptions'):
+    for folder in ('certificates', 'route-images', 'homepage-backgrounds', 'subscriptions'):
         (prefix / 'data' / folder).mkdir(mode=0o700)
         (prefix / 'data' / folder / 'fixture').write_bytes(b'TEST_ONLY_PERSISTENT_DATA')
     before = snapshot()
@@ -128,7 +128,7 @@ trap '[[ -z "$DOWNLOAD_DIR" ]] || rm -rf -- "$DOWNLOAD_DIR"' EXIT
 
     shutil.copy2(prefix / 'config/state.json', legacy / 'state.json')
     shutil.copytree(prefix / 'log', legacy / 'logs')
-    for folder in ('certificates', 'route-images', 'subscriptions'):
+    for folder in ('certificates', 'route-images', 'homepage-backgrounds', 'subscriptions'):
         shutil.copytree(prefix / 'data' / folder, legacy / folder)
     environment['QA_PREFIX'] = str(temp / 'migrated')
     old_files = {p.relative_to(legacy).as_posix(): p.read_bytes() for p in legacy.rglob('*') if p.is_file()}

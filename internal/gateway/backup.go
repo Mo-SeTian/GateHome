@@ -45,7 +45,7 @@ func snapshotBackup(dir string, state State) (backupPayload, error) {
 func snapshotBackupPaths(paths StoragePaths, state State) (backupPayload, error) {
 	dir := paths.Data
 	b := backupPayload{State: state, Certificates: map[string][]byte{}, Files: map[string][]byte{}}
-	for _, name := range []string{"certificates", "logs", "subscriptions", "route-images"} {
+	for _, name := range []string{"certificates", "logs", "subscriptions", "route-images", "homepage-backgrounds"} {
 		info, err := os.Lstat(paths.directory(name))
 		if errors.Is(err, os.ErrNotExist) {
 			continue
@@ -96,10 +96,19 @@ func snapshotBackupPaths(paths StoragePaths, state State) (backupPayload, error)
 			seen[route.Image] = true
 		}
 	}
+	for id := range homepageImages(state.Config.Homepage) {
+		if !seen[id] {
+			names = append(names, "route-images/"+id+".img")
+			seen[id] = true
+		}
+	}
+	if state.Config.Homepage.Background != "" {
+		names = append(names, "homepage-backgrounds/"+state.Config.Homepage.Background+".jpg")
+	}
 	for _, name := range names {
 		path := paths.file(name)
 		info, err := os.Lstat(path)
-		if errors.Is(err, os.ErrNotExist) && !strings.HasPrefix(name, "route-images/") {
+		if errors.Is(err, os.ErrNotExist) && !strings.HasPrefix(name, "route-images/") && !strings.HasPrefix(name, "homepage-backgrounds/") {
 			continue
 		}
 		if err != nil || !info.Mode().IsRegular() {
@@ -257,7 +266,7 @@ type restoreTarget struct {
 func restoreTargets(paths StoragePaths, full bool, incoming map[string][]byte) []restoreTarget {
 	targets := []restoreTarget{{"certificates", paths.directory("certificates"), true}}
 	if full {
-		for _, name := range []string{"route-images", "subscriptions"} {
+		for _, name := range []string{"route-images", "homepage-backgrounds", "subscriptions"} {
 			targets = append(targets, restoreTarget{name, paths.directory(name), true})
 		}
 		if paths.splitLogs() {
