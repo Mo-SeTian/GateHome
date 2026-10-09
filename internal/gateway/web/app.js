@@ -1116,6 +1116,7 @@ document.addEventListener('click',async event=>{
   const action=button.dataset.action;
   if(action==='close-dialog') { closeDialog(button.closest('dialog')); return; }
   if(!config||busy) return;
+  if(action==='edit-dashboard') return toggleDashboardEditing();
   if(action==='configure-dashboard') return openDashboardSettings();
   if(action==='move-widget') return moveDashboardWidget(button.dataset.widget,Number(button.dataset.direction));
   if(action==='toggle-group-panel') return toggleGroupPanel(button);

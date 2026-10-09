@@ -7,6 +7,19 @@ const context=vm.createContext({URL,FormData:class{},structuredClone,clone:struc
 vm.runInContext(code,context);
 const run=expression=>vm.runInContext(expression,context);
 const plain=value=>structuredClone(value);
+context.heading=(kicker,title,description,actions)=>actions;context.addRouteButton=()=>'';
+assert.ok(run('dashboardHTML()').includes('编辑布局'));
+assert.ok(!run('dashboardHTML()').includes('data-widget-handle='),'view mode exposed drag handles');
+assert.ok(!run('dashboardHTML()').includes('data-action="configure-dashboard"'),'view mode exposed configuration controls');
+let viewWrites=0;context.save=async()=>{viewWrites++;};
+await run("moveDashboardWidget('cpu',1)");
+await run("persistWidgetOrder(['map','cpu','memory'],'map')");
+assert.equal(viewWrites,0,'view mode allowed layout mutation');
+run('toggleDashboardEditing()');
+assert.equal(run('dashboardEditing'),true);
+assert.ok(run('dashboardHTML()').includes('data-widget-handle='));
+assert.ok(run('dashboardHTML()').includes('data-action="configure-dashboard"'));
+assert.ok(run('dashboardHTML()').includes('完成'));
 assert.deepEqual(plain(run("reorderedWidgets(['cpu','map','memory'],'cpu','memory',true)")),['map','memory','cpu']);
 assert.deepEqual(plain(run("reorderedWidgets(['cpu','map','memory'],'memory','cpu',false)")),['memory','cpu','map']);
 assert.deepEqual(plain(run("reorderedWidgets(['cpu','map'],'cpu','cpu')")),['cpu','map']);
@@ -33,6 +46,9 @@ await run("persistWidgetOrder(['map','cpu','memory'],'map')");assert.deepEqual(c
 context.save=async(next)=>{saves++;context.config=next;};
 await run("moveDashboardWidget('cpu',1)");assert.deepEqual(plain(context.config.dashboard.widgets),['map','cpu','memory']);assert.equal(saves,2);
 await run("moveDashboardWidget('map',-1)");assert.equal(saves,2,'boundary move sent a write');
+run('toggleDashboardEditing()');
+assert.equal(run('dashboardEditing'),false);
+assert.ok(!run('dashboardHTML()').includes('data-widget-handle='),'done did not restore view mode');
 
 // Competing refreshes and logout must revoke stale data responses.
 const resolvers=[];context.api=()=>new Promise(resolve=>resolvers.push(resolve));
@@ -41,6 +57,7 @@ resolvers[1]({resources:{},sampled_at:'NEW'});await second;resolvers[0]({resourc
 assert.equal(run('dashboardView.sampled_at'),'NEW');
 const revoked=run('loadDashboard()');run('resetDashboard()');resolvers[2]({resources:{},sampled_at:'REVOKED'});await revoked;
 assert.equal(run('dashboardView'),null);
+assert.equal(run('dashboardEditing'),false,'logout retained editing mode');
 
 // A pointer cancellation removes visual state without committing any data.
 let released=false,removed=false;

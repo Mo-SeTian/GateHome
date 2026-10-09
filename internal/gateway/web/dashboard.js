@@ -1,9 +1,14 @@
 'use strict';
 const widgetCatalog=[['server','服务器状态','server'],['cpu','CPU 占用','activity'],['memory','内存占用','layers'],['storage','存储空间','server'],['traffic','上传 / 下载速率','activity'],['transfer','上传 / 下载数据量','download'],['requests','访问数量','chart'],['blocked','拦截数量','shield'],['trend','访问趋势','chart'],['provinces','省份 / IP 分析','globe'],['map','中国访问地图','globe'],['services','代理服务','routes'],['listeners','监听入口','gateway'],['events','最近活动','logs']];
 const provincePoints={'北京':[116.4,39.9],'天津':[117.2,39.1],'河北':[114.5,38.0],'山西':[112.5,37.9],'内蒙古':[111.7,40.8],'辽宁':[123.4,41.8],'吉林':[125.3,43.9],'黑龙江':[126.6,45.8],'上海':[121.5,31.2],'江苏':[118.8,32.1],'浙江':[120.2,30.3],'安徽':[117.3,31.9],'福建':[119.3,26.1],'江西':[115.9,28.7],'山东':[117.0,36.7],'河南':[113.6,34.8],'湖北':[114.3,30.6],'湖南':[113.0,28.2],'广东':[113.3,23.1],'广西':[108.3,22.8],'海南':[110.3,20.0],'重庆':[106.5,29.6],'四川':[104.1,30.7],'贵州':[106.7,26.6],'云南':[102.7,25.0],'西藏':[91.1,29.7],'陕西':[108.9,34.3],'甘肃':[103.8,36.1],'青海':[101.8,36.6],'宁夏':[106.3,38.5],'新疆':[87.6,43.8],'台湾':[121.5,25.0],'香港':[114.2,22.3],'澳门':[113.5,22.2]};
-let dashboardView=null,dashboardError='',dashboardRequest=0,dashboardDrag=null,dashboardSaving=false;
+let dashboardView=null,dashboardError='',dashboardRequest=0,dashboardDrag=null,dashboardSaving=false,dashboardEditing=false;
 
-function resetDashboard() { cancelWidgetDrag();dashboardRequest++;dashboardView=null;dashboardError=''; }
+function resetDashboard() { cancelWidgetDrag();dashboardRequest++;dashboardView=null;dashboardError='';dashboardEditing=false; }
+function toggleDashboardEditing() {
+  if(dashboardSaving||busy) return;
+  cancelWidgetDrag();dashboardEditing=!dashboardEditing;render();
+  $('[data-action="edit-dashboard"]')?.focus({preventScroll:true});
+}
 function widgetIDs(current=config) { return current.dashboard?.widgets??widgetCatalog.map(w=>w[0]); }
 function bytesLabel(value) {
   if(!Number.isFinite(Number(value))||value===null||value===undefined) return '—';
@@ -61,11 +66,11 @@ function dashboardMapHTML(regions) {
 }
 function dashboardHTML() {
   const ids=widgetIDs();
-  return heading('WORKSPACE / OVERVIEW','网络概览','服务器、流量与安全事件，自定义你的工作空间。','<button class="secondary" data-action="configure-dashboard">'+icon('settings')+'配置组件</button>'+addRouteButton())+
-    `<div class="dashboard-meta"><span>${dashboardView?'最近采样：'+esc(date(dashboardView.sampled_at)):'正在读取实时数据…'} · 每 5 秒刷新</span><span>拖动手柄排序，或使用上移 / 下移按钮</span></div><p id="dashboard-error" class="error" role="alert">${esc(dashboardError)}</p><div class="dashboard-grid" role="list" aria-label="概览小组件">${ids.map((id,i)=>{
+  return heading('WORKSPACE / OVERVIEW','网络概览','服务器、流量与安全事件，自定义你的工作空间。',`<button class="${dashboardEditing?'primary':'secondary'}" data-action="edit-dashboard" aria-pressed="${dashboardEditing}" ${dashboardSaving?'disabled':''}>${icon(dashboardEditing?'save':'edit')}${dashboardEditing?'完成':'编辑布局'}</button>${dashboardEditing?'<button class="secondary" data-action="configure-dashboard">'+icon('settings')+'配置组件</button>':''}`+addRouteButton())+
+    `<div class="dashboard-meta"><span>${dashboardView?'最近采样：'+esc(date(dashboardView.sampled_at)):'正在读取实时数据…'} · 每 5 秒刷新</span><span>${dashboardEditing?'编辑模式：拖动手柄或按钮排序，修改自动保存，完成后退出。':'点击“编辑布局”配置组件和调整顺序'}</span></div><p id="dashboard-error" class="error" role="alert">${esc(dashboardError)}</p><div class="dashboard-grid" role="list" aria-label="概览小组件">${ids.map((id,i)=>{
       const definition=widgetCatalog.find(w=>w[0]===id);if(!definition) return '';
-      return `<section class="dashboard-widget ${['map','trend','provinces','services','listeners','events'].includes(id)?'widget-wide':''}" data-widget="${id}" role="listitem"><div class="widget-heading"><h2>${icon(definition[2])}${definition[1]}</h2><div class="widget-controls"><button class="icon-button widget-handle" type="button" data-widget-handle="${id}" aria-label="拖动${definition[1]}排序，方向键可移动">${icon('menu')}</button><button class="icon-button" type="button" data-action="move-widget" data-widget="${id}" data-direction="-1" aria-label="上移${definition[1]}" ${i===0?'disabled':''}>${icon('chevron-up')}</button><button class="icon-button" type="button" data-action="move-widget" data-widget="${id}" data-direction="1" aria-label="下移${definition[1]}" ${i===ids.length-1?'disabled':''}>${icon('chevron-down')}</button></div></div><div class="widget-body">${widgetBody(id)}</div></section>`;
-    }).join('')}</div>${ids.length?'':'<div class="empty"><h3>尚未显示组件</h3><p>通过“配置组件”选择要显示的内容。</p></div>'}<p id="dashboard-announcement" class="sr-only" role="status" aria-live="polite"></p>`;
+      return `<section class="dashboard-widget ${['map','trend','provinces','services','listeners','events'].includes(id)?'widget-wide':''}" data-widget="${id}" role="listitem"><div class="widget-heading"><h2>${icon(definition[2])}${definition[1]}</h2>${dashboardEditing?`<div class="widget-controls"><button class="icon-button widget-handle" type="button" data-widget-handle="${id}" aria-label="拖动${definition[1]}排序，方向键可移动">${icon('menu')}</button><button class="icon-button" type="button" data-action="move-widget" data-widget="${id}" data-direction="-1" aria-label="上移${definition[1]}" ${i===0?'disabled':''}>${icon('chevron-up')}</button><button class="icon-button" type="button" data-action="move-widget" data-widget="${id}" data-direction="1" aria-label="下移${definition[1]}" ${i===ids.length-1?'disabled':''}>${icon('chevron-down')}</button></div>`:''}</div><div class="widget-body">${widgetBody(id)}</div></section>`;
+    }).join('')}</div>${ids.length?'':'<div class="empty"><h3>尚未显示组件</h3><p>点击“编辑布局”，通过“配置组件”选择要显示的内容。</p></div>'}<p id="dashboard-announcement" class="sr-only" role="status" aria-live="polite"></p>`;
 }
 async function loadDashboard() {
   if(!config||page!=='overview'||dashboardDrag||dashboardSaving) return;
@@ -82,6 +87,7 @@ async function loadDashboard() {
   }
 }
 function openDashboardSettings() {
+  if(!dashboardEditing||dashboardSaving) return;
   const form=$('#dashboard-form'),selected=widgetIDs();
   $('#dashboard-choices').innerHTML=widgetCatalog.map(([id,title])=>`<label class="check-label"><input type="checkbox" name="widgets" value="${id}" ${selected.includes(id)?'checked':''}>${title}</label>`).join('');
   const interfaces=dashboardView?.resources?.networks||[],saved=config.dashboard?.network_interface||'';
@@ -91,6 +97,7 @@ function openDashboardSettings() {
   form.elements.map_province.value=config.dashboard?.map_province||'';$('.error',form).textContent='';openDialog($('#dashboard-dialog'));
 }
 async function saveDashboardSettings() {
+  if(!dashboardEditing) return;
   const form=$('#dashboard-form'),selected=new FormData(form).getAll('widgets'),next=clone(config),current=widgetIDs();
   next.dashboard={widgets:[...current.filter(id=>selected.includes(id)),...selected.filter(id=>!current.includes(id))],network_interface:form.elements.network_interface.value,map_province:form.elements.map_province.value};
   await save(next);closeDialog($('#dashboard-dialog'));render();await loadDashboard();
@@ -100,9 +107,10 @@ function reorderedWidgets(ids,id,target,after=false) {
   const next=ids.filter(value=>value!==id),index=next.indexOf(target)+(after?1:0);next.splice(index,0,id);return next;
 }
 async function persistWidgetOrder(ids,focusID='') {
-  if(dashboardSaving||!config) return;
+  if(!dashboardEditing||dashboardSaving||!config) return;
   const old=widgetIDs();if(JSON.stringify(old)===JSON.stringify(ids)) return;
   dashboardSaving=true;
+  const editButton=$('[data-action="edit-dashboard"]');if(editButton) editButton.disabled=true;
   const grid=$('.dashboard-grid');grid?.setAttribute('aria-busy','true');
   try {
     const next=clone(config);next.dashboard={...(next.dashboard||{}),widgets:ids};
@@ -110,9 +118,10 @@ async function persistWidgetOrder(ids,focusID='') {
     $(`[data-widget-handle="${focusID}"]`)?.focus({preventScroll:true});
     const announcement=$('#dashboard-announcement');if(announcement) announcement.textContent='组件顺序已保存';
   } catch(error) {toast('排序未保存，原顺序保留：'+error.message);render();}
-  finally {dashboardSaving=false;}
+  finally {dashboardSaving=false;const editButton=$('[data-action="edit-dashboard"]');if(editButton) editButton.disabled=false;}
 }
 async function moveDashboardWidget(id,direction) {
+  if(!dashboardEditing) return;
   const ids=widgetIDs(),index=ids.indexOf(id),target=index+direction;
   if(target<0||target>=ids.length) return;
   const next=[...ids];[next[index],next[target]]=[next[target],next[index]];await persistWidgetOrder(next,id);
@@ -127,7 +136,7 @@ function cancelWidgetDrag() {
 }
 document.addEventListener('pointerdown',event=>{
   const handle=event.target.closest('[data-widget-handle]');
-  if(!handle||event.button!==0||!config||busy||dashboardSaving||dashboardDrag) return;
+  if(!dashboardEditing||!handle||event.button!==0||!config||busy||dashboardSaving||dashboardDrag) return;
   event.preventDefault();handle.focus();handle.setPointerCapture(event.pointerId);
   dashboardDrag={handle,card:handle.closest('.dashboard-widget'),id:handle.dataset.widgetHandle,pointer:event.pointerId,x:event.clientX,y:event.clientY,active:false,target:null};
 });
@@ -154,7 +163,7 @@ document.addEventListener('lostpointercapture',event=>{if(dashboardDrag?.pointer
 document.addEventListener('keydown',event=>{
   if(event.key==='Escape'&&dashboardDrag) {event.preventDefault();cancelWidgetDrag();return;}
   const handle=event.target.closest('[data-widget-handle]');
-  if(handle&&['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(event.key)&&!dashboardSaving&&!busy) {event.preventDefault();moveDashboardWidget(handle.dataset.widgetHandle,['ArrowUp','ArrowLeft'].includes(event.key)?-1:1);}
+  if(dashboardEditing&&handle&&['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(event.key)&&!dashboardSaving&&!busy) {event.preventDefault();moveDashboardWidget(handle.dataset.widgetHandle,['ArrowUp','ArrowLeft'].includes(event.key)?-1:1);}
 });
 window.addEventListener('blur',cancelWidgetDrag);
-window.addEventListener('hashchange',cancelWidgetDrag);
+window.addEventListener('hashchange',()=>{cancelWidgetDrag();dashboardEditing=false;});

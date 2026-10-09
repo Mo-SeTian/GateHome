@@ -6,11 +6,105 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
+	"net/url"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 )
+
+func TestAdminUpstreamClassification(t *testing.T) {
+	addresses := map[netip.Addr]bool{netip.MustParseAddr("192.168.2.25"): true, netip.MustParseAddr("2001:db8::25"): true}
+	for _, item := range []struct {
+		url     string
+		allowed bool
+	}{
+		{"http://192.168.2.25:16666/", true}, {"http://127.0.0.1:16666/", true}, {"http://localhost:16666", true},
+		{"http://[::1]:16666/", true}, {"http://[2001:db8::25]:16666/", true}, {"http://[::ffff:192.168.2.25]:16666/", true},
+		{"http://192.168.2.26:16666/", false}, {"http://192.168.2.25:7777/", false}, {"http://example.test:16666/", false},
+		{"http://localhost.evil.test:16666/", false}, {"http://0.0.0.0:16666/", false}, {"http://[::]:16666/", false},
+	} {
+		u, err := url.Parse(item.url)
+		if err != nil || isAdminUpstream(u, 16666, addresses) != item.allowed {
+			t.Errorf("incorrect local management classification for %s", item.url)
+		}
+		if isAdminUpstream(u, 0, addresses) {
+			t.Fatal("unset management port trusted a backend")
+		}
+	}
+}
+
+func TestAdminLANUpstreamKeepsSession(t *testing.T) {
+	var ip netip.Addr
+	for address := range localAdminAddresses() {
+		if address.Is4() && !address.IsLoopback() && address.IsGlobalUnicast() {
+			ip = address
+			break
+		}
+	}
+	if !ip.IsValid() {
+		t.Skip("no local non-loopback IPv4 interface")
+	}
+	a, h := testAdmin(t)
+	listener, err := net.Listen("tcp", net.JoinHostPort(ip.String(), "0"))
+	if err != nil {
+		t.Fatal("local test management listener failed")
+	}
+	backend := httptest.NewUnstartedServer(h)
+	backend.Listener.Close()
+	backend.Listener = listener
+	backend.Start()
+	defer backend.Close()
+	_, port, _ := net.SplitHostPort(listener.Addr().String())
+	a.proxy.adminPort, _ = strconv.Atoi(port)
+	c := a.store.Snapshot().Config
+	c.Routes = []Route{{GroupID: "default", Host: "console.example.test", Upstream: backend.URL + "/", Enabled: true, TLS: true}}
+	a.proxy.Configure(c)
+	front := httptest.NewTLSServer(a.proxy.Handler("default"))
+	defer front.Close()
+	_, publicPort, _ := net.SplitHostPort(strings.TrimPrefix(front.URL, "https://"))
+	publicHost := "console.example.test:" + publicPort
+	publicOrigin := "https://" + publicHost
+	c.AdminAccess = AdminAccessConfig{Enabled: true, Origins: []string{publicOrigin}}
+	if a.store.Update(c, nil, a.store.Snapshot().Revision) != nil {
+		t.Fatal("test reverse proxy access setup failed")
+	}
+	request := func(method, path string, body any, cookie *http.Cookie) *http.Response {
+		data, _ := json.Marshal(body)
+		r, _ := http.NewRequest(method, front.URL+path, bytes.NewReader(data))
+		r.Host = publicHost
+		r.Header.Set("Origin", publicOrigin)
+		r.Header.Set("Content-Type", "application/json")
+		r.Header.Set("X-Gatehouse-Request", "1")
+		if cookie != nil {
+			r.AddCookie(cookie)
+		}
+		resp, err := front.Client().Do(r)
+		if err != nil {
+			t.Fatal("LAN management reverse proxy request failed")
+		}
+		t.Cleanup(func() { resp.Body.Close() })
+		return resp
+	}
+	login := request("POST", "/api/login", map[string]string{"password": "TEST_ONLY_ADMIN_PASSWORD"}, nil)
+	if login.StatusCode != 200 || len(login.Cookies()) != 1 {
+		t.Fatal("successful LAN login lost its management session cookie")
+	}
+	cookie := login.Cookies()[0]
+	if !cookie.HttpOnly || !cookie.Secure {
+		t.Fatal("LAN login weakened cookie protection")
+	}
+	if resp := request("GET", "/api/config", nil, cookie); resp.StatusCode != 200 {
+		t.Fatal("LAN domain login did not remain authenticated")
+	}
+	if resp := request("PUT", "/api/config", map[string]any{"config": c, "revision": a.store.Snapshot().Revision}, cookie); resp.StatusCode != 200 {
+		t.Fatal("LAN management session could not save config")
+	}
+	if resp := request("GET", "/api/config", nil, nil); resp.StatusCode != 401 {
+		t.Fatal("LAN upstream bypassed management login")
+	}
+}
 
 func TestAdminAccessConfigValidation(t *testing.T) {
 	for _, origin := range []string{"https://console.example.test:18443", "https://console.example.test/", "http://127.0.0.1:16668", "https://[::1]:18443"} {

@@ -59,13 +59,14 @@ func (p *Proxy) configure(c Config, hashes map[string]string) error {
 func (p *Proxy) configurePrepared(c Config, hashes map[string]string, firewalls map[string]*compiledFirewall) {
 	previous, _ := p.routes.Load().(map[string]proxyRoute)
 	routes := make(map[string]proxyRoute)
+	adminAddresses := localAdminAddresses()
 	for _, r := range c.Routes {
 		if !c.RouteActive(r) {
 			continue
 		}
 		u, _ := url.Parse(r.Upstream)
 		upstream := u
-		adminUpstream := p.adminPort > 0 && upstream.Port() == fmt.Sprint(p.adminPort) && (upstream.Hostname() == "127.0.0.1" || upstream.Hostname() == "::1")
+		adminUpstream := isAdminUpstream(upstream, p.adminPort, adminAddresses)
 		h := &httputil.ReverseProxy{
 			Rewrite: func(pr *httputil.ProxyRequest) {
 				pr.SetURL(upstream)
