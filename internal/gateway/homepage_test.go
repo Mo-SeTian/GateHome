@@ -20,6 +20,7 @@ func homepageFixture(t *testing.T, a *Admin) HomepageConfig {
 	h := defaultHomepage()
 	h.Enabled = true
 	h.CustomCSS = ".gh-main { max-width: 1200px; }"
+	h.SearchEngines = append(h.SearchEngines, HomepageSearchEngine{ID: "docs", Name: "文档", URL: "https://search.example.test/?q={query}&lang=zh"})
 	icon, err := storeRouteImage(a.store.paths.Data, testRoutePNG(t, 64, 64))
 	if err != nil {
 		t.Fatal("icon fixture failed")
@@ -31,6 +32,45 @@ func homepageFixture(t *testing.T, a *Admin) HomepageConfig {
 	h.Background = background
 	h.Groups = []HomepageGroup{{ID: "home", Name: "家庭", Pages: []HomepagePage{{ID: "daily", Name: "日常", Rows: 2, Columns: 3, MobileColumns: 2, Links: []HomepageLink{{ID: "nas", Name: "NAS", LAN: "http://192.168.2.10:5000/", WAN: "https://nas.example.test/", Image: icon, Favorite: true}}}}}}
 	return h
+}
+
+func TestHomepageSearchEnginesValidationAndMigration(t *testing.T) {
+	h := defaultHomepage()
+	h.SearchEngines = append(h.SearchEngines, HomepageSearchEngine{ID: "custom", Name: "自定义", URL: "https://search.example.test/find/{query}?language=zh"})
+	if validateHomepage(h, nil) != nil {
+		t.Fatal("valid custom search rejected")
+	}
+	for _, address := range []string{"javascript:alert(1)", "ftp://example.test/?q={query}", "https://user:password@example.test/?q={query}", "https://example.test/search", "https://example.test/?a={query}&b={query}", "https://{query}.example.test/", "https://example.test/#{query}", "https://example.test/?q={query}\n"} {
+		bad := h
+		bad.SearchEngines = []HomepageSearchEngine{{ID: "test", Name: "测试", URL: address}}
+		if validateHomepage(bad, nil) == nil {
+			t.Fatal("unsafe or incomplete search template accepted")
+		}
+	}
+	bad := h
+	bad.SearchEngines = []HomepageSearchEngine{}
+	if validateHomepage(bad, nil) == nil {
+		t.Fatal("empty search engine list accepted")
+	}
+	bad.SearchEngines = append([]HomepageSearchEngine{}, h.SearchEngines...)
+	bad.SearchEngines[1].ID = bad.SearchEngines[0].ID
+	if validateHomepage(bad, nil) == nil {
+		t.Fatal("duplicate search engine ID accepted")
+	}
+	bad.SearchEngines = []HomepageSearchEngine{{ID: "test", URL: "https://example.test/?q={query}"}}
+	if validateHomepage(bad, nil) == nil {
+		t.Fatal("unnamed search engine accepted")
+	}
+	c := DefaultConfig()
+	h.SearchEngines = nil
+	h.Title = "保留的空间"
+	h.CustomCSS = ".gh-main { max-width: 1200px; }"
+	c.Homepage = h
+	wanted := h
+	wanted.SearchEngines = defaultHomepage().SearchEngines
+	if !migrateConfig(&c) || !reflect.DeepEqual(c.Homepage, wanted) {
+		t.Fatal("legacy search migration changed existing homepage settings")
+	}
 }
 
 func TestHomepageValidationMigrationAndPortConflicts(t *testing.T) {

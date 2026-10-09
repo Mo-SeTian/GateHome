@@ -338,8 +338,12 @@ func migrateState(s *State) bool {
 
 func migrateConfig(c *Config) bool {
 	migrated := false
-	if c.Homepage.Port == 0 && !c.Homepage.Enabled && len(c.Homepage.Groups) == 0 && c.Homepage.CustomCSS == "" && c.Homepage.Background == "" {
+	if c.Homepage.Port == 0 && !c.Homepage.Enabled && len(c.Homepage.Groups) == 0 && c.Homepage.CustomCSS == "" && c.Homepage.Background == "" && c.Homepage.SearchEngines == nil {
 		c.Homepage = defaultHomepage()
+		migrated = true
+	}
+	if c.Homepage.SearchEngines == nil {
+		c.Homepage.SearchEngines = defaultHomepage().SearchEngines
 		migrated = true
 	}
 	if c.LogRetention == (LogRetentionConfig{}) {

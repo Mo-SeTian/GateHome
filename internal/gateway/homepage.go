@@ -39,22 +39,32 @@ type HomepageGroup struct {
 	Pages []HomepagePage `json:"pages"`
 }
 
+type HomepageSearchEngine struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	URL  string `json:"url"`
+}
+
 type HomepageConfig struct {
-	Enabled       bool            `json:"enabled"`
-	Port          int             `json:"port"`
-	Public        bool            `json:"public"`
-	Title         string          `json:"title"`
-	Tone          string          `json:"tone"`
-	Background    string          `json:"background"`
-	Shade         int             `json:"shade"`
-	Compact       bool            `json:"compact"`
-	ShowAddresses bool            `json:"show_addresses"`
-	CustomCSS     string          `json:"custom_css"`
-	Groups        []HomepageGroup `json:"groups"`
+	Enabled       bool                   `json:"enabled"`
+	Port          int                    `json:"port"`
+	Public        bool                   `json:"public"`
+	Title         string                 `json:"title"`
+	Tone          string                 `json:"tone"`
+	Background    string                 `json:"background"`
+	Shade         int                    `json:"shade"`
+	Compact       bool                   `json:"compact"`
+	ShowAddresses bool                   `json:"show_addresses"`
+	CustomCSS     string                 `json:"custom_css"`
+	SearchEngines []HomepageSearchEngine `json:"search_engines"`
+	Groups        []HomepageGroup        `json:"groups"`
 }
 
 func defaultHomepage() HomepageConfig {
-	return HomepageConfig{Port: 16680, Public: true, Title: "我的数字空间", Tone: "forest", Shade: 50, Groups: []HomepageGroup{}}
+	return HomepageConfig{Port: 16680, Public: true, Title: "我的数字空间", Tone: "forest", Shade: 50, Groups: []HomepageGroup{}, SearchEngines: []HomepageSearchEngine{
+		{ID: "baidu", Name: "百度", URL: "https://www.baidu.com/s?wd={query}"},
+		{ID: "google", Name: "Google", URL: "https://www.google.com/search?q={query}"},
+	}}
 }
 
 func homepageImages(c HomepageConfig) map[string]bool {
@@ -98,7 +108,7 @@ func (m *Maintenance) checkHomepageFiles(incoming *HomepageConfig) error {
 
 func validateHomepage(c HomepageConfig, groups []ProxyGroup) error {
 	// Zero-valued configurations from older backups remain compatible.
-	if c.Port == 0 && !c.Enabled && len(c.Groups) == 0 && c.CustomCSS == "" && c.Background == "" {
+	if c.Port == 0 && !c.Enabled && len(c.Groups) == 0 && c.CustomCSS == "" && c.Background == "" && c.SearchEngines == nil {
 		return nil
 	}
 	if c.Port < 1024 || c.Port > 65535 {
@@ -114,6 +124,17 @@ func validateHomepage(c HomepageConfig, groups []ProxyGroup) error {
 	}
 	if c.Background != "" && !routeImageID.MatchString(c.Background) {
 		return errors.New("首页背景图片引用无效")
+	}
+	if len(c.SearchEngines) < 1 || len(c.SearchEngines) > 12 {
+		return errors.New("首页须设置 1–12 个搜索引擎")
+	}
+	engineIDs := map[string]bool{}
+	for _, e := range c.SearchEngines {
+		u, err := imageURL(e.URL)
+		if !idPattern.MatchString(e.ID) || engineIDs[e.ID] || strings.TrimSpace(e.Name) == "" || len(e.Name) > 64 || err != nil || strings.ContainsAny(e.URL, "\r\n\x00") || strings.Count(e.URL, "{query}") != 1 || (!strings.Contains(u.Path, "{query}") && !strings.Contains(u.RawQuery, "{query}")) {
+			return errors.New("搜索引擎名称或地址无效：须使用不含账号密码的 HTTP / HTTPS 地址，并在路径或查询参数中填写一次 {query}")
+		}
+		engineIDs[e.ID] = true
 	}
 	if len(c.Groups) > 30 {
 		return errors.New("首页最多支持 30 个分组")
