@@ -2,7 +2,7 @@
 
 一个自托管的反向代理与 DDNS 综合管理工具。Go 主程序内嵌中文管理界面与 Sun-Panel 前后端；启用首页时由主程序管理独立的 Sun-Panel 子进程。运行无需 Node.js、外部数据库或额外 Web 服务器，Sun-Panel 使用内置 SQLite。
 
-当前版本为 **0.0.41**，安装包见 [v0.0.41 Release](https://github.com/Mo-SeTian/GateHome/releases/tag/v0.0.41)。程序和 systemd 服务名为 `gatehouse`。
+当前版本为 **0.0.42**，安装包见 [v0.0.42 Release](https://github.com/Mo-SeTian/GateHome/releases/tag/v0.0.42)。程序和 systemd 服务名为 `gatehouse`。
 
 ## 主要功能
 
@@ -10,7 +10,7 @@
 - **DDNS 与证书**：多组独立 Cloudflare 凭据、IPv4 / IPv6 同步、网卡或接口获取公网 IP、域名解析列表、Let's Encrypt DNS-01 与泛域名证书。
 - **访问保护**：独立服务账号、IP / CIDR 和订阅规则、Coraza WAF 与 OWASP CRS、自定义 HTTP 规则、限速和自动 IP 冻结。
 - **监控与日志**：可配置概览组件、服务器资源与流量、访问地域分析、独立防火墙记录、分页筛选、日志空间与保留期限。
-- **Sun-Panel 浏览器首页**：集成 v1.3.0 开源版，管理页内嵌访问、独立端口、多用户桌面和自身导入导出。
+- **Sun-Panel 浏览器首页**：集成 v1.3.0 开源版，管理页内嵌访问、独立端口、多用户桌面、自身导入导出，以及从 GateHome 反代项导入默认网址和内网地址。
 - **维护**：在线更新、代理下载、加密备份恢复，以及 `config`、`log`、`data`、`sunpanel` 四目录持久化。
 
 反代、DDNS、防火墙和证书任务按组折叠，添加与编辑通过弹窗完成；管理界面适配电脑和手机。访问控制作用于代理层，不修改 Linux 的 nftables / iptables。
@@ -131,7 +131,7 @@ sudo bash /tmp/gatehome-install.sh install --proxy "$GATEHOME_INSTALL_PROXY"
 
 下载使用 HTTP/1.1；TLS 连接中断等下载错误会清除残缺文件并重试，最多尝试 4 次。下载和校验成功后才修改安装。如果出现 `curl: (56)` / `unexpected eof while reading`，说明下载连接提前断开；请检查服务器的网络或代理规则。使用 MSM 等分流工具时，安装需要访问 `raw.githubusercontent.com`、`github.com` 和 `release-assets.githubusercontent.com`。仍无法下载时，可在其他能访问 GitHub 的设备下载下面的安装包，复制到服务器离线安装。
 
-离线安装可使用 `make release` 生成的 **`版本/0.0.41/`** 完整目录，或解压 Release 中对应架构的 `gatehome-linux-*.tar.gz`，然后运行：
+离线安装可使用 `make release` 生成的 **`版本/0.0.42/`** 完整目录，或解压 Release 中对应架构的 `gatehome-linux-*.tar.gz`，然后运行：
 
 ```sh
 sudo bash install.sh

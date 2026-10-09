@@ -12,3 +12,5 @@
 构建：在仓库根目录运行 make build 或 make linux，需要 Go、Node.js 22 和 npm。sunpanel/build.sh 固定 pnpm 8.15.9，使用上游锁文件构建。
 
 运行数据：Docker /sunpanel；Linux /etc/gatehome/sunpanel；源码开发 .local/runtime/sunpanel。不得将运行数据写入本源码目录。
+
+网站联动：添加/编辑项目弹窗通过 Naive UI 原生折叠区、可搜索选择器、提示和按钮，从 GateHome 选择已启用的反代项，一次性填入名称、默认网址与内网地址。管理端嵌入及独立首页端口均提供 GET /api/sunpanel/routes，要求有效 GateHome 管理会话，仅返回书签所需字段，不导出凭据。默认网址按协议和监听端口生成，外网映射端口不同时由用户修改后保存。
