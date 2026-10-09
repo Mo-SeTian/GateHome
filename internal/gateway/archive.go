@@ -15,6 +15,7 @@ import (
 )
 
 const maxUpdateBytes = 128 << 20
+const maxUpdateExpandedBytes = 256 << 20
 const maxBackupBytes = 64 << 20
 
 type releaseFile struct {
@@ -69,7 +70,7 @@ func readZIP(data []byte, maxExpanded int64, maxEntries int) (map[string][]byte,
 }
 
 func inspectRelease(data []byte, arch string) (string, []byte, error) {
-	files, err := readZIP(data, 128<<20, 1000)
+	files, err := readZIP(data, maxUpdateExpandedBytes, 1000)
 	if err != nil {
 		return "", nil, err
 	}

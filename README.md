@@ -2,7 +2,7 @@
 
 一个自托管的反向代理与 DDNS 综合管理工具。Go 单进程，中文管理界面内嵌，无需 Node.js、数据库或额外 Web 服务器。
 
-当前版本为 **0.0.38**，安装包见 [v0.0.38 Release](https://github.com/Mo-SeTian/GateHome/releases/tag/v0.0.38)。程序和 systemd 服务名为 `gatehouse`。
+当前版本为 **0.0.39**，安装包见 [v0.0.39 Release](https://github.com/Mo-SeTian/GateHome/releases/tag/v0.0.39)。程序和 systemd 服务名为 `gatehouse`。
 
 ## 主要功能
 
@@ -129,7 +129,7 @@ sudo bash /tmp/gatehome-install.sh install --proxy "$GATEHOME_INSTALL_PROXY"
 
 下载使用 HTTP/1.1；TLS 连接中断等下载错误会清除残缺文件并重试，最多尝试 4 次。下载和校验成功后才修改安装。如果出现 `curl: (56)` / `unexpected eof while reading`，说明下载连接提前断开；请检查服务器的网络或代理规则。使用 MSM 等分流工具时，安装需要访问 `raw.githubusercontent.com`、`github.com` 和 `release-assets.githubusercontent.com`。仍无法下载时，可在其他能访问 GitHub 的设备下载下面的安装包，复制到服务器离线安装。
 
-离线安装可使用 `make release` 生成的 **`版本/0.0.38/`** 完整目录，或解压 Release 中对应架构的 `gatehome-linux-*.tar.gz`，然后运行：
+离线安装可使用 `make release` 生成的 **`版本/0.0.39/`** 完整目录，或解压 Release 中对应架构的 `gatehome-linux-*.tar.gz`，然后运行：
 
 ```sh
 sudo bash install.sh
