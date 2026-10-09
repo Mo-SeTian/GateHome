@@ -53,11 +53,13 @@ if(typeof document!=='undefined') (()=>{
     $('.gh-tabs').innerHTML=config.groups.map(g=>`<button type="button" class="gh-tab" data-group="${esc(g.id)}" aria-pressed="${g.id===groupID}">${esc(g.name)}</button>`).join('');
     const {group,sheets,sheet}=current(),grid=$('.gh-link-grid');
     $('.gh-tabs').querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.group===groupID)));
+    $('.gh-section-meta').textContent=group?group.pages.reduce((count,page)=>count+page.links.length,0)+' 个链接':'';
+    grid.setAttribute('aria-label',group?group.name+'的链接':'当前页面链接');
     let content='';
     if(sheet) {
-      grid.style.setProperty('--gh-columns',String(sheet.columns));content=sheet.links.map(l=>card(l)).join('');$('.gh-section-name').textContent=sheet.page.name;$('.gh-section-meta').textContent=sheet.page.links.length+' 个链接 · '+sheet.page.rows+' 行 / '+sheet.columns+' 列';
+      grid.style.setProperty('--gh-columns',String(sheet.columns));content=sheet.links.map(l=>card(l)).join('');
       $('.gh-pager').innerHTML=sheets.map((p,i)=>`<button type="button" class="gh-page-dot" data-sheet="${esc(p.id)}" aria-current="${p.id===sheet.id?'page':'false'}" aria-label="第 ${i+1} 页：${esc(p.page.name)}${p.index?'（续页 '+(p.index+1)+'）':''}"><span aria-hidden="true"></span></button>`).join('');
-    }else { $('.gh-section-name').textContent='我的应用';$('.gh-section-meta').textContent='';$('.gh-pager').innerHTML=''; }
+    }else { $('.gh-pager').innerHTML=''; }
     grid.innerHTML=content||'<div class="gh-empty">这里还没有链接。点击右上角编辑桌面，在管理界面添加。</div>';
     remember();
     if(animate&&!matchMedia('(prefers-reduced-motion:reduce)').matches)grid.animate([{opacity:.55,transform:'translateY(5px)'},{opacity:1,transform:'translateY(0)'}],{duration:150,easing:'ease-out'});
