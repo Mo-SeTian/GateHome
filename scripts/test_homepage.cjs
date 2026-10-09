@@ -4,12 +4,17 @@ const {homepageSheets,homepageURL,homepageSearch,homepageEngineImage,homepageWhe
 const links=Array.from({length:14},(_,i)=>({id:String(i),favorite:i===9}));
 const group={pages:[{id:'daily',rows:2,columns:3,mobile_columns:2,links},{id:'backup',rows:1,columns:4,mobile_columns:2,links:[]}]};
 const desktop=homepageSheets(group,false,960),mobile=homepageSheets(group,true,343),narrow=homepageSheets(group,true,280);
-assert.equal(desktop.length,4);assert.equal(mobile.length,5);assert.equal(narrow.length,8);
+assert.equal(desktop.length,4);assert.equal(mobile.length,5);assert.equal(narrow.length,5);
 for(const sheets of [desktop,mobile,narrow]){
  assert.equal(sheets[0].links[0].id,'9');assert.equal(new Set(sheets.map(p=>p.id)).size,sheets.length);
  assert.deepEqual(sheets.flatMap(p=>p.links).map(l=>l.id).sort(),links.map(l=>l.id).sort());
  assert(sheets.every(p=>p.links.length<=p.columns*p.page.rows));
 }
+const icons={pages:[{...group.pages[0],rows:3,columns:8,mobile_columns:4}]};
+assert.equal(homepageSheets(icons,true,342)[0].columns,4);
+assert.equal(homepageSheets(icons,true,272)[0].columns,3);
+assert.equal(homepageSheets(icons,false,600)[0].columns,6);
+assert.equal(homepageSheets(icons,false,1000)[0].columns,8);
 assert.equal(links[0].id,'0');
 const smaller=homepageSheets({pages:[{...group.pages[0],rows:1,columns:1}]},false,960);
 assert.equal(smaller.length,14);assert.equal(smaller.flatMap(p=>p.links).length,14);

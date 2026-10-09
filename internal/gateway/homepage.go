@@ -165,7 +165,7 @@ func validateHomepage(c HomepageConfig, groups []ProxyGroup) error {
 			return errors.New("首页分组名称、ID 或页面数量无效，每组须有 1–30 个页面")
 		}
 		for _, p := range g.Pages {
-			if !validID(p.ID) || strings.TrimSpace(p.Name) == "" || len(p.Name) > 100 || p.Rows < 1 || p.Rows > 8 || p.Columns < 1 || p.Columns > 8 || p.MobileColumns < 1 || p.MobileColumns > 3 {
+			if !validID(p.ID) || strings.TrimSpace(p.Name) == "" || len(p.Name) > 100 || p.Rows < 1 || p.Rows > 8 || p.Columns < 1 || p.Columns > 8 || p.MobileColumns < 1 || p.MobileColumns > 5 {
 				return errors.New("首页页面须设置 1–8 行、1–8 列，手机端 1–3 列")
 			}
 			for _, l := range p.Links {

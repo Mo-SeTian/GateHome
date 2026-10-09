@@ -145,7 +145,7 @@ func TestHomepageValidationMigrationAndPortConflicts(t *testing.T) {
 	invalid := []func(*HomepageConfig){
 		func(h *HomepageConfig) { h.Port = 16681 }, func(h *HomepageConfig) { h.Enabled = true },
 		func(h *HomepageConfig) { h.Groups[0].Pages[0].Rows = 0 }, func(h *HomepageConfig) { h.Groups[0].Pages[0].Columns = 9 },
-		func(h *HomepageConfig) { h.Groups[0].Pages[0].MobileColumns = 4 }, func(h *HomepageConfig) { h.Groups[0].Pages[0].Links[0].LAN = "javascript:alert(1)" },
+		func(h *HomepageConfig) { h.Groups[0].Pages[0].MobileColumns = 6 }, func(h *HomepageConfig) { h.Groups[0].Pages[0].Links[0].LAN = "javascript:alert(1)" },
 		func(h *HomepageConfig) { h.Groups[0].Pages[0].Links[0].WAN = "https://user:password@example.test/" },
 		func(h *HomepageConfig) { h.Groups[0].Pages[0].Links[0].ID = "daily" }, func(h *HomepageConfig) { h.Background = "../../state.json" },
 		func(h *HomepageConfig) { h.CustomCSS = strings.Repeat("a", 32769) }, func(h *HomepageConfig) { h.Groups[0].Pages = nil },
@@ -214,7 +214,7 @@ func TestHomepageThemeAssetAndProbePolicy(t *testing.T) {
 	a, admin := testAdmin(t)
 	setupHomepage(t, a, defaultHomepage())
 	viewer := a.HomepageHandler()
-	w := adminRequest(viewer, "GET", "/homepage-sunset.png", nil, nil, "")
+	w := adminRequest(viewer, "GET", "/homepage-coast.png", nil, nil, "")
 	if w.Code != 200 || w.Header().Get("Content-Type") != "image/png" || !bytes.HasPrefix(w.Body.Bytes(), []byte("\x89PNG\r\n\x1a\n")) {
 		t.Fatal("bundled homepage background missing or incorrectly served")
 	}

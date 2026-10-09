@@ -240,7 +240,7 @@ func (a *Admin) HomepageHandler() http.Handler {
 	a.homepageEditorRoutes(mux)
 	mux.HandleFunc("GET /manage", func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, "/#edit", http.StatusFound) })
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
-		name := map[string]string{"/": "homepage.html", "/homepage.js": "homepage.js", "/homepage.css": "homepage.css", "/homepage-editor.js": "homepage-editor.js", "/homepage-editor.css": "homepage-editor.css", "/homepage-sunset.png": "homepage-sunset.png", "/icons.svg": "icons.svg", "/search-baidu.svg": "search-baidu.svg", "/search-google.svg": "search-google.svg", "/search-generic.svg": "search-generic.svg"}[r.URL.Path]
+		name := map[string]string{"/": "homepage.html", "/homepage.js": "homepage.js", "/homepage.css": "homepage.css", "/homepage-editor.js": "homepage-editor.js", "/homepage-editor.css": "homepage-editor.css", "/homepage-sunset.png": "homepage-sunset.png", "/homepage-coast.png": "homepage-coast.png", "/icons.svg": "icons.svg", "/search-baidu.svg": "search-baidu.svg", "/search-google.svg": "search-google.svg", "/search-generic.svg": "search-generic.svg"}[r.URL.Path]
 		if name == "" {
 			http.NotFound(w, r)
 			return

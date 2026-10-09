@@ -11,7 +11,7 @@ function homepageEngineImage(engine) {
 }
 function homepageSheets(group, mobile, availableWidth) {
   return (group?.pages||[]).flatMap(page=>{
-    const columns=mobile?Math.max(1,Math.min(page.columns,page.mobile_columns,Math.floor((availableWidth+10)/160))):page.columns;
+    const columns=Math.max(1,Math.min(mobile?page.mobile_columns:page.columns,Math.floor((availableWidth+12)/(mobile?76:96))));
     const capacity=page.rows*columns,links=[...(page.links||[])].sort((a,b)=>Number(b.favorite)-Number(a.favorite));
     return Array.from({length:Math.max(1,Math.ceil(links.length/capacity))},(_,index)=>({id:page.id+':'+index,page,columns,index,links:links.slice(index*capacity,(index+1)*capacity)}));
   });
@@ -80,7 +80,7 @@ if(typeof document!=='undefined') (()=>{
   }
   function current() {
     const group=config.groups.find(g=>g.id===groupID)||config.groups[0];if(!group)return {group:null,sheets:[],sheet:null};
-    groupID=group.id;const sheets=homepageSheets(group,matchMedia('(max-width:700px)').matches,$('.gh-link-grid').clientWidth||window.innerWidth-32);
+    groupID=group.id;const sheets=homepageSheets(group,matchMedia('(max-width:700px)').matches,$('#gh-content').clientWidth||window.innerWidth-48);
     const sheet=sheets.find(p=>p.id===active[group.id])||sheets[0];active[group.id]=sheet.id;return {group,sheets,sheet};
   }
   function card(link) {
@@ -107,7 +107,7 @@ if(typeof document!=='undefined') (()=>{
       grid.style.setProperty('--gh-columns',String(sheet.columns));content=sheet.links.map(l=>card(l)).join('');
       $('.gh-pager').innerHTML=sheets.map((p,i)=>`<button type="button" class="gh-page-dot" data-sheet="${esc(p.id)}" aria-current="${p.id===sheet.id?'page':'false'}" aria-label="第 ${i+1} 页：${esc(p.page.name)}${p.index?'（续页 '+(p.index+1)+'）':''}"><span aria-hidden="true"></span></button>`).join('');
     }else { $('.gh-pager').innerHTML=''; }
-    grid.innerHTML=content||'<div class="gh-empty">这里还没有应用。打开右下角菜单，点击“编辑桌面”添加分组和应用。</div>';
+    grid.innerHTML=(content||`<div class="gh-empty">${group?'点击添加应用，整理这一页。':'添加分组，开始整理你的桌面。'}</div>`)+`<button type="button" class="gh-open gh-add" id="gh-add"><span class="gh-art">${icon('plus')}</span><span class="gh-copy"><span class="gh-name">${group?'添加应用':'添加分组'}</span></span></button>`;
     $('#gh-editor-tools').innerHTML=editor.toolbar();
     remember();
     pageAnimation?.cancel();pageAnimation=null;
@@ -120,7 +120,7 @@ if(typeof document!=='undefined') (()=>{
     if(ignoreClick){ignoreClick=false;if(event.target.closest('.gh-open')){event.preventDefault();return;}}
     const anchor=event.target.closest('a[data-link]');
     if(anchor&&!event.ctrlKey&&!event.metaKey&&!event.shiftKey&&!event.altKey&&event.button===0){const link=current().sheet?.links.find(l=>l.id===anchor.dataset.link);if(link?.lan&&link?.wan&&link.lan!==link.wan){const tab=window.open('about:blank','_blank');if(!tab)return;event.preventDefault();tab.opener=null;tab.document.title='正在打开应用';tab.document.body.textContent='正在选择可用地址…';reachability.check(link.lan).then(()=>{if(!tab.closed)tab.location.replace(reachability.address(link));});}return;}
-    const button=event.target.closest('button');if(!button)return;
+    const button=event.target.closest('button');if(!button)return;if(button.id==='gh-add'){editor.add();return;}
     if(button.dataset.engine){engine=button.dataset.engine;remember();renderEngines();$('#gh-engine').focus();}
     if(button.dataset.group){wheel.reset();groupID=button.dataset.group;render(true);$('.gh-tabs button[data-group="'+CSS.escape(groupID)+'"]').focus();}
     if(button.dataset.sheet){wheel.reset();const {group}=current();active[group.id]=button.dataset.sheet;render(true);$('.gh-page-dot[data-sheet="'+CSS.escape(button.dataset.sheet)+'"]').focus();}
@@ -170,7 +170,7 @@ if(typeof document!=='undefined') (()=>{
   function clock(){if(document.hidden)return;const now=new Date();$('.gh-clock').textContent=now.toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',hour12:false});$('.gh-date').textContent=now.toLocaleDateString('zh-CN',{month:'long',day:'numeric',weekday:'long'});}
   function stylesheet(revision=''){let link=$('#gh-custom-css');if(!link){link=document.createElement('link');link.id='gh-custom-css';link.rel='stylesheet';document.head.append(link);}link.href=asset('/custom.css')+'&revision='+encodeURIComponent(revision);}
   function closeAccount(focus=false){const menu=$('#gh-account-menu');if(menu.contains(document.activeElement)||focus)$('#gh-user').focus();menu.hidden=true;$('#gh-user').setAttribute('aria-expanded','false');}
-  function closeFloating(focus=false){const menu=$('#gh-floating-menu');closeAccount();if(menu.contains(document.activeElement)||focus)$('#gh-floating-toggle').focus();menu.hidden=true;$('#gh-floating-toggle').setAttribute('aria-expanded','false');$('#gh-floating-toggle').setAttribute('aria-label','打开桌面菜单');$('#gh-floating-toggle').innerHTML=icon('more');}
+  function closeFloating(focus=false){const menu=$('#gh-floating-menu');closeAccount();if(menu.contains(document.activeElement)||focus)$('#gh-floating-toggle').focus();menu.hidden=true;$('#gh-floating-toggle').setAttribute('aria-expanded','false');$('#gh-floating-toggle').setAttribute('aria-label','打开桌面菜单');$('#gh-floating-toggle').innerHTML=icon('settings');}
   async function session(){const me=await request('/api/me');currentUser=me;closeAccount();$('#gh-account-name').textContent=me.authenticated?'当前账号：'+me.username:'';$('#gh-user').title=me.authenticated?me.username:'登录首页';return me;}
   async function loggedIn(){const me=await session(),url=new URL(location.href);url.searchParams.set('space',me.user_id);history.replaceState(null,'',url);await load();}
   const editor=createHomepageEditor({request,context:current,icon,esc,loggedIn,changed(home,id,revision){view(id);config=home;const url=new URL(location.href);url.searchParams.set('space',id);history.replaceState(null,'',url);$('#gh-content').hidden=false;$('#gh-login').hidden=true;stylesheet(revision);render();}});
@@ -181,6 +181,7 @@ if(typeof document!=='undefined') (()=>{
   $('#gh-edit').addEventListener('click',async()=>{await editor.toggle();if(!editor.editing)closeFloating();});$('#gh-user').addEventListener('click',()=>{if(!currentUser?.authenticated){editor.login(false);return;}const menu=$('#gh-account-menu');menu.hidden=!menu.hidden;$('#gh-user').setAttribute('aria-expanded',String(!menu.hidden));});$('#gh-switch-user').addEventListener('click',()=>{closeAccount();editor.login(false);});
   $('#gh-login form').addEventListener('submit',async event=>{event.preventDefault();const form=event.target,button=form.querySelector('button');button.disabled=true;form.querySelector('.gh-error').textContent='';try{const username=form.elements.username.value,password=form.elements.password.value;form.elements.password.value='';await request('/login',{username,password});await loggedIn();}catch(e){form.querySelector('.gh-error').textContent=e.message;}finally{button.disabled=false;}});
   $('#gh-logout').addEventListener('click',async()=>{try{await request('/logout',{});reachability.reset();closeFloating();editor.reset();document.body.classList.remove('gh-editing');$('#gh-editor-tools').innerHTML='';await session();await load();}catch(e){$('#gh-error').textContent=e.message;}});
+  $('#gh-settings').addEventListener('click',()=>editor.settings());
   $('#gh-edit').disabled=true;
   clock();setInterval(clock,15000);document.addEventListener('visibilitychange',clock);load().then(()=>{$('#gh-edit').disabled=false;if(location.hash==='#edit')editor.toggle();});
 })();
