@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -58,10 +59,15 @@ func run() error {
 			return nil
 		}
 		if flag.Arg(0) != "init" {
-			return errors.New("支持的命令：init（设置或重置管理密码）、migrate（迁移旧目录）；参数须放在命令前")
+			return errors.New("支持的命令：init（设置或重置管理员账号密码）、migrate（迁移旧目录）；参数须放在命令前")
 		}
 		if !term.IsTerminal(int(os.Stdin.Fd())) {
 			return errors.New("请在交互终端运行 init，Docker 使用 docker compose run --rm gatehouse init")
+		}
+		fmt.Print("管理员账号（留空保留当前账号，首次默认 admin）：")
+		username, err := readAdminUsername(os.Stdin, store.Snapshot().AdminUsername)
+		if err != nil {
+			return err
 		}
 		fmt.Print("管理密码（12–72 字节，输入不回显）: ")
 		first, err := term.ReadPassword(int(os.Stdin.Fd()))
@@ -84,14 +90,14 @@ func run() error {
 		if err != nil {
 			return err
 		}
-		if err := store.SetPassword(hash); err != nil {
-			return errors.New("密码保存失败")
+		if err := store.SetAdminAccount(username, hash); err != nil {
+			return err
 		}
-		fmt.Println("管理密码已保存；如果服务正在运行，请重启服务。")
+		fmt.Println("管理员账号密码已保存；如果服务正在运行，请重启服务。")
 		return nil
 	}
 	if store.Snapshot().PasswordHash == "" {
-		return errors.New("尚未初始化，请先运行 gatehouse -data <数据目录> init 设置密码")
+		return errors.New("尚未初始化，请先运行 gatehouse -data <数据目录> init 设置管理员账号密码")
 	}
 	c := store.Snapshot().Config
 	_, port, err := net.SplitHostPort(*adminAddr)
@@ -206,6 +212,33 @@ func run() error {
 		log.Print("维护操作已安排，退出当前进程以应用更新或恢复")
 	}
 	return serveErr
+}
+
+// Read only through this newline; buffering must not consume the password that
+// the terminal password reader will subsequently read without echo.
+func readAdminUsername(reader io.Reader, current string) (string, error) {
+	var data []byte
+	var b [1]byte
+	for {
+		if _, err := io.ReadFull(reader, b[:]); err != nil {
+			return "", errors.New("管理员账号读取失败")
+		}
+		if b[0] == '\n' {
+			break
+		}
+		data = append(data, b[0])
+		if len(data) > 65 {
+			return "", errors.New("管理员账号须为 1–64 字节")
+		}
+	}
+	username := strings.TrimSuffix(string(data), "\r")
+	if username == "" {
+		username = current
+	}
+	if err := gateway.ValidateAdminUsername(username); err != nil {
+		return "", err
+	}
+	return username, nil
 }
 
 func validateConfigAdminPort(c gateway.Config, adminPort int) error {

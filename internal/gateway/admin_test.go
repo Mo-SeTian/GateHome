@@ -58,7 +58,7 @@ func adminRequest(h http.Handler, method, path string, body any, cookie *http.Co
 
 func loginForTest(t *testing.T, h http.Handler) *http.Cookie {
 	t.Helper()
-	w := adminRequest(h, "POST", "/api/login", map[string]string{"password": "TEST_ONLY_ADMIN_PASSWORD"}, nil, "")
+	w := adminRequest(h, "POST", "/api/login", map[string]string{"username": "admin", "password": "TEST_ONLY_ADMIN_PASSWORD"}, nil, "")
 	if w.Code != 200 {
 		t.Fatal("login failed")
 	}

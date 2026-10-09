@@ -32,6 +32,7 @@ type Admin struct {
 	adminPort    int
 	updateMu     sync.Mutex
 	mu           sync.Mutex
+	authMu       sync.RWMutex
 	sessions     map[[32]byte]time.Time
 	attempts     map[string]routeAttempts
 	activeLogins int
@@ -83,6 +84,7 @@ func (a *Admin) Handler() http.Handler {
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { jsonResponse(w, 200, map[string]bool{"ok": true}) })
 	mux.HandleFunc("POST /api/login", a.login)
 	mux.HandleFunc("POST /api/logout", a.requireAuth(a.logout))
+	a.accountRoutes(mux)
 	mux.HandleFunc("GET /api/config", a.requireAuth(a.getConfig))
 	mux.HandleFunc("PUT /api/config", a.requireAuth(a.putConfig))
 	mux.HandleFunc("GET /api/status", a.requireAuth(a.status))
@@ -329,37 +331,24 @@ func (a *Admin) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 }
 
 func (a *Admin) login(w http.ResponseWriter, r *http.Request) {
-	a.mu.Lock()
-	now := time.Now()
-	for ip, attempt := range a.attempts {
-		if now.Sub(attempt.started) >= time.Minute {
-			delete(a.attempts, ip)
-		}
-	}
-	ip := remoteIP(r.RemoteAddr)
-	attempt := a.attempts[ip]
-	if a.activeLogins >= 2 || attempt.count >= 8 || (attempt.count == 0 && len(a.attempts) >= 1024) {
-		a.mu.Unlock()
+	if !a.beginCredentialAttempt(r) {
 		w.Header().Set("Retry-After", "60")
 		apiError(w, 429, "登录尝试过于频繁，请一分钟后再试")
 		return
 	}
-	if attempt.count == 0 {
-		attempt.started = now
-	}
-	attempt.count++
-	a.attempts[ip] = attempt
-	a.activeLogins++
-	a.mu.Unlock()
-	defer func() { a.mu.Lock(); a.activeLogins--; a.mu.Unlock() }()
+	defer a.endCredentialAttempt()
 	var input struct {
+		Username string `json:"username"`
 		Password string `json:"password"`
 	}
 	if !decodeBody(w, r, &input) {
 		return
 	}
-	if len(input.Password) > 72 || bcrypt.CompareHashAndPassword([]byte(a.store.Snapshot().PasswordHash), []byte(input.Password)) != nil {
-		apiError(w, 401, "密码错误")
+	a.authMu.RLock()
+	defer a.authMu.RUnlock()
+	state := a.store.Snapshot()
+	if len(input.Password) > 72 || bcrypt.CompareHashAndPassword([]byte(state.PasswordHash), []byte(input.Password)) != nil || input.Username != state.AdminUsername {
+		apiError(w, 401, "管理员账号或密码不正确")
 		return
 	}
 	secret := make([]byte, 32)
@@ -369,6 +358,7 @@ func (a *Admin) login(w http.ResponseWriter, r *http.Request) {
 	}
 	token := hex.EncodeToString(secret)
 	a.mu.Lock()
+	now := time.Now()
 	for k, exp := range a.sessions {
 		if !now.Before(exp) {
 			delete(a.sessions, k)

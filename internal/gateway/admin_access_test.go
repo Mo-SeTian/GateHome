@@ -87,7 +87,7 @@ func TestAdminLANUpstreamKeepsSession(t *testing.T) {
 		t.Cleanup(func() { resp.Body.Close() })
 		return resp
 	}
-	login := request("POST", "/api/login", map[string]string{"password": "TEST_ONLY_ADMIN_PASSWORD"}, nil)
+	login := request("POST", "/api/login", map[string]string{"username": "admin", "password": "TEST_ONLY_ADMIN_PASSWORD"}, nil)
 	if login.StatusCode != 200 || len(login.Cookies()) != 1 {
 		t.Fatal("successful LAN login lost its management session cookie")
 	}
@@ -151,7 +151,7 @@ func TestAdminReverseProxyOriginAndSecureSession(t *testing.T) {
 		t.Cleanup(func() { response.Body.Close() })
 		return response
 	}
-	login := map[string]string{"password": "TEST_ONLY_ADMIN_PASSWORD"}
+	login := map[string]string{"username": "admin", "password": "TEST_ONLY_ADMIN_PASSWORD"}
 	if response := request("POST", "/api/login", origin, login, nil); response.StatusCode != 403 {
 		t.Fatal("HTTPS to HTTP mismatch must reproduce before enabling compatibility")
 	}

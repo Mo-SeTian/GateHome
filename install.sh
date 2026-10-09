@@ -104,10 +104,10 @@ install_gatehouse() {
   install -m 0750 -o gatehouse -g gatehouse "$binary" "$INSTALL_DIR/app/gatehouse"
   runuser -u gatehouse -- "$INSTALL_DIR/app/gatehouse" -config "$CONFIG_DIR" -log "$LOG_DIR" -data "$DATA_DIR" migrate
   if [[ ! -f "$CONFIG_DIR/state.json" ]]; then
-    printf '首次安装，请设置管理员密码（输入不会回显）。\n'
+    printf '首次安装，请设置管理员账号和管理密码（密码输入不会回显）。\n'
     runuser -u gatehouse -- "$INSTALL_DIR/app/gatehouse" -config "$CONFIG_DIR" -log "$LOG_DIR" -data "$DATA_DIR" init < /dev/tty
   else
-    printf '保留已有配置和管理员密码。\n'
+    printf '保留已有配置和管理员账户。\n'
   fi
   install -m 0644 -o root -g root "$SOURCE_DIR/deploy/gatehouse.service" "$SERVICE_FILE"
   install -d -m 0755 -o root -g root "${SERVICE_FILE}.d"

@@ -39,6 +39,7 @@ function openDialog(dialog) {
 }
 function closeDialog(dialog) {
   if(!dialog?.open) return;
+  if(dialog.id==='account-dialog') clearAccountPasswords();
   if(dialog.id==='route-dialog') {++routeImageRequest;routeImagePending=false;}
   if(dialog.id==='discovery-dialog') abandonDiscovery();
   const from={opacity:getComputedStyle(dialog).opacity,transform:getComputedStyle(dialog).transform};
@@ -75,6 +76,36 @@ let dnsRecords={},dnsRecordsRequest=0,dnsRecordsError='';
 let networkInfo=null,ipGroup='',ipInterface='',ipIPv4Source='url',ipIPv6Source='url',ipRequest=0,ipViewKey='';
 let config, revision, status = {}, page = 'overview', toastTimer, busy = false;
 
+let adminUsername='';
+function clearAccountPasswords() {
+  const form=$('#account-form');if(!form) return;
+  for(const name of ['current_password','new_password','confirm_password']) form.elements[name].value='';
+}
+function applyAccount(data) {
+  adminUsername=data.username;
+  $('#account-name').textContent=adminUsername;
+  $('#account-avatar').textContent=[...adminUsername][0]?.toUpperCase()||'G';
+  $('#account-button').setAttribute('aria-label','管理员账户设置：'+adminUsername);
+}
+function openAdminAccount() {
+  if(busy) return;
+  const form=$('#account-form');form.reset();form.elements.username.value=adminUsername;$('.error',form).textContent='';openDialog($('#account-dialog'));
+}
+function accountInput(form) {
+  const e=form.elements,username=e.username.value,newPassword=e.new_password.value;
+  const size=value=>new TextEncoder().encode(value).length;
+  if(!username||size(username)>64||username.trim()!==username||/[\u0000-\u001f\u007f-\u009f]/.test(username)) throw new Error('管理员账号须为 1–64 字节，不含控制字符或首尾空格');
+  if(newPassword!==e.confirm_password.value) throw new Error('两次新管理密码不一致');
+  if(newPassword&&(size(newPassword)<12||size(newPassword)>72)) throw new Error('新管理密码须为 12–72 字节');
+  return {username,current_password:e.current_password.value,new_password:newPassword,confirm_password:e.confirm_password.value};
+}
+async function saveAdminAccount(form) {
+  const input=accountInput(form);
+  let result;
+  try {result=await api('account','PUT',input);} finally {clearAccountPasswords();}
+  showLogin();$('#login-form').elements.username.value=result.username;$('#login-error').textContent=result.message;$('#login-form').elements.password.focus();toast(result.message);
+}
+
 async function api(path, method = 'GET', body) {
   const multipart=typeof FormData!=='undefined'&&body instanceof FormData;
   const response = await fetch('/api/' + path, {method, credentials:'same-origin', headers:multipart?{'X-Gatehouse-Request':'1'}:{'Content-Type':'application/json','X-Gatehouse-Request':'1'}, body:multipart?body:body === undefined ? undefined : JSON.stringify(body)});
@@ -89,7 +120,7 @@ function toast(message) {
   $('#toast').textContent = message; $('#toast').hidden = false; if(!reducedMotion.matches) {$('#toast').getAnimations().forEach(a=>a.cancel());$('#toast').animate([{opacity:0,translate:'0 8px'},{opacity:1,translate:'0 0'}],{duration:180,easing:'ease-out'});}
   clearTimeout(toastTimer); toastTimer = setTimeout(() => { $('#toast').hidden = true; }, 4500);
 }
-function showLogin() { resetDashboard();setNavigation(false,false); $('#login').hidden = false; $('#app').hidden = true; document.querySelectorAll('dialog').forEach(d=>d.close()); config = undefined; renderedPage='';clearTimeout(onlineUpdate.timer);onlineUpdate.request++;onlineUpdate.phase='';onlineUpdate.job=null;onlineUpdate.release=null;onlineUpdate.error='';abandonDiscovery();for(const state of Object.values(securityEvents)) {state.request++;state.view=null;state.filters=emptyEventFilters();state.applied=emptyEventFilters();state.loading=false;state.error='';} }
+function showLogin() { clearAccountPasswords();adminUsername='';$('#account-name').textContent='管理员';$('#account-avatar').textContent='G';resetDashboard();setNavigation(false,false); $('#login').hidden = false; $('#app').hidden = true; document.querySelectorAll('dialog').forEach(d=>d.close()); config = undefined; renderedPage='';clearTimeout(onlineUpdate.timer);onlineUpdate.request++;onlineUpdate.phase='';onlineUpdate.job=null;onlineUpdate.release=null;onlineUpdate.error='';abandonDiscovery();for(const state of Object.values(securityEvents)) {state.request++;state.view=null;state.filters=emptyEventFilters();state.applied=emptyEventFilters();state.loading=false;state.error='';} }
 function applyConfig(data) { config = data.config; revision = data.revision; dnsCredentialsConfigured=data.dns_credentials_configured||{}; certificateCredentialsConfigured=data.certificate_credentials_configured||{};routePasswordsConfigured=data.route_passwords_configured||{}; proxyPasswordConfigured=data.proxy_password_configured; ipRequest++;dnsRecordsRequest++;dnsRecords={};dnsRecordsError=''; if(networkInfo) networkInfo.groups={}; }
 async function save(next, dnsTokens, proxyPassword, certificateTokens, routePasswords) {
   const payload = {config:next, revision};
@@ -432,7 +463,7 @@ function maintenanceHTML() {
   const preview=maintenancePreview;
   const detail=!preview?'':`<div class="maintenance-preview"><b>${preview.kind==='update'?'更新包 v'+esc(preview.version):'备份 v'+esc(preview.version)}</b>${preview.kind==='restore'?`<p>${preview.groups} 个反代组 · ${preview.routes} 个服务 · ${preview.ddns_groups} 个 DDNS 组 · ${preview.firewalls} 个防火墙 · ${preview.subscriptions} 个订阅<br>${preview.images||0} 张服务图片 · ${preview.certificates||0} 个证书文件 · ${preview.log_entries||0} 条日志 · ${preview.subscription_caches||0} 个订阅缓存<br>${preview.includes_files?'':'此旧备份未包含日志、缓存与图片；恢复时保留服务器现有文件。<br>'}备份时间：${date(preview.created_at)} · ${preview.token_configured?'含 Cloudflare Token':'未配置 Cloudflare Token'}</p>`:''}<p>${esc(preview.message)}</p><button class="primary" data-action="apply-maintenance" ${!preview.can_apply?'disabled':''}>${preview.kind==='update'?'应用更新并重启':'恢复数据并重启'}</button></div>`;
   const backupDetail=preview?.kind==='restore'?detail:'',updateDetail=preview?.kind==='update'?detail:'';
-  return panel('备份与恢复','备份配置与凭据、证书、服务图片、日志和订阅缓存。',`<div class="panel-body two-col maintenance-forms"><form id="backup-form"><h3>下载加密备份</h3><label>备份密码<input name="password" type="password" autocomplete="new-password"></label><label>再次输入备份密码<input name="confirm_password" type="password" autocomplete="new-password"></label><p class="form-note">密码不限长度，可以留空；留空时恢复也无需填写密码。请保存设置的密码，恢复时需保持一致。ZIP 内的数据使用 AES-256-GCM 加密，含反代访问密码、IP 冻结名单与全部已保存的业务数据。登录会话、未保存的扫描结果和维护临时文件不备份。</p><p class="error" role="alert"></p><div class="form-actions"><button class="primary" type="submit">下载备份 ZIP</button></div></form><form id="restore-form"><h3>上传备份</h3><label>备份 ZIP<input name="file" type="file" accept=".zip,application/zip" required></label><label>导出时的备份密码<input name="password" type="password" autocomplete="off"></label><p class="form-note">密码不限长度；导出时留空，这里也留空。先检查备份再确认恢复。恢复后使用备份时的管理员密码重新登录。</p><p class="error" role="alert"></p><div class="form-actions"><button class="secondary" type="submit">检查备份</button></div></form></div>${backupDetail}`) +
+  return panel('备份与恢复','备份配置与凭据、证书、服务图片、日志和订阅缓存。',`<div class="panel-body two-col maintenance-forms"><form id="backup-form"><h3>下载加密备份</h3><label>备份密码<input name="password" type="password" autocomplete="new-password"></label><label>再次输入备份密码<input name="confirm_password" type="password" autocomplete="new-password"></label><p class="form-note">密码不限长度，可以留空；留空时恢复也无需填写密码。请保存设置的密码，恢复时需保持一致。ZIP 内的数据使用 AES-256-GCM 加密，含反代访问密码、IP 冻结名单与全部已保存的业务数据。登录会话、未保存的扫描结果和维护临时文件不备份。</p><p class="error" role="alert"></p><div class="form-actions"><button class="primary" type="submit">下载备份 ZIP</button></div></form><form id="restore-form"><h3>上传备份</h3><label>备份 ZIP<input name="file" type="file" accept=".zip,application/zip" required></label><label>导出时的备份密码<input name="password" type="password" autocomplete="off"></label><p class="form-note">密码不限长度；导出时留空，这里也留空。先检查备份再确认恢复。恢复后使用备份时的管理员账号和管理密码重新登录。</p><p class="error" role="alert"></p><div class="form-actions"><button class="secondary" type="submit">检查备份</button></div></form></div>${backupDetail}`) +
     `<div id="online-update">${onlineUpdateHTML()}</div>` +
     panel('上传版本更新','使用本项目“更新版本”目录生成的 ZIP；只接受更高版本。',`<form id="update-form" class="panel-body"><label>更新 ZIP<input name="file" type="file" accept=".zip,application/zip" required></label><p class="form-note">检查版本、文件哈希和主机架构后再应用。只使用你信任的项目更新包；哈希校验用于检查文件完整性。</p><p class="form-note">${supported?'维护时短暂停止服务，新程序启动检查失败会回滚。':'此部署可导出备份及检查上传包。应用更新或恢复需要 Linux 安装脚本或新版 Docker 启动方式。'}</p><p class="error" role="alert"></p><div class="form-actions"><button type="submit" class="secondary">检查更新包</button></div></form>${updateDetail}`) +
     `<div class="app-version"><b>Gatehouse</b><button class="secondary" data-action="restart-service" ${!supported?'disabled':''}>重启服务</button><span>版本 ${esc(status.version||'加载中')}</span></div>`;
@@ -716,6 +747,7 @@ async function refreshStatus() {
 async function load() {
   applyConfig(await api('config'));
   await refreshStatus();
+  applyAccount(await api('account'));
   $('#login').hidden=true; $('#app').hidden=false;
   page=pages[location.hash.slice(1)]?location.hash.slice(1):'overview';
   render();
@@ -1030,8 +1062,9 @@ async function submitForm(form, work) {
 }
 document.addEventListener('submit',event=>{
   event.preventDefault(); const form=event.target;
-  if(form.id==='login-form') return submitForm(form,async()=>{ const password=form.elements.password.value; form.elements.password.value=''; await api('login','POST',{password}); await load(); });
+  if(form.id==='login-form') return submitForm(form,async()=>{ const username=form.elements.username.value,password=form.elements.password.value; form.elements.password.value=''; await api('login','POST',{username,password}); await load(); });
   if(!config) return;
+  if(form.id==='account-form') return submitForm(form,()=>saveAdminAccount(form));
   if(form.id==='dashboard-form') return submitForm(form,saveDashboardSettings);
   if(form.dataset.eventFilters) {
     const kind=form.dataset.eventFilters;securityEvents[kind].filters={...emptyEventFilters(),...Object.fromEntries(new FormData(form))};
@@ -1116,6 +1149,7 @@ document.addEventListener('click',async event=>{
   const action=button.dataset.action;
   if(action==='close-dialog') { closeDialog(button.closest('dialog')); return; }
   if(!config||busy) return;
+  if(action==='edit-admin-account') return openAdminAccount();
   if(action==='edit-dashboard') return toggleDashboardEditing();
   if(action==='configure-dashboard') return openDashboardSettings();
   if(action==='move-widget') return moveDashboardWidget(button.dataset.widget,Number(button.dataset.direction));
@@ -1170,7 +1204,7 @@ document.addEventListener('click',async event=>{
     if(action==='restart-service') {if(!confirm('重启会短暂中断服务，监听端口变更将生效。确认重启？')) return;const result=await api('maintenance/restart','POST',{});toast(result.message);showLogin();}
     if(action==='apply-maintenance') {
       const preview=maintenancePreview;if(!preview?.can_apply) throw new Error('请先检查可用的维护包');
-      const message=preview.kind==='restore'?'恢复会覆盖当前全部配置、Token 和管理员登录数据，并重启服务。确认恢复？':'确认更新至 '+preview.version+' 并重启服务？';
+      const message=preview.kind==='restore'?'恢复会覆盖当前全部配置、Token 和管理员账户数据，并重启服务。确认恢复？':'确认更新至 '+preview.version+' 并重启服务？';
       if(!confirm(message)) return;
       const result=await api('maintenance/apply-'+preview.kind,'POST',{id:preview.id});maintenancePreview=null;toast(result.message);showLogin();
     }

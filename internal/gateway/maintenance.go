@@ -126,7 +126,7 @@ func (m *Maintenance) inspectBackup(data []byte, password string, adminPort int)
 	c := payload.State.Config
 	images, logs, caches := backupFileCounts(payload)
 	canApply := m.Available() && (payload.Files == nil || m.backupFiles)
-	message := "恢复会覆盖当前配置和管理员密码；完成后使用备份时的管理员密码登录"
+	message := "恢复会覆盖当前配置和管理员账户；完成后使用备份时的管理员账号和管理密码登录"
 	if payload.Files != nil && !m.backupFiles && m.Available() {
 		message = "当前启动器不支持完整数据恢复。请使用此版本安装脚本更新启动器，再重新检查备份；仅网页更新程序不会更新启动器。"
 	}

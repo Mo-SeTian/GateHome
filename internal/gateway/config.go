@@ -171,6 +171,7 @@ type Config struct {
 }
 
 type State struct {
+	AdminUsername          string                   `json:"admin_username"`
 	Config                 Config                   `json:"config"`
 	PasswordHash           string                   `json:"password_hash"`
 	CloudflareToken        string                   `json:"cloudflare_token"`
@@ -211,6 +212,7 @@ func OpenStorePaths(paths StoragePaths) (*Store, error) {
 	b, err := os.ReadFile(s.path)
 	if errors.Is(err, os.ErrNotExist) {
 		s.state.Config = DefaultConfig()
+		s.state.AdminUsername = defaultAdminUsername
 		return s, nil
 	}
 	if err != nil {
@@ -220,6 +222,9 @@ func OpenStorePaths(paths StoragePaths) (*Store, error) {
 		return nil, errors.New("配置文件无法解析")
 	}
 	migrated := migrateState(&s.state)
+	if err := ValidateAdminUsername(s.state.AdminUsername); err != nil {
+		return nil, err
+	}
 	if err := Validate(s.state.Config); err != nil {
 		return nil, err
 	}
@@ -239,6 +244,10 @@ func containsCredentialNewline(value string) bool { return strings.ContainsAny(v
 
 func migrateState(s *State) bool {
 	changed := migrateConfig(&s.Config)
+	if s.AdminUsername == "" {
+		s.AdminUsername = defaultAdminUsername
+		changed = true
+	}
 	if s.DNSCredentials == nil {
 		s.DNSCredentials = map[string]DNSCredential{}
 		changed = true
@@ -616,6 +625,9 @@ func (s *Store) SetPassword(hash string) error {
 	defer s.mu.Unlock()
 	next := s.state
 	next.PasswordHash = hash
+	if next.AdminUsername == "" {
+		next.AdminUsername = defaultAdminUsername
+	}
 	if err := writeJSON(s.path, next); err != nil {
 		return err
 	}

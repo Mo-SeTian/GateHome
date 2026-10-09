@@ -214,6 +214,9 @@ func decodeBackup(data []byte, password string) (backupPayload, backupManifest, 
 		return payload, m, errors.New("备份格式与数据范围不一致")
 	}
 	migrateState(&payload.State)
+	if err := ValidateAdminUsername(payload.State.AdminUsername); err != nil {
+		return payload, m, errors.New("备份的管理员账号数据无效")
+	}
 	if err := Validate(payload.State.Config); err != nil {
 		return payload, m, errors.New("备份配置无效，无法恢复")
 	}
