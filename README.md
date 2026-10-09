@@ -2,7 +2,7 @@
 
 一个自托管的反向代理与 DDNS 综合管理工具。Go 单进程，中文管理界面内嵌，无需 Node.js、数据库或额外 Web 服务器。
 
-当前版本为 **0.0.38**，安装包见 [GitHub Releases](https://github.com/Mo-SeTian/GateHome/releases/latest)。程序和 systemd 服务名为 `gatehouse`。
+当前版本为 **0.0.38**，安装包见 [v0.0.38 Release](https://github.com/Mo-SeTian/GateHome/releases/tag/v0.0.38)。程序和 systemd 服务名为 `gatehouse`。
 
 ## 主要功能
 
@@ -173,7 +173,6 @@ cd GateHome
 ```sh
 make build
 make test
-make build
 python3 scripts/install_checks.py
 make release
 ```
