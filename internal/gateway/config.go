@@ -154,7 +154,7 @@ func (c Config) CertificateRequest(id string) (CertificateRequest, bool) {
 }
 
 type Config struct {
-	Homepage HomepageConfig `json:"homepage"`
+	SunPanel SunPanelConfig `json:"sunpanel"`
 	// Read-only compatibility fields for migrating the original on-disk format.
 	HTTPPort      int                 `json:"http_port,omitempty"`
 	HTTPSPort     int                 `json:"https_port,omitempty"`
@@ -172,8 +172,6 @@ type Config struct {
 }
 
 type State struct {
-	HomepageData           bool                     `json:"homepage_data,omitempty"`
-	HomepageUsers          map[string]HomepageUser  `json:"homepage_users,omitempty"`
 	AdminUsername          string                   `json:"admin_username"`
 	Config                 Config                   `json:"config"`
 	PasswordHash           string                   `json:"password_hash"`
@@ -191,29 +189,10 @@ type Store struct {
 	path  string
 	paths StoragePaths
 	state State
-	pages *homepageStore
-}
-
-// Desktop content is persisted under data/page, not in GateHome's configuration.
-func (c Config) MarshalJSON() ([]byte, error) {
-	type plain Config
-	if c.Homepage.Title != "" {
-		return json.Marshal(plain(c)) // Legacy state and backups retain content until migration.
-	}
-	return json.Marshal(struct {
-		*plain
-		Homepage struct {
-			Enabled bool `json:"enabled"`
-			Port    int  `json:"port"`
-		} `json:"homepage"`
-	}{plain: (*plain)(&c), Homepage: struct {
-		Enabled bool `json:"enabled"`
-		Port    int  `json:"port"`
-	}{c.Homepage.Enabled, c.Homepage.Port}})
 }
 
 func DefaultConfig() Config {
-	return Config{Homepage: HomepageConfig{Port: 16680}, Groups: []ProxyGroup{{ID: "default", Name: "默认组", Enabled: true, HTTPPort: 18080, HTTPSPort: 18443}}, Subscriptions: []Subscription{}, Firewalls: []Firewall{}, Routes: []Route{},
+	return Config{SunPanel: SunPanelConfig{Port: 16680}, Groups: []ProxyGroup{{ID: "default", Name: "默认组", Enabled: true, HTTPPort: 18080, HTTPSPort: 18443}}, Subscriptions: []Subscription{}, Firewalls: []Firewall{}, Routes: []Route{},
 		DDNS: DDNSConfig{Groups: []DDNSGroup{}}, LogRetention: defaultLogRetention,
 		ACME: ACMEConfig{Staging: true, DNSGroups: map[string]string{}, Requests: []CertificateRequest{}}}
 }
@@ -235,12 +214,6 @@ func OpenStorePaths(paths StoragePaths) (*Store, error) {
 	if errors.Is(err, os.ErrNotExist) {
 		s.state.Config = DefaultConfig()
 		s.state.AdminUsername = defaultAdminUsername
-		s.pages, err = openHomepageStore(paths.Data, s.state)
-		if err != nil {
-			return nil, err
-		}
-		s.state.Config.Homepage = HomepageConfig{Port: s.state.Config.Homepage.Port}
-		s.state.HomepageData = true
 		return s, nil
 	}
 	if err != nil {
@@ -258,21 +231,6 @@ func OpenStorePaths(paths StoragePaths) (*Store, error) {
 	}
 	if err := validateCredentials(s.state); err != nil {
 		return nil, err
-	}
-	if err := validateHomepageUsers(s.state); err != nil {
-		return nil, err
-	}
-	s.pages, err = openHomepageStore(paths.Data, s.state)
-	if err != nil {
-		return nil, err
-	}
-	if legacyHomepageContent(s.state.Config.Homepage) {
-		migrated = true
-	}
-	s.state.Config.Homepage = HomepageConfig{Enabled: s.state.Config.Homepage.Enabled, Port: s.state.Config.Homepage.Port}
-	if !s.state.HomepageData {
-		migrated = true
-		s.state.HomepageData = true
 	}
 	if migrated {
 		s.state.Revision++
@@ -380,8 +338,8 @@ func migrateState(s *State) bool {
 
 func migrateConfig(c *Config) bool {
 	migrated := false
-	if c.Homepage.Port == 0 && !c.Homepage.Enabled && len(c.Homepage.Groups) == 0 && c.Homepage.CustomCSS == "" && c.Homepage.Background == "" && c.Homepage.SearchEngines == nil {
-		c.Homepage = HomepageConfig{Port: 16680}
+	if c.SunPanel == (SunPanelConfig{}) {
+		c.SunPanel = SunPanelConfig{Port: 16680}
 		migrated = true
 	}
 	if c.LogRetention == (LogRetentionConfig{}) {
@@ -539,8 +497,8 @@ func (c Config) TLSHosts() []string {
 
 func listenerSignature(c Config) string {
 	parts := []string{}
-	if c.Homepage.Enabled {
-		parts = append(parts, fmt.Sprintf("homepage:%d", c.Homepage.Port))
+	if c.SunPanel.Enabled {
+		parts = append(parts, fmt.Sprintf("sunpanel:%d", c.SunPanel.Port))
 	}
 	for _, g := range c.Groups {
 		if g.Enabled {
@@ -552,8 +510,8 @@ func listenerSignature(c Config) string {
 }
 
 func validateAdminPort(c Config, port int) error {
-	if c.Homepage.Enabled && c.Homepage.Port == port {
-		return errors.New("首页端口不能与管理端口相同")
+	if c.SunPanel.Enabled && c.SunPanel.Port == port {
+		return errors.New("Sun-Panel 端口不能与管理端口相同")
 	}
 	for _, g := range c.Groups {
 		if g.HTTPPort == port || g.HTTPSPort == port {
@@ -587,7 +545,6 @@ func (s *Store) UpdateCredentials(c Config, tokens, certificateTokens map[string
 }
 
 func (s *Store) UpdateRouteCredentials(c Config, tokens, certificateTokens map[string]*string, legacyToken, proxyPassword *string, routePasswords map[string]*string, revision int) error {
-	c.Homepage = HomepageConfig{Enabled: c.Homepage.Enabled, Port: c.Homepage.Port}
 	c = includeProxyDNSHosts(c)
 	if err := Validate(c); err != nil {
 		return err
@@ -735,7 +692,7 @@ func validDomain(s string) bool {
 func inZone(host, zone string) bool { return host == zone || strings.HasSuffix(host, "."+zone) }
 
 func Validate(c Config) error {
-	if err := validateHomepageListener(c.Homepage, c.Groups); err != nil {
+	if err := validateSunPanelListener(c.SunPanel, c.Groups); err != nil {
 		return err
 	}
 	if err := validateDashboard(c.Dashboard); err != nil {

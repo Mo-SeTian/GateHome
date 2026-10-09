@@ -61,7 +61,13 @@ func (a *Admin) maintenanceRoutes(mux *http.ServeMux) {
 		if a.logs != nil {
 			a.logs.mu.Lock()
 		}
-		payload, err := snapshotBackupPaths(a.store.paths, a.store.Snapshot())
+		var payload backupPayload
+		var err error
+		if a.sunPanel != nil {
+			payload, err = a.sunPanel.snapshot(a.store.paths, a.store.Snapshot())
+		} else {
+			payload, err = snapshotBackupPaths(a.store.paths, a.store.Snapshot())
+		}
 		if a.logs != nil {
 			a.logs.mu.Unlock()
 		}
@@ -136,12 +142,19 @@ func (a *Admin) maintenanceRoutes(mux *http.ServeMux) {
 
 func checkRestartPorts(current, next Config) error {
 	owned := map[int]bool{}
+	if current.SunPanel.Enabled {
+		owned[current.SunPanel.Port] = true
+	}
 	for _, g := range current.Groups {
 		if g.Enabled {
 			owned[g.HTTPPort], owned[g.HTTPSPort] = true, true
 		}
 	}
-	for _, g := range next.Groups {
+	groups := append([]ProxyGroup{}, next.Groups...)
+	if next.SunPanel.Enabled {
+		groups = append(groups, ProxyGroup{Enabled: true, HTTPPort: next.SunPanel.Port})
+	}
+	for _, g := range groups {
 		if !g.Enabled {
 			continue
 		}

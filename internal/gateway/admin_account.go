@@ -33,9 +33,6 @@ func (s *Store) SetAdminAccount(username, hash string) error {
 	defer s.mu.Unlock()
 	next := s.state
 	next.AdminUsername, next.PasswordHash = username, hash
-	if err := validateHomepageUsers(next); err != nil {
-		return err
-	}
 	if err := writeJSON(s.path, next); err != nil {
 		return errors.New("管理员账户保存失败，请检查配置目录权限")
 	}
@@ -51,9 +48,6 @@ func (s *Store) changeAdminAccount(username, hash string, previous State) error 
 	}
 	next := s.state
 	next.AdminUsername, next.PasswordHash = username, hash
-	if err := validateHomepageUsers(next); err != nil {
-		return err
-	}
 	next.Revision++
 	if err := writeJSON(s.path, next); err != nil {
 		return errors.New("管理员账户保存失败，请检查配置目录权限")
@@ -158,7 +152,6 @@ func (a *Admin) accountRoutes(mux *http.ServeMux) {
 		}
 		a.mu.Lock()
 		clear(a.sessions)
-		clear(a.homepageSessions)
 		a.mu.Unlock()
 		http.SetCookie(w, &http.Cookie{Name: "gatehouse_session", Path: "/", MaxAge: -1, HttpOnly: true, Secure: a.secureSession(r), SameSite: http.SameSiteStrictMode})
 		jsonResponse(w, 200, map[string]string{"username": input.Username, "message": "管理员账户已更新，请使用新账号和管理密码重新登录"})

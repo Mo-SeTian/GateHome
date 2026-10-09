@@ -10,9 +10,10 @@ services:
     # Linux host mode preserves the source IP for access policies.
     network_mode: host
     volumes:
-      - ./config:/config
-      - ./log:/log
-      - ./data:/data
+      - ${GATEHOME_RUNTIME_DIR:-./runtime}/config:/config
+      - ${GATEHOME_RUNTIME_DIR:-./runtime}/log:/log
+      - ${GATEHOME_RUNTIME_DIR:-./runtime}/data:/data
+      - ${GATEHOME_RUNTIME_DIR:-./runtime}/sunpanel:/sunpanel
     read_only: true
     cap_drop:
       - ALL
@@ -25,11 +26,12 @@ services:
     user: "0:0"
     network_mode: none
     entrypoint: ["/bin/sh", "-c"]
-    command: ["chown -R 10001:10001 /config /log /data && chmod 700 /config /log /data"]
+    command: ["chown -R 10001:10001 /config /log /data /sunpanel && chmod 700 /config /log /data /sunpanel"]
     volumes:
-      - ./config:/config
-      - ./log:/log
-      - ./data:/data
+      - ${GATEHOME_RUNTIME_DIR:-./runtime}/config:/config
+      - ${GATEHOME_RUNTIME_DIR:-./runtime}/log:/log
+      - ${GATEHOME_RUNTIME_DIR:-./runtime}/data:/data
+      - ${GATEHOME_RUNTIME_DIR:-./runtime}/sunpanel:/sunpanel
     read_only: true
     cap_drop:
       - ALL

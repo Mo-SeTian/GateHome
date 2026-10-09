@@ -6,7 +6,7 @@ function newID() {
   const bytes=new Uint8Array(16);crypto.getRandomValues(bytes);bytes[6]=(bytes[6]&15)|64;bytes[8]=(bytes[8]&63)|128;
   const hex=[...bytes].map(b=>b.toString(16).padStart(2,'0')).join('');return hex.slice(0,8)+'-'+hex.slice(8,12)+'-'+hex.slice(12,16)+'-'+hex.slice(16,20)+'-'+hex.slice(20);
 }
-const pages = {homepage:'浏览器首页',overview:'概览',routes:'反向代理',ddns:'动态域名',certificates:'SSL 证书',access:'防火墙管理',subscriptions:'订阅管理',settings:'设置',logs:'日志',statistics:'统计','firewall-logs':'防火墙拦截记录','ip-blocks':'IP 拦截名单'};
+const pages = {sunpanel:'浏览器首页',overview:'概览',routes:'反向代理',ddns:'动态域名',certificates:'SSL 证书',access:'防火墙管理',subscriptions:'订阅管理',settings:'设置',logs:'日志',statistics:'统计','firewall-logs':'防火墙拦截记录','ip-blocks':'IP 拦截名单'};
 const iconNames = new Set(['overview','routes','globe','certificate','shield','download','logs','chart','settings','server','gateway','router','layers','activity','refresh','plus','close','logout','menu','more','back','edit','chevron-down','chevron-up','chevron-left','chevron-right','external-link','trash','play','pause','login','filter','unlock','save','upload']);
 function icon(name) { return `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="/icons.svg#${iconNames.has(name)?name:'layers'}"></use></svg>`; }
 function hydrateIcons(scope=document) {
@@ -462,9 +462,9 @@ async function loadOnlineUpdateStatus() {
 function maintenanceHTML() {
   const supported=status.maintenance_available;
   const preview=maintenancePreview;
-  const detail=!preview?'':`<div class="maintenance-preview"><b>${preview.kind==='update'?'更新包 v'+esc(preview.version):'备份 v'+esc(preview.version)}</b>${preview.kind==='restore'?`<p>${preview.groups} 个反代组 · ${preview.routes} 个服务 · ${preview.ddns_groups} 个 DDNS 组 · ${preview.firewalls} 个防火墙 · ${preview.subscriptions} 个订阅<br>${preview.homepage_users||0} 个用户桌面 · ${preview.homepage_groups||0} 个首页分组 · ${preview.images||0} 张图片资产 · ${preview.certificates||0} 个证书文件 · ${preview.log_entries||0} 条日志 · ${preview.subscription_caches||0} 个订阅缓存<br>${preview.includes_files?'':'此旧备份未包含日志、缓存与图片；恢复时保留服务器现有文件。<br>'}备份时间：${date(preview.created_at)} · ${preview.token_configured?'含 Cloudflare Token':'未配置 Cloudflare Token'}</p>`:''}<p>${esc(preview.message)}</p><button class="primary" data-action="apply-maintenance" ${!preview.can_apply?'disabled':''}>${preview.kind==='update'?'应用更新并重启':'恢复数据并重启'}</button></div>`;
+  const detail=!preview?'':`<div class="maintenance-preview"><b>${preview.kind==='update'?'更新包 v'+esc(preview.version):'备份 v'+esc(preview.version)}</b>${preview.kind==='restore'?`<p>${preview.groups} 个反代组 · ${preview.routes} 个服务 · ${preview.ddns_groups} 个 DDNS 组 · ${preview.firewalls} 个防火墙 · ${preview.subscriptions} 个订阅<br>${preview.sunpanel_files||0} 个 Sun-Panel 文件 · ${preview.images||0} 张图片资产 · ${preview.certificates||0} 个证书文件 · ${preview.log_entries||0} 条日志 · ${preview.subscription_caches||0} 个订阅缓存<br>${preview.includes_files?'':'此旧备份未包含日志、缓存与图片；恢复时保留服务器现有文件。<br>'}备份时间：${date(preview.created_at)} · ${preview.token_configured?'含 Cloudflare Token':'未配置 Cloudflare Token'}</p>`:''}<p>${esc(preview.message)}</p><button class="primary" data-action="apply-maintenance" ${!preview.can_apply?'disabled':''}>${preview.kind==='update'?'应用更新并重启':'恢复数据并重启'}</button></div>`;
   const backupDetail=preview?.kind==='restore'?detail:'',updateDetail=preview?.kind==='update'?detail:'';
-  return panel('备份与恢复','备份配置与凭据、证书、服务图片、首页背景和 CSS、日志和订阅缓存。',`<div class="panel-body two-col maintenance-forms"><form id="backup-form"><h3>下载加密备份</h3><label>备份密码<input name="password" type="password" autocomplete="new-password"></label><label>再次输入备份密码<input name="confirm_password" type="password" autocomplete="new-password"></label><p class="form-note">密码不限长度，可以留空；留空时恢复也无需填写密码。请保存设置的密码，恢复时需保持一致。ZIP 内的数据使用 AES-256-GCM 加密，含反代访问密码、IP 冻结名单与全部已保存的业务数据。登录会话、未保存的扫描结果和维护临时文件不备份。</p><p class="error" role="alert"></p><div class="form-actions"><button class="primary" type="submit">下载备份 ZIP</button></div></form><form id="restore-form"><h3>上传备份</h3><label>备份 ZIP<input name="file" type="file" accept=".zip,application/zip" required></label><label>导出时的备份密码<input name="password" type="password" autocomplete="off"></label><p class="form-note">密码不限长度；导出时留空，这里也留空。先检查备份再确认恢复。恢复后使用备份时的管理员账号和管理密码重新登录。</p><p class="error" role="alert"></p><div class="form-actions"><button class="secondary" type="submit">检查备份</button></div></form></div>${backupDetail}`) +
+  return panel('备份与恢复','备份配置与凭据、证书、服务图片、Sun-Panel 全部数据、日志和订阅缓存。',`<div class="panel-body two-col maintenance-forms"><form id="backup-form"><h3>下载加密备份</h3><label>备份密码<input name="password" type="password" autocomplete="new-password"></label><label>再次输入备份密码<input name="confirm_password" type="password" autocomplete="new-password"></label><p class="form-note">密码不限长度，可以留空；留空时恢复也无需填写密码。请保存设置的密码，恢复时需保持一致。ZIP 内的数据使用 AES-256-GCM 加密，含反代访问密码、IP 冻结名单与全部已保存的业务数据。登录会话、未保存的扫描结果和维护临时文件不备份。</p><p class="error" role="alert"></p><div class="form-actions"><button class="primary" type="submit">下载备份 ZIP</button></div></form><form id="restore-form"><h3>上传备份</h3><label>备份 ZIP<input name="file" type="file" accept=".zip,application/zip" required></label><label>导出时的备份密码<input name="password" type="password" autocomplete="off"></label><p class="form-note">密码不限长度；导出时留空，这里也留空。先检查备份再确认恢复。恢复后使用备份时的管理员账号和管理密码重新登录。</p><p class="error" role="alert"></p><div class="form-actions"><button class="secondary" type="submit">检查备份</button></div></form></div>${backupDetail}`) +
     `<div id="online-update">${onlineUpdateHTML()}</div>` +
     panel('上传版本更新','使用本项目“更新版本”目录生成的 ZIP；只接受更高版本。',`<form id="update-form" class="panel-body"><label>更新 ZIP<input name="file" type="file" accept=".zip,application/zip" required></label><p class="form-note">检查版本、文件哈希和主机架构后再应用。只使用你信任的项目更新包；哈希校验用于检查文件完整性。</p><p class="form-note">${supported?'维护时短暂停止服务，新程序启动检查失败会回滚。':'此部署可导出备份及检查上传包。应用更新或恢复需要 Linux 安装脚本或新版 Docker 启动方式。'}</p><p class="error" role="alert"></p><div class="form-actions"><button type="submit" class="secondary">检查更新包</button></div></form>${updateDetail}`) +
     `<div class="app-version"><b>Gatehouse</b><button class="secondary" data-action="restart-service" ${!supported?'disabled':''}>重启服务</button><span>版本 ${esc(status.version||'加载中')}</span></div>`;
@@ -699,7 +699,7 @@ function render() {
   $('#route-count').textContent=config.routes.length;
   document.querySelectorAll('nav [data-page]').forEach(b=>{b.classList.toggle('active',b.dataset.page===page);if(b.dataset.page===page) b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');});
   let html;
-  if (page==='homepage') html=homepageHTML();
+  if (page==='sunpanel') html=sunPanelHTML();
   if (page==='overview') html=overviewHTML();
   if (page==='routes') html=groupsHTML();
   if (page==='ddns') html=ddnsHTML();
@@ -1064,7 +1064,7 @@ async function submitForm(form, work) {
 }
 document.addEventListener('submit',event=>{
   event.preventDefault(); const form=event.target;
-  if(form.dataset.homepage) return;
+  if(form.id==='sunpanel-form') return;
   if(form.id==='login-form') return submitForm(form,async()=>{ const username=form.elements.username.value,password=form.elements.password.value; form.elements.password.value=''; await api('login','POST',{username,password}); await load(); });
   if(!config) return;
   if(form.id==='account-form') return submitForm(form,()=>saveAdminAccount(form));

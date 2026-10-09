@@ -2,7 +2,7 @@
 
 一个自托管的反向代理与 DDNS 综合管理工具。Go 单进程，中文管理界面内嵌，无需 Node.js、数据库或额外 Web 服务器。
 
-当前版本为 **0.0.37**，安装包见 [GitHub Releases](https://github.com/Mo-SeTian/GateHome/releases/latest)。程序和 systemd 服务名为 `gatehouse`。
+当前版本为 **0.0.38**，安装包见 [GitHub Releases](https://github.com/Mo-SeTian/GateHome/releases/latest)。程序和 systemd 服务名为 `gatehouse`。
 
 ## 主要功能
 
@@ -10,8 +10,8 @@
 - **DDNS 与证书**：多组独立 Cloudflare 凭据、IPv4 / IPv6 同步、网卡或接口获取公网 IP、域名解析列表、Let's Encrypt DNS-01 与泛域名证书。
 - **访问保护**：独立服务账号、IP / CIDR 和订阅规则、Coraza WAF 与 OWASP CRS、自定义 HTTP 规则、限速和自动 IP 冻结。
 - **监控与日志**：可配置概览组件、服务器资源与流量、访问地域分析、独立防火墙记录、分页筛选、日志空间与保留期限。
-- **GateHomePage**：可选开启的浏览器首页、多用户独立桌面、分组分页、自定义图标、背景、搜索引擎与 CSS。
-- **维护**：在线更新、代理下载、加密备份恢复，以及 `config`、`log`、`data` 三目录持久化。
+- **Sun-Panel 浏览器首页**：集成 v1.3.0 开源版，管理页内嵌访问、独立端口、多用户桌面和自身导入导出。
+- **维护**：在线更新、代理下载、加密备份恢复，以及 `config`、`log`、`data`、`sunpanel` 四目录持久化。
 
 反代、DDNS、防火墙和证书任务按组折叠，添加与编辑通过弹窗完成；管理界面适配电脑和手机。访问控制作用于代理层，不修改 Linux 的 nftables / iptables。
 
@@ -43,15 +43,16 @@ docker compose run --rm gatehouse init
 docker compose up -d
 ```
 
-`init` 交互设置管理员账号和管理密码，账号留空保留现有值，首次默认 `admin`；密码输入不回显，长度 12–72 字节。Compose 使用三个宿主机文件夹持久化，并自动为它们设置运行用户权限：
+`init` 交互设置管理员账号和管理密码，账号留空保留现有值，首次默认 `admin`；密码输入不回显，长度 12–72 字节。Compose 使用四个宿主机文件夹持久化，并自动为它们设置运行用户权限：
 
 | 宿主机目录 | 容器目录 | 内容 |
 | --- | --- | --- |
-| `./config` | `/config` | 配置、管理员和服务账号密码哈希、DNS 凭据、IP 冻结名单 |
-| `./log` | `/log` | 项目、反代、防火墙和安全事件日志，以及轮转日志 |
-| `./data` | `/data` | 证书与 ACME 账户、服务图片、Page 独立桌面与图片、订阅缓存、维护数据、可更新的程序 |
+| `./runtime/config` | `/config` | 配置、管理员和服务账号密码哈希、DNS 凭据、IP 冻结名单 |
+| `./runtime/log` | `/log` | 项目、反代、防火墙和安全事件日志，以及轮转日志 |
+| `./runtime/data` | `/data` | 证书与 ACME 账户、服务图片、订阅缓存、维护数据、可更新的程序 |
+| `./runtime/sunpanel` | `/sunpanel` | Sun-Panel 配置、SQLite 数据库、上传文件、自定义文件、运行日志与语言文件 |
 
-保留这三个文件夹，删除容器、重新构建镜像或重新安装后即可恢复原有配置、凭据和日志。有 `config/state.json` 时直接执行 `docker compose up -d`，无需再次运行 `init`；`init` 会重置管理员密码。迁移到另一台机器时，先停止容器，再完整复制三个文件夹。可以修改 Compose 中左侧宿主机路径，容器内的三个路径保持不变。
+保留这四个文件夹，删除容器、重新构建镜像或重新安装后即可恢复原有配置、凭据和日志。有 `runtime/config/state.json` 时直接执行 `docker compose up -d`，无需再次运行 `init`；`init` 会重置管理员密码。迁移到另一台机器时，先停止容器，再完整复制四个文件夹。可以修改 Compose 中左侧宿主机路径，容器内的四个路径保持不变。
 
 `storage-init` 只负责初始化挂载目录的所有权，完成后退出。业务容器始终以 UID/GID `10001` 运行，并保留只读根文件系统与全部 capability 移除配置。
 
@@ -77,6 +78,8 @@ docker compose run --rm gatehouse init
 docker compose up -d
 ```
 
+默认宿主机运行根目录为 `./runtime`，可通过 `GATEHOME_RUNTIME_DIR` 修改；源码 `sunpanel/` 与运行目录 `runtime/sunpanel/` 严格分离。旧版使用仓库根目录 `config/`、`log/`、`data/` 的部署，应先停止容器并备份，将这三个目录移入 `runtime/` 后再启动新版。旧浏览器首页配置不迁移。
+
 ### 从旧版 Docker 命名卷迁移
 
 先停止旧服务，使用 `docker volume ls` 确认原数据卷名称，不要删除旧卷。下面以 `gatehouse_gatehouse-data` 为例；实际名称不同请替换：
@@ -84,11 +87,11 @@ docker compose up -d
 ```sh
 docker compose down
 docker volume inspect gatehouse_gatehouse-data
-mkdir -p config log data
+mkdir -p runtime/config runtime/log runtime/data runtime/sunpanel
 docker compose build
 docker run --rm --user 0 --entrypoint /bin/sh \
   --mount type=volume,source=gatehouse_gatehouse-data,target=/legacy,readonly \
-  --mount type=bind,source="$(pwd)/data",target=/target \
+  --mount type=bind,source="$(pwd)/runtime/data",target=/target \
   gatehouse:local -c 'cp -a /legacy/. /target/'
 docker compose up -d
 ```
@@ -126,7 +129,7 @@ sudo bash /tmp/gatehome-install.sh install --proxy "$GATEHOME_INSTALL_PROXY"
 
 下载使用 HTTP/1.1；TLS 连接中断等下载错误会清除残缺文件并重试，最多尝试 4 次。下载和校验成功后才修改安装。如果出现 `curl: (56)` / `unexpected eof while reading`，说明下载连接提前断开；请检查服务器的网络或代理规则。使用 MSM 等分流工具时，安装需要访问 `raw.githubusercontent.com`、`github.com` 和 `release-assets.githubusercontent.com`。仍无法下载时，可在其他能访问 GitHub 的设备下载下面的安装包，复制到服务器离线安装。
 
-离线安装可使用 `make release` 生成的 **`版本/0.0.37/`** 完整目录，或解压 Release 中对应架构的 `gatehome-linux-*.tar.gz`，然后运行：
+离线安装可使用 `make release` 生成的 **`版本/0.0.38/`** 完整目录，或解压 Release 中对应架构的 `gatehome-linux-*.tar.gz`，然后运行：
 
 ```sh
 sudo bash install.sh
@@ -138,14 +141,15 @@ sudo bash install.sh
 
 - `/etc/gatehome/config`：配置、账号密码哈希、凭据、IP 冻结名单。
 - `/etc/gatehome/log`：全部项目、反代、防火墙与安全事件日志、轮转日志。
-- `/etc/gatehome/data`：证书、ACME 账户、服务图片、`page` 独立桌面目录、订阅缓存及维护数据。
+- `/etc/gatehome/data`：证书、ACME 账户、服务图片、订阅缓存及维护数据。
+- `/etc/gatehome/sunpanel`：Sun-Panel 全部运行数据，与 `data` 同级。
 - `/etc/gatehome/launcher`、`/etc/gatehome/app`：启动器和可更新的业务程序。
 
 重新安装会保留三个持久化目录及管理员账户。旧 `/var/lib/gatehouse` 数据会在停服后复制并迁移，原目录保留。服务使用普通用户运行。只读的 `launcher` 管理可更新的子程序，Web 更新无需给服务 root 或 sudo 权限。默认管理监听为 `0.0.0.0:16666`，在局域网设备浏览器中打开 `http://服务器局域网IP:16666` 即可访问，无需 SSH 隧道。安装脚本也会列出主机 IPv4 地址。
 
 安装完成后，`systemctl status gatehouse` 查看状态，`journalctl -u gatehouse` 查看启动诊断，`systemctl restart gatehouse` 使监听变更生效。
 
-卸载会先要求输入 `UNINSTALL`，移除程序及 systemd 服务，默认保留配置、Token、证书和日志。只有另行输入 `DELETE DATA` 才永久删除 `config`、`log`、`data` 三个目录。重新安装使用保留的数据，不会重置密码。通过右上角账户按钮可以在线修改管理员账号密码；忘记账户时先停止服务，再运行：
+卸载会先要求输入 `UNINSTALL`，移除程序及 systemd 服务，默认保留配置、Token、证书和日志。只有另行输入 `DELETE DATA` 才永久删除 `config`、`log`、`data`、`sunpanel` 四个目录。重新安装使用保留的数据，不会重置密码。通过右上角账户按钮可以在线修改管理员账号密码；忘记账户时先停止服务，再运行：
 
 ```sh
 sudo systemctl stop gatehouse
@@ -167,6 +171,7 @@ cd GateHome
 开发机器需 Go 1.27.1 或更高版本，以及 Python 3（仅打包使用）。在项目根目录运行：
 
 ```sh
+make build
 make test
 make build
 python3 scripts/install_checks.py
@@ -194,13 +199,13 @@ Docker 的可更新程序保存在持久化目录 `/data/app`，镜像中的启�
 
 ## 加密备份与恢复
 
-在 **设置 → 备份与恢复** 填写备份密码并下载 ZIP；密码没有长度限制，也可以留空，留空时恢复也无需填写密码。备份覆盖全部已保存的业务数据：所有配置项、各 DNS 组与证书任务凭据、出站代理密码、管理员和每个服务的密码哈希、IP 冻结名单、证书与 ACME 账户私钥、反代服务图片、所有 Page 账号及各自桌面的分组、链接、图标、背景图片、搜索引擎和自定义 CSS、当前及轮转日志、已配置订阅的下载缓存。登录会话、未保存的扫描结果及图片、维护暂存文件和程序文件不包含在内。单个备份内容上限为 64 MiB，超出时明确失败，不截断数据。
+在 **设置 → 备份与恢复** 填写备份密码并下载 ZIP；密码没有长度限制，也可以留空，留空时恢复也无需填写密码。备份覆盖全部已保存的业务数据：所有配置项、各 DNS 组与证书任务凭据、出站代理密码、管理员和每个服务的密码哈希、IP 冻结名单、证书与 ACME 账户私钥、反代服务图片、Sun-Panel 配置、数据库、全部上传文件、自定义文件、运行日志和语言文件、当前及轮转日志、已配置订阅的下载缓存。GateHome 内存登录会话、未保存的扫描结果及图片、维护暂存文件和程序文件不包含在内。单个备份内容上限为 64 MiB，超出时明确失败，不截断数据。
 
 新备份使用 `gatehouse-backup-v2` 格式，旧程序明确拒绝，新版本继续支持 `gatehouse-backup-v1` 旧备份。ZIP 内是清单和 AES-256-GCM 加密数据，密钥由 scrypt 从备份密码派生。普通解压工具不会显示明文配置，需要在 Gatehouse 中输入导出时的密码恢复。请分别保存 ZIP 和密码，忘记备份密码无法解密。备份密码不持久化、不记日志；运行所需凭据仍保存在本机权限 `0600` 的配置文件里。
 
-上传备份并输入密码，软件先校验和显示配置数量预览，确认后才恢复。新备份恢复覆盖配置、凭据、冻结名单、证书、服务图片、首页背景、日志和订阅缓存，使用备份时的管理员账号和管理密码重新登录。0.0.18 及以前的备份继续支持，保留它们未包含的现有日志和缓存；检查页面明确显示覆盖范围。拒绝损坏、密码不正确、来自更高版本或端口冲突的备份。启动检查失败会恢复维护前的数据和程序；旧订阅缓存只在来源匹配时使用。
+上传备份并输入密码，软件先校验和显示配置数量预览，确认后才恢复。新备份恢复覆盖配置、凭据、冻结名单、证书、服务图片、Sun-Panel 数据、日志和订阅缓存，使用备份时的管理员账号和管理密码重新登录。0.0.18 及以前的备份继续支持，保留它们未包含的现有日志和缓存；检查页面明确显示覆盖范围。拒绝损坏、密码不正确、来自更高版本或端口冲突的备份。启动检查失败会恢复维护前的数据和程序；旧订阅缓存只在来源匹配时使用。
 
-**旧安装需更新一次启动器及部署布局**：Web 更新只替换业务程序。Linux 请重新执行上述 curl 安装命令，或在最新离线安装目录运行 `sudo bash install.sh`；已有数据和密码保留。Docker 请按旧卷迁移说明保留数据，再使用新版 Dockerfile 和 Compose 重建部署。启动器未更新时，检查页面提示原因并禁用完整恢复，后端也拒绝操作，确保 `data/page`、图片、日志和缓存参与完整恢复与回滚。之后继续正常使用网页更新。
+**旧安装需更新一次启动器及部署布局**：Web 更新只替换业务程序。Linux 请重新执行上述 curl 安装命令，或在最新离线安装目录运行 `sudo bash install.sh`；已有数据和密码保留。Docker 请按旧卷迁移说明保留数据，再使用新版 Dockerfile 和 Compose 重建部署。启动器未更新时，检查页面提示原因并禁用完整恢复，后端也拒绝操作，确保 `sunpanel`、图片、日志和缓存参与完整恢复与回滚。之后继续正常使用网页更新。
 
 备份覆盖检查及图片使用见 [服务图片与备份覆盖说明](docs/route-images-backup-0.0.19.md)。
 
@@ -220,7 +225,7 @@ DDNS 组以域名列表分别显示解析到的 IPv4 / A 与 IPv6 / AAAA，可�
 
 ## 管理员账户与公网访问
 
-管理界面使用管理员账号和密码登录，账号区分大小写，支持 1–64 字节；管理密码为 12–72 字节。点击右上角账户按钮修改账号或密码，须验证当前管理密码，新密码留空只修改账号；保存后所有管理员会话失效，需要重新登录。管理员账户与反代服务访问账号、Page 用户账号分别管理。
+管理界面使用管理员账号和密码登录，账号区分大小写，支持 1–64 字节；管理密码为 12–72 字节。点击右上角账户按钮修改账号或密码，须验证当前管理密码，新密码留空只修改账号；保存后所有管理员会话失效，需要重新登录。管理员账户与反代服务访问账号、Sun-Panel 用户账号分别管理。
 
 通过公网域名访问管理界面时，先通过服务器 IP 进入 **设置 → 管理界面反代访问**，开启“允许指定公网地址反代访问”，填写完整地址，例如 `https://gate.example.com:18443`。协议、域名与端口必须与实际访问地址一致，不包含路径、参数或账号；最多配置 20 个地址。
 
@@ -236,7 +241,7 @@ DDNS 组以域名列表分别显示解析到的 IPv4 / A 与 IPv6 / AAAA，可�
 
 ## 独立服务验证与 IP 冻结
 
-在 **反向代理 → 编辑代理服务 → 此服务的访问账号** 开启独立账号验证，为每条规则配置自己的账号和密码。它与管理界面账号及 Page 用户账号分开；管理员登录不能代替服务验证。
+在 **反向代理 → 编辑代理服务 → 此服务的访问账号** 开启独立账号验证，为每条规则配置自己的账号和密码。它与管理界面账号及 Sun-Panel 用户账号分开；管理员登录不能代替服务验证。
 
 - 未验证的页面、资源、API 和 WebSocket 请求均被拦截，正确账号密码才会访问后端；错误验证返回 401。
 - 账号为 1–64 字节，密码为 12–72 字节，使用 bcrypt 保存哈希。编辑时密码留空保留原值；修改账号、域名或所属组后须重新设置密码。
@@ -256,21 +261,25 @@ Linux 资源数据来自 `/proc`，上传为 TX、下载为 RX，数据量自网
 
 IP 归属地由内嵌 ip2region 双栈离线库查询，显示在日志 IP 下方，不向外部服务发送访客 IP。归属地为估算，数据库随程序发布更新。详见 [概览组件说明](docs/dashboard-0.0.23.md) 和 [记录查询说明](docs/security-records-0.0.17.md)。
 
-## GateHomePage 浏览器首页
+## Sun-Panel 浏览器首页
 
-GateHomePage 可选开启，默认关闭、端口 `16680`。在 GateHome 的 **浏览器首页** 页面管理开关、端口和 Page 账号，启停或修改端口后重启服务。管理员可登录自己的桌面；其他 Page 账号各自拥有独立桌面，不能登录 GateHome 管理界面。
+感谢 [hslr-s/sun-panel](https://github.com/hslr-s/sun-panel)（作者：红烧猎人）。本项目引用并修改 **v1.3.0** 开源源码，保留其 [MIT 许可证](sunpanel/LICENSE)。全部源码位于 [`sunpanel/`](sunpanel/)，具体修改和上游提交见 [集成说明](sunpanel/INTEGRATION.md)。
 
-首页采用海岸背景、紧凑时钟与搜索、图标网格、分组和圆点分页。右上角菜单提供桌面设置、编辑、完成编辑与账号入口；手机端设置为全屏列表，电脑端为居中弹窗。首页加号可添加应用，编辑模式可修改、删除或撤销删除。
+在 GateHome 的 **浏览器首页** 页面开启 Sun-Panel 并设置独立端口（默认 `16680`），保存后重启服务。管理页内嵌访问 `/sunpanel/`，也可将 `http://服务器IP:16680/` 设置为浏览器首页或新标签页地址。Sun-Panel 账号独立于 GateHome；首次登录信息见 [上游部署说明](https://doc.sun-panel.top/zh_cn/usage/quick_deploy.html)，登录后修改密码。
 
-- 分组内支持多页，每页 1–8 行、电脑端 1–8 列、手机端最多 1–5 列，窄屏自动减少列数。新增页面默认 3 行、电脑端 6 列、手机端最多 4 列；容量超出自动续页，支持圆点、键盘、滚轮、鼠标拖动与触摸翻页。
-- 应用支持名称、描述、上传或 URL 图标、内外网链接、置顶、排序和移动页面。在 Page 内可从 GateHome 导入反代服务名称、图片和地址，之后独立修改。
-- 外网链接为默认地址；访问者浏览器确认内网可达后使用内网，失败或受浏览器限制时回退外网。HTTPS 首页访问 HTTP 内网可能需要浏览器本地网络权限。
-- 背景支持上传与 URL 导入，可配置遮罩、时钟颜色、显示组件与自定义 CSS。搜索预置百度和 Google，可增删自定义引擎、地址与图标，搜索地址用 `{query}` 代表关键词。
-- 设置由 Page 自行管理并分别保存，可选择允许访客查看或要求登录。独立桌面位于 `data/page/<用户ID>/`，其中 `config.json` 保存配置，`route-images/` 保存图标，`homepage-backgrounds/` 保存背景；管理员使用 `admin` 目录。账号和密码哈希由 GateHome 保存于 `config/state.json`，所有桌面及已引用图片纳入备份恢复。
+Docker host 网络无需额外映射。bridge 模式可用 `SUNPANEL_PORT=自定义端口 docker compose -f compose.bridge.yaml up -d` 映射端口，必须与管理页保存的端口一致。HTTPS 管理页使用同源嵌入路径；独立首页可经 HTTPS 反代访问。
 
-Linux host 网络无需额外映射端口。Docker bridge 启用首页时，将对应端口（如 `16680:16680`）加入 `compose.bridge.yaml` 并重建容器。首页使用 HTTP，公网可通过单独 HTTPS 域名反代到 `http://服务器IP:16680`。旧安装需用最新安装脚本更新启动器，Docker 保留三个挂载目录后重建镜像，确保 `data/page` 完整恢复与回滚。旧自定义 CSS 若依赖宽卡片结构，需要适配当前图标布局。
+| 用途 | 位置 |
+| --- | --- |
+| Git 提交的完整源码 | `sunpanel/` |
+| Docker 容器运行数据 | `/sunpanel`，与 `/data` 同级 |
+| Compose 宿主机运行数据 | `runtime/sunpanel/`，与 `runtime/data/` 同级 |
+| Linux 安装数据 | `/etc/gatehome/sunpanel/`，与 `/etc/gatehome/data/` 同级 |
+| 本地开发数据 | `.local/runtime/sunpanel/` |
 
-详见 [桌面布局说明](docs/homepage-0.0.37.md) 和 [Page 账号与数据管理](docs/homepage-0.0.34.md)。
+运行目录包含 `conf/`、`database/`、`uploads/`、`custom/`、`runtime/`、`lang/`。本集成固定使用本地 SQLite 和内存缓存，保证业务数据都在此目录；前端及后端随 GateHome 程序一同构建与升级。
+
+整站加密备份包含 Sun-Panel 全部数据，备份时会短暂停止并重新启动 Sun-Panel，以取得一致快照；恢复和失败回滚均包含此目录。保留 Sun-Panel 自带的“导入导出”（v1.3.0 支持分组及项目 JSON，不包含数据库账号及上传文件，完整迁移请使用整站备份）。旧浏览器首页实现已移除，旧首页配置与账号不迁移；旧备份中的这部分数据会被忽略，保留功能仍可恢复。
 
 ## 防火墙与 IP 组
 
@@ -320,7 +329,7 @@ Linux host 网络无需额外映射端口。Docker bridge 启用首页时，将�
 - 管理员密码使用 bcrypt；登录使用 12 小时 HttpOnly / SameSite=Strict 会话，支持退出登录、登录限速、请求来源校验。重启使所有会话失效。
 - 保存配置有版本检查，多页面旧配置不会悄悄覆盖新配置。代理与访问策略立即生效，监听端口及反代组监听启停重启后生效。旧版本的全局端口及代理规则会自动迁移到“默认组”，保留密码、Token 与证书。
 - 请求计数和最近 60 条任务事件保存在内存，重启清零。调用日志另行持久化，见下文；不记录请求正文、查询参数、认证头、密码、Token 或外部服务原始错误正文。
-- 备份完整的 `config`、`log`、`data` 三个目录，并限制备份访问权限。删除路由不删除已有证书文件；恢复同域名时可继续使用有效证书。
+- 备份完整的 `config`、`log`、`data`、`sunpanel` 四个目录，并限制备份访问权限。删除路由不删除已有证书文件；恢复同域名时可继续使用有效证书。
 
 ## 出站代理
 
@@ -347,9 +356,8 @@ make test
 node scripts/frontend_checks.mjs
 node scripts/motion_checks.mjs
 node scripts/security_checks.mjs
-make build
-./dist/gatehouse -config ./config -log ./log -data ./data init
-./dist/gatehouse -config ./config -log ./log -data ./data
+./dist/gatehouse -config ./.local/runtime/config -log ./.local/runtime/log -data ./.local/runtime/data init
+./dist/gatehouse -config ./.local/runtime/config -log ./.local/runtime/log -data ./.local/runtime/data
 ```
 
 测试使用本地假后端、模拟 Cloudflare API 和测试证书，不需要真实 Token、不修改真实 DNS，也不消耗 Let's Encrypt 签发额度。覆盖防火墙首条匹配/包含/排除/默认动作/跨服务复用/无防火墙、旧访问策略迁移、组间同域名隔离、端口冲突与旧配置迁移、订阅解析/热更新/缓存恢复/失败保留/过时下载隔离、域名分流、未知/停用域名、转发头防伪、IPv4/IPv6 规则、WebSocket 升级和双向流、TLS 限制、DDNS 更新/冲突、配置持久化、会话/CSRF/脱敏、证书热加载/环境隔离/到期判断。
@@ -365,4 +373,4 @@ make build
 - [Cloudflare DNS API](https://developers.cloudflare.com/api/resources/dns/subresources/records/)
 - [lego Cloudflare provider](https://go-acme.github.io/lego/dns/cloudflare/)
 
-参考 Lucky 的使用场景，当前项目独立实现，未复制其源码或品牌素材。
+反代与 DDNS 功能参考 Lucky 的使用场景，未复制其源码或品牌素材；浏览器首页基于上述 Sun-Panel 开源项目。

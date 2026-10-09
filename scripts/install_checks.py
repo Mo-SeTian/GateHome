@@ -65,7 +65,7 @@ shutil.copy2(Path(os.environ['QA_ASSETS'])/name,output)
     environment = os.environ | {'QA_PREFIX': str(prefix), 'QA_LEGACY': str(legacy), 'QA_PACKAGE': str(package), 'QA_ASSETS': str(assets), 'QA_SYSTEMD': str(temp / 'systemd'), 'QA_CURL_COUNTER': str(temp / 'curl-attempts'), 'TMPDIR': str(temp / 'tmp'), 'PATH': str(temp) + os.pathsep + os.environ['PATH']}
     # Privilege and systemd commands are the only mocked installation operations.
     shell = '''source "$QA_PACKAGE/install.sh"
-INSTALL_DIR="$QA_PREFIX"; CONFIG_DIR="$INSTALL_DIR/config"; LOG_DIR="$INSTALL_DIR/log"; DATA_DIR="$INSTALL_DIR/data"
+INSTALL_DIR="$QA_PREFIX"; CONFIG_DIR="$INSTALL_DIR/config"; LOG_DIR="$INSTALL_DIR/log"; DATA_DIR="$INSTALL_DIR/data"; SUNPANEL_DIR="$INSTALL_DIR/sunpanel"
 LEGACY_DATA_DIR="$QA_LEGACY"; SERVICE_FILE="$QA_SYSTEMD/gatehouse.service"
 require_linux() { :; }
 ensure_ca_certificates() { :; }
@@ -109,26 +109,27 @@ trap '[[ -z "$DOWNLOAD_DIR" ]] || rm -rf -- "$DOWNLOAD_DIR"' EXIT
             raise AssertionError('Installer check failed; exit code ' + str(process.returncode))
         return out
     def snapshot():
-        return {file.relative_to(prefix).as_posix(): file.read_bytes() for folder in ('config', 'log', 'data') for file in (prefix / folder).rglob('*') if file.is_file()}
+        return {file.relative_to(prefix).as_posix(): file.read_bytes() for folder in ('config', 'log', 'data', 'sunpanel') for file in (prefix / folder).rglob('*') if file.is_file()}
 
     execute('install_gatehouse', '\nTEST_ONLY_INSTALL_PASSWORD\nTEST_ONLY_INSTALL_PASSWORD\n')
     assert (prefix / 'config/state.json').is_file() and not (prefix / 'data/state.json').exists()
-    for folder in ('log', 'data'): assert (prefix / folder).is_dir()
+    for folder in ('log', 'data', 'sunpanel'): assert (prefix / folder).is_dir()
     (prefix / 'log/calls.jsonl').write_text('{"id":1,"message":"TEST_ONLY_LOG"}\n')
     (prefix / 'log/calls.jsonl.1').write_text('{"id":0,"message":"TEST_ONLY_ROTATED_LOG"}\n')
-    for folder in ('certificates', 'route-images', 'homepage-backgrounds', 'subscriptions'):
+    for folder in ('certificates', 'route-images', 'subscriptions'):
         (prefix / 'data' / folder).mkdir(mode=0o700)
         (prefix / 'data' / folder / 'fixture').write_bytes(b'TEST_ONLY_PERSISTENT_DATA')
+    (prefix / 'sunpanel' / 'fixture').write_bytes(b'TEST_ONLY_SUNPANEL_DATA')
     before = snapshot()
     execute('install_gatehouse')
     assert snapshot() == before, 'Reinstall reset saved credentials or files.'
     execute('uninstall_gatehouse', 'UNINSTALL\n\n')
     assert snapshot() == before and not (prefix / 'launcher').exists() and not (prefix / 'app').exists()
-    print('Installer: first install, password initialization, reinstall and uninstall retain config/log/data: PASS')
+    print('Installer: first install, password initialization, reinstall and uninstall retain config/log/data/sunpanel: PASS')
 
     shutil.copy2(prefix / 'config/state.json', legacy / 'state.json')
     shutil.copytree(prefix / 'log', legacy / 'logs')
-    for folder in ('certificates', 'route-images', 'homepage-backgrounds', 'subscriptions'):
+    for folder in ('certificates', 'route-images', 'subscriptions'):
         shutil.copytree(prefix / 'data' / folder, legacy / folder)
     environment['QA_PREFIX'] = str(temp / 'migrated')
     old_files = {p.relative_to(legacy).as_posix(): p.read_bytes() for p in legacy.rglob('*') if p.is_file()}

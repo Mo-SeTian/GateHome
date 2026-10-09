@@ -21,3 +21,8 @@ __pycache__/
 /docs/security-records-0.0.17/
 /docs/service-discovery-0.0.18/
 /docs/route-images-backup-0.0.19/
+
+/runtime/
+
+/sunpanel/service/integration/web/*
+!/sunpanel/service/integration/web/.gitkeep

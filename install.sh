@@ -8,6 +8,7 @@ INSTALL_DIR=/etc/gatehome
 CONFIG_DIR="$INSTALL_DIR/config"
 LOG_DIR="$INSTALL_DIR/log"
 DATA_DIR="$INSTALL_DIR/data"
+SUNPANEL_DIR="$INSTALL_DIR/sunpanel"
 LEGACY_DATA_DIR=/var/lib/gatehouse
 SERVICE_FILE=/etc/systemd/system/gatehouse.service
 DOWNLOAD_DIR=""
@@ -94,12 +95,12 @@ install_gatehouse() {
   systemctl stop gatehouse.service 2>/dev/null || true
   install -d -m 0755 -o root -g root "$INSTALL_DIR"
   install -d -m 0750 -o gatehouse -g gatehouse "$INSTALL_DIR/app"
-  install -d -m 0700 -o gatehouse -g gatehouse "$CONFIG_DIR" "$LOG_DIR" "$DATA_DIR"
+  install -d -m 0700 -o gatehouse -g gatehouse "$CONFIG_DIR" "$LOG_DIR" "$DATA_DIR" "$SUNPANEL_DIR"
   if [[ ! -f "$CONFIG_DIR/state.json" && -f "$LEGACY_DATA_DIR/state.json" ]]; then
     printf '迁移旧版数据；原目录保留在 %s。\n' "$LEGACY_DATA_DIR"
     cp -a -n -- "$LEGACY_DATA_DIR/." "$DATA_DIR/"
   fi
-  chown -R gatehouse:gatehouse "$CONFIG_DIR" "$LOG_DIR" "$DATA_DIR" "$INSTALL_DIR/app"
+  chown -R gatehouse:gatehouse "$CONFIG_DIR" "$LOG_DIR" "$DATA_DIR" "$SUNPANEL_DIR" "$INSTALL_DIR/app"
   install -m 0755 -o root -g root "$binary" "$INSTALL_DIR/launcher"
   install -m 0750 -o gatehouse -g gatehouse "$binary" "$INSTALL_DIR/app/gatehouse"
   runuser -u gatehouse -- "$INSTALL_DIR/app/gatehouse" -config "$CONFIG_DIR" -log "$LOG_DIR" -data "$DATA_DIR" migrate
@@ -117,7 +118,7 @@ WorkingDirectory=$INSTALL_DIR
 ExecStart=
 ExecStart=$INSTALL_DIR/launcher -supervise -managed-root $INSTALL_DIR/app -config $CONFIG_DIR -log $LOG_DIR -data $DATA_DIR -admin 0.0.0.0:16666
 ReadWritePaths=
-ReadWritePaths=$INSTALL_DIR/app $CONFIG_DIR $LOG_DIR $DATA_DIR
+ReadWritePaths=$INSTALL_DIR/app $CONFIG_DIR $LOG_DIR $DATA_DIR $SUNPANEL_DIR
 EOF
   chmod 0644 "${SERVICE_FILE}.d/admin.conf"
   systemctl daemon-reload
@@ -131,7 +132,7 @@ EOF
   [[ "$ready" -eq 1 ]] || fail '程序未通过启动检查，请用 journalctl -u gatehouse.service 检查。'
   systemctl is-active --quiet gatehouse.service || fail '服务未启动，请用 journalctl -u gatehouse.service 检查。'
   printf '\n安装完成。目录：%s\n管理界面：http://服务器局域网IP:16666\n' "$INSTALL_DIR"
-  printf '配置：%s\n日志：%s\n数据：%s\n' "$CONFIG_DIR" "$LOG_DIR" "$DATA_DIR"
+  printf '配置：%s\n日志：%s\n数据：%s\nSun-Panel：%s\n' "$CONFIG_DIR" "$LOG_DIR" "$DATA_DIR" "$SUNPANEL_DIR"
   local address addresses
   addresses="$(hostname -I 2>/dev/null || true)"
   for address in $addresses; do
@@ -142,7 +143,7 @@ EOF
 uninstall_gatehouse() {
   require_linux
   local answer
-  printf '卸载会停止服务并移除程序；默认保留 config、log、data 三个目录。\n'
+  printf '卸载会停止服务并移除程序；默认保留 config、log、data、sunpanel 四个目录。\n'
   read -r -p '确认卸载？输入 UNINSTALL：' answer < /dev/tty
   [[ "$answer" == UNINSTALL ]] || { printf '已取消。\n'; return; }
   systemctl disable --now gatehouse.service 2>/dev/null || true
@@ -151,9 +152,9 @@ uninstall_gatehouse() {
   rm -rf -- "$INSTALL_DIR/app"
   systemctl daemon-reload
   printf '程序已卸载，配置、日志和数据保留在 %s。\n' "$INSTALL_DIR"
-  read -r -p '永久删除这三个目录请输入 DELETE DATA；回车保留：' answer < /dev/tty
+  read -r -p '永久删除这四个目录请输入 DELETE DATA；回车保留：' answer < /dev/tty
   if [[ "$answer" == 'DELETE DATA' ]]; then
-    rm -rf -- "$CONFIG_DIR" "$LOG_DIR" "$DATA_DIR"
+    rm -rf -- "$CONFIG_DIR" "$LOG_DIR" "$DATA_DIR" "$SUNPANEL_DIR"
     rmdir -- "$INSTALL_DIR" 2>/dev/null || true
     printf '数据已删除。\n'
   fi

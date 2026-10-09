@@ -18,6 +18,9 @@ func legacyStorage(data string) StoragePaths {
 }
 
 func (p StoragePaths) file(name string) string {
+	if strings.HasPrefix(name, "sunpanel/") {
+		return filepath.Join(p.sunPanelDir(), filepath.FromSlash(strings.TrimPrefix(name, "sunpanel/")))
+	}
 	if name == "state.json" {
 		return filepath.Join(p.Config, name)
 	}
@@ -28,6 +31,9 @@ func (p StoragePaths) file(name string) string {
 }
 
 func (p StoragePaths) directory(name string) string {
+	if name == "sunpanel" {
+		return p.sunPanelDir()
+	}
 	if name == "logs" {
 		return p.Log
 	}

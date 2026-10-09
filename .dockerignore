@@ -7,3 +7,9 @@
 !internal/
 !internal/**
 internal/**/*_test.go
+!sunpanel/
+!sunpanel/**
+sunpanel/node_modules
+sunpanel/dist
+sunpanel/service/integration/web
+sunpanel/service/**/*_test.go

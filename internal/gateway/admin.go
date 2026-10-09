@@ -23,27 +23,27 @@ import (
 var webFiles embed.FS
 
 type Admin struct {
-	store            *Store
-	proxy            *Proxy
-	certs            *Certificates
-	jobs             *Jobs
-	started          time.Time
-	ports            Config
-	adminPort        int
-	updateMu         sync.Mutex
-	mu               sync.Mutex
-	authMu           sync.RWMutex
-	sessions         map[[32]byte]time.Time
-	homepageSessions map[[32]byte]homepageSession
-	attempts         map[string]routeAttempts
-	activeLogins     int
-	logs             *Logs
-	maintenance      *Maintenance
-	onlineUpdate     onlineUpdateJob
-	dashboard        dashboardCache
-	telemetry        telemetryCollector
-	domainDNS        *domainDNS
-	discovery        serviceDiscovery
+	sunPanel     *SunPanel
+	store        *Store
+	proxy        *Proxy
+	certs        *Certificates
+	jobs         *Jobs
+	started      time.Time
+	ports        Config
+	adminPort    int
+	updateMu     sync.Mutex
+	mu           sync.Mutex
+	authMu       sync.RWMutex
+	sessions     map[[32]byte]time.Time
+	attempts     map[string]routeAttempts
+	activeLogins int
+	logs         *Logs
+	maintenance  *Maintenance
+	onlineUpdate onlineUpdateJob
+	dashboard    dashboardCache
+	telemetry    telemetryCollector
+	domainDNS    *domainDNS
+	discovery    serviceDiscovery
 }
 
 func NewAdmin(store *Store, proxy *Proxy, certs *Certificates, jobs *Jobs, adminPort int) *Admin {
@@ -86,8 +86,6 @@ func decodeBody(w http.ResponseWriter, r *http.Request, v any) bool {
 
 func (a *Admin) Handler() http.Handler {
 	mux := http.NewServeMux()
-	a.homepageAdminRoutes(mux)
-	a.homepageUserRoutes(mux)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { jsonResponse(w, 200, map[string]bool{"ok": true}) })
 	mux.HandleFunc("POST /api/login", a.login)
 	mux.HandleFunc("POST /api/logout", a.requireAuth(a.logout))
@@ -267,7 +265,7 @@ func (a *Admin) Handler() http.Handler {
 	sub, _ := fs.Sub(webFiles, "web")
 	files := http.FileServer(http.FS(sub))
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/" && r.URL.Path != "/app.js" && r.URL.Path != "/style.css" && r.URL.Path != "/icons.svg" && r.URL.Path != "/dashboard.js" && r.URL.Path != "/china-outline.svg" && r.URL.Path != "/homepage-admin.js" && r.URL.Path != "/search-baidu.svg" && r.URL.Path != "/search-google.svg" && r.URL.Path != "/search-generic.svg" {
+		if r.URL.Path != "/" && r.URL.Path != "/app.js" && r.URL.Path != "/style.css" && r.URL.Path != "/icons.svg" && r.URL.Path != "/sunpanel-admin.js" && r.URL.Path != "/dashboard.js" && r.URL.Path != "/china-outline.svg" {
 			http.NotFound(w, r)
 			return
 		}
@@ -290,13 +288,23 @@ func (a *Admin) Handler() http.Handler {
 				a.logs.Add(LogEntry{Category: "admin", Action: "管理 API", Method: r.Method, Path: r.URL.Path, Remote: remoteIP(r.RemoteAddr), Status: status, OK: status < 400, DurationMS: time.Since(started).Milliseconds(), Message: message})
 			}()
 		}
+		if strings.HasPrefix(r.URL.Path, "/sunpanel/") && a.sunPanel != nil {
+			a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != "GET" && r.Method != "HEAD" && !a.requestOriginAllowed(r) {
+					apiError(w, 403, "请求来源未获允许")
+					return
+				}
+				a.sunPanel.Handler().ServeHTTP(w, r)
+			})(w, r)
+			return
+		}
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
 		if r.Method != "GET" && r.Method != "HEAD" {
-			isUpload := r.URL.Path == "/api/maintenance/inspect-update" || r.URL.Path == "/api/maintenance/inspect-backup" || r.URL.Path == "/api/route-images/upload" || r.URL.Path == "/api/homepage-backgrounds/upload"
+			isUpload := r.URL.Path == "/api/maintenance/inspect-update" || r.URL.Path == "/api/maintenance/inspect-backup" || r.URL.Path == "/api/route-images/upload"
 			contentOK := strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") || (isUpload && strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data;"))
 			if r.Header.Get("X-Gatehouse-Request") != "1" || !contentOK {
 				apiError(w, 403, "请求来源验证失败")
@@ -434,11 +442,6 @@ func (a *Admin) putConfig(w http.ResponseWriter, r *http.Request) {
 		apiError(w, 400, "全局 DNS 账户已迁移，请刷新后在组内配置")
 		return
 	}
-	home := input.Config.Homepage
-	if home.Title != "" || home.Tone != "" || home.Public || home.Background != "" || home.CustomCSS != "" || len(home.Groups) != 0 || len(home.SearchEngines) != 0 || home.Widgets != nil {
-		apiError(w, 400, "桌面配置已移至 GateHomePage，请在那里编辑")
-		return
-	}
 	if err := validateAdminPort(input.Config, a.adminPort); err != nil {
 		apiError(w, 400, err.Error())
 		return
@@ -524,3 +527,5 @@ func HashPassword(password []byte) (string, error) {
 }
 
 func (s *Admin) SetLogs(logs *Logs) { s.logs = logs }
+
+func (a *Admin) SetSunPanel(panel *SunPanel) { a.sunPanel = panel }

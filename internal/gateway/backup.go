@@ -45,7 +45,7 @@ func snapshotBackup(dir string, state State) (backupPayload, error) {
 func snapshotBackupPaths(paths StoragePaths, state State) (backupPayload, error) {
 	dir := paths.Data
 	b := backupPayload{State: state, Certificates: map[string][]byte{}, Files: map[string][]byte{}}
-	for _, name := range []string{"certificates", "logs", "subscriptions", "route-images", "homepage-backgrounds", "page"} {
+	for _, name := range []string{"certificates", "logs", "subscriptions", "route-images"} {
 		info, err := os.Lstat(paths.directory(name))
 		if errors.Is(err, os.ErrNotExist) {
 			continue
@@ -96,26 +96,15 @@ func snapshotBackupPaths(paths StoragePaths, state State) (backupPayload, error)
 			seen[route.Image] = true
 		}
 	}
-	for id := range homepageImages(state.Config.Homepage) {
-		if !seen[id] {
-			names = append(names, "route-images/"+id+".img")
-			seen[id] = true
-		}
+	panelNames, err := sunPanelBackupNames(paths)
+	if err != nil {
+		return b, err
 	}
-	if state.Config.Homepage.Background != "" {
-		names = append(names, "homepage-backgrounds/"+state.Config.Homepage.Background+".jpg")
-	}
-	if state.HomepageData {
-		pageNames, err := homepageBackupNames(paths, state)
-		if err != nil {
-			return b, err
-		}
-		names = append(names, pageNames...)
-	}
+	names = append(names, panelNames...)
 	for _, name := range names {
 		path := paths.file(name)
 		info, err := os.Lstat(path)
-		if errors.Is(err, os.ErrNotExist) && !strings.HasPrefix(name, "route-images/") && !strings.HasPrefix(name, "homepage-backgrounds/") {
+		if errors.Is(err, os.ErrNotExist) && !strings.HasPrefix(name, "route-images/") {
 			continue
 		}
 		if err != nil || !info.Mode().IsRegular() {
@@ -230,9 +219,6 @@ func decodeBackup(data []byte, password string) (backupPayload, backupManifest, 
 		return payload, m, errors.New("备份格式与数据范围不一致")
 	}
 	migrateState(&payload.State)
-	if err := migrateHomepageBackup(&payload); err != nil {
-		return payload, m, err
-	}
 	if err := ValidateAdminUsername(payload.State.AdminUsername); err != nil {
 		return payload, m, errors.New("备份的管理员账号数据无效")
 	}
@@ -247,9 +233,6 @@ func decodeBackup(data []byte, password string) (backupPayload, backupManifest, 
 	}
 	if err := validateCredentials(payload.State); err != nil {
 		return payload, m, errors.New("备份中的 DNS 凭据缺失或格式错误")
-	}
-	if err := validateHomepageUsers(payload.State); err != nil {
-		return payload, m, err
 	}
 	for name, data := range payload.Certificates {
 		if !safeCertificateName(name) || len(data) > 1<<20 || !json.Valid(data) {
@@ -279,7 +262,12 @@ type restoreTarget struct {
 func restoreTargets(paths StoragePaths, full bool, incoming map[string][]byte) []restoreTarget {
 	targets := []restoreTarget{{"certificates", paths.directory("certificates"), true}}
 	if full {
-		for _, name := range []string{"route-images", "homepage-backgrounds", "subscriptions", "page"} {
+		if sunPanelFileCount(incoming) > 0 {
+			for _, dir := range sunPanelDirectories {
+				targets = append(targets, restoreTarget{"sunpanel/" + dir, filepath.Join(paths.sunPanelDir(), dir), true})
+			}
+		}
+		for _, name := range []string{"route-images", "subscriptions"} {
 			targets = append(targets, restoreTarget{name, paths.directory(name), true})
 		}
 		if paths.splitLogs() {
@@ -335,7 +323,24 @@ func restoreFilesPaths(paths StoragePaths, state []byte, certificates, files map
 		}
 		defer os.RemoveAll(logStage)
 	}
+	sunStage := ""
+	if sunPanelFileCount(files) > 0 {
+		if info, err := os.Lstat(paths.sunPanelDir()); err == nil && (!info.IsDir() || info.Mode()&os.ModeSymlink != 0) {
+			return errors.New("Sun-Panel 恢复目录无效")
+		}
+		if err := os.MkdirAll(paths.sunPanelDir(), 0700); err != nil {
+			return err
+		}
+		sunStage, err = os.MkdirTemp(paths.sunPanelDir(), ".restore-files-")
+		if err != nil {
+			return err
+		}
+		defer os.RemoveAll(sunStage)
+	}
 	staged := func(name string) string {
+		if sunStage != "" && strings.HasPrefix(name, "sunpanel/") {
+			return filepath.Join(sunStage, strings.TrimPrefix(name, "sunpanel/"))
+		}
 		if logStage != "" && strings.HasPrefix(name, "logs/") {
 			return filepath.Join(logStage, strings.TrimPrefix(name, "logs/"))
 		}
@@ -364,7 +369,7 @@ func restoreFilesPaths(paths StoragePaths, state []byte, certificates, files map
 		if !safeBackupFile(name) {
 			return errors.New("无效的备份数据路径")
 		}
-		if strings.HasPrefix(name, "page/") {
+		if strings.HasPrefix(name, "sunpanel/") {
 			if err := os.MkdirAll(filepath.Dir(staged(name)), 0700); err != nil {
 				return err
 			}

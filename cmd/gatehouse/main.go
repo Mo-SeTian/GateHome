@@ -19,6 +19,7 @@ import (
 
 	"gatehouse/internal/gateway"
 	"golang.org/x/term"
+	"sun-panel/integration"
 )
 
 func main() {
@@ -29,7 +30,8 @@ func main() {
 }
 
 func run() error {
-	data := flag.String("data", "./data", "数据目录")
+	worker := flag.String("sunpanel-worker", "", "内部 Sun-Panel 子进程")
+	data := flag.String("data", "./.local/runtime/data", "数据目录")
 	config := flag.String("config", "", "配置目录；留空沿用数据目录")
 	logsDir := flag.String("log", "", "日志目录；留空沿用数据目录下的 logs")
 	adminAddr := flag.String("admin", "0.0.0.0:16666", "管理界面监听地址")
@@ -37,6 +39,9 @@ func run() error {
 	supervise := flag.Bool("supervise", false, "启动维护管理程序")
 	managedRoot := flag.String("managed-root", "", "可更新的程序目录")
 	flag.Parse()
+	if *worker != "" {
+		return integration.Run(*worker)
+	}
 	if *version {
 		fmt.Println(gateway.Version)
 		return nil
@@ -133,6 +138,14 @@ func run() error {
 	if err != nil {
 		return errors.New("无法打开维护目录")
 	}
+	panel := gateway.NewSunPanel(paths)
+	if c.SunPanel.Enabled {
+		if err := panel.Start(); err != nil {
+			return err
+		}
+	}
+	defer panel.Stop()
+	admin.SetSunPanel(panel)
 	admin.SetMaintenance(maintenance)
 	proxy.SetLogs(logs)
 	subscriptions.SetLogs(logs)
@@ -157,9 +170,9 @@ func run() error {
 			tlsGetters = append(tlsGetters, certs.ForGroup(group.ID))
 		}
 	}
-	if c.Homepage.Enabled {
-		addresses = append(addresses, ":"+strconv.Itoa(c.Homepage.Port))
-		handlers = append(handlers, admin.HomepageHandler())
+	if c.SunPanel.Enabled {
+		addresses = append(addresses, ":"+strconv.Itoa(c.SunPanel.Port))
+		handlers = append(handlers, panel.Handler())
 		tlsGetters = append(tlsGetters, nil)
 	}
 	var listeners []net.Listener
@@ -202,6 +215,8 @@ func run() error {
 	select {
 	case <-ctx.Done():
 	case <-maintenance.RestartSignal():
+	case err := <-panel.Failures():
+		serveErr = err
 	case err := <-errorsCh:
 		if !errors.Is(err, http.ErrServerClosed) {
 			serveErr = errors.New("监听服务意外停止")
@@ -247,8 +262,8 @@ func readAdminUsername(reader io.Reader, current string) (string, error) {
 }
 
 func validateConfigAdminPort(c gateway.Config, adminPort int) error {
-	if c.Homepage.Enabled && c.Homepage.Port == adminPort {
-		return errors.New("首页端口不能与管理端口相同")
+	if c.SunPanel.Enabled && c.SunPanel.Port == adminPort {
+		return errors.New("Sun-Panel 端口不能与管理端口相同")
 	}
 	for _, g := range c.Groups {
 		if g.HTTPPort == adminPort || g.HTTPSPort == adminPort {

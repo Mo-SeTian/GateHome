@@ -109,7 +109,7 @@ func storeRouteImage(dir string, data []byte) (string, error) {
 
 // Only committed rule images enter a backup. Uncommitted uploads expire after a day.
 func pruneRouteImages(dir string, c Config) {
-	keep := homepageImages(c.Homepage)
+	keep := map[string]bool{}
 	for _, r := range c.Routes {
 		keep[r.Image] = true
 	}

@@ -12,16 +12,14 @@ import (
 )
 
 func safeBackupFile(name string) bool {
-	if strings.HasPrefix(name, "page/") {
-		return safeHomepageBackupFile(name)
+	if strings.HasPrefix(name, "sunpanel/") {
+		return safeSunPanelBackupFile(name)
 	}
 	if strings.HasPrefix(name, "logs/") {
 		_, ok := logFileNumber(strings.TrimPrefix(name, "logs/"))
 		return ok
 	}
-	if strings.HasPrefix(name, "homepage-backgrounds/") && strings.HasSuffix(name, ".jpg") {
-		return routeImageID.MatchString(strings.TrimSuffix(strings.TrimPrefix(name, "homepage-backgrounds/"), ".jpg"))
-	}
+
 	if strings.HasPrefix(name, "route-images/") && strings.HasSuffix(name, ".img") {
 		return routeImageID.MatchString(strings.TrimSuffix(strings.TrimPrefix(name, "route-images/"), ".img"))
 	}
@@ -57,11 +55,6 @@ func validateBackupFiles(payload backupPayload) error {
 			if !validRouteImage(id, data) {
 				return errors.New("备份中的反代图片损坏或无效")
 			}
-		case strings.HasPrefix(name, "homepage-backgrounds/"):
-			id := strings.TrimSuffix(strings.TrimPrefix(name, "homepage-backgrounds/"), ".jpg")
-			if !validHomepageBackground(id, data) {
-				return errors.New("备份中的首页背景损坏或无效")
-			}
 		case strings.HasPrefix(name, "logs/"):
 			if len(data) > maxLogBytes {
 				return errors.New("备份日志超过大小限制")
@@ -92,21 +85,13 @@ func validateBackupFiles(payload backupPayload) error {
 			return errors.New("备份缺少反代规则使用的图片")
 		}
 	}
-	for id := range homepageImages(payload.State.Config.Homepage) {
-		if payload.Files["route-images/"+id+".img"] == nil {
-			return errors.New("备份缺少首页图片")
-		}
-	}
-	if id := payload.State.Config.Homepage.Background; id != "" && payload.Files["homepage-backgrounds/"+id+".jpg"] == nil {
-		return errors.New("备份缺少首页背景图片")
-	}
-	return validateHomepageBackup(payload)
+	return nil
 }
 
 func backupFileCounts(payload backupPayload) (images, logs, caches int) {
 	for name, data := range payload.Files {
 		switch {
-		case strings.HasPrefix(name, "route-images/"), strings.HasPrefix(name, "homepage-backgrounds/"), strings.HasPrefix(name, "page/") && (strings.Contains(name, "/route-images/") || strings.Contains(name, "/homepage-backgrounds/")):
+		case strings.HasPrefix(name, "route-images/"):
 			images++
 		case strings.HasPrefix(name, "logs/"):
 			logs += bytes.Count(data, []byte("\n"))

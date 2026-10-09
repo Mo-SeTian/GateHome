@@ -67,7 +67,6 @@ func (p *Proxy) configurePrepared(c Config, hashes map[string]string, firewalls 
 		u, _ := url.Parse(r.Upstream)
 		upstream := u
 		adminUpstream := isAdminUpstream(upstream, p.adminPort, adminAddresses)
-		homepageUpstream := c.Homepage.Enabled && isAdminUpstream(upstream, c.Homepage.Port, adminAddresses)
 		h := &httputil.ReverseProxy{
 			Rewrite: func(pr *httputil.ProxyRequest) {
 				pr.SetURL(upstream)
@@ -81,9 +80,6 @@ func (p *Proxy) configurePrepared(c Config, hashes map[string]string, firewalls 
 				if !adminUpstream {
 					stripAdminCookies(pr.Out)
 				}
-				if !homepageUpstream {
-					stripSessionCookie(pr.Out, "gatehomepage_session")
-				}
 				pr.SetXForwarded()
 			},
 			Transport: &http.Transport{Proxy: nil, DialContext: (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
@@ -91,9 +87,6 @@ func (p *Proxy) configurePrepared(c Config, hashes map[string]string, firewalls 
 			ModifyResponse: func(response *http.Response) error {
 				if !adminUpstream {
 					stripAdminResponseCookies(response)
-				}
-				if !homepageUpstream {
-					stripSessionResponseCookie(response, "gatehomepage_session")
 				}
 				return stripRouteResponseCookies(response)
 			},

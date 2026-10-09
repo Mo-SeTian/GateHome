@@ -261,6 +261,7 @@ func TestMaintenanceAPIBackupAuthAndUploadCSRF(t *testing.T) {
 
 func TestRestartUsesCompatibleUpdateProtocol(t *testing.T) {
 	t.Setenv("GATEHOUSE_SUPERVISED", "1")
+	t.Setenv("GATEHOUSE_SUNPANEL_STORAGE", "1")
 	a, _ := testAdmin(t)
 	dir := filepath.Dir(a.store.path)
 	app := t.TempDir()

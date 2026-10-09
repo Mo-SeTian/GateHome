@@ -16,9 +16,12 @@ if not re.fullmatch(r"(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,
     raise SystemExit("Invalid VERSION")
 
 # Generated artifacts and private runtime data are never part of a release.
-excluded = {".git", ".local", ".agents", "skills-lock.json", "config", "log", "data", "dist", "版本", "更新版本", "__pycache__", ".DS_Store", "state.json", "calls.jsonl", "backup.enc", "restore-staged.json", "rollback.json", "ui-redesign-2026-10-08", "waf-0.0.16", "security-records-0.0.17", "service-discovery-0.0.18", "route-images-backup-0.0.19", "design-qa.md"}
+excluded = {".git", "node_modules", "runtime", ".local", ".agents", "skills-lock.json", "config", "log", "data", "dist", "版本", "更新版本", "__pycache__", ".DS_Store", "state.json", "calls.jsonl", "backup.enc", "restore-staged.json", "rollback.json", "ui-redesign-2026-10-08", "waf-0.0.16", "security-records-0.0.17", "service-discovery-0.0.18", "route-images-backup-0.0.19", "design-qa.md"}
 def private(path):
-    return any(part in excluded or part.startswith(".env") for part in path.parts) or path.suffix in {".key", ".pem", ".test"}
+    if path.as_posix().startswith("sunpanel/service/integration/web/"):
+        return True
+    return path.parts[0] in excluded or any(part in {"node_modules", ".git", "__pycache__", ".DS_Store", "dist"} or part.startswith(".env") for part in path.parts) or path.suffix in {".key", ".pem", ".test"}
+
 
 versions = ROOT / "版本"
 updates = ROOT / "更新版本"

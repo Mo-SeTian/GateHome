@@ -13,10 +13,13 @@ services:
       - "16666:16666"
       - "18080:18080"
       - "18443:18443"
+      # Match this container port to the port configured in GateHome.
+      - "${SUNPANEL_PORT:-16680}:${SUNPANEL_PORT:-16680}"
     volumes:
-      - ./config:/config
-      - ./log:/log
-      - ./data:/data
+      - ${GATEHOME_RUNTIME_DIR:-./runtime}/config:/config
+      - ${GATEHOME_RUNTIME_DIR:-./runtime}/log:/log
+      - ${GATEHOME_RUNTIME_DIR:-./runtime}/data:/data
+      - ${GATEHOME_RUNTIME_DIR:-./runtime}/sunpanel:/sunpanel
     read_only: true
     cap_drop:
       - ALL
@@ -29,11 +32,12 @@ services:
     user: "0:0"
     network_mode: none
     entrypoint: ["/bin/sh", "-c"]
-    command: ["chown -R 10001:10001 /config /log /data && chmod 700 /config /log /data"]
+    command: ["chown -R 10001:10001 /config /log /data /sunpanel && chmod 700 /config /log /data /sunpanel"]
     volumes:
-      - ./config:/config
-      - ./log:/log
-      - ./data:/data
+      - ${GATEHOME_RUNTIME_DIR:-./runtime}/config:/config
+      - ${GATEHOME_RUNTIME_DIR:-./runtime}/log:/log
+      - ${GATEHOME_RUNTIME_DIR:-./runtime}/data:/data
+      - ${GATEHOME_RUNTIME_DIR:-./runtime}/sunpanel:/sunpanel
     read_only: true
     cap_drop:
       - ALL

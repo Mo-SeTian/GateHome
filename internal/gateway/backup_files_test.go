@@ -58,7 +58,7 @@ func fullBackupFixture(t *testing.T) (string, backupPayload) {
 }
 func TestBackupAllPersistentDataRoundTrip(t *testing.T) {
 	_, payload := fullBackupFixture(t)
-	if images, logs, caches := backupFileCounts(payload); images != 1 || logs != 2 || caches != 1 || len(payload.Files) != 5 || payload.Files["page/admin/config.json"] == nil || len(payload.Certificates) != 2 {
+	if images, logs, caches := backupFileCounts(payload); images != 1 || logs != 2 || caches != 1 || len(payload.Files) != 4 || len(payload.Certificates) != 2 {
 		t.Fatal("snapshot omitted persistent data or included temporary data")
 	}
 	encrypted, err := encodeBackup(payload, "TEST_ONLY_BACKUP_PASSWORD")
@@ -90,11 +90,11 @@ func TestBackupAllPersistentDataRoundTrip(t *testing.T) {
 		t.Fatal("restored configuration, credentials or freeze records changed")
 	}
 	for name, want := range decoded.Files {
-		got, err := os.ReadFile(filepath.Join(dest, filepath.FromSlash(name)))
+		got, err := os.ReadFile(legacyStorage(dest).file(name))
 		if err != nil || !bytes.Equal(got, want) {
 			t.Fatal("persistent file was not restored")
 		}
-		info, _ := os.Stat(filepath.Join(dest, filepath.FromSlash(name)))
+		info, _ := os.Stat(legacyStorage(dest).file(name))
 		if info.Mode().Perm() != 0600 {
 			t.Fatal("restored file is not private")
 		}
@@ -222,6 +222,7 @@ func TestBackupRestoreAtomicFailureAndSupervisorRollback(t *testing.T) {
 	m.backupFiles = false
 	writeJSON(filepath.Join(m.dir, "restore-staged.json"), p)
 	m.supervised = true
+	m.sunPanelFiles = true
 	m.stage = &maintenanceStage{ID: "test-stage", Kind: "restore", Version: Version, Created: time.Now()}
 	if runtime.GOOS == "linux" {
 		if err := m.schedule("test-stage", "restore"); err == nil {
