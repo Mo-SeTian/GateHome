@@ -135,6 +135,7 @@ func TestHomepageUsersOwnDesktopIsolation(t *testing.T) {
 	document, _ := a.store.pages.snapshot(bob)
 	home := cloneHomepage(document.Homepage)
 	home.Title = "TEST_ONLY_BOB_PRIVATE_DESKTOP"
+	home.ClockColor = "#123456"
 	dir, _ := homepageSpaceDirectory(a.store.paths.Data, bob)
 	image, _ := storeRouteImage(dir, testRoutePNG(t, 32, 20))
 	home.SearchEngines[0].Image = image
@@ -156,6 +157,7 @@ func TestHomepageUsersOwnDesktopIsolation(t *testing.T) {
 	aliceDocument, _ := a.store.pages.snapshot(alice)
 	changed := cloneHomepage(aliceDocument.Homepage)
 	changed.Title = "TEST_ONLY_ALICE_DESKTOP"
+	changed.ClockColor = "#abcdef"
 	beforeBob, _ := a.store.pages.snapshot(bob)
 	input := homepageDocument{Homepage: changed, Revision: aliceDocument.Revision}
 	if adminRequest(page, "PUT", "/api/editor/config?space="+bob, input, aliceCookie, "").Code != 200 {
@@ -211,6 +213,7 @@ func TestHomepageUsersBackupAndLegacyMigration(t *testing.T) {
 	id := addHomepageUserForTest(t, a, admin, loginForTest(t, admin), "TEST_ONLY_RESTORE_USER")
 	document, _ := a.store.pages.snapshot(id)
 	document.Homepage.Title = "TEST_ONLY_INDEPENDENT_SPACE"
+	document.Homepage.ClockColor = "#123456"
 	if _, err := a.store.pages.update(id, document.Homepage, document.Revision); err != nil {
 		t.Fatal("user desktop fixture failed")
 	}

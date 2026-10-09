@@ -2,7 +2,7 @@
 
 一个自托管的反向代理与 DDNS 综合管理工具。Go 单进程，中文管理界面内嵌，无需 Node.js、数据库或额外 Web 服务器。
 
-当前版本为 **0.0.35**。目前支持多个 DNS 组分别配置根域名、服务商和凭据（当前支持 Cloudflare），以及 HTTP / HTTPS / WebSocket 代理。访问控制属于代理层，不修改 Linux 的 nftables / iptables。
+当前版本为 **0.0.36**。目前支持多个 DNS 组分别配置根域名、服务商和凭据（当前支持 Cloudflare），以及 HTTP / HTTPS / WebSocket 代理。访问控制属于代理层，不修改 Linux 的 nftables / iptables。
 
 ## 网络结构
 
@@ -115,7 +115,7 @@ sudo bash /tmp/gatehome-install.sh install --proxy "$GATEHOME_INSTALL_PROXY"
 
 下载使用 HTTP/1.1；TLS 连接中断等下载错误会清除残缺文件并重试，最多尝试 4 次。下载和校验成功后才修改安装。如果出现 `curl: (56)` / `unexpected eof while reading`，说明下载连接提前断开；请检查服务器的网络或代理规则。使用 MSM 等分流工具时，安装需要访问 `raw.githubusercontent.com`、`github.com` 和 `release-assets.githubusercontent.com`。仍无法下载时，可在其他能访问 GitHub 的设备下载下面的安装包，复制到服务器离线安装。
 
-离线安装可使用 `make release` 生成的 **`版本/0.0.35/`** 完整目录，或解压 Release 中对应架构的 `gatehome-linux-*.tar.gz`，然后运行：
+离线安装可使用 `make release` 生成的 **`版本/0.0.36/`** 完整目录，或解压 Release 中对应架构的 `gatehome-linux-*.tar.gz`，然后运行：
 
 ```sh
 sudo bash install.sh
@@ -581,3 +581,7 @@ GateHome 的“浏览器首页”只管理首页开关、端口与 Page 账号�
 GateHomePage 使用彩霞背景与半透明卡片，黑色时钟、日期和搜索框在顶部居中，品牌位于底部。编辑桌面、账号切换和退出登录集中到右下角浮动菜单；分组、圆点翻页、鼠标滚轮与拖动、多用户独立桌面和自定义背景/CSS 保留。手机端按照可用宽度自动调整列数。
 
 应用默认使用外网链接；访问者浏览器确认内网服务可达后改用内网链接，探测失败、超时或浏览器阻止请求时回退外网。只配置单一地址时直接使用该地址。探测不携带 Cookie、请求体或 Referer，不由服务器代替访客判断内网。HTTPS 页面访问 HTTP 内网可能需要浏览器的本地网络权限，详见 [新版主题与地址选择说明](docs/homepage-0.0.35.md)。
+
+## 0.0.36：时钟颜色与完成编辑
+
+GateHomePage 的“编辑桌面 → 桌面设置”增加时钟文字颜色，可使用色块选择器或输入 `#RRGGBB` 色值，默认黑色。颜色按用户独立保存，随桌面配置备份恢复；旧桌面自动使用默认值。“完成编辑”位于右下角展开的浮动菜单，显示勾选图标，点击后退出编辑并收起菜单。

@@ -45,6 +45,9 @@ func homepageSpaceIDs(state State) []string {
 
 func normalizeHomepage(c *HomepageConfig) {
 	c.Enabled, c.Port = false, 0
+	if c.ClockColor == "" {
+		c.ClockColor = "#000000"
+	}
 	if c.Groups == nil {
 		c.Groups = []HomepageGroup{}
 	}

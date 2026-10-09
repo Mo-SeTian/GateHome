@@ -19,6 +19,7 @@ func homepageFixture(t *testing.T, a *Admin) HomepageConfig {
 	t.Helper()
 	h := defaultHomepage()
 	normalizeHomepage(&h)
+	h.ClockColor = "#8547d1"
 	h.CustomCSS = ".gh-main { max-width: 1200px; }"
 	engineIcon, err := storeRouteImage(filepath.Join(a.store.paths.Data, "page", homepageAdminSpace), testRoutePNG(t, 48, 32))
 	if err != nil {
@@ -36,6 +37,59 @@ func homepageFixture(t *testing.T, a *Admin) HomepageConfig {
 	h.Background = background
 	h.Groups = []HomepageGroup{{ID: "home", Name: "家庭", Pages: []HomepagePage{{ID: "daily", Name: "日常", Rows: 2, Columns: 3, MobileColumns: 2, Links: []HomepageLink{{ID: "nas", Name: "NAS", LAN: "http://192.168.2.10:5000/", WAN: "https://nas.example.test/", Image: icon, Favorite: true}}}}}}
 	return h
+}
+
+func TestHomepageClockColorValidationAndPersistence(t *testing.T) {
+	h := defaultHomepage()
+	if h.ClockColor != "#000000" {
+		t.Fatal("default clock color changed")
+	}
+	for _, color := range []string{"", "#000000", "#FFFFFF", "#85a7D1"} {
+		h.ClockColor = color
+		if validateHomepage(h, nil) != nil {
+			t.Fatal("valid clock color rejected")
+		}
+	}
+	for _, color := range []string{"red", "transparent", "#fff", "#12345678", "#gggggg", " #123456", "#123456\n", "#123456;display:none"} {
+		h.ClockColor = color
+		if validateHomepage(h, nil) == nil {
+			t.Fatal("invalid clock color accepted")
+		}
+	}
+	h.ClockColor = ""
+	wanted := cloneHomepage(h)
+	wanted.ClockColor = "#000000"
+	normalizeHomepage(&wanted)
+	normalizeHomepage(&h)
+	if !reflect.DeepEqual(h, wanted) {
+		t.Fatal("legacy clock default changed other content")
+	}
+	a, _ := testAdmin(t)
+	setupHomepage(t, a, h)
+	page := a.HomepageHandler()
+	cookie := homepageLoginForTest(t, page, "admin", "TEST_ONLY_ADMIN_PASSWORD")
+	document, _ := a.store.pages.snapshot(homepageAdminSpace)
+	document.Homepage.ClockColor = "#8547d1"
+	if adminRequest(page, "PUT", "/api/editor/config", document, cookie, "").Code != 200 {
+		t.Fatal("clock color save failed")
+	}
+	saved, _ := a.store.pages.snapshot(homepageAdminSpace)
+	if saved.Homepage.ClockColor != "#8547d1" {
+		t.Fatal("saved clock color lost")
+	}
+	loaded, err := readHomepageDocument(a.store.paths.Data, homepageAdminSpace)
+	if err != nil || !reflect.DeepEqual(saved, loaded) {
+		t.Fatal("clock color did not survive reading from disk")
+	}
+	invalid := loaded
+	invalid.Homepage.ClockColor = "#123456;display:none"
+	if adminRequest(page, "PUT", "/api/editor/config", invalid, cookie, "").Code != http.StatusBadRequest {
+		t.Fatal("API accepted invalid clock color")
+	}
+	after, _ := a.store.pages.snapshot(homepageAdminSpace)
+	if !reflect.DeepEqual(saved, after) {
+		t.Fatal("invalid color changed desktop or revision")
+	}
 }
 
 func TestHomepageSearchEnginesValidationAndMigration(t *testing.T) {

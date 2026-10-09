@@ -4,3 +4,5 @@
 #ghe-dialog .ghe-danger{background:#6a302b;border-color:#b76556;color:#ffe4df}
 
 body[data-tone=forest] #ghe-dialog{background:#fcfaff;--gh-line:#c7bed5;--gh-paper:#f3eef9;--gh-soft:#eae1f4;--gh-bg:#fff}body[data-tone=forest] .ghe-toolbar{--gh-line:#c7bed5}body[data-tone=forest] .ghe-error{color:#a02739}body[data-tone=forest] #ghe-dialog::backdrop{background:#38244370}body[data-tone=forest] #ghe-dialog .gh-primary:hover{background:var(--gh-accent)}
+
+.ghe-body input[type=color]{padding:4px;cursor:pointer}

@@ -116,6 +116,7 @@
 </symbol><symbol id="unlock" viewBox="0 0 24 24"><path d="M5 13a2 2 0 0 1 2 -2h10a2 2 0 0 1 2 2v6a2 2 0 0 1 -2 2h-10a2 2 0 0 1 -2 -2l0 -6" />
   <path d="M11 16a1 1 0 1 0 2 0a1 1 0 1 0 -2 0" />
   <path d="M8 11v-5a4 4 0 0 1 8 0" />
+</symbol><symbol id="check" viewBox="0 0 24 24"><path d="m5 12 4 4 10 -10" />
 </symbol><symbol id="save" viewBox="0 0 24 24"><path d="M6 4h10l4 4v10a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2v-12a2 2 0 0 1 2 -2" />
   <path d="M10 14a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" />
   <path d="M14 4l0 4l-6 0l0 -4" />

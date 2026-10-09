@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"regexp"
 	"strings"
 )
 
@@ -45,6 +46,7 @@ type HomepageConfig struct {
 	Public        bool                   `json:"public"`
 	Title         string                 `json:"title"`
 	Tone          string                 `json:"tone"`
+	ClockColor    string                 `json:"clock_color,omitempty"`
 	Background    string                 `json:"background"`
 	Shade         int                    `json:"shade"`
 	Compact       bool                   `json:"compact"`
@@ -56,7 +58,7 @@ type HomepageConfig struct {
 }
 
 func defaultHomepage() HomepageConfig {
-	return HomepageConfig{Port: 16680, Public: true, Title: "我的数字空间", Tone: "forest", Shade: 50, Groups: []HomepageGroup{}, SearchEngines: []HomepageSearchEngine{
+	return HomepageConfig{Port: 16680, Public: true, Title: "我的数字空间", Tone: "forest", ClockColor: "#000000", Shade: 50, Groups: []HomepageGroup{}, SearchEngines: []HomepageSearchEngine{
 		{ID: "baidu", Name: "百度", URL: "https://www.baidu.com/s?wd={query}"},
 		{ID: "google", Name: "Google", URL: "https://www.google.com/search?q={query}"},
 	}}
@@ -109,9 +111,11 @@ func (m *Maintenance) checkHomepageFiles(incoming *HomepageConfig) error {
 	return nil
 }
 
+var homepageClockColor = regexp.MustCompile(`^#[a-fA-F0-9]{6}$`)
+
 func validateHomepage(c HomepageConfig, groups []ProxyGroup) error {
 	// Zero-valued configurations from older backups remain compatible.
-	if c.Port == 0 && !c.Enabled && len(c.Groups) == 0 && c.CustomCSS == "" && c.Background == "" && c.SearchEngines == nil {
+	if c.Port == 0 && !c.Enabled && len(c.Groups) == 0 && c.CustomCSS == "" && c.Background == "" && c.ClockColor == "" && c.SearchEngines == nil {
 		return nil
 	}
 	if c.Port < 1024 || c.Port > 65535 {
@@ -124,6 +128,9 @@ func validateHomepage(c HomepageConfig, groups []ProxyGroup) error {
 	}
 	if strings.TrimSpace(c.Title) == "" || len(c.Title) > 160 || c.Shade < 0 || c.Shade > 90 || (c.Tone != "forest" && c.Tone != "dusk" && c.Tone != "midnight") || len(c.CustomCSS) > 32768 {
 		return errors.New("首页标题、背景设置或 CSS 无效（CSS 最多 32 KiB）")
+	}
+	if c.ClockColor != "" && !homepageClockColor.MatchString(c.ClockColor) {
+		return errors.New("时钟文字颜色须为 #RRGGBB 格式，例如 #000000")
 	}
 	if c.Background != "" && !routeImageID.MatchString(c.Background) {
 		return errors.New("首页背景图片引用无效")
