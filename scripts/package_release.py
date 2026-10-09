@@ -74,10 +74,28 @@ with tempfile.TemporaryDirectory(prefix=".release-", dir=versions) as temp:
 
 archive = updates / ("gatehouse-" + version + "-update.zip")
 temporary = archive.with_suffix(".pending")
-with zipfile.ZipFile(temporary, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as z:
-    for item in sorted(destination.rglob("*")):
-        if item.is_file():
-            z.write(item, item.relative_to(destination).as_posix())
+update_paths = [Path("dist/gatehouse-linux-amd64"), Path("dist/gatehouse-linux-arm64")]
+update_files = {
+    path.as_posix(): {
+        "size": (destination / path).stat().st_size,
+        "sha256": hashlib.sha256((destination / path).read_bytes()).hexdigest(),
+    }
+    for path in update_paths
+}
+with tempfile.TemporaryDirectory(prefix=".update-", dir=updates) as temp:
+    update_stage = Path(temp)
+    for path in update_paths:
+        target = update_stage / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(destination / path, target)
+    (update_stage / "manifest.json").write_text(json.dumps({"format": "gatehouse-update-v1", "version": version, "files": update_files}, ensure_ascii=False, indent=2) + "\n")
+    expanded = sum(item.stat().st_size for item in update_stage.rglob("*") if item.is_file())
+    if expanded > 128 << 20:
+        raise SystemExit("Update ZIP expanded size exceeds the compatibility limit")
+    with zipfile.ZipFile(temporary, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as z:
+        for item in sorted(update_stage.rglob("*")):
+            if item.is_file():
+                z.write(item, item.relative_to(update_stage).as_posix())
 temporary.replace(archive)
 print("Version directory:", destination.relative_to(ROOT))
 print("Update ZIP:", archive.relative_to(ROOT))
