@@ -20,7 +20,11 @@ func homepageFixture(t *testing.T, a *Admin) HomepageConfig {
 	h := defaultHomepage()
 	h.Enabled = true
 	h.CustomCSS = ".gh-main { max-width: 1200px; }"
-	h.SearchEngines = append(h.SearchEngines, HomepageSearchEngine{ID: "docs", Name: "文档", URL: "https://search.example.test/?q={query}&lang=zh"})
+	engineIcon, err := storeRouteImage(a.store.paths.Data, testRoutePNG(t, 48, 32))
+	if err != nil {
+		t.Fatal("search icon fixture failed")
+	}
+	h.SearchEngines = append(h.SearchEngines, HomepageSearchEngine{ID: "docs", Name: "文档", URL: "https://search.example.test/?q={query}&lang=zh", Image: engineIcon})
 	icon, err := storeRouteImage(a.store.paths.Data, testRoutePNG(t, 64, 64))
 	if err != nil {
 		t.Fatal("icon fixture failed")
@@ -61,6 +65,10 @@ func TestHomepageSearchEnginesValidationAndMigration(t *testing.T) {
 	if validateHomepage(bad, nil) == nil {
 		t.Fatal("unnamed search engine accepted")
 	}
+	bad.SearchEngines = []HomepageSearchEngine{{ID: "test", Name: "测试", URL: "https://example.test/?q={query}", Image: "../../state.json"}}
+	if validateHomepage(bad, nil) == nil {
+		t.Fatal("invalid search icon reference accepted")
+	}
 	c := DefaultConfig()
 	h.SearchEngines = nil
 	h.Title = "保留的空间"
@@ -96,6 +104,12 @@ func TestHomepageValidationMigrationAndPortConflicts(t *testing.T) {
 		if Validate(next) == nil {
 			t.Fatalf("invalid homepage case %d accepted", i)
 		}
+	}
+	missing := c
+	missing.Homepage.SearchEngines = append([]HomepageSearchEngine{}, c.Homepage.SearchEngines...)
+	missing.Homepage.SearchEngines[2].Image = strings.Repeat("f", 64)
+	if a.store.Update(missing, nil, a.store.Snapshot().Revision) == nil {
+		t.Fatal("missing search icon accepted")
 	}
 	c.Homepage.Port = a.adminPort
 	if validateAdminPort(c, a.adminPort) == nil {
@@ -160,12 +174,22 @@ func TestHomepageIsolationPrivateLoginAndCSS(t *testing.T) {
 	if adminRequest(viewer, "GET", "/images/"+h.Groups[0].Pages[0].Links[0].Image, nil, nil, "").Code != 200 {
 		t.Fatal("selected icon missing")
 	}
+	if adminRequest(viewer, "GET", "/images/"+h.SearchEngines[2].Image, nil, nil, "").Code != 200 {
+		t.Fatal("selected search icon missing")
+	}
+	for _, path := range []string{"/search-baidu.svg", "/search-google.svg", "/search-generic.svg"} {
+		for _, handler := range []http.Handler{viewer, admin} {
+			if w := adminRequest(handler, "GET", path, nil, nil, ""); w.Code != 200 || !strings.HasPrefix(w.Header().Get("Content-Type"), "image/svg+xml") {
+				t.Fatal("bundled search icon unavailable")
+			}
+		}
+	}
 	c := a.store.Snapshot().Config
 	c.Homepage.Public = false
 	if a.store.Update(c, nil, a.store.Snapshot().Revision) != nil {
 		t.Fatal("private setup failed")
 	}
-	for _, path := range []string{"/api/homepage", "/custom.css", "/images/" + h.Groups[0].Pages[0].Links[0].Image, "/background/" + h.Background} {
+	for _, path := range []string{"/api/homepage", "/custom.css", "/images/" + h.Groups[0].Pages[0].Links[0].Image, "/images/" + h.SearchEngines[2].Image, "/background/" + h.Background} {
 		if adminRequest(viewer, "GET", path, nil, cookie, "").Code != 401 {
 			t.Fatal("private homepage accepted administrator cookie or anonymous access")
 		}
@@ -213,7 +237,7 @@ func TestHomepageAssetsBackupRestoreAndPruning(t *testing.T) {
 	if err != nil {
 		t.Fatal("homepage snapshot failed")
 	}
-	if images, _, _ := backupFileCounts(payload); images != 2 {
+	if images, _, _ := backupFileCounts(payload); images != 3 {
 		t.Fatal("homepage assets omitted from snapshot")
 	}
 	encrypted, err := encodeBackup(payload, "TEST_ONLY_BACKUP_PASSWORD")
@@ -264,14 +288,18 @@ func TestHomepageAssetsBackupRestoreAndPruning(t *testing.T) {
 	}
 
 	id := c.Homepage.Groups[0].Pages[0].Links[0].Image
-	path := filepath.Join(a.store.paths.Data, "route-images", id+".img")
+	engineIcon := c.Homepage.SearchEngines[2].Image
 	old := time.Now().Add(-48 * time.Hour)
-	os.Chtimes(path, old, old)
-	pruneRouteImages(a.store.paths.Data, c)
-	if _, err := os.Stat(path); err != nil {
-		t.Fatal("homepage-only icon pruned")
+	for _, image := range []string{id, engineIcon} {
+		os.Chtimes(filepath.Join(a.store.paths.Data, "route-images", image+".img"), old, old)
 	}
-	for _, name := range []string{"route-images/" + id + ".img", "homepage-backgrounds/" + c.Homepage.Background + ".jpg"} {
+	pruneRouteImages(a.store.paths.Data, c)
+	for _, image := range []string{id, engineIcon} {
+		if _, err := readRouteImage(a.store.paths.Data, image); err != nil {
+			t.Fatal("homepage-only icon pruned")
+		}
+	}
+	for _, name := range []string{"route-images/" + id + ".img", "route-images/" + engineIcon + ".img", "homepage-backgrounds/" + c.Homepage.Background + ".jpg"} {
 		data := payload.Files[name]
 		delete(payload.Files, name)
 		if validateBackupFiles(payload) == nil {

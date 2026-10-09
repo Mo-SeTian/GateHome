@@ -266,7 +266,7 @@ func (a *Admin) Handler() http.Handler {
 	sub, _ := fs.Sub(webFiles, "web")
 	files := http.FileServer(http.FS(sub))
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/" && r.URL.Path != "/app.js" && r.URL.Path != "/style.css" && r.URL.Path != "/icons.svg" && r.URL.Path != "/dashboard.js" && r.URL.Path != "/china-outline.svg" && r.URL.Path != "/homepage-admin.js" {
+		if r.URL.Path != "/" && r.URL.Path != "/app.js" && r.URL.Path != "/style.css" && r.URL.Path != "/icons.svg" && r.URL.Path != "/dashboard.js" && r.URL.Path != "/china-outline.svg" && r.URL.Path != "/homepage-admin.js" && r.URL.Path != "/search-baidu.svg" && r.URL.Path != "/search-google.svg" && r.URL.Path != "/search-generic.svg" {
 			http.NotFound(w, r)
 			return
 		}

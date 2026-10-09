@@ -562,7 +562,7 @@ func (s *Store) UpdateRouteCredentials(c Config, tokens, certificateTokens map[s
 	}
 	for id := range homepageImages(c.Homepage) {
 		if _, err := readRouteImage(s.paths.Data, id); err != nil {
-			return errors.New("首页链接图片不存在，请重新选择")
+			return errors.New("首页图片不存在，请重新选择")
 		}
 	}
 	if c.Homepage.Background != "" {

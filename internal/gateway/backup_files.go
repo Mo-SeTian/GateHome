@@ -91,7 +91,7 @@ func validateBackupFiles(payload backupPayload) error {
 	}
 	for id := range homepageImages(payload.State.Config.Homepage) {
 		if payload.Files["route-images/"+id+".img"] == nil {
-			return errors.New("备份缺少首页链接图片")
+			return errors.New("备份缺少首页图片")
 		}
 	}
 	if id := payload.State.Config.Homepage.Background; id != "" && payload.Files["homepage-backgrounds/"+id+".jpg"] == nil {

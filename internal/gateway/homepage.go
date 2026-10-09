@@ -40,9 +40,10 @@ type HomepageGroup struct {
 }
 
 type HomepageSearchEngine struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	URL  string `json:"url"`
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	URL   string `json:"url"`
+	Image string `json:"image"`
 }
 
 type HomepageConfig struct {
@@ -69,6 +70,11 @@ func defaultHomepage() HomepageConfig {
 
 func homepageImages(c HomepageConfig) map[string]bool {
 	images := map[string]bool{}
+	for _, e := range c.SearchEngines {
+		if e.Image != "" {
+			images[e.Image] = true
+		}
+	}
 	for _, g := range c.Groups {
 		for _, p := range g.Pages {
 			for _, l := range p.Links {
@@ -135,6 +141,9 @@ func validateHomepage(c HomepageConfig, groups []ProxyGroup) error {
 			return errors.New("搜索引擎名称或地址无效：须使用不含账号密码的 HTTP / HTTPS 地址，并在路径或查询参数中填写一次 {query}")
 		}
 		engineIDs[e.ID] = true
+		if e.Image != "" && !routeImageID.MatchString(e.Image) {
+			return errors.New("搜索引擎图标引用无效")
+		}
 	}
 	if len(c.Groups) > 30 {
 		return errors.New("首页最多支持 30 个分组")
@@ -310,7 +319,7 @@ func (a *Admin) HomepageHandler() http.Handler {
 		jsonResponse(w, 200, map[string]bool{"ok": true})
 	})
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
-		name := map[string]string{"/": "homepage.html", "/homepage.js": "homepage.js", "/homepage.css": "homepage.css", "/icons.svg": "icons.svg"}[r.URL.Path]
+		name := map[string]string{"/": "homepage.html", "/homepage.js": "homepage.js", "/homepage.css": "homepage.css", "/icons.svg": "icons.svg", "/search-baidu.svg": "search-baidu.svg", "/search-google.svg": "search-google.svg", "/search-generic.svg": "search-generic.svg"}[r.URL.Path]
 		if name == "" {
 			http.NotFound(w, r)
 			return

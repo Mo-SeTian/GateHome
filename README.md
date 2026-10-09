@@ -2,7 +2,7 @@
 
 一个自托管的反向代理与 DDNS 综合管理工具。Go 单进程，中文管理界面内嵌，无需 Node.js、数据库或额外 Web 服务器。
 
-当前版本为 **0.0.30**。目前支持多个 DNS 组分别配置根域名、服务商和凭据（当前支持 Cloudflare），以及 HTTP / HTTPS / WebSocket 代理。访问控制属于代理层，不修改 Linux 的 nftables / iptables。
+当前版本为 **0.0.31**。目前支持多个 DNS 组分别配置根域名、服务商和凭据（当前支持 Cloudflare），以及 HTTP / HTTPS / WebSocket 代理。访问控制属于代理层，不修改 Linux 的 nftables / iptables。
 
 ## 网络结构
 
@@ -115,7 +115,7 @@ sudo bash /tmp/gatehome-install.sh install --proxy "$GATEHOME_INSTALL_PROXY"
 
 下载使用 HTTP/1.1；TLS 连接中断等下载错误会清除残缺文件并重试，最多尝试 4 次。下载和校验成功后才修改安装。如果出现 `curl: (56)` / `unexpected eof while reading`，说明下载连接提前断开；请检查服务器的网络或代理规则。使用 MSM 等分流工具时，安装需要访问 `raw.githubusercontent.com`、`github.com` 和 `release-assets.githubusercontent.com`。仍无法下载时，可在其他能访问 GitHub 的设备下载下面的安装包，复制到服务器离线安装。
 
-离线安装可使用 `make release` 生成的 **`版本/0.0.30/`** 完整目录，或解压 Release 中对应架构的 `gatehome-linux-*.tar.gz`，然后运行：
+离线安装可使用 `make release` 生成的 **`版本/0.0.31/`** 完整目录，或解压 Release 中对应架构的 `gatehome-linux-*.tar.gz`，然后运行：
 
 ```sh
 sudo bash install.sh
@@ -554,3 +554,7 @@ Linux host 网络无需额外发布端口。Docker bridge 模式启用首页时�
 ## 0.0.30：自定义网页搜索引擎
 
 首页搜索框改为网页搜索，预置百度与 Google，可在“浏览器首页 → 桌面设置 → 搜索引擎”添加、修改或移除引擎。搜索地址使用 `{query}` 代表关键词，例如 `https://www.google.com/search?q={query}`。首页下拉选择引擎后按回车或点击搜索按钮，在新标签页打开结果；浏览器记住选择。配置保存到服务端并纳入备份，旧配置和备份自动补上默认引擎。
+
+## 0.0.31：搜索引擎图标选择
+
+首页搜索框使用图标按钮，点击后展开图标选择面板。百度与 Google 预置本地矢量图标，在高清屏幕保持清晰；引擎名称通过提示和无障碍标签提供。在“桌面设置 → 搜索引擎 → 自定义图标”上传图片或通过 URL 获取图标，保存后随配置备份、恢复和持久化。移除自定义图标后恢复默认图标。手机端按钮保持 44 像素触控区域，支持键盘选择和 Escape 收起。
