@@ -1,6 +1,6 @@
 'use strict';
 const assert=require('node:assert/strict');
-const {homepageSheets,homepageURL,homepageSearch,homepageEngineImage,homepageWheelGesture}=require('../internal/gateway/web/homepage.js');
+const {homepageSheets,homepageURL,homepageSearch,homepageEngineImage,homepageWheelGesture,homepageLinkAddress,homepageReachability}=require('../internal/gateway/web/homepage.js');
 const links=Array.from({length:14},(_,i)=>({id:String(i),favorite:i===9}));
 const group={pages:[{id:'daily',rows:2,columns:3,mobile_columns:2,links},{id:'backup',rows:1,columns:4,mobile_columns:2,links:[]}]};
 const desktop=homepageSheets(group,false,960),mobile=homepageSheets(group,true,343),narrow=homepageSheets(group,true,280);
@@ -56,4 +56,25 @@ wheel.reset();
 assert.equal(wheel.step(100,2800,false),null);
 assert.equal(wheel.step(100,2816,true),null);
 assert.equal(wheel.step(100,3100,true),1);
-console.log('Homepage pagination, wheel momentum/boundaries/reversal, search encoding, icon selection and URL validation passed');
+async function addressTests(){
+ const link={lan:'http://192.168.2.10:5000/app?query=TEST_ONLY',wan:'https://nas.example.test/'};
+ assert.equal(homepageLinkAddress(link),link.wan);assert.equal(homepageLinkAddress(link,true),link.lan);
+ assert.equal(homepageLinkAddress({lan:link.lan}),link.lan);assert.equal(homepageLinkAddress({wan:link.wan}),link.wan);
+ assert.equal(homepageLinkAddress({lan:'javascript:alert(1)',wan:link.wan},true),link.wan);
+ let calls=0,time=0,fail=false;
+ const reach=homepageReachability(async(url,options)=>{calls++;assert.equal(url,'http://192.168.2.10:5000/');assert.equal(options.method,'HEAD');assert.equal(options.credentials,'omit');assert.equal(options.referrerPolicy,'no-referrer');assert.equal(options.redirect,'follow');assert.equal(options.mode,'no-cors');assert.equal(options.cache,'no-store');assert(!options.headers&&!options.body);if(fail)throw new Error('TEST_ONLY_NETWORK_UNREACHABLE');return {type:'opaque'};},()=>time);
+ assert.equal(reach.address(link),link.wan);
+ const first=reach.check(link.lan);assert.equal(reach.check('http://192.168.2.10:5000/other'),first);
+ assert.equal(await first,true);assert.equal(calls,1);assert.equal(reach.address(link),link.lan);
+ assert.equal(await reach.check(link.lan),true);assert.equal(calls,1);
+ time=31000;fail=true;assert.equal(reach.address(link),link.wan);assert.equal(await reach.check(link.lan),false);assert.equal(reach.address(link),link.wan);assert.equal(calls,2);
+ assert.equal(await reach.check('javascript:alert(1)'),false);assert.equal(calls,2);
+ reach.reset();fail=false;assert.equal(await reach.check(link.lan),true);assert.equal(calls,3);
+ let signal;
+ const hanging=homepageReachability((_url,options)=>{signal=options.signal;return new Promise(()=>{});});
+ assert.equal(await hanging.check(link.lan),false);assert(signal.aborted);assert.equal(hanging.address(link),link.wan);
+ let resolve;
+ const canceled=homepageReachability(()=>new Promise(done=>{resolve=done;}));const pending=canceled.check(link.lan);await Promise.resolve();canceled.reset();resolve({type:'opaque'});await pending;assert.equal(canceled.address(link),link.wan);
+ console.log('Homepage pagination, gestures, search, icons, URL validation and automatic LAN/WAN selection passed');
+}
+addressTests().catch(error=>{console.error(error);process.exitCode=1;});

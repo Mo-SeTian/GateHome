@@ -156,6 +156,26 @@ func homepageLoginForTest(t *testing.T, h http.Handler, username, password strin
 	return w.Result().Cookies()[0]
 }
 
+func TestHomepageThemeAssetAndProbePolicy(t *testing.T) {
+	a, admin := testAdmin(t)
+	setupHomepage(t, a, defaultHomepage())
+	viewer := a.HomepageHandler()
+	w := adminRequest(viewer, "GET", "/homepage-sunset.png", nil, nil, "")
+	if w.Code != 200 || w.Header().Get("Content-Type") != "image/png" || !bytes.HasPrefix(w.Body.Bytes(), []byte("\x89PNG\r\n\x1a\n")) {
+		t.Fatal("bundled homepage background missing or incorrectly served")
+	}
+	w = adminRequest(viewer, "GET", "/", nil, nil, "")
+	policy := w.Header().Get("Content-Security-Policy")
+	for _, directive := range []string{"script-src 'self'", "img-src 'self' data:", "connect-src 'self' http: https:", "frame-ancestors 'none'", "base-uri 'none'", "form-action 'self'"} {
+		if !strings.Contains(policy, directive) {
+			t.Fatal("homepage browser probe changed unrelated document protections")
+		}
+	}
+	if strings.Contains(adminRequest(admin, "GET", "/", nil, nil, "").Header().Get("Content-Security-Policy"), "connect-src 'self' http: https:") {
+		t.Fatal("homepage probe permissions widened the administrator document")
+	}
+}
+
 func TestHomepageIsolationPrivateLoginAndCSS(t *testing.T) {
 	a, admin := testAdmin(t)
 	h := homepageFixture(t, a)

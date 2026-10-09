@@ -122,4 +122,4 @@
 </symbol><symbol id="upload" viewBox="0 0 24 24"><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2 -2v-2" />
   <path d="M7 9l5 -5l5 5" />
   <path d="M12 4l0 12" />
-</symbol><symbol id="search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></symbol><symbol id="pin" viewBox="0 0 24 24"><path d="m16 3 5 5-4 2-3 5-5-5 5-3zM10 14l-6 6"/></symbol></svg>
+</symbol><symbol id="search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></symbol><symbol id="pin" viewBox="0 0 24 24"><path d="m16 3 5 5-4 2-3 5-5-5 5-3zM10 14l-6 6"/></symbol><symbol id="user" viewBox="0 0 24 24"><path d="M8 7a4 4 0 1 0 8 0a4 4 0 0 0 -8 0" /><path d="M6 21v-2a4 4 0 0 1 4 -4h4a4 4 0 0 1 4 4v2" /></symbol></svg>

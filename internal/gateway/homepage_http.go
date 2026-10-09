@@ -240,7 +240,7 @@ func (a *Admin) HomepageHandler() http.Handler {
 	a.homepageEditorRoutes(mux)
 	mux.HandleFunc("GET /manage", func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, "/#edit", http.StatusFound) })
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
-		name := map[string]string{"/": "homepage.html", "/homepage.js": "homepage.js", "/homepage.css": "homepage.css", "/homepage-editor.js": "homepage-editor.js", "/homepage-editor.css": "homepage-editor.css", "/icons.svg": "icons.svg", "/search-baidu.svg": "search-baidu.svg", "/search-google.svg": "search-google.svg", "/search-generic.svg": "search-generic.svg"}[r.URL.Path]
+		name := map[string]string{"/": "homepage.html", "/homepage.js": "homepage.js", "/homepage.css": "homepage.css", "/homepage-editor.js": "homepage-editor.js", "/homepage-editor.css": "homepage-editor.css", "/homepage-sunset.png": "homepage-sunset.png", "/icons.svg": "icons.svg", "/search-baidu.svg": "search-baidu.svg", "/search-google.svg": "search-google.svg", "/search-generic.svg": "search-generic.svg"}[r.URL.Path]
 		if name == "" {
 			http.NotFound(w, r)
 			return
@@ -257,6 +257,8 @@ func (a *Admin) HomepageHandler() http.Handler {
 			mime = "text/css; charset=utf-8"
 		} else if strings.HasSuffix(name, ".svg") {
 			mime = "image/svg+xml"
+		} else if strings.HasSuffix(name, ".png") {
+			mime = "image/png"
 		}
 		w.Header().Set("Content-Type", mime)
 		w.Write(data)
@@ -266,7 +268,7 @@ func (a *Admin) HomepageHandler() http.Handler {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("X-Frame-Options", "DENY")
-		w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' http: https:; font-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
 		if !a.store.Snapshot().Config.Homepage.Enabled {
 			http.Error(w, "GateHomePage 已关闭", http.StatusServiceUnavailable)
 			return
