@@ -45,7 +45,7 @@ func snapshotBackup(dir string, state State) (backupPayload, error) {
 func snapshotBackupPaths(paths StoragePaths, state State) (backupPayload, error) {
 	dir := paths.Data
 	b := backupPayload{State: state, Certificates: map[string][]byte{}, Files: map[string][]byte{}}
-	for _, name := range []string{"certificates", "logs", "subscriptions", "route-images", "homepage-backgrounds"} {
+	for _, name := range []string{"certificates", "logs", "subscriptions", "route-images", "homepage-backgrounds", "page"} {
 		info, err := os.Lstat(paths.directory(name))
 		if errors.Is(err, os.ErrNotExist) {
 			continue
@@ -104,6 +104,13 @@ func snapshotBackupPaths(paths StoragePaths, state State) (backupPayload, error)
 	}
 	if state.Config.Homepage.Background != "" {
 		names = append(names, "homepage-backgrounds/"+state.Config.Homepage.Background+".jpg")
+	}
+	if state.HomepageData {
+		pageNames, err := homepageBackupNames(paths, state)
+		if err != nil {
+			return b, err
+		}
+		names = append(names, pageNames...)
 	}
 	for _, name := range names {
 		path := paths.file(name)
@@ -223,6 +230,9 @@ func decodeBackup(data []byte, password string) (backupPayload, backupManifest, 
 		return payload, m, errors.New("备份格式与数据范围不一致")
 	}
 	migrateState(&payload.State)
+	if err := migrateHomepageBackup(&payload); err != nil {
+		return payload, m, err
+	}
 	if err := ValidateAdminUsername(payload.State.AdminUsername); err != nil {
 		return payload, m, errors.New("备份的管理员账号数据无效")
 	}
@@ -237,6 +247,9 @@ func decodeBackup(data []byte, password string) (backupPayload, backupManifest, 
 	}
 	if err := validateCredentials(payload.State); err != nil {
 		return payload, m, errors.New("备份中的 DNS 凭据缺失或格式错误")
+	}
+	if err := validateHomepageUsers(payload.State); err != nil {
+		return payload, m, err
 	}
 	for name, data := range payload.Certificates {
 		if !safeCertificateName(name) || len(data) > 1<<20 || !json.Valid(data) {
@@ -266,7 +279,7 @@ type restoreTarget struct {
 func restoreTargets(paths StoragePaths, full bool, incoming map[string][]byte) []restoreTarget {
 	targets := []restoreTarget{{"certificates", paths.directory("certificates"), true}}
 	if full {
-		for _, name := range []string{"route-images", "homepage-backgrounds", "subscriptions"} {
+		for _, name := range []string{"route-images", "homepage-backgrounds", "subscriptions", "page"} {
 			targets = append(targets, restoreTarget{name, paths.directory(name), true})
 		}
 		if paths.splitLogs() {
@@ -350,6 +363,11 @@ func restoreFilesPaths(paths StoragePaths, state []byte, certificates, files map
 	for name, data := range files {
 		if !safeBackupFile(name) {
 			return errors.New("无效的备份数据路径")
+		}
+		if strings.HasPrefix(name, "page/") {
+			if err := os.MkdirAll(filepath.Dir(staged(name)), 0700); err != nil {
+				return err
+			}
 		}
 		if err := atomicWrite(staged(name), data); err != nil {
 			return err

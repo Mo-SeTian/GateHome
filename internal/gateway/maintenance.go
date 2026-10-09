@@ -30,6 +30,7 @@ type Maintenance struct {
 	supervised    bool
 	backupFiles   bool
 	homepageFiles bool
+	pageFiles     bool
 	stage         *maintenanceStage
 	busy          bool
 	restart       chan struct{}
@@ -44,7 +45,7 @@ func NewMaintenancePaths(paths StoragePaths, appDir string) (*Maintenance, error
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, err
 	}
-	return &Maintenance{dir: dir, appDir: appDir, paths: paths, supervised: os.Getenv("GATEHOUSE_SUPERVISED") == "1", backupFiles: os.Getenv("GATEHOUSE_BACKUP_FILES") == "1", homepageFiles: os.Getenv("GATEHOUSE_HOMEPAGE_FILES") == "1", restart: make(chan struct{}, 1)}, nil
+	return &Maintenance{dir: dir, appDir: appDir, paths: paths, supervised: os.Getenv("GATEHOUSE_SUPERVISED") == "1", backupFiles: os.Getenv("GATEHOUSE_BACKUP_FILES") == "1", homepageFiles: os.Getenv("GATEHOUSE_HOMEPAGE_FILES") == "1", pageFiles: os.Getenv("GATEHOUSE_PAGE_STORAGE") == "1", restart: make(chan struct{}, 1)}, nil
 }
 
 func (m *Maintenance) Available() bool {
@@ -130,6 +131,7 @@ func (m *Maintenance) inspectBackup(data []byte, password string, adminPort int)
 	m.stage = &maintenanceStage{ID: id, Kind: "restore", Version: Version, Created: time.Now()}
 	c := payload.State.Config
 	images, logs, caches := backupFileCounts(payload)
+	desktops, homepageGroups := homepageBackupCounts(payload)
 	compatible := m.checkHomepageFiles(&c.Homepage)
 	canApply := m.Available() && (payload.Files == nil || m.backupFiles) && compatible == nil
 	message := "恢复会覆盖当前配置和管理员账户；完成后使用备份时的管理员账号和管理密码登录"
@@ -139,7 +141,7 @@ func (m *Maintenance) inspectBackup(data []byte, password string, adminPort int)
 	if compatible != nil && m.Available() {
 		message = compatible.Error()
 	}
-	return map[string]any{"id": id, "version": manifest.Version, "created_at": manifest.CreatedAt, "can_apply": canApply, "routes": len(c.Routes), "groups": len(c.Groups), "homepage_groups": len(c.Homepage.Groups), "ddns_groups": len(c.DDNS.Groups), "firewalls": len(c.Firewalls), "subscriptions": len(c.Subscriptions), "certificates": len(payload.Certificates), "images": images, "log_entries": logs, "subscription_caches": caches, "includes_files": payload.Files != nil, "token_configured": payload.State.HasDNSToken(), "message": message}, nil
+	return map[string]any{"id": id, "version": manifest.Version, "created_at": manifest.CreatedAt, "can_apply": canApply, "routes": len(c.Routes), "groups": len(c.Groups), "homepage_groups": homepageGroups, "homepage_users": desktops, "ddns_groups": len(c.DDNS.Groups), "firewalls": len(c.Firewalls), "subscriptions": len(c.Subscriptions), "certificates": len(payload.Certificates), "images": images, "log_entries": logs, "subscription_caches": caches, "includes_files": payload.Files != nil, "token_configured": payload.State.HasDNSToken(), "message": message}, nil
 }
 
 func stageID() (string, error) {

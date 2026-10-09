@@ -18,18 +18,18 @@ import (
 func homepageFixture(t *testing.T, a *Admin) HomepageConfig {
 	t.Helper()
 	h := defaultHomepage()
-	h.Enabled = true
+	normalizeHomepage(&h)
 	h.CustomCSS = ".gh-main { max-width: 1200px; }"
-	engineIcon, err := storeRouteImage(a.store.paths.Data, testRoutePNG(t, 48, 32))
+	engineIcon, err := storeRouteImage(filepath.Join(a.store.paths.Data, "page", homepageAdminSpace), testRoutePNG(t, 48, 32))
 	if err != nil {
 		t.Fatal("search icon fixture failed")
 	}
 	h.SearchEngines = append(h.SearchEngines, HomepageSearchEngine{ID: "docs", Name: "文档", URL: "https://search.example.test/?q={query}&lang=zh", Image: engineIcon})
-	icon, err := storeRouteImage(a.store.paths.Data, testRoutePNG(t, 64, 64))
+	icon, err := storeRouteImage(filepath.Join(a.store.paths.Data, "page", homepageAdminSpace), testRoutePNG(t, 64, 64))
 	if err != nil {
 		t.Fatal("icon fixture failed")
 	}
-	background, err := storeHomepageBackground(a.store.paths.Data, testRoutePNG(t, 800, 400))
+	background, err := storeHomepageBackground(filepath.Join(a.store.paths.Data, "page", homepageAdminSpace), testRoutePNG(t, 800, 400))
 	if err != nil {
 		t.Fatal("background fixture failed")
 	}
@@ -69,84 +69,110 @@ func TestHomepageSearchEnginesValidationAndMigration(t *testing.T) {
 	if validateHomepage(bad, nil) == nil {
 		t.Fatal("invalid search icon reference accepted")
 	}
-	c := DefaultConfig()
 	h.SearchEngines = nil
-	h.Title = "保留的空间"
+	h.Title = "TEST_ONLY_PRESERVED_SPACE"
 	h.CustomCSS = ".gh-main { max-width: 1200px; }"
-	c.Homepage = h
 	wanted := h
 	wanted.SearchEngines = defaultHomepage().SearchEngines
-	if !migrateConfig(&c) || !reflect.DeepEqual(c.Homepage, wanted) {
-		t.Fatal("legacy search migration changed existing homepage settings")
+	normalizeHomepage(&wanted)
+	normalizeHomepage(&h)
+	if !reflect.DeepEqual(h, wanted) {
+		t.Fatal("legacy search migration changed desktop content")
 	}
+
 }
 
 func TestHomepageValidationMigrationAndPortConflicts(t *testing.T) {
 	a, _ := testAdmin(t)
-	c := a.store.Snapshot().Config
-	c.Homepage = homepageFixture(t, a)
-	if Validate(c) != nil {
-		t.Fatal("valid homepage rejected")
+	h := homepageFixture(t, a)
+	if validateHomepageContent(h) != nil {
+		t.Fatal("valid desktop rejected")
 	}
-	invalid := []func(*Config){
-		func(c *Config) { c.Homepage.Port = 1023 }, func(c *Config) { c.Homepage.Port = c.Groups[0].HTTPPort },
-		func(c *Config) { c.Homepage.Groups[0].Pages[0].Rows = 0 }, func(c *Config) { c.Homepage.Groups[0].Pages[0].Columns = 9 },
-		func(c *Config) { c.Homepage.Groups[0].Pages[0].MobileColumns = 4 }, func(c *Config) { c.Homepage.Groups[0].Pages[0].Links[0].LAN = "javascript:alert(1)" },
-		func(c *Config) { c.Homepage.Groups[0].Pages[0].Links[0].WAN = "https://user:password@example.test/" },
-		func(c *Config) { c.Homepage.Groups[0].Pages[0].Links[0].ID = "daily" }, func(c *Config) { c.Homepage.Background = "../../state.json" },
-		func(c *Config) { c.Homepage.CustomCSS = strings.Repeat("a", 32769) }, func(c *Config) { c.Homepage.Groups[0].Pages = nil },
+	invalid := []func(*HomepageConfig){
+		func(h *HomepageConfig) { h.Port = 16681 }, func(h *HomepageConfig) { h.Enabled = true },
+		func(h *HomepageConfig) { h.Groups[0].Pages[0].Rows = 0 }, func(h *HomepageConfig) { h.Groups[0].Pages[0].Columns = 9 },
+		func(h *HomepageConfig) { h.Groups[0].Pages[0].MobileColumns = 4 }, func(h *HomepageConfig) { h.Groups[0].Pages[0].Links[0].LAN = "javascript:alert(1)" },
+		func(h *HomepageConfig) { h.Groups[0].Pages[0].Links[0].WAN = "https://user:password@example.test/" },
+		func(h *HomepageConfig) { h.Groups[0].Pages[0].Links[0].ID = "daily" }, func(h *HomepageConfig) { h.Background = "../../state.json" },
+		func(h *HomepageConfig) { h.CustomCSS = strings.Repeat("a", 32769) }, func(h *HomepageConfig) { h.Groups[0].Pages = nil },
 	}
 	for i, change := range invalid {
-		data, _ := json.Marshal(c)
-		var next Config
-		json.Unmarshal(data, &next)
+		next := cloneHomepage(h)
 		change(&next)
-		if Validate(next) == nil {
-			t.Fatalf("invalid homepage case %d accepted", i)
+		if validateHomepageContent(next) == nil {
+			t.Fatalf("invalid desktop case %d accepted", i)
 		}
 	}
-	missing := c
-	missing.Homepage.SearchEngines = append([]HomepageSearchEngine{}, c.Homepage.SearchEngines...)
-	missing.Homepage.SearchEngines[2].Image = strings.Repeat("f", 64)
-	if a.store.Update(missing, nil, a.store.Snapshot().Revision) == nil {
+	missing := cloneHomepage(h)
+	missing.SearchEngines[2].Image = strings.Repeat("f", 64)
+	if _, err := a.store.pages.update(homepageAdminSpace, missing, 1); err == nil {
 		t.Fatal("missing search icon accepted")
+	}
+	c := a.store.Snapshot().Config
+	c.Homepage.Enabled = true
+	c.Homepage.Port = c.Groups[0].HTTPPort
+	if Validate(c) == nil {
+		t.Fatal("business listener port collision accepted")
 	}
 	c.Homepage.Port = a.adminPort
 	if validateAdminPort(c, a.adminPort) == nil {
-		t.Fatal("admin port conflict accepted")
+		t.Fatal("admin port collision accepted")
 	}
 	c.Homepage.Enabled = false
 	if validateAdminPort(c, a.adminPort) != nil {
 		t.Fatal("disabled homepage reserved admin port")
 	}
 	c.Homepage = HomepageConfig{}
-	c.Groups[0].HTTPPort = 16680
-	if !migrateConfig(&c) || c.Homepage.Enabled || c.Homepage.Port != 16680 || Validate(c) != nil {
-		t.Fatal("migration enabled homepage or broke an existing listener")
+	if !migrateConfig(&c) || c.Homepage.Port != 16680 || Validate(c) != nil {
+		t.Fatal("legacy listener migration failed")
 	}
 	c.Homepage.Enabled = true
 	c.Homepage.Port = 16681
 	if listenerSignature(c) == listenerSignature(a.ports) {
-		t.Fatal("homepage listener change omitted from restart signal")
+		t.Fatal("listener change omitted")
 	}
+}
+
+func setupHomepage(t *testing.T, a *Admin, h HomepageConfig) {
+	t.Helper()
+	normalizeHomepage(&h)
+	doc, _ := a.store.pages.snapshot(homepageAdminSpace)
+	if _, err := a.store.pages.update(homepageAdminSpace, h, doc.Revision); err != nil {
+		t.Fatal("desktop setup failed")
+	}
+	c := a.store.Snapshot().Config
+	c.Homepage.Enabled = true
+	if a.store.Update(c, nil, a.store.Snapshot().Revision) != nil {
+		t.Fatal("listener setup failed")
+	}
+}
+
+func homepageLoginForTest(t *testing.T, h http.Handler, username, password string) *http.Cookie {
+	t.Helper()
+	w := adminRequest(h, "POST", "/login", map[string]string{"username": username, "password": password}, nil, "")
+	if w.Code != 200 || len(w.Result().Cookies()) != 1 {
+		t.Fatal("homepage login failed")
+	}
+	return w.Result().Cookies()[0]
 }
 
 func TestHomepageIsolationPrivateLoginAndCSS(t *testing.T) {
 	a, admin := testAdmin(t)
 	h := homepageFixture(t, a)
 	cookie := loginForTest(t, admin)
-	update := map[string]any{"homepage": h, "revision": a.store.Snapshot().Revision}
+	setupHomepage(t, a, h)
+	update := map[string]any{"enabled": true, "port": 16680, "revision": a.store.Snapshot().Revision}
 	if adminRequest(admin, "PUT", "/api/homepage", update, nil, "").Code != 401 {
-		t.Fatal("anonymous homepage mutation")
+		t.Fatal("anonymous listener mutation")
 	}
 	if adminRequest(admin, "PUT", "/api/homepage", update, cookie, "https://attacker.example.test").Code != 403 {
-		t.Fatal("cross origin homepage mutation")
+		t.Fatal("listener CSRF")
 	}
 	if adminRequest(admin, "PUT", "/api/homepage", update, cookie, "").Code != 200 {
-		t.Fatal("homepage save failed")
+		t.Fatal("listener save failed")
 	}
 	if adminRequest(admin, "PUT", "/api/homepage", update, cookie, "").Code == 200 {
-		t.Fatal("stale revision overwrote homepage")
+		t.Fatal("stale listener revision accepted")
 	}
 	viewer := a.HomepageHandler()
 	for _, path := range []string{"/api/config", "/api/account", "/api/status", "/api/maintenance/backup", "/state.json", "/homepage-admin.js"} {
@@ -167,7 +193,7 @@ func TestHomepageIsolationPrivateLoginAndCSS(t *testing.T) {
 	if w := adminRequest(admin, "GET", "/custom.css", nil, cookie, ""); w.Code != 404 {
 		t.Fatal("homepage CSS leaked onto administrative document")
 	}
-	unused, _ := storeRouteImage(a.store.paths.Data, testRoutePNG(t, 20, 10))
+	unused, _ := storeRouteImage(filepath.Join(a.store.paths.Data, "page", homepageAdminSpace), testRoutePNG(t, 20, 10))
 	if adminRequest(viewer, "GET", "/images/"+unused, nil, nil, "").Code != 404 {
 		t.Fatal("unselected route icon exposed")
 	}
@@ -184,14 +210,14 @@ func TestHomepageIsolationPrivateLoginAndCSS(t *testing.T) {
 			}
 		}
 	}
-	c := a.store.Snapshot().Config
-	c.Homepage.Public = false
-	if a.store.Update(c, nil, a.store.Snapshot().Revision) != nil {
+	h.Public = false
+	document, _ := a.store.pages.snapshot(homepageAdminSpace)
+	if _, err := a.store.pages.update(homepageAdminSpace, h, document.Revision); err != nil {
 		t.Fatal("private setup failed")
 	}
-	for _, path := range []string{"/api/homepage", "/custom.css", "/images/" + h.Groups[0].Pages[0].Links[0].Image, "/images/" + h.SearchEngines[2].Image, "/background/" + h.Background} {
+	for _, path := range []string{"/api/homepage", "/custom.css", "/images/" + h.Groups[0].Pages[0].Links[0].Image, "/images/" + h.SearchEngines[2].Image, "/background/" + h.Background, "/api/editor/config"} {
 		if adminRequest(viewer, "GET", path, nil, cookie, "").Code != 401 {
-			t.Fatal("private homepage accepted administrator cookie or anonymous access")
+			t.Fatal("private desktop accepted administrator cookie")
 		}
 	}
 	request := httptest.NewRequest("POST", "http://home.example.test:16680/login", strings.NewReader(`{"username":"admin","password":"TEST_ONLY_ADMIN_PASSWORD"}`))
@@ -218,7 +244,7 @@ func TestHomepageIsolationPrivateLoginAndCSS(t *testing.T) {
 	if adminRequest(viewer, "POST", "/logout", map[string]string{}, cookies[0], "").Code != 200 || adminRequest(viewer, "GET", "/api/homepage", nil, cookies[0], "").Code != 401 {
 		t.Fatal("private logout failed to invalidate session")
 	}
-	c = a.store.Snapshot().Config
+	c := a.store.Snapshot().Config
 	c.Homepage.Enabled = false
 	a.store.Update(c, nil, a.store.Snapshot().Revision)
 	if adminRequest(viewer, "GET", "/", nil, nil, "").Code != 503 {
@@ -228,11 +254,8 @@ func TestHomepageIsolationPrivateLoginAndCSS(t *testing.T) {
 
 func TestHomepageAssetsBackupRestoreAndPruning(t *testing.T) {
 	a, _ := testAdmin(t)
-	c := a.store.Snapshot().Config
-	c.Homepage = homepageFixture(t, a)
-	if a.store.Update(c, nil, a.store.Snapshot().Revision) != nil {
-		t.Fatal("homepage setup failed")
-	}
+	h := homepageFixture(t, a)
+	setupHomepage(t, a, h)
 	payload, err := snapshotBackupPaths(a.store.paths, a.store.Snapshot())
 	if err != nil {
 		t.Fatal("homepage snapshot failed")
@@ -253,15 +276,15 @@ func TestHomepageAssetsBackupRestoreAndPruning(t *testing.T) {
 		t.Fatal("homepage restore failed")
 	}
 	restored, err := OpenStore(dest)
-	if err != nil || !reflect.DeepEqual(restored.Snapshot().Config.Homepage, c.Homepage) {
+	if err != nil || !reflect.DeepEqual(restored.pages.documents[homepageAdminSpace].Homepage, h) {
 		t.Fatal("homepage settings CSS links or pages lost during restoration")
 	}
-	for id := range homepageImages(c.Homepage) {
-		if _, err := readRouteImage(dest, id); err != nil {
+	for id := range homepageImages(h) {
+		if _, err := readRouteImage(filepath.Join(dest, "page", homepageAdminSpace), id); err != nil {
 			t.Fatal("homepage icon not restored")
 		}
 	}
-	if _, err := readHomepageBackground(dest, c.Homepage.Background); err != nil {
+	if _, err := readHomepageBackground(filepath.Join(dest, "page", homepageAdminSpace), h.Background); err != nil {
 		t.Fatal("background not restored")
 	}
 	paths := StoragePaths{Config: filepath.Join(t.TempDir(), "config"), Log: filepath.Join(t.TempDir(), "log"), Data: filepath.Join(t.TempDir(), "data")}
@@ -275,7 +298,7 @@ func TestHomepageAssetsBackupRestoreAndPruning(t *testing.T) {
 		t.Fatal("split storage restore failed")
 	}
 	splitStore, err := OpenStorePaths(paths)
-	if err != nil || !reflect.DeepEqual(splitStore.Snapshot().Config.Homepage, c.Homepage) {
+	if err != nil || !reflect.DeepEqual(splitStore.pages.documents[homepageAdminSpace].Homepage, h) {
 		t.Fatal("split storage lost homepage configuration")
 	}
 	newConfigRoot, _ := os.Stat(paths.Config)
@@ -283,23 +306,23 @@ func TestHomepageAssetsBackupRestoreAndPruning(t *testing.T) {
 	if !os.SameFile(configRoot, newConfigRoot) || !os.SameFile(logRoot, newLogRoot) {
 		t.Fatal("restore replaced Docker mount roots")
 	}
-	if _, err := readHomepageBackground(paths.Data, c.Homepage.Background); err != nil {
+	if _, err := readHomepageBackground(filepath.Join(paths.Data, "page", homepageAdminSpace), h.Background); err != nil {
 		t.Fatal("split storage lost background")
 	}
 
-	id := c.Homepage.Groups[0].Pages[0].Links[0].Image
-	engineIcon := c.Homepage.SearchEngines[2].Image
+	id := h.Groups[0].Pages[0].Links[0].Image
+	engineIcon := h.SearchEngines[2].Image
 	old := time.Now().Add(-48 * time.Hour)
 	for _, image := range []string{id, engineIcon} {
-		os.Chtimes(filepath.Join(a.store.paths.Data, "route-images", image+".img"), old, old)
+		os.Chtimes(filepath.Join(a.store.paths.Data, "page", homepageAdminSpace, "route-images", image+".img"), old, old)
 	}
-	pruneRouteImages(a.store.paths.Data, c)
+	pruneRouteImages(filepath.Join(a.store.paths.Data, "page", homepageAdminSpace), Config{Homepage: h})
 	for _, image := range []string{id, engineIcon} {
-		if _, err := readRouteImage(a.store.paths.Data, image); err != nil {
+		if _, err := readRouteImage(filepath.Join(a.store.paths.Data, "page", homepageAdminSpace), image); err != nil {
 			t.Fatal("homepage-only icon pruned")
 		}
 	}
-	for _, name := range []string{"route-images/" + id + ".img", "route-images/" + engineIcon + ".img", "homepage-backgrounds/" + c.Homepage.Background + ".jpg"} {
+	for _, name := range []string{"page/admin/route-images/" + id + ".img", "page/admin/route-images/" + engineIcon + ".img", "page/admin/homepage-backgrounds/" + h.Background + ".jpg"} {
 		data := payload.Files[name]
 		delete(payload.Files, name)
 		if validateBackupFiles(payload) == nil {
@@ -312,14 +335,14 @@ func TestHomepageAssetsBackupRestoreAndPruning(t *testing.T) {
 			t.Fatal("invalid background accepted")
 		}
 	}
-	backgroundPath := filepath.Join(dest, "homepage-backgrounds", c.Homepage.Background+".jpg")
+	backgroundPath := filepath.Join(dest, "page", homepageAdminSpace, "homepage-backgrounds", h.Background+".jpg")
 	info, _ := os.Stat(backgroundPath)
 	if info.Mode().Perm() != 0600 {
 		t.Fatal("background permissions incorrect")
 	}
 	os.Remove(backgroundPath)
 	os.Symlink(filepath.Join(dest, "state.json"), backgroundPath)
-	if _, err := readHomepageBackground(dest, c.Homepage.Background); err == nil {
+	if _, err := readHomepageBackground(filepath.Join(dest, "page", homepageAdminSpace), h.Background); err == nil {
 		t.Fatal("background symlink followed")
 	}
 	if safeBackupFile("homepage-backgrounds/../../state.json") {
@@ -334,9 +357,11 @@ func TestPrivateHomepageThroughSelfProxy(t *testing.T) {
 	u, _ := url.Parse(viewer.URL)
 	port, _ := strconv.Atoi(u.Port())
 	c := a.store.Snapshot().Config
-	c.Homepage = homepageFixture(t, a)
+	h := homepageFixture(t, a)
+	h.Public = false
+	setupHomepage(t, a, h)
+	c = a.store.Snapshot().Config
 	c.Homepage.Port = port
-	c.Homepage.Public = false
 	c.Routes = []Route{{GroupID: "default", Name: "首页", Host: "home.example.test", Upstream: viewer.URL, Enabled: true}}
 	if a.store.Update(c, nil, a.store.Snapshot().Revision) != nil {
 		t.Fatal("self proxy setup failed")
@@ -382,26 +407,18 @@ func TestHomepageLauncherCompatibilityAndRollback(t *testing.T) {
 	if err != nil {
 		t.Fatal("maintenance fixture failed")
 	}
-	m.homepageFiles = false
-	if m.checkHomepageFiles(nil) != nil {
-		t.Fatal("legacy launcher rejected configuration without homepage assets")
+	m.homepageFiles = true
+	m.pageFiles = false
+	if m.checkHomepageFiles(nil) == nil {
+		t.Fatal("legacy launcher accepted page directory without rollback support")
 	}
 	h := homepageFixture(t, a)
-	if m.checkHomepageFiles(&h) == nil {
-		t.Fatal("legacy launcher accepted incoming homepage assets")
-	}
-	c := a.store.Snapshot().Config
-	c.Homepage = h
-	if a.store.Update(c, nil, a.store.Snapshot().Revision) != nil {
-		t.Fatal("asset setup failed")
-	}
-	if m.checkHomepageFiles(nil) == nil {
-		t.Fatal("legacy launcher could discard current homepage icons during rollback")
-	}
+	setupHomepage(t, a, h)
 	t.Setenv("GATEHOUSE_HOMEPAGE_FILES", "1")
+	t.Setenv("GATEHOUSE_PAGE_STORAGE", "1")
 	supported, err := NewMaintenancePaths(a.store.paths, m.appDir)
-	if err != nil || !supported.homepageFiles || supported.checkHomepageFiles(&h) != nil {
-		t.Fatal("new launcher capability rejected")
+	if err != nil || !supported.pageFiles || supported.checkHomepageFiles(&h) != nil {
+		t.Fatal("new page storage capability rejected")
 	}
 	before, err := snapshotDiskPaths(a.store.paths)
 	if err != nil {

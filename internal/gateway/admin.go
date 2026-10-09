@@ -34,7 +34,7 @@ type Admin struct {
 	mu               sync.Mutex
 	authMu           sync.RWMutex
 	sessions         map[[32]byte]time.Time
-	homepageSessions map[[32]byte]time.Time
+	homepageSessions map[[32]byte]homepageSession
 	attempts         map[string]routeAttempts
 	activeLogins     int
 	logs             *Logs
@@ -72,7 +72,7 @@ func decodeBody(w http.ResponseWriter, r *http.Request, v any) bool {
 		defer controller.SetReadDeadline(time.Time{})
 	}
 	limit := int64(128 << 10)
-	if r.URL.Path == "/api/config" {
+	if r.URL.Path == "/api/config" || r.URL.Path == "/api/editor/config" {
 		limit = 1 << 20
 	}
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, limit))
@@ -87,6 +87,7 @@ func decodeBody(w http.ResponseWriter, r *http.Request, v any) bool {
 func (a *Admin) Handler() http.Handler {
 	mux := http.NewServeMux()
 	a.homepageAdminRoutes(mux)
+	a.homepageUserRoutes(mux)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { jsonResponse(w, 200, map[string]bool{"ok": true}) })
 	mux.HandleFunc("POST /api/login", a.login)
 	mux.HandleFunc("POST /api/logout", a.requireAuth(a.logout))
@@ -431,6 +432,11 @@ func (a *Admin) putConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	if input.Config.Zone != "" {
 		apiError(w, 400, "全局 DNS 账户已迁移，请刷新后在组内配置")
+		return
+	}
+	home := input.Config.Homepage
+	if home.Title != "" || home.Tone != "" || home.Public || home.Background != "" || home.CustomCSS != "" || len(home.Groups) != 0 || len(home.SearchEngines) != 0 || home.Widgets != nil {
+		apiError(w, 400, "桌面配置已移至 GateHomePage，请在那里编辑")
 		return
 	}
 	if err := validateAdminPort(input.Config, a.adminPort); err != nil {

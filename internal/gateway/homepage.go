@@ -1,17 +1,10 @@
 package gateway
 
 import (
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
-	"io"
-	"net"
-	"net/http"
-	"net/url"
 	"os"
-	"strconv"
 	"strings"
-	"time"
 )
 
 type HomepageLink struct {
@@ -47,8 +40,8 @@ type HomepageSearchEngine struct {
 }
 
 type HomepageConfig struct {
-	Enabled       bool                   `json:"enabled"`
-	Port          int                    `json:"port"`
+	Enabled       bool                   `json:"enabled,omitempty"`
+	Port          int                    `json:"port,omitempty"`
 	Public        bool                   `json:"public"`
 	Title         string                 `json:"title"`
 	Tone          string                 `json:"tone"`
@@ -59,6 +52,7 @@ type HomepageConfig struct {
 	CustomCSS     string                 `json:"custom_css"`
 	SearchEngines []HomepageSearchEngine `json:"search_engines"`
 	Groups        []HomepageGroup        `json:"groups"`
+	Widgets       *HomepageWidgets       `json:"widgets,omitempty"`
 }
 
 func defaultHomepage() HomepageConfig {
@@ -90,6 +84,9 @@ func homepageImages(c HomepageConfig) map[string]bool {
 // Older launchers snapshot only proxy-referenced icons. Their rollback would
 // remove homepage-only icons, and they cannot restore the new background path.
 func (m *Maintenance) checkHomepageFiles(incoming *HomepageConfig) error {
+	if _, err := os.Lstat(m.paths.directory("page")); err == nil && !m.pageFiles {
+		return errors.New("当前启动器不支持 data/page 的完整恢复与回滚，请使用最新安装脚本更新启动器并保留 config、log、data；Docker 请保留挂载目录后重建镜像")
+	}
 	if m.homepageFiles {
 		return nil
 	}
@@ -185,238 +182,14 @@ func validateHomepage(c HomepageConfig, groups []ProxyGroup) error {
 	return nil
 }
 
-func (a *Admin) homepageAdminRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("PUT /api/homepage", a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
-		var input struct {
-			Homepage HomepageConfig `json:"homepage"`
-			Revision int            `json:"revision"`
-		}
-		controller := http.NewResponseController(w)
-		if controller.SetReadDeadline(time.Now().Add(15*time.Second)) == nil {
-			defer controller.SetReadDeadline(time.Time{})
-		}
-		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
-		decoder := json.NewDecoder(r.Body)
-		decoder.DisallowUnknownFields()
-		if decoder.Decode(&input) != nil || decoder.Decode(&struct{}{}) != io.EOF {
-			apiError(w, 400, "首页配置无效或超过 1 MiB")
-			return
-		}
-		a.updateMu.Lock()
-		defer a.updateMu.Unlock()
-		if a.maintenance.Busy() {
-			apiError(w, 409, "正在执行维护操作")
-			return
-		}
-		c := a.store.Snapshot().Config
-		c.Homepage = input.Homepage
-		if err := validateAdminPort(c, a.adminPort); err != nil {
-			apiError(w, 400, err.Error())
-			return
-		}
-		if err := a.store.Update(c, nil, input.Revision); err != nil {
-			apiError(w, 400, err.Error())
-			return
-		}
-		pruneRouteImages(a.store.paths.Data, c)
-		pruneHomepageBackgrounds(a.store.paths.Data, c.Homepage.Background)
-		a.getConfig(w, r)
-	}))
-	a.homepageBackgroundRoutes(mux)
-}
-
-func homepageOriginAllowed(r *http.Request) bool {
-	if r.Header.Get("Sec-Fetch-Site") == "cross-site" {
-		return false
+func validateHomepageListener(c HomepageConfig, groups []ProxyGroup) error {
+	if c.Port < 1024 || c.Port > 65535 {
+		return errors.New("首页端口须为 1024–65535")
 	}
-	value := r.Header.Get("Origin")
-	if value == "" {
-		return true
-	}
-	u, err := url.Parse(value)
-	return err == nil && u.User == nil && strings.EqualFold(u.Host, r.Host) && (u.Scheme == "http" || u.Scheme == "https") && (u.Path == "" || u.Path == "/") && u.RawQuery == "" && !u.ForceQuery && u.Fragment == ""
-}
-
-// This listener exposes only the selected homepage and its referenced assets.
-// Administrative configuration and mutations are available solely on the admin listener.
-func (a *Admin) HomepageHandler() http.Handler {
-	mux := http.NewServeMux()
-	allowed := func(r *http.Request) bool {
-		if a.store.Snapshot().Config.Homepage.Public {
-			return true
-		}
-		cookie, err := r.Cookie("gatehomepage_session")
-		if err != nil {
-			return false
-		}
-		a.mu.Lock()
-		defer a.mu.Unlock()
-		return time.Now().Before(a.homepageSessions[sha256.Sum256([]byte(cookie.Value))])
-	}
-	protect := func(next http.HandlerFunc) http.HandlerFunc {
-		return func(w http.ResponseWriter, r *http.Request) {
-			if !a.store.Snapshot().Config.Homepage.Public && !homepageOriginAllowed(r) {
-				apiError(w, 403, "首页请求来源未获允许")
-				return
-			}
-			if !allowed(r) {
-				apiError(w, 401, "请先登录")
-				return
-			}
-			next(w, r)
+	for _, group := range groups {
+		if c.Enabled && (c.Port == group.HTTPPort || c.Port == group.HTTPSPort) {
+			return errors.New("首页端口不能与反代监听端口相同")
 		}
 	}
-	mux.HandleFunc("GET /api/homepage", protect(func(w http.ResponseWriter, r *http.Request) {
-		c := a.store.Snapshot().Config.Homepage
-		c.CustomCSS = "" // CSS is served separately and never interpolated into HTML.
-		jsonResponse(w, 200, c)
-	}))
-	mux.HandleFunc("GET /custom.css", protect(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/css; charset=utf-8")
-		io.WriteString(w, a.store.Snapshot().Config.Homepage.CustomCSS)
-	}))
-	mux.HandleFunc("GET /images/{id}", protect(func(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("id")
-		if !homepageImages(a.store.Snapshot().Config.Homepage)[id] {
-			http.NotFound(w, r)
-			return
-		}
-		data, err := readRouteImage(a.store.paths.Data, id)
-		if err != nil {
-			http.NotFound(w, r)
-			return
-		}
-		w.Header().Set("Content-Type", http.DetectContentType(data))
-		w.Write(data)
-	}))
-	mux.HandleFunc("GET /background/{id}", protect(func(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("id")
-		if id == "" || id != a.store.Snapshot().Config.Homepage.Background {
-			http.NotFound(w, r)
-			return
-		}
-		data, err := readHomepageBackground(a.store.paths.Data, id)
-		if err != nil {
-			http.NotFound(w, r)
-			return
-		}
-		w.Header().Set("Content-Type", "image/jpeg")
-		w.Write(data)
-	}))
-	// Reuse administrator verification and throttling, with a separate cookie name.
-	mux.HandleFunc("POST /login", func(w http.ResponseWriter, r *http.Request) {
-		u, _ := url.Parse(r.Header.Get("Origin"))
-		secure := r.TLS != nil || (u != nil && u.Scheme == "https")
-		a.login(homepageCookieWriter{ResponseWriter: w, secure: secure, admin: a}, r)
-	})
-	mux.HandleFunc("POST /logout", func(w http.ResponseWriter, r *http.Request) {
-		if c, err := r.Cookie("gatehomepage_session"); err == nil {
-			a.mu.Lock()
-			delete(a.homepageSessions, sha256.Sum256([]byte(c.Value)))
-			a.mu.Unlock()
-		}
-		http.SetCookie(w, &http.Cookie{Name: "gatehomepage_session", Path: "/", HttpOnly: true, MaxAge: -1, SameSite: http.SameSiteStrictMode})
-		jsonResponse(w, 200, map[string]bool{"ok": true})
-	})
-	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
-		name := map[string]string{"/": "homepage.html", "/homepage.js": "homepage.js", "/homepage.css": "homepage.css", "/icons.svg": "icons.svg", "/search-baidu.svg": "search-baidu.svg", "/search-google.svg": "search-google.svg", "/search-generic.svg": "search-generic.svg"}[r.URL.Path]
-		if name == "" {
-			http.NotFound(w, r)
-			return
-		}
-		data, err := webFiles.ReadFile("web/" + name)
-		if err != nil {
-			http.NotFound(w, r)
-			return
-		}
-		mime := "text/html; charset=utf-8"
-		if strings.HasSuffix(name, ".js") {
-			mime = "text/javascript; charset=utf-8"
-		}
-		if strings.HasSuffix(name, ".css") {
-			mime = "text/css; charset=utf-8"
-		}
-		if strings.HasSuffix(name, ".svg") {
-			mime = "image/svg+xml"
-		}
-		w.Header().Set("Content-Type", mime)
-		w.Write(data)
-	})
-	mux.HandleFunc("GET /manage", func(w http.ResponseWriter, r *http.Request) {
-		access := a.store.Snapshot().Config.AdminAccess
-		target := ""
-		if access.Enabled && len(access.Origins) > 0 {
-			target, _ = adminOrigin(access.Origins[0])
-		}
-		if target == "" {
-			u, err := url.Parse("http://" + r.Host)
-			if err != nil || u.Hostname() == "" {
-				http.NotFound(w, r)
-				return
-			}
-			target = "http://" + net.JoinHostPort(u.Hostname(), strconv.Itoa(a.adminPort))
-		}
-		http.Redirect(w, r, target+"/#homepage", http.StatusFound)
-	})
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cache-Control", "no-store")
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Header().Set("Referrer-Policy", "no-referrer")
-		w.Header().Set("X-Frame-Options", "DENY")
-		w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
-		if !a.store.Snapshot().Config.Homepage.Enabled {
-			http.Error(w, "GateHomePage 已关闭", http.StatusServiceUnavailable)
-			return
-		}
-		if r.Method != "GET" && r.Method != "HEAD" {
-			if r.Header.Get("X-Gatehouse-Request") != "1" || !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") || !homepageOriginAllowed(r) {
-				apiError(w, 403, "请求来源验证失败")
-				return
-			}
-		}
-		mux.ServeHTTP(w, r)
-	})
-}
-
-type homepageCookieWriter struct {
-	http.ResponseWriter
-	secure bool
-	admin  *Admin
-}
-
-func (w homepageCookieWriter) WriteHeader(code int) {
-	values := w.Header().Values("Set-Cookie")
-	w.Header().Del("Set-Cookie")
-	for _, value := range values {
-		name, rest, _ := strings.Cut(value, "=")
-		if name == "gatehouse_session" {
-			token, _, _ := strings.Cut(rest, ";")
-			key := sha256.Sum256([]byte(token))
-			w.admin.mu.Lock()
-			if w.admin.homepageSessions == nil {
-				w.admin.homepageSessions = map[[32]byte]time.Time{}
-			}
-			now := time.Now()
-			for k, expiry := range w.admin.homepageSessions {
-				if !now.Before(expiry) {
-					delete(w.admin.homepageSessions, k)
-				}
-			}
-			if len(w.admin.homepageSessions) >= 32 {
-				for k := range w.admin.homepageSessions {
-					delete(w.admin.homepageSessions, k)
-					break
-				}
-			}
-			w.admin.homepageSessions[key] = now.Add(12 * time.Hour)
-			delete(w.admin.sessions, key)
-			w.admin.mu.Unlock()
-		}
-		value = strings.Replace(value, "gatehouse_session=", "gatehomepage_session=", 1)
-		if w.secure && !strings.Contains(value, "; Secure") {
-			value += "; Secure"
-		}
-		w.Header().Add("Set-Cookie", value)
-	}
-	w.ResponseWriter.WriteHeader(code)
+	return nil
 }

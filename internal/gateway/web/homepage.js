@@ -37,19 +37,21 @@ if(typeof module!=='undefined') module.exports={homepageURL,homepageSheets,homep
 if(typeof document!=='undefined') (()=>{
   const $=s=>document.querySelector(s),esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const icon=name=>`<svg aria-hidden="true"><use href="/icons.svg#${name}"></use></svg>`;
-  let config=null,groupID='',active={},network='lan',engine='',swipe=null,ignoreClick=false,drag=null,pageAnimation=null;
+  let config=null,groupID='',active={},network='lan',engine='',swipe=null,ignoreClick=false,drag=null,pageAnimation=null,viewSpace='',currentUser=null;
   const wheel=homepageWheelGesture();
-  try {const saved=JSON.parse(localStorage.getItem('gatehomepage-view')||'{}');groupID=saved.group||'';active=saved.active||{};network=saved.network==='wan'?'wan':'lan';engine=saved.search_engine||'';}catch{}
-  const remember=()=>{try{localStorage.setItem('gatehomepage-view',JSON.stringify({group:groupID,active,network,search_engine:engine}));}catch{}};
-  const engineArt=e=>`<span class="gh-engine-art"><img src="${esc(homepageEngineImage(e))}" alt="" decoding="async"></span>`;
+  function view(id){if(id===viewSpace)return;viewSpace=id;groupID='';active={};network='lan';engine='';try{const saved=JSON.parse(localStorage.getItem('gatehomepage-view:'+id)||(id==='admin'?localStorage.getItem('gatehomepage-view'):null)||'{}');groupID=saved.group||'';active=saved.active||{};network=saved.network==='wan'?'wan':'lan';engine=saved.search_engine||'';}catch{}}
+  const remember=()=>{try{if(viewSpace)localStorage.setItem('gatehomepage-view:'+viewSpace,JSON.stringify({group:groupID,active,network,search_engine:engine}));}catch{}};
+  const asset=path=>path+(path.includes('?')?'&':'?')+'space='+encodeURIComponent(viewSpace);
+  const engineArt=e=>`<span class="gh-engine-art"><img src="${esc(e.image?asset(homepageEngineImage(e)):homepageEngineImage(e))}" alt="" decoding="async"></span>`;
   function closeEngines(focus=false){$('#gh-engine-menu').hidden=true;$('#gh-engine').setAttribute('aria-expanded','false');if(focus)$('#gh-engine').focus();}
   function renderEngines(){
     const engines=config.search_engines||[];if(!engines.some(e=>e.id===engine))engine=engines[0]?.id||'';
     const selected=engines.find(e=>e.id===engine),button=$('#gh-engine');button.innerHTML=selected?engineArt(selected):'';button.title=selected?selected.name+' · 切换搜索引擎':'切换搜索引擎';button.setAttribute('aria-label',button.title);
-    $('#gh-engine-menu').style.setProperty('--gh-engines',String(Math.min(4,engines.length)));$('#gh-engine-menu').innerHTML=engines.map(e=>`<button type="button" class="gh-engine-option" data-engine="${esc(e.id)}" title="${esc(e.name)}" aria-label="${esc(e.name)}" aria-pressed="${e.id===engine}">${engineArt(e)}</button>`).join('');$('.gh-search').hidden=!engines.length;closeEngines();
+    $('#gh-engine-menu').style.setProperty('--gh-engines',String(Math.min(4,engines.length)));$('#gh-engine-menu').innerHTML=engines.map(e=>`<button type="button" class="gh-engine-option" data-engine="${esc(e.id)}" title="${esc(e.name)}" aria-label="${esc(e.name)}" aria-pressed="${e.id===engine}">${engineArt(e)}</button>`).join('');$('.gh-search').hidden=!engines.length||config.widgets?.search===false;closeEngines();
   }
-  async function request(path,body) {
-    const response=await fetch(path,{method:body?'POST':'GET',credentials:'same-origin',headers:body?{'Content-Type':'application/json','X-Gatehouse-Request':'1'}:{},body:body?JSON.stringify(body):undefined});
+  async function request(path,body,method=body?'POST':'GET') {
+    const multipart=body instanceof FormData;
+    const response=await fetch(path,{method,credentials:'same-origin',headers:body?(multipart?{'X-Gatehouse-Request':'1'}:{'Content-Type':'application/json','X-Gatehouse-Request':'1'}):{},body:body?(multipart?body:JSON.stringify(body)):undefined});
     let data;try{data=await response.json();}catch{throw new Error('首页暂不可用，请检查是否已启用并重启服务');}
     if(!response.ok){const e=new Error(data.error||'请求失败');e.status=response.status;throw e;}return data;
   }
@@ -59,15 +61,16 @@ if(typeof document!=='undefined') (()=>{
     const sheet=sheets.find(p=>p.id===active[group.id])||sheets[0];active[group.id]=sheet.id;return {group,sheets,sheet};
   }
   function card(link) {
-    const address=homepageURL(link[network]),image=link.image?`<img src="/images/${esc(link.image)}" alt="" loading="lazy" decoding="async">`:icon('server');
-    return `<article class="gh-item ${address?'':'gh-unavailable'}">${link.favorite?`<span class="gh-favorite" aria-label="已置顶">${icon('pin')}</span>`:''}<${address?'a':'div'} class="gh-open" ${address?`href="${esc(address)}" target="_blank" rel="noopener noreferrer"`:''}><span class="gh-art">${image}</span><span class="gh-copy"><span class="gh-name">${esc(link.name)}</span>${link.description?`<span class="gh-description">${esc(link.description)}</span>`:''}${!address?`<span class="gh-address">未设置${network==='lan'?'内网':'外网'}地址</span>`:config.show_addresses?`<span class="gh-address">${esc(address)}</span>`:''}</span></${address?'a':'div'}></article>`;
+    const address=homepageURL(link[network]),image=link.image?`<img src="${esc(asset('/images/'+link.image))}" alt="" loading="lazy" decoding="async">`:icon('server'),tag=editor.editing?'button':address?'a':'div';
+    return `<article class="gh-item ${!editor.editing&&!address?'gh-unavailable':''}">${link.favorite?`<span class="gh-favorite" aria-label="已置顶">${icon('pin')}</span>`:''}<${tag} class="gh-open" ${editor.editing?`type="button" data-ghe-action="link-edit" data-id="${esc(link.id)}"`:address?`href="${esc(address)}" target="_blank" rel="noopener noreferrer"`:''}><span class="gh-art">${image}</span><span class="gh-copy"><span class="gh-name">${esc(link.name)}</span>${link.description?`<span class="gh-description">${esc(link.description)}</span>`:''}${!address?`<span class="gh-address">未设置${network==='lan'?'内网':'外网'}地址</span>`:config.show_addresses?`<span class="gh-address">${esc(address)}</span>`:''}</span></${tag}>${editor.cardControls(link)}</article>`;
   }
   function resetDrag(){const grid=$('.gh-link-grid');if(drag&&grid.hasPointerCapture(drag.id))grid.releasePointerCapture(drag.id);drag=null;grid.classList.remove('gh-dragging');grid.style.transform='';}
   function render(animate=false,direction=0) {
     if(!config)return;
     resetDrag();
+    document.body.classList.toggle('gh-editing',editor.editing);$('#gh-edit').innerHTML=icon('edit')+(editor.editing?'完成编辑':'编辑');$('.gh-summary').hidden=config.widgets?.clock===false;
     document.body.dataset.tone=config.tone;document.body.classList.toggle('gh-compact',config.compact);$('.gh-space-title').textContent=config.title;document.title=config.title+' · GateHomePage';
-    document.body.classList.toggle('gh-has-background',!!config.background);$('.gh-wall').style.backgroundImage=config.background?`url("/background/${config.background}")`:'';document.body.style.setProperty('--gh-shade',config.shade/100);
+    document.body.classList.toggle('gh-has-background',!!config.background);$('.gh-wall').style.backgroundImage=config.background?`url("${asset('/background/'+config.background)}")`:'';document.body.style.setProperty('--gh-shade',config.shade/100);
     renderEngines();
     $('[data-net=lan]').setAttribute('aria-pressed',String(network==='lan'));$('[data-net=wan]').setAttribute('aria-pressed',String(network==='wan'));
     $('.gh-tabs').innerHTML=config.groups.map(g=>`<button type="button" class="gh-tab" data-group="${esc(g.id)}" aria-pressed="${g.id===groupID}">${esc(g.name)}</button>`).join('');
@@ -80,14 +83,15 @@ if(typeof document!=='undefined') (()=>{
       grid.style.setProperty('--gh-columns',String(sheet.columns));content=sheet.links.map(l=>card(l)).join('');
       $('.gh-pager').innerHTML=sheets.map((p,i)=>`<button type="button" class="gh-page-dot" data-sheet="${esc(p.id)}" aria-current="${p.id===sheet.id?'page':'false'}" aria-label="第 ${i+1} 页：${esc(p.page.name)}${p.index?'（续页 '+(p.index+1)+'）':''}"><span aria-hidden="true"></span></button>`).join('');
     }else { $('.gh-pager').innerHTML=''; }
-    grid.innerHTML=content||'<div class="gh-empty">这里还没有链接。点击右上角编辑桌面，在管理界面添加。</div>';
+    grid.innerHTML=content||'<div class="gh-empty">这里还没有应用。点击右上角“编辑”，添加分组和应用。</div>';
+    $('#gh-editor-tools').innerHTML=editor.toolbar();
     remember();
     pageAnimation?.cancel();pageAnimation=null;
     if(animate&&!matchMedia('(prefers-reduced-motion:reduce)').matches)pageAnimation=grid.animate([{opacity:.55,transform:direction?`translateX(${direction*18}px)`:'translateY(5px)'},{opacity:1,transform:'translate(0)'}],{duration:150,easing:'ease-out'});
   }
   function turn(direction) {const {group,sheets,sheet}=current(),index=sheets.indexOf(sheet),next=sheets[index+direction];if(!next)return false;active[group.id]=next.id;render(true,direction);return true;}
   document.addEventListener('click',event=>{
-    if(!event.target.closest('.gh-engine-picker'))closeEngines();
+    if(!event.target.closest('.gh-engine-picker'))closeEngines();if(!event.target.closest('.gh-account')){ $('#gh-account-menu').hidden=true;$('#gh-user').setAttribute('aria-expanded','false');}
     if(ignoreClick){ignoreClick=false;if(event.target.closest('.gh-open')){event.preventDefault();return;}}
     const button=event.target.closest('button');if(!button)return;
     if(button.dataset.engine){engine=button.dataset.engine;remember();renderEngines();$('#gh-engine').focus();}
@@ -111,7 +115,7 @@ if(typeof document!=='undefined') (()=>{
     if(direction===null)return;event.preventDefault();if(direction)turn(direction);
   },{passive:false});
   grid.addEventListener('pointerdown',event=>{
-    if(event.pointerType!=='mouse'||event.button!==0)return;ignoreClick=false;
+    if(event.pointerType!=='mouse'||event.button!==0||editor.editing)return;ignoreClick=false;
     if(event.ctrlKey||event.metaKey||event.altKey)return;
     wheel.reset();drag={id:event.pointerId,x:event.clientX,y:event.clientY,locked:false};
   });
@@ -138,8 +142,14 @@ if(typeof document!=='undefined') (()=>{
   window.addEventListener('blur',()=>{wheel.reset();resetDrag();swipe=null;});
   window.addEventListener('resize',()=>{wheel.reset();render();});
   function clock(){if(document.hidden)return;const now=new Date();$('.gh-clock').textContent=now.toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',hour12:false});$('.gh-date').textContent=now.toLocaleDateString('zh-CN',{month:'long',day:'numeric',weekday:'long'});}
-  async function load(){try{config=await request('/api/homepage');$('#gh-login').hidden=true;$('#gh-login .gh-error').textContent='';$('#gh-content').hidden=false;$('#gh-logout').hidden=config.public;$('#gh-error').textContent='';if(!$('#gh-custom-css')){const link=document.createElement('link');link.id='gh-custom-css';link.rel='stylesheet';link.href='/custom.css';document.head.append(link);}render();}catch(e){$('#gh-content').hidden=true;$('.gh-search').hidden=true;if(e.status===401){config=null;$('#gh-login').hidden=false;$('#gh-custom-css')?.remove();}else $('#gh-error').textContent=e.message;}}
-  $('#gh-login form').addEventListener('submit',async event=>{event.preventDefault();const form=event.target,button=form.querySelector('button');button.disabled=true;form.querySelector('.gh-error').textContent='';try{const username=form.elements.username.value,password=form.elements.password.value;form.elements.password.value='';await request('/login',{username,password});await load();}catch(e){form.querySelector('.gh-error').textContent=e.message;}finally{button.disabled=false;}});
-  $('#gh-logout').addEventListener('click',async()=>{try{await request('/logout',{});await load();}catch(e){$('#gh-error').textContent=e.message;}});
-  clock();setInterval(clock,15000);document.addEventListener('visibilitychange',clock);load();
+  function stylesheet(revision=''){let link=$('#gh-custom-css');if(!link){link=document.createElement('link');link.id='gh-custom-css';link.rel='stylesheet';document.head.append(link);}link.href=asset('/custom.css')+'&revision='+encodeURIComponent(revision);}
+  async function session(){const me=await request('/api/me');currentUser=me;$('#gh-account-menu').hidden=true;$('#gh-user').setAttribute('aria-expanded','false');$('#gh-user').textContent=me.authenticated?me.username:'登录';return me;}
+  async function loggedIn(){const me=await session(),url=new URL(location.href);url.searchParams.set('space',me.user_id);history.replaceState(null,'',url);await load();}
+  const editor=createHomepageEditor({request,context:current,icon,esc,loggedIn,changed(home,id,revision){view(id);config=home;const url=new URL(location.href);url.searchParams.set('space',id);history.replaceState(null,'',url);$('#gh-content').hidden=false;$('#gh-login').hidden=true;stylesheet(revision);render();}});
+  async function load(){try{const space=new URL(location.href).searchParams.get('space');config=await request('/api/homepage'+(space?'?space='+encodeURIComponent(space):''));view(config.space_id);$('#gh-login').hidden=true;$('#gh-login .gh-error').textContent='';$('#gh-content').hidden=false;$('#gh-error').textContent='';stylesheet();render();await session();}catch(e){$('#gh-content').hidden=true;$('.gh-search').hidden=true;if(e.status===401){config=null;$('#gh-login').hidden=false;$('#gh-custom-css')?.remove();$('.gh-wall').style.backgroundImage='';document.body.classList.remove('gh-has-background');document.title='GateHomePage';}else $('#gh-error').textContent=e.message;}}
+  $('#gh-edit').addEventListener('click',()=>editor.toggle());$('#gh-user').addEventListener('click',()=>{if(!currentUser?.authenticated){editor.login(false);return;}const menu=$('#gh-account-menu');menu.hidden=!menu.hidden;$('#gh-user').setAttribute('aria-expanded',String(!menu.hidden));});$('#gh-switch-user').addEventListener('click',()=>{ $('#gh-account-menu').hidden=true;$('#gh-user').setAttribute('aria-expanded','false');editor.login(false);});$('.gh-account').addEventListener('keydown',event=>{if(event.key==='Escape'){ $('#gh-account-menu').hidden=true;$('#gh-user').setAttribute('aria-expanded','false');$('#gh-user').focus();}});
+  $('#gh-login form').addEventListener('submit',async event=>{event.preventDefault();const form=event.target,button=form.querySelector('button');button.disabled=true;form.querySelector('.gh-error').textContent='';try{const username=form.elements.username.value,password=form.elements.password.value;form.elements.password.value='';await request('/login',{username,password});await loggedIn();}catch(e){form.querySelector('.gh-error').textContent=e.message;}finally{button.disabled=false;}});
+  $('#gh-logout').addEventListener('click',async()=>{try{await request('/logout',{});editor.reset();document.body.classList.remove('gh-editing');$('#gh-editor-tools').innerHTML='';await session();await load();}catch(e){$('#gh-error').textContent=e.message;}});
+  $('#gh-edit').disabled=true;
+  clock();setInterval(clock,15000);document.addEventListener('visibilitychange',clock);load().then(()=>{$('#gh-edit').disabled=false;if(location.hash==='#edit')editor.toggle();});
 })();

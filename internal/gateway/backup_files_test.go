@@ -58,7 +58,7 @@ func fullBackupFixture(t *testing.T) (string, backupPayload) {
 }
 func TestBackupAllPersistentDataRoundTrip(t *testing.T) {
 	_, payload := fullBackupFixture(t)
-	if images, logs, caches := backupFileCounts(payload); images != 1 || logs != 2 || caches != 1 || len(payload.Files) != 4 || len(payload.Certificates) != 2 {
+	if images, logs, caches := backupFileCounts(payload); images != 1 || logs != 2 || caches != 1 || len(payload.Files) != 5 || payload.Files["page/admin/config.json"] == nil || len(payload.Certificates) != 2 {
 		t.Fatal("snapshot omitted persistent data or included temporary data")
 	}
 	encrypted, err := encodeBackup(payload, "TEST_ONLY_BACKUP_PASSWORD")

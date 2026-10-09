@@ -2,7 +2,7 @@
 
 一个自托管的反向代理与 DDNS 综合管理工具。Go 单进程，中文管理界面内嵌，无需 Node.js、数据库或额外 Web 服务器。
 
-当前版本为 **0.0.33**。目前支持多个 DNS 组分别配置根域名、服务商和凭据（当前支持 Cloudflare），以及 HTTP / HTTPS / WebSocket 代理。访问控制属于代理层，不修改 Linux 的 nftables / iptables。
+当前版本为 **0.0.34**。目前支持多个 DNS 组分别配置根域名、服务商和凭据（当前支持 Cloudflare），以及 HTTP / HTTPS / WebSocket 代理。访问控制属于代理层，不修改 Linux 的 nftables / iptables。
 
 ## 网络结构
 
@@ -115,7 +115,7 @@ sudo bash /tmp/gatehome-install.sh install --proxy "$GATEHOME_INSTALL_PROXY"
 
 下载使用 HTTP/1.1；TLS 连接中断等下载错误会清除残缺文件并重试，最多尝试 4 次。下载和校验成功后才修改安装。如果出现 `curl: (56)` / `unexpected eof while reading`，说明下载连接提前断开；请检查服务器的网络或代理规则。使用 MSM 等分流工具时，安装需要访问 `raw.githubusercontent.com`、`github.com` 和 `release-assets.githubusercontent.com`。仍无法下载时，可在其他能访问 GitHub 的设备下载下面的安装包，复制到服务器离线安装。
 
-离线安装可使用 `make release` 生成的 **`版本/0.0.33/`** 完整目录，或解压 Release 中对应架构的 `gatehome-linux-*.tar.gz`，然后运行：
+离线安装可使用 `make release` 生成的 **`版本/0.0.34/`** 完整目录，或解压 Release 中对应架构的 `gatehome-linux-*.tar.gz`，然后运行：
 
 ```sh
 sudo bash install.sh
@@ -566,3 +566,11 @@ Linux host 网络无需额外发布端口。Docker bridge 模式启用首页时�
 ## 0.0.33：首页滚轮与鼠标拖动翻页
 
 在应用卡片区域内，滚轮向下或横向滚动向右切换下一页，向上或向左切换上一页；鼠标按住左键左右拖动也可翻页，短距离拖动取消。每次滚动手势最多切换一页，首尾停留，拖动不会误打开应用。页面较长、卡片未完整进入视口时，纵向滚轮优先滚动网页；横向滚动、圆点和键盘仍可翻页。减少动态效果时直接切换内容。
+
+## 0.0.34：Page 自主管理与多用户桌面
+
+GateHome 的“浏览器首页”只管理首页开关、端口与 Page 账号；分组、页面、应用、组件、外观、图片、搜索引擎、自定义 CSS 以及反代导入均在 GateHomePage 内管理。点击首页右上角“编辑”进入编辑模式，“完成编辑”返回浏览状态。每个账号拥有独立桌面，Page 账号不能登录 GateHome 管理界面；管理员账号也可登录自己的 Page 桌面。
+
+桌面数据统一保存在 `/data/page/<用户ID>/`：`config.json` 保存独立配置与版本号，`route-images/` 保存图标，`homepage-backgrounds/` 保存背景。管理员桌面使用 `admin` 目录。账号与密码哈希由 GateHome 保存在 `/config/state.json`。Docker 继续映射 `/config`、`/log`、`/data` 即可，在映射的 data 文件夹内可以看到 page 子目录。旧首页配置与已引用图片自动迁入管理员桌面。加密备份覆盖所有账号、独立桌面和已引用图片；旧备份也支持迁移。
+
+**升级启动器：** 新目录需要 0.0.34 或更新版本启动器参与完整恢复与回滚。Linux 使用最新版安装脚本更新安装并保留原有 config、log、data 目录；Docker 保留三个挂载目录后更新镜像。旧启动器会收到明确提示，并阻止不完整的维护操作。仅网页在线更新业务程序不会替换启动器。详见 [Page 管理与迁移说明](docs/homepage-0.0.34.md)。

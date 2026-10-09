@@ -12,6 +12,9 @@ import (
 )
 
 func safeBackupFile(name string) bool {
+	if strings.HasPrefix(name, "page/") {
+		return safeHomepageBackupFile(name)
+	}
 	if strings.HasPrefix(name, "logs/") {
 		_, ok := logFileNumber(strings.TrimPrefix(name, "logs/"))
 		return ok
@@ -97,13 +100,13 @@ func validateBackupFiles(payload backupPayload) error {
 	if id := payload.State.Config.Homepage.Background; id != "" && payload.Files["homepage-backgrounds/"+id+".jpg"] == nil {
 		return errors.New("备份缺少首页背景图片")
 	}
-	return nil
+	return validateHomepageBackup(payload)
 }
 
 func backupFileCounts(payload backupPayload) (images, logs, caches int) {
 	for name, data := range payload.Files {
 		switch {
-		case strings.HasPrefix(name, "route-images/"), strings.HasPrefix(name, "homepage-backgrounds/"):
+		case strings.HasPrefix(name, "route-images/"), strings.HasPrefix(name, "homepage-backgrounds/"), strings.HasPrefix(name, "page/") && (strings.Contains(name, "/route-images/") || strings.Contains(name, "/homepage-backgrounds/")):
 			images++
 		case strings.HasPrefix(name, "logs/"):
 			logs += bytes.Count(data, []byte("\n"))

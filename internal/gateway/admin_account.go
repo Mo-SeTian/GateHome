@@ -33,6 +33,9 @@ func (s *Store) SetAdminAccount(username, hash string) error {
 	defer s.mu.Unlock()
 	next := s.state
 	next.AdminUsername, next.PasswordHash = username, hash
+	if err := validateHomepageUsers(next); err != nil {
+		return err
+	}
 	if err := writeJSON(s.path, next); err != nil {
 		return errors.New("管理员账户保存失败，请检查配置目录权限")
 	}
@@ -48,6 +51,9 @@ func (s *Store) changeAdminAccount(username, hash string, previous State) error 
 	}
 	next := s.state
 	next.AdminUsername, next.PasswordHash = username, hash
+	if err := validateHomepageUsers(next); err != nil {
+		return err
+	}
 	next.Revision++
 	if err := writeJSON(s.path, next); err != nil {
 		return errors.New("管理员账户保存失败，请检查配置目录权限")
