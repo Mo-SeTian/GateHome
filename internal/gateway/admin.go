@@ -94,6 +94,7 @@ func (a *Admin) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/config", a.requireAuth(a.putConfig))
 	mux.HandleFunc("GET /api/status", a.requireAuth(a.status))
 	a.maintenanceRoutes(mux)
+	mux.HandleFunc("GET /api/sunpanel/routes", a.requireAuth(a.sunPanelRoutes))
 	a.onlineUpdateRoutes(mux)
 	a.dashboardRoutes(mux)
 	a.networkRoutes(mux)

@@ -172,7 +172,7 @@ func run() error {
 	}
 	if c.SunPanel.Enabled {
 		addresses = append(addresses, ":"+strconv.Itoa(c.SunPanel.Port))
-		handlers = append(handlers, panel.Handler())
+		handlers = append(handlers, admin.SunPanelHandler())
 		tlsGetters = append(tlsGetters, nil)
 	}
 	var listeners []net.Listener
