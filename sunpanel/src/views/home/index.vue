@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { VueDraggable } from 'vue-draggable-plus'
 import { NBackTop, NButton, NButtonGroup, NDropdown, NModal, NSkeleton, NSpin, useDialog, useMessage } from 'naive-ui'
-import { nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import { AppIcon, AppStarter, EditItem } from './components'
 import { Clock, SearchBox, SystemMonitor } from '@/components/deskModule'
 import { SvgIcon } from '@/components/common'
@@ -14,6 +14,7 @@ import { PanelPanelConfigStyleEnum, PanelStateNetworkModeEnum } from '@/enums'
 import { VisitMode } from '@/enums/auth'
 import { router } from '@/router'
 import { t } from '@/locales'
+import { resolveAutoUrl } from '@/utils/network'
 
 interface ItemGroup extends Panel.ItemIconGroup {
   sortStatus?: boolean
@@ -47,6 +48,13 @@ const settingModalShow = ref(false)
 
 const items = ref<ItemGroup[]>([])
 const filterItems = ref<ItemGroup[]>([])
+const openingItems = new Set<Panel.ItemInfo>()
+const networkModeOptions = computed(() => [
+  { label: t('panelHome.autoMode'), key: PanelStateNetworkModeEnum.auto },
+  { label: t('panelHome.lanMode'), key: PanelStateNetworkModeEnum.lan },
+  { label: t('panelHome.wanMode'), key: PanelStateNetworkModeEnum.wan },
+])
+const networkModeTitle = computed(() => `${t('panelHome.networkMode')}: ${networkModeOptions.value.find(option => option.key === panelState.networkMode)?.label}`)
 
 function openPage(openMethod: number, url: string, title?: string) {
   switch (openMethod) {
@@ -68,20 +76,49 @@ function openPage(openMethod: number, url: string, title?: string) {
   }
 }
 
+function openItem(item: Panel.ItemInfo, openMethod = item.openMethod) {
+  const lanUrl = item.lanUrl?.trim()
+  if (panelState.networkMode !== PanelStateNetworkModeEnum.auto || !lanUrl || lanUrl === item.url) {
+    openPage(openMethod, (panelState.networkMode === PanelStateNetworkModeEnum.lan && lanUrl) ? lanUrl : item.url, item.title)
+    return
+  }
+  if (openingItems.has(item))
+    return
+
+  // Reserve the tab inside the click event, before awaiting the network probe.
+  const popup = openMethod === 2 ? window.open('about:blank', '_blank') : null
+  if (openMethod === 2 && !popup) {
+    ms.warning(t('panelHome.popupBlocked'))
+    return
+  }
+  if (popup) {
+    popup.opener = null
+    popup.document.title = t('panelHome.checkingLan')
+    popup.document.body.textContent = t('panelHome.checkingLan')
+  }
+  openingItems.add(item)
+  const loading = ms.loading(t('panelHome.checkingLan'), { duration: 0 })
+  resolveAutoUrl(item.url, lanUrl).then((url) => {
+    if (popup) {
+      if (!popup.closed)
+        popup.location.replace(url)
+    }
+    else {
+      openPage(openMethod, url, item.title)
+    }
+  }).finally(() => {
+    openingItems.delete(item)
+    loading.destroy()
+  })
+}
+
 function handleItemClick(itemGroupIndex: number, item: Panel.ItemInfo) {
   if (items.value[itemGroupIndex] && items.value[itemGroupIndex].sortStatus) {
     handleEditItem(item)
     return
   }
 
-  let jumpUrl = ''
-
-  if (item)
-    jumpUrl = (panelState.networkMode === PanelStateNetworkModeEnum.lan ? item.lanUrl : item.url) as string
-  if (item.lanUrl === '')
-    jumpUrl = item.url
-
-  openPage(item.openMethod, jumpUrl, item.title)
+  openItem(item)
 }
 
 function handWindowIframeIdLoad(payload: Event) {
@@ -114,12 +151,10 @@ function updateItemIconGroupByNet(itemIconGroupIndex: number, itemIconGroupId: n
 function handleRightMenuSelect(key: string | number) {
   dropdownShow.value = false
   // console.log(currentRightSelectItem, key)
-  let jumpUrl = panelState.networkMode === PanelStateNetworkModeEnum.lan ? currentRightSelectItem.value?.lanUrl : currentRightSelectItem.value?.url
-  if (currentRightSelectItem.value?.lanUrl === '')
-    jumpUrl = currentRightSelectItem.value.url
   switch (key) {
     case 'newWindows':
-      window.open(jumpUrl)
+      if (currentRightSelectItem.value)
+        openItem(currentRightSelectItem.value, 2)
       break
     case 'openWanUrl':
       if (currentRightSelectItem.value)
@@ -181,11 +216,13 @@ function handleEditSuccess(item: Panel.ItemInfo) {
   getList()
 }
 
-function handleChangeNetwork(mode: PanelStateNetworkModeEnum) {
-  panelState.setNetworkMode(mode)
+function handleChangeNetwork(mode: string | number) {
+  panelState.setNetworkMode(Number(mode) as PanelStateNetworkModeEnum)
   if (mode === PanelStateNetworkModeEnum.lan)
     ms.success(t('panelHome.changeToLanModelSuccess'))
 
+  else if (mode === PanelStateNetworkModeEnum.auto)
+    ms.success(t('panelHome.changeToAutoModelSuccess'))
   else
     ms.success(t('panelHome.changeToWanModelSuccess'))
 }
@@ -228,14 +265,14 @@ function getDropdownMenuOptions() {
 
   ]
 
-  if (currentRightSelectItem.value?.lanUrl && panelState.networkMode === PanelStateNetworkModeEnum.wan) {
+  if (currentRightSelectItem.value?.lanUrl && panelState.networkMode !== PanelStateNetworkModeEnum.lan) {
     dropdownMenuOptions.push({
       label: t('panelHome.openLanUrl'),
       key: 'openLanUrl',
     })
   }
 
-  if (currentRightSelectItem.value?.lanUrl && panelState.networkMode === PanelStateNetworkModeEnum.lan) {
+  if (currentRightSelectItem.value?.lanUrl && panelState.networkMode !== PanelStateNetworkModeEnum.wan) {
     dropdownMenuOptions.push({
       label: t('panelHome.openWanUrl'),
       key: 'openWanUrl',
@@ -506,23 +543,13 @@ function handleAddItem(itemIconGroupId?: number) {
     <div class="fixed-element shadow-[0_0_10px_2px_rgba(0,0,0,0.2)]">
       <NButtonGroup vertical>
         <!-- 网络模式切换按钮组 -->
-        <NButton
-          v-if="panelState.networkMode === PanelStateNetworkModeEnum.lan && panelState.panelConfig.netModeChangeButtonShow" color="#2a2a2a6b"
-          :title="t('panelHome.changeToWanModel')" @click="handleChangeNetwork(PanelStateNetworkModeEnum.wan)"
-        >
-          <template #icon>
-            <SvgIcon class="text-white font-xl" icon="material-symbols:lan-outline-rounded" />
-          </template>
-        </NButton>
-
-        <NButton
-          v-if="panelState.networkMode === PanelStateNetworkModeEnum.wan && panelState.panelConfig.netModeChangeButtonShow" color="#2a2a2a6b"
-          :title="t('panelHome.changeToLanModel')" @click="handleChangeNetwork(PanelStateNetworkModeEnum.lan)"
-        >
-          <template #icon>
-            <SvgIcon class="text-white font-xl" icon="mdi:wan" />
-          </template>
-        </NButton>
+        <NDropdown v-if="panelState.panelConfig.netModeChangeButtonShow" trigger="click" :options="networkModeOptions" :value="panelState.networkMode" @select="handleChangeNetwork">
+          <NButton color="#2a2a2a6b" :title="networkModeTitle" :aria-label="networkModeTitle">
+            <template #icon>
+              <SvgIcon class="text-white font-xl" :icon="panelState.networkMode === PanelStateNetworkModeEnum.auto ? 'gatehome:network-auto' : panelState.networkMode === PanelStateNetworkModeEnum.lan ? 'material-symbols:lan-outline-rounded' : 'mdi:wan'" />
+            </template>
+          </NButton>
+        </NDropdown>
 
         <NButton v-if="authStore.visitMode === VisitMode.VISIT_MODE_LOGIN" color="#2a2a2a6b" @click="settingModalShow = !settingModalShow">
           <template #icon>

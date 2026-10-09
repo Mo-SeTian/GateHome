@@ -242,6 +242,13 @@
     "welcomeMessage": "Welcome back!"
   },
   "panelHome": {
+    "networkMode": "Network mode",
+    "autoMode": "Automatic (prefer LAN)",
+    "lanMode": "LAN URL",
+    "wanMode": "Default URL",
+    "changeToAutoModelSuccess": "Automatic mode enabled: use the LAN URL when reachable, otherwise the default URL (saved locally)",
+    "checkingLan": "Checking LAN connection…",
+    "popupBlocked": "The browser blocked the new window. Allow popups and try again.",
     "changeToLanModel": "Switch to LAN mode",
     "changeToLanModelSuccess": "Switched to LAN mode (mode status saved locally)",
     "changeToWanModel": "Switch to WAN mode",
