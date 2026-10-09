@@ -2,7 +2,7 @@
 
 一个自托管的反向代理与 DDNS 综合管理工具。Go 单进程，中文管理界面内嵌，无需 Node.js、数据库或额外 Web 服务器。
 
-当前版本为 **0.0.32**。目前支持多个 DNS 组分别配置根域名、服务商和凭据（当前支持 Cloudflare），以及 HTTP / HTTPS / WebSocket 代理。访问控制属于代理层，不修改 Linux 的 nftables / iptables。
+当前版本为 **0.0.33**。目前支持多个 DNS 组分别配置根域名、服务商和凭据（当前支持 Cloudflare），以及 HTTP / HTTPS / WebSocket 代理。访问控制属于代理层，不修改 Linux 的 nftables / iptables。
 
 ## 网络结构
 
@@ -115,7 +115,7 @@ sudo bash /tmp/gatehome-install.sh install --proxy "$GATEHOME_INSTALL_PROXY"
 
 下载使用 HTTP/1.1；TLS 连接中断等下载错误会清除残缺文件并重试，最多尝试 4 次。下载和校验成功后才修改安装。如果出现 `curl: (56)` / `unexpected eof while reading`，说明下载连接提前断开；请检查服务器的网络或代理规则。使用 MSM 等分流工具时，安装需要访问 `raw.githubusercontent.com`、`github.com` 和 `release-assets.githubusercontent.com`。仍无法下载时，可在其他能访问 GitHub 的设备下载下面的安装包，复制到服务器离线安装。
 
-离线安装可使用 `make release` 生成的 **`版本/0.0.32/`** 完整目录，或解压 Release 中对应架构的 `gatehome-linux-*.tar.gz`，然后运行：
+离线安装可使用 `make release` 生成的 **`版本/0.0.33/`** 完整目录，或解压 Release 中对应架构的 `gatehome-linux-*.tar.gz`，然后运行：
 
 ```sh
 sudo bash install.sh
@@ -562,3 +562,7 @@ Linux host 网络无需额外发布端口。Docker bridge 模式启用首页时�
 ## 0.0.32：精简首页分组层级
 
 首页分组移到应用卡片上方左侧，与组内链接总数共用一行。保留现有组名，组内页面通过圆点翻页，移除重复的页面标题和行列信息。分组较多时可横向滚动，手机端保持紧凑布局。
+
+## 0.0.33：首页滚轮与鼠标拖动翻页
+
+在应用卡片区域内，滚轮向下或横向滚动向右切换下一页，向上或向左切换上一页；鼠标按住左键左右拖动也可翻页，短距离拖动取消。每次滚动手势最多切换一页，首尾停留，拖动不会误打开应用。页面较长、卡片未完整进入视口时，纵向滚轮优先滚动网页；横向滚动、圆点和键盘仍可翻页。减少动态效果时直接切换内容。

@@ -1,6 +1,6 @@
 'use strict';
 const assert=require('node:assert/strict');
-const {homepageSheets,homepageURL,homepageSearch,homepageEngineImage}=require('../internal/gateway/web/homepage.js');
+const {homepageSheets,homepageURL,homepageSearch,homepageEngineImage,homepageWheelGesture}=require('../internal/gateway/web/homepage.js');
 const links=Array.from({length:14},(_,i)=>({id:String(i),favorite:i===9}));
 const group={pages:[{id:'daily',rows:2,columns:3,mobile_columns:2,links},{id:'backup',rows:1,columns:4,mobile_columns:2,links:[]}]};
 const desktop=homepageSheets(group,false,960),mobile=homepageSheets(group,true,343),narrow=homepageSheets(group,true,280);
@@ -29,4 +29,31 @@ assert.equal(homepageEngineImage({url:'https://www.google.com/search?q={query}'}
 assert.equal(homepageEngineImage({id:'google',url:'https://www.google.com.evil.test/?q={query}'}),'/search-generic.svg');
 assert.equal(homepageEngineImage({url:'https://www.google.com/search?q={query}',image:'a'.repeat(64)}),'/images/'+'a'.repeat(64));
 assert.equal(homepageEngineImage({url:'',image:'../../state.json'}),'/search-generic.svg');
-console.log('Homepage pagination, responsive capacity, search encoding, icon selection and URL validation passed');
+const wheel=homepageWheelGesture();
+assert.equal(wheel.step(15,0,true),0);
+assert.equal(wheel.step(25,16,true),0);
+assert.equal(wheel.step(20,32,true),1);
+// Momentum must not skip pages or scroll the document after reaching the end.
+for(let time=48;time<1200;time+=16)assert.equal(wheel.step(120,time,false),0);
+assert.equal(wheel.step(120,1500,false),null);
+assert.equal(wheel.step(-60,1516,true),-1);
+assert.equal(wheel.step(-60,1532,true),0);
+assert.equal(wheel.step(-60,1800,true),-1);
+wheel.reset();
+assert.equal(wheel.step(40,2000,true),0);
+assert.equal(wheel.step(-40,2016,true),0);
+assert.equal(wheel.step(-20,2032,true),-1);
+wheel.reset();
+assert.equal(wheel.step(40,2200,true),0);
+assert.equal(wheel.step(40,2500,true),0);
+assert.equal(wheel.step(0,2516,true),null);
+assert.equal(wheel.step(20,2532,true),1);
+wheel.reset();
+assert.equal(wheel.step(-100,2600,false),null);
+assert.equal(wheel.step(100,2616,true),1);
+wheel.reset();
+// A document scroll stays a document scroll even when the grid enters view.
+assert.equal(wheel.step(100,2800,false),null);
+assert.equal(wheel.step(100,2816,true),null);
+assert.equal(wheel.step(100,3100,true),1);
+console.log('Homepage pagination, wheel momentum/boundaries/reversal, search encoding, icon selection and URL validation passed');
