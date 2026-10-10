@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -39,7 +40,10 @@ func TestSunPanelBackupRestoresSiblingData(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	payload, err := snapshotBackupPaths(paths, store.Snapshot())
+	snapshot := store.Snapshot()
+	snapshot.Config.SunPanel.LaunchURL = "http://192.168.2.25:16680/"
+	snapshot.Config.SunPanel.ExternalURL = "https://panel.example.test/sunpanel/#/"
+	payload, err := snapshotBackupPaths(paths, snapshot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,6 +61,10 @@ func TestSunPanelBackupRestoresSiblingData(t *testing.T) {
 	state, _ := json.Marshal(decoded.State)
 	if err := restoreFilesPaths(paths, state, decoded.Certificates, decoded.Files); err != nil {
 		t.Fatal(err)
+	}
+	reopened, err := OpenStorePaths(paths)
+	if err != nil || reopened.Snapshot().Config.SunPanel != snapshot.Config.SunPanel {
+		t.Fatal("Sun-Panel launch addresses were not restored from encrypted backup")
 	}
 	for name, want := range original {
 		got, err := os.ReadFile(paths.file(name))
@@ -127,18 +135,35 @@ func TestSunPanelPortAndRemovedConfiguration(t *testing.T) {
 }
 
 func TestSunPanelLaunchURLValidation(t *testing.T) {
-	for _, value := range []string{"", "http://192.168.2.25:16680/", "https://panel.example.test/custom/?view=home#desk", "HTTP://panel.example.test/", "http://[fd00::25]:17777/", "/sunpanel/#/"} {
-		c := DefaultConfig()
-		c.SunPanel.LaunchURL = value
-		if err := Validate(c); err != nil {
-			t.Fatalf("valid launch URL rejected: %q: %v", value, err)
+	for _, external := range []bool{false, true} {
+		valid := []string{"", "http://192.168.2.25:16680/", "https://panel.example.test/custom/?view=home#desk", "HTTP://panel.example.test/", "http://[fd00::25]:17777/"}
+		invalid := []string{"javascript:alert(1)", "data:text/html,test", "//other.example.test/", "/\\other.example.test/", "panel.example.test", "http:///sunpanel/", "https://user:FAKE_PASSWORD@example.test/", "http://example.test:99999/", "http://example.test/\n", strings.Repeat("a", 2049)}
+		if external {
+			invalid = append(invalid, "/sunpanel/#/")
+		} else {
+			valid = append(valid, "/sunpanel/#/")
 		}
-	}
-	for _, value := range []string{"javascript:alert(1)", "data:text/html,test", "//other.example.test/", "/\\other.example.test/", "panel.example.test", "http:///sunpanel/", "https://user:FAKE_PASSWORD@example.test/", "http://example.test:99999/", "http://example.test/\n"} {
-		c := DefaultConfig()
-		c.SunPanel.LaunchURL = value
-		if Validate(c) == nil {
-			t.Fatalf("invalid launch URL accepted: %q", value)
+		for _, value := range valid {
+			c := DefaultConfig()
+			if external {
+				c.SunPanel.ExternalURL = value
+			} else {
+				c.SunPanel.LaunchURL = value
+			}
+			if err := Validate(c); err != nil {
+				t.Fatalf("valid launch URL rejected (external=%v): %q: %v", external, value, err)
+			}
+		}
+		for _, value := range invalid {
+			c := DefaultConfig()
+			if external {
+				c.SunPanel.ExternalURL = value
+			} else {
+				c.SunPanel.LaunchURL = value
+			}
+			if Validate(c) == nil {
+				t.Fatalf("invalid launch URL accepted (external=%v): %q", external, value)
+			}
 		}
 	}
 }
@@ -147,7 +172,8 @@ func TestSunPanelLaunchURLSavedWithoutRestart(t *testing.T) {
 	a, handler := testAdmin(t)
 	cookie := loginForTest(t, handler)
 	s := a.store.Snapshot()
-	s.Config.SunPanel.LaunchURL = "https://panel.example.test/custom/#/"
+	s.Config.SunPanel.LaunchURL = "http://192.168.2.25:16680/custom/#/"
+	s.Config.SunPanel.ExternalURL = "https://panel.example.test/custom/#/"
 	w := adminRequest(handler, "PUT", "/api/config", map[string]any{"config": s.Config, "revision": s.Revision}, cookie, "")
 	if w.Code != 200 {
 		t.Fatal("launch URL save failed")
@@ -160,17 +186,18 @@ func TestSunPanelLaunchURLSavedWithoutRestart(t *testing.T) {
 		t.Fatal("launch URL change required a service restart")
 	}
 	reopened, err := OpenStorePaths(a.store.paths)
-	if err != nil || reopened.Snapshot().Config.SunPanel.LaunchURL != s.Config.SunPanel.LaunchURL {
-		t.Fatal("launch URL was not persisted")
+	if err != nil || reopened.Snapshot().Config.SunPanel != s.Config.SunPanel {
+		t.Fatal("internal and external launch URLs were not persisted")
 	}
 	backup, err := snapshotBackupPaths(a.store.paths, a.store.Snapshot())
-	if err != nil || backup.State.Config.SunPanel.LaunchURL != s.Config.SunPanel.LaunchURL {
-		t.Fatal("launch URL missing from backup")
+	if err != nil || backup.State.Config.SunPanel != s.Config.SunPanel {
+		t.Fatal("internal or external launch URL missing from backup")
 	}
 	s = a.store.Snapshot()
 	s.Config.SunPanel.LaunchURL = ""
+	s.Config.SunPanel.ExternalURL = ""
 	w = adminRequest(handler, "PUT", "/api/config", map[string]any{"config": s.Config, "revision": s.Revision}, cookie, "")
-	if w.Code != 200 || a.store.Snapshot().Config.SunPanel.LaunchURL != "" {
-		t.Fatal("launch URL could not be cleared")
+	if w.Code != 200 || a.store.Snapshot().Config.SunPanel.LaunchURL != "" || a.store.Snapshot().Config.SunPanel.ExternalURL != "" {
+		t.Fatal("launch URLs could not be cleared")
 	}
 }

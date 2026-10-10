@@ -2,7 +2,7 @@
 
 一个自托管的反向代理与 DDNS 综合管理工具。Go 主程序内嵌中文管理界面与 Sun-Panel 前后端；启用首页时由主程序管理独立的 Sun-Panel 子进程。运行无需 Node.js、外部数据库或额外 Web 服务器，Sun-Panel 使用内置 SQLite。
 
-当前版本为 **0.0.46**，安装包见 [v0.0.46 Release](https://github.com/Mo-SeTian/GateHome/releases/tag/v0.0.46)。程序和 systemd 服务名为 `gatehouse`。
+当前版本为 **0.0.47**，安装包见 [v0.0.47 Release](https://github.com/Mo-SeTian/GateHome/releases/tag/v0.0.47)。程序和 systemd 服务名为 `gatehouse`。
 
 ## 主要功能
 
@@ -131,7 +131,7 @@ sudo bash /tmp/gatehome-install.sh install --proxy "$GATEHOME_INSTALL_PROXY"
 
 下载使用 HTTP/1.1；TLS 连接中断等下载错误会清除残缺文件并重试，最多尝试 4 次。下载和校验成功后才修改安装。如果出现 `curl: (56)` / `unexpected eof while reading`，说明下载连接提前断开；请检查服务器的网络或代理规则。使用 MSM 等分流工具时，安装需要访问 `raw.githubusercontent.com`、`github.com` 和 `release-assets.githubusercontent.com`。仍无法下载时，可在其他能访问 GitHub 的设备下载下面的安装包，复制到服务器离线安装。
 
-离线安装可使用 `make release` 生成的 **`版本/0.0.46/`** 完整目录，或解压 Release 中对应架构的 `gatehome-linux-*.tar.gz`，然后运行：
+离线安装可使用 `make release` 生成的 **`版本/0.0.47/`** 完整目录，或解压 Release 中对应架构的 `gatehome-linux-*.tar.gz`，然后运行：
 
 ```sh
 sudo bash install.sh
@@ -296,7 +296,12 @@ IP 归属地由内嵌 ip2region 双栈离线库查询，显示在日志 IP 下�
 
 Docker host 网络无需额外映射。bridge 模式可用 `SUNPANEL_PORT=自定义端口 docker compose -f compose.bridge.yaml up -d` 映射端口，必须与管理页保存的端口一致。HTTPS 管理页使用同源嵌入路径；独立首页可经 HTTPS 反代访问。
 
-“新标签页访问地址”可填写完整 HTTP(S) 地址（包含自定义域名、端口和路径），或以 `/` 开头的 GateHome 本站路径。留空时，“打开 Sun-Panel”和预览区“新标签页打开”默认使用 `http://当前地址栏主机:已配置独立端口/`；从内网 IP 访问 GateHome 时使用该 IP。修改访问地址保存后立即生效，不需要重启；嵌入预览仍使用管理端同源路径。
+浏览器首页提供“内网打开”和“外网打开”两个新标签页入口，分别配置地址：
+
+- **内网地址**：可填写完整 HTTP(S) 地址或以 `/` 开头的本站路径，如 `/sunpanel/`。留空时默认使用 `http://当前地址栏主机:已配置独立端口/`；从内网 IP 访问 GateHome 时使用该 IP。升级前保存的单个访问地址会保留为内网地址。
+- **外网地址**：填写能访问 Sun-Panel 的完整 HTTP(S) 外网地址，可包含域名、端口和路径，如 `https://panel.example.com/sunpanel/`。留空时外网入口显示未配置，不能点击。
+
+两个地址保存后立即生效，无需重启；也会随 GateHome 整站备份保存和恢复。页面预览仍通过管理端同源路径加载 Sun-Panel。
 
 在 Sun-Panel 的“添加项目 / 编辑项目”弹窗展开 **从 GateHome 导入**，搜索并选择已启用的反代项，预览后点击“填入网站信息”。名称、默认网址和内网地址会填入当前表单，检查后保存到所选 Sun-Panel 分组。默认网址由反代域名、HTTP / HTTPS 和监听端口生成，内网地址取反代上游；外网映射端口不同时可在保存前修改。导入是一次性复制，后续修改反代不会自动改写首页项目。
 

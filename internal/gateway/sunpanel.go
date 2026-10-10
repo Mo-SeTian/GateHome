@@ -18,26 +18,36 @@ import (
 )
 
 type SunPanelConfig struct {
-	Enabled   bool   `json:"enabled"`
-	Port      int    `json:"port"`
-	LaunchURL string `json:"launch_url,omitempty"`
+	Enabled     bool   `json:"enabled"`
+	Port        int    `json:"port"`
+	LaunchURL   string `json:"launch_url,omitempty"`
+	ExternalURL string `json:"external_url,omitempty"`
 }
 
 func validateSunPanelListener(c SunPanelConfig, groups []ProxyGroup) error {
-	if c.LaunchURL != "" {
-		u, err := url.Parse(c.LaunchURL)
-		if err != nil || len(c.LaunchURL) > 2048 || strings.ContainsAny(c.LaunchURL, " \\\t\r\n") || u.User != nil {
-			return errors.New("Sun-Panel 访问地址须为无账号密码的 HTTP(S) 地址或以 / 开头的本站路径")
+	for _, address := range []struct {
+		name, value string
+		allowPath   bool
+	}{{"内网", c.LaunchURL, true}, {"外网", c.ExternalURL, false}} {
+		if address.value == "" {
+			continue
+		}
+		u, err := url.Parse(address.value)
+		if err != nil || len(address.value) > 2048 || strings.ContainsAny(address.value, " \\\t\r\n") || u.User != nil {
+			return fmt.Errorf("Sun-Panel %s地址须为有效地址，不能包含账号密码或空白字符", address.name)
 		}
 		absolute := (strings.EqualFold(u.Scheme, "http") || strings.EqualFold(u.Scheme, "https")) && u.Hostname() != ""
-		localPath := strings.HasPrefix(c.LaunchURL, "/") && !strings.HasPrefix(c.LaunchURL, "//") && u.Scheme == "" && u.Host == ""
+		localPath := address.allowPath && strings.HasPrefix(address.value, "/") && !strings.HasPrefix(address.value, "//") && u.Scheme == "" && u.Host == ""
 		if !absolute && !localPath {
-			return errors.New("Sun-Panel 访问地址须为 HTTP(S) 地址或以 / 开头的本站路径")
+			if address.allowPath {
+				return errors.New("Sun-Panel 内网地址须为 HTTP(S) 地址或以 / 开头的本站路径")
+			}
+			return errors.New("Sun-Panel 外网地址须为完整 HTTP(S) 地址")
 		}
 		if u.Port() != "" {
 			port, err := strconv.Atoi(u.Port())
 			if err != nil || port < 1 || port > 65535 {
-				return errors.New("Sun-Panel 访问地址中的端口须为 1–65535")
+				return fmt.Errorf("Sun-Panel %s地址中的端口须为 1–65535", address.name)
 			}
 		}
 	}
