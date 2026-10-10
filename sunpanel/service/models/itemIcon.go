@@ -8,6 +8,7 @@ import (
 
 type ItemIcon struct {
 	BaseModel
+	GateHome        *GateHomeLink             `gorm:"serializer:json" json:"gateHome,omitempty"`
 	IconJson        string                    `gorm:"type:varchar(1000)" json:"-"`
 	Icon            datatype.ItemIconIconInfo `gorm:"-" json:"icon"`
 	Title           string                    `gorm:"type:varchar(50)" json:"title"`
@@ -19,6 +20,14 @@ type ItemIcon struct {
 	ItemIconGroupId int                       `json:"itemIconGroupId"`
 	UserId          uint                      `json:"userId"`
 	User            User                      `json:"user"`
+}
+
+// Last imported values let explicit synchronization preserve user overrides.
+type GateHomeLink struct {
+	RouteID string `json:"routeId"`
+	Title   string `json:"title"`
+	URL     string `json:"url"`
+	LanURL  string `json:"lanUrl"`
 }
 
 func (m *ItemIcon) DeleteByItemIconGroupIds(db *gorm.DB, userId uint, itemIconGroupIds []uint) (err error) {

@@ -36,7 +36,7 @@ func (a *Admin) sunPanelRoutes(w http.ResponseWriter, r *http.Request) {
 			if name == "" {
 				name = route.Host
 			}
-			items = append(items, map[string]string{"title": name, "group": group.Name, "url": scheme + "://" + host + "/", "lanUrl": upstream.String()})
+			items = append(items, map[string]string{"id": route.ID, "title": name, "group": group.Name, "url": scheme + "://" + host + "/", "lanUrl": upstream.String()})
 		}
 	}
 	jsonResponse(w, http.StatusOK, items)

@@ -41,6 +41,10 @@ func (a *ItemIcon) Edit(c *gin.Context) {
 	}
 
 	req.UserId = userInfo.ID
+	if !ownedGroup(global.Db, req.ItemIconGroupId, userInfo.ID) || (req.GateHome != nil && !validLink(req.GateHome)) {
+		apiReturn.Error(c, "分组或关联信息无效")
+		return
+	}
 
 	// json转字符串
 	if j, err := json.Marshal(req.Icon); err == nil {
@@ -49,17 +53,24 @@ func (a *ItemIcon) Edit(c *gin.Context) {
 
 	if req.ID != 0 {
 		// 修改
-		updateField := []string{"IconJson", "Icon", "Title", "Url", "LanUrl", "Description", "OpenMethod", "GroupId", "UserId", "ItemIconGroupId"}
+		updateField := []string{"IconJson", "Icon", "Title", "Url", "LanUrl", "Description", "OpenMethod", "GroupId", "UserId", "ItemIconGroupId", "GateHome"}
 		if req.Sort != 0 {
 			updateField = append(updateField, "Sort")
 		}
-		global.Db.Model(&models.ItemIcon{}).
+		result := global.Db.Model(&models.ItemIcon{}).
 			Select(updateField).
-			Where("id=?", req.ID).Updates(&req)
+			Where("id=? AND user_id=?", req.ID, userInfo.ID).Updates(&req)
+		if result.Error != nil || result.RowsAffected != 1 {
+			apiReturn.Error(c, "项目保存失败，请刷新后重试")
+			return
+		}
 	} else {
 		req.Sort = 9999
 		// 创建
-		global.Db.Create(&req)
+		if err := global.Db.Create(&req).Error; err != nil {
+			apiReturn.Error(c, "项目保存失败")
+			return
+		}
 	}
 
 	apiReturn.SuccessData(c, req)

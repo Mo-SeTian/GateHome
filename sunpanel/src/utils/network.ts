@@ -39,15 +39,17 @@ export async function resolveAutoUrl(url: string, lanUrl?: string): Promise<stri
 const autoUrlCacheMs = 60_000
 
 // Each home page checks LAN addresses in the background; clicks only read results.
-export function createAutoUrlResolver() {
+export function createAutoUrlResolver(onChange?: () => void) {
   const probes = new Map<string, Promise<void>>()
   const reachable = new Set<string>()
   const checkedAt = new Map<string, number>()
+  const lastCheckedAt = new Map<string, number>()
   return {
     invalidate() {
       probes.clear()
       reachable.clear()
       checkedAt.clear()
+      onChange?.()
     },
     check(items: { url: string; lanUrl?: string }[]) {
       const pending: Promise<void>[] = []
@@ -69,12 +71,20 @@ export function createAutoUrlResolver() {
             if (chosen === lanUrl)
               reachable.add(lanUrl)
             checkedAt.set(lanUrl, Date.now())
+            lastCheckedAt.set(lanUrl, Date.now())
+            onChange?.()
           })
           probes.set(lanUrl, probe)
         }
         pending.push(probe)
       }
       return Promise.all(pending)
+    },
+    inspect(url: string, lanUrl?: string) {
+      const lan = lanUrl?.trim()
+      const checked = lan ? checkedAt.get(lan) : undefined
+      const state = !lan ? 'unconfigured' : lan === url ? 'same' : checked === undefined ? (probes.has(lan) ? 'checking' : 'unchecked') : Date.now() - checked >= autoUrlCacheMs ? 'expired' : reachable.has(lan) ? 'reachable' : 'unreachable'
+      return { state, checkedAt: lan ? lastCheckedAt.get(lan) : undefined }
     },
     resolve(url: string, lanUrl?: string) {
       const lan = lanUrl?.trim()

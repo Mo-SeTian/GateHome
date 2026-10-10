@@ -62,6 +62,7 @@ function setNavigation(open,restoreFocus=true) {
 }
 let ipBlockView={entries:[]},ipBlockRule='',ipBlockSearch='',ipBlockPage=1,ipBlockRequest=0,ipBlockError='',ipBlockReceived=0;
 let maintenancePreview=null;
+let backupCapacity=null,backupCapacityError='',backupCapacityRequest=0;
 const onlineUpdate={release:null,phase:'',error:'',job:null,timer:null,request:0};
 let logRequest=0;
 const discovery={request:0,timer:null,scan:null,rows:new Map(),pending:false};
@@ -122,7 +123,7 @@ function toast(message) {
   $('#toast').textContent = message; $('#toast').hidden = false; if(!reducedMotion.matches) {$('#toast').getAnimations().forEach(a=>a.cancel());$('#toast').animate([{opacity:0,translate:'0 8px'},{opacity:1,translate:'0 0'}],{duration:180,easing:'ease-out'});}
   clearTimeout(toastTimer); toastTimer = setTimeout(() => { $('#toast').hidden = true; }, 4500);
 }
-function showLogin() { $('#account-menu').open=false;clearAccountPasswords();adminUsername='';$('#account-name').textContent='管理员';$('#account-avatar').textContent='G';resetDashboard();setNavigation(false,false); $('#login').hidden = false; $('#app').hidden = true; document.querySelectorAll('dialog').forEach(d=>d.close()); config = undefined; renderedPage='';clearTimeout(onlineUpdate.timer);onlineUpdate.request++;onlineUpdate.phase='';onlineUpdate.job=null;onlineUpdate.release=null;onlineUpdate.error='';abandonDiscovery();for(const state of Object.values(securityEvents)) {state.request++;state.view=null;state.filters=emptyEventFilters();state.applied=emptyEventFilters();state.loading=false;state.error='';} }
+function showLogin() { $('#account-menu').open=false;clearAccountPasswords();adminUsername='';$('#account-name').textContent='管理员';$('#account-avatar').textContent='G';resetDashboard();setNavigation(false,false); $('#login').hidden = false; $('#app').hidden = true; document.querySelectorAll('dialog').forEach(d=>d.close()); config = undefined;backupCapacity=null;backupCapacityError='';backupCapacityRequest++; renderedPage='';clearTimeout(onlineUpdate.timer);onlineUpdate.request++;onlineUpdate.phase='';onlineUpdate.job=null;onlineUpdate.release=null;onlineUpdate.error='';abandonDiscovery();for(const state of Object.values(securityEvents)) {state.request++;state.view=null;state.filters=emptyEventFilters();state.applied=emptyEventFilters();state.loading=false;state.error='';} }
 function applyConfig(data) { config = data.config; revision = data.revision; dnsCredentialsConfigured=data.dns_credentials_configured||{}; certificateCredentialsConfigured=data.certificate_credentials_configured||{};routePasswordsConfigured=data.route_passwords_configured||{}; proxyPasswordConfigured=data.proxy_password_configured; githubTokenConfigured=!!data.github_token_configured; ipRequest++;dnsRecordsRequest++;dnsRecords={};dnsRecordsError=''; if(networkInfo) networkInfo.groups={}; }
 async function save(next, dnsTokens, proxyPassword, certificateTokens, routePasswords, githubToken) {
   const payload = {config:next, revision};
@@ -464,12 +465,23 @@ async function loadOnlineUpdateStatus() {
 function githubTokenHTML() {
   return panel('GitHub 访问令牌','为在线更新提供更高的 GitHub API 访问额度，保存后立即生效。',`<form id="github-token-form" class="panel-body"><label>GitHub Token（可选）<input name="token" type="password" maxlength="512" autocomplete="new-password" spellcheck="false" placeholder="${githubTokenConfigured?'已配置，留空保留':'不填写则匿名访问'}"><small>仅读取 GateHome 公开发布；classic Token 无需勾选任何权限，fine-grained Token 可选择 Public repositories，不必添加仓库权限。</small></label><p class="form-note">匿名 API 额度通常为每 IP 每小时 60 次；有效个人 Token 通常为每账号每小时 5,000 次。Token 用于版本检查和更新包 API 请求，不影响已保存的出站代理。保存后不回显，并随整站加密备份保存。</p><label class="check-label"><input name="clear_token" type="checkbox">清除已保存的 GitHub Token</label><p class="error" role="alert"></p><div class="form-actions"><button type="submit" class="primary">保存 GitHub Token</button></div></form>`);
 }
+function backupCapacityHTML() {
+  const c=backupCapacity,mib=value=>(Number(value||0)/1048576).toFixed(2)+' MiB';
+  return panel('备份与更新容量预检','估算当前数据及编码后的回滚快照，检查过程无需停服。',`<div class="panel-body"><p class="error" role="alert">${esc(backupCapacityError)}</p>${c?`<ul class="info-list"><li><span>配置 / 日志</span><b>${mib(c.config_bytes)} / ${mib(c.log_bytes)}</b></li><li><span>Sun-Panel 全部数据 / 反代图片</span><b>${mib(c.sunpanel_bytes)} / ${mib(c.image_bytes)}</b></li><li><span>证书与订阅缓存</span><b>${mib(c.other_bytes)}</b></li><li><span>预计快照 / 上限</span><b>${mib(c.snapshot_bytes)} / ${mib(c.limit_bytes)}</b></li></ul><p class="${c.can_proceed?'form-note':'error'}">${c.can_proceed?'当前容量检查通过。':'容量超限，请减少保留日志或迁出不需要的文件后重试。'}</p><p class="form-note">检查时间：${date(c.checked_at)}。快照估算含 JSON 和 Base64 编码开销；数据增长后可能变化。备份、下载更新及应用维护前会重新检查。</p>`:'<p class="form-note">正在读取容量…</p>'}<div class="form-actions"><button class="secondary" data-action="refresh-backup-capacity">重新检查容量</button></div></div>`);
+}
+async function loadBackupCapacity() {
+  const request=++backupCapacityRequest;backupCapacityError='';
+  try {const data=await api('maintenance/capacity');if(request===backupCapacityRequest&&config) backupCapacity=data;}
+  catch(error) {if(request===backupCapacityRequest&&config) {backupCapacity=null;backupCapacityError=error.message;}}
+  const root=$('#backup-capacity');if(root) {root.innerHTML=backupCapacityHTML();hydrateIcons(root);}
+}
+
 function maintenanceHTML() {
   const supported=status.maintenance_available;
   const preview=maintenancePreview;
   const detail=!preview?'':`<div class="maintenance-preview"><b>${preview.kind==='update'?'更新包 v'+esc(preview.version):'备份 v'+esc(preview.version)}</b>${preview.kind==='restore'?`<p>${preview.groups} 个反代组 · ${preview.routes} 个服务 · ${preview.ddns_groups} 个 DDNS 组 · ${preview.firewalls} 个防火墙 · ${preview.subscriptions} 个订阅<br>${preview.sunpanel_files||0} 个 Sun-Panel 文件 · ${preview.images||0} 张图片资产 · ${preview.certificates||0} 个证书文件 · ${preview.log_entries||0} 条日志 · ${preview.subscription_caches||0} 个订阅缓存<br>${preview.includes_files?'':'此旧备份未包含日志、缓存与图片；恢复时保留服务器现有文件。<br>'}备份时间：${date(preview.created_at)} · ${preview.token_configured?'含 Cloudflare Token':'未配置 Cloudflare Token'}</p>`:''}<p>${esc(preview.message)}</p><button class="primary" data-action="apply-maintenance" ${!preview.can_apply?'disabled':''}>${preview.kind==='update'?'应用更新并重启':'恢复数据并重启'}</button></div>`;
   const backupDetail=preview?.kind==='restore'?detail:'',updateDetail=preview?.kind==='update'?detail:'';
-  return panel('备份与恢复','备份配置与凭据、证书、服务图片、Sun-Panel 全部数据、日志和订阅缓存。',`<div class="panel-body two-col maintenance-forms"><form id="backup-form"><h3>下载加密备份</h3><label>备份密码<input name="password" type="password" autocomplete="new-password"></label><label>再次输入备份密码<input name="confirm_password" type="password" autocomplete="new-password"></label><p class="form-note">密码不限长度，可以留空；留空时恢复也无需填写密码。请保存设置的密码，恢复时需保持一致。ZIP 内的数据使用 AES-256-GCM 加密，含反代访问密码、IP 冻结名单与全部已保存的业务数据。登录会话、未保存的扫描结果和维护临时文件不备份。</p><p class="error" role="alert"></p><div class="form-actions"><button class="primary" type="submit">下载备份 ZIP</button></div></form><form id="restore-form"><h3>上传备份</h3><label>备份 ZIP<input name="file" type="file" accept=".zip,application/zip" required></label><label>导出时的备份密码<input name="password" type="password" autocomplete="off"></label><p class="form-note">密码不限长度；导出时留空，这里也留空。先检查备份再确认恢复。恢复后使用备份时的管理员账号和管理密码重新登录。</p><p class="error" role="alert"></p><div class="form-actions"><button class="secondary" type="submit">检查备份</button></div></form></div>${backupDetail}`) +
+  return `<div id="backup-capacity">${backupCapacityHTML()}</div>` + panel('备份与恢复','备份配置与凭据、证书、服务图片、Sun-Panel 全部数据、日志和订阅缓存。',`<div class="panel-body two-col maintenance-forms"><form id="backup-form"><h3>下载加密备份</h3><label>备份密码<input name="password" type="password" autocomplete="new-password"></label><label>再次输入备份密码<input name="confirm_password" type="password" autocomplete="new-password"></label><p class="form-note">密码不限长度，可以留空；留空时恢复也无需填写密码。请保存设置的密码，恢复时需保持一致。ZIP 内的数据使用 AES-256-GCM 加密，含反代访问密码、IP 冻结名单与全部已保存的业务数据。登录会话、未保存的扫描结果和维护临时文件不备份。</p><p class="error" role="alert"></p><div class="form-actions"><button class="primary" type="submit">下载备份 ZIP</button></div></form><form id="restore-form"><h3>上传备份</h3><label>备份 ZIP<input name="file" type="file" accept=".zip,application/zip" required></label><label>导出时的备份密码<input name="password" type="password" autocomplete="off"></label><p class="form-note">密码不限长度；导出时留空，这里也留空。先检查备份再确认恢复。恢复后使用备份时的管理员账号和管理密码重新登录。</p><p class="error" role="alert"></p><div class="form-actions"><button class="secondary" type="submit">检查备份</button></div></form></div>${backupDetail}`) +
     `<div id="online-update">${onlineUpdateHTML()}</div>` + githubTokenHTML() +
     panel('上传版本更新','使用本项目“更新版本”目录生成的 ZIP；只接受更高版本。',`<form id="update-form" class="panel-body"><label>更新 ZIP<input name="file" type="file" accept=".zip,application/zip" required></label><p class="form-note">检查版本、文件哈希和主机架构后再应用。只使用你信任的项目更新包；哈希校验用于检查文件完整性。</p><p class="form-note">${supported?'维护时短暂停止服务，新程序启动检查失败会回滚。':'此部署可导出备份及检查上传包。应用更新或恢复需要 Linux 安装脚本或新版 Docker 启动方式。'}</p><p class="error" role="alert"></p><div class="form-actions"><button type="submit" class="secondary">检查更新包</button></div></form>${updateDetail}`) +
     `<div class="app-version"><b>Gatehouse</b><button class="secondary" data-action="restart-service" ${!supported?'disabled':''}>重启服务</button><span>版本 ${esc(status.version||'加载中')}</span></div>`;
@@ -738,7 +750,7 @@ function render() {
     if(!reducedMotion.matches) content.querySelectorAll('.stat-value').forEach((el,i)=>{if(values[i]!==el.textContent) el.animate([{opacity:.4},{opacity:1}],{duration:160});});
   }
   renderedPage=page;
-  if(changed&&page==='settings') loadOnlineUpdateStatus();
+  if(changed&&page==='settings') {loadOnlineUpdateStatus();loadBackupCapacity();}
   if(changed&&page==='overview') loadDashboard();
   if(page==='ddns') {loadIPInfo().catch(e=>{if($('#ip-results')) $('#ip-results').textContent=e.message;});loadDNSRecords();}
 }
@@ -1105,7 +1117,7 @@ document.addEventListener('submit',event=>{
       if(e.image_url.value.trim()&&!await loadRouteImage('url')) return;
       if(!$('#route-dialog').open) return;
       const index=Number(e.index.value);
-      const r={group_id:e.group_id.value,name:e.name.value.trim(),host:proxyHost(next.groups.find(g=>g.id===e.group_id.value),e.host.value,form.dataset.fullHost==='true'),upstream:upstreamURL(e.upstream_scheme.value,e.upstream.value),image:e.image.value,tls:e.tls.checked,enabled:index<0?true:next.routes[index].enabled,firewall_id:e.firewall_id.value,auth:{enabled:e.auth_enabled.checked,username:e.auth_username.value.trim(),failure_limit:Number(e.failure_limit.value),freeze_seconds:Number(e.freeze_minutes.value)*60}};
+      const r={id:index<0?newID():next.routes[index].id,group_id:e.group_id.value,name:e.name.value.trim(),host:proxyHost(next.groups.find(g=>g.id===e.group_id.value),e.host.value,form.dataset.fullHost==='true'),upstream:upstreamURL(e.upstream_scheme.value,e.upstream.value),image:e.image.value,tls:e.tls.checked,enabled:index<0?true:next.routes[index].enabled,firewall_id:e.firewall_id.value,auth:{enabled:e.auth_enabled.checked,username:e.auth_username.value.trim(),failure_limit:Number(e.failure_limit.value),freeze_seconds:Number(e.freeze_minutes.value)*60}};
       if(index<0) next.routes.push(r); else next.routes[index]=r;
       const password=e.clear_auth_password.checked?'':e.auth_password.value||undefined;
       await save(next,undefined,undefined,undefined,password===undefined?undefined:{[r.group_id+'/'+r.host]:password});e.auth_password.value='';form.dataset.dirty='false';collapsedGroups.delete('proxy:'+r.group_id);closeDialog($('#route-dialog')); render();
@@ -1211,6 +1223,7 @@ document.addEventListener('click',async event=>{
       await save(next);render();
     }
     if(action==='refresh-public-ip') {await loadIPInfo(true);toast('公网 IP 检测已安排，DNS 记录按组同步任务更新');}
+    if(action==='refresh-backup-capacity') await loadBackupCapacity();
     if(action==='check-online-update') await checkOnlineUpdate();
     if(action==='install-online-update') await installOnlineUpdate();
     if(action==='restart-service') {if(!confirm('重启会短暂中断服务，监听端口变更将生效。确认重启？')) return;const result=await api('maintenance/restart','POST',{});toast(result.message);showLogin();}

@@ -180,6 +180,14 @@ func (m *Maintenance) schedule(id, kind string) error {
 			return errors.New("只可更新到更高版本")
 		}
 	}
+	var current State
+	stateData, err := os.ReadFile(m.paths.file("state.json"))
+	if err != nil || json.Unmarshal(stateData, &current) != nil {
+		return errors.New("当前配置无法进行容量预检")
+	}
+	if err := checkBackupCapacity(m.paths, current); err != nil {
+		return err
+	}
 	if kind == "restore" {
 		var payload diskBackup
 		data, err := os.ReadFile(filepath.Join(m.dir, "restore-staged.json"))

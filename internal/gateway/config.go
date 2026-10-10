@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -31,6 +32,7 @@ type RouteAuthConfig struct {
 }
 
 type Route struct {
+	ID         string          `json:"id,omitempty"`
 	GroupID    string          `json:"group_id"`
 	Name       string          `json:"name"`
 	Host       string          `json:"host"`
@@ -415,6 +417,10 @@ func migrateConfig(c *Config) bool {
 	}
 	for i := range c.Routes {
 		r := &c.Routes[i]
+		if r.ID == "" {
+			r.ID = "route-" + rand.Text()
+			migrated = true
+		}
 		if r.Access == nil || r.FirewallID != "" {
 			continue
 		}
@@ -567,6 +573,23 @@ func (s *Store) UpdateRouteCredentials(c Config, tokens, certificateTokens map[s
 		return errors.New("配置已被修改，请刷新页面后重试")
 	}
 	next := s.state
+	for i := range c.Routes {
+		if c.Routes[i].ID != "" {
+			continue
+		}
+		for _, old := range s.state.Config.Routes {
+			if routeKey(old) == routeKey(c.Routes[i]) {
+				c.Routes[i].ID = old.ID
+				break
+			}
+		}
+		if c.Routes[i].ID == "" {
+			c.Routes[i].ID = "route-" + rand.Text()
+		}
+	}
+	if err := Validate(c); err != nil {
+		return err
+	}
 	next.Config = c
 	next.RoutePasswordHashes = map[string]string{}
 	for _, route := range c.Routes {
@@ -811,7 +834,14 @@ func Validate(c Config) error {
 		return errors.New("第一版最多支持 100 条代理及 DNS 记录")
 	}
 	seen := map[string]bool{}
+	routeIDs := map[string]bool{}
 	for _, r := range c.Routes {
+		if r.ID != "" {
+			if !idPattern.MatchString(r.ID) || routeIDs[r.ID] {
+				return errors.New("反代标识无效或重复")
+			}
+			routeIDs[r.ID] = true
+		}
 		key := r.GroupID + "/" + r.Host
 		if r.Image != "" && !routeImageID.MatchString(r.Image) {
 			return errors.New("反代图片引用无效，请重新选择图片")

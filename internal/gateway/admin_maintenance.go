@@ -15,6 +15,14 @@ import (
 func (a *Admin) SetMaintenance(m *Maintenance) { a.maintenance = m }
 
 func (a *Admin) maintenanceRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/maintenance/capacity", a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
+		capacity, err := inspectBackupCapacity(a.store.paths, a.store.Snapshot())
+		if err != nil {
+			apiError(w, 400, err.Error())
+			return
+		}
+		jsonResponse(w, 200, capacity)
+	}))
 	mux.HandleFunc("POST /api/maintenance/restart", a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
 		var input struct{}
 		if !decodeBody(w, r, &input) {
@@ -55,6 +63,10 @@ func (a *Admin) maintenanceRoutes(mux *http.ServeMux) {
 		defer a.updateMu.Unlock()
 		if a.maintenance == nil || a.maintenance.Busy() {
 			apiError(w, 409, "维护功能不可用或正在执行操作")
+			return
+		}
+		if err := checkBackupCapacity(a.store.paths, a.store.Snapshot()); err != nil {
+			apiError(w, 400, err.Error())
 			return
 		}
 		// Keep all rotated log files at the same complete-record snapshot.

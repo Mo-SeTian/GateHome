@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
+import PortableTransfer from './PortableTransfer.vue'
 import type { UploadFileInfo } from 'naive-ui'
 import { NAlert, NButton, NCheckbox, NCheckboxGroup, NDivider, NInput, NSpace, NUpload, useMessage } from 'naive-ui'
 import { RoundCardModal, SvgIcon } from '@/components/common'
@@ -250,6 +251,7 @@ async function handleStartImport() {
 
 <template>
   <div class="pt-2">
+    <PortableTransfer />
     <NAlert type="info" :bordered="false">
       <p>{{ $t('apps.exportImport.tip') }}</p>
     </NAlert>

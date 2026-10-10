@@ -6,6 +6,7 @@ import IconEditor from './IconEditor.vue'
 import { edit, getSiteFavicon } from '@/api/panel/itemIcon'
 import { getList as getGroupList } from '@/api/panel/itemIconGroup'
 import { t } from '@/locales'
+import { routeLink } from '@/utils/gateHome'
 
 interface Props {
   visible: boolean
@@ -41,7 +42,7 @@ interface Emit {
 const model = ref<Panel.Info>(props.itemInfo ? { ...props.itemInfo } : { ...restoreDefault })
 const formRef = ref<FormInst | null>(null)
 
-interface GateHomeRoute { title: string; group: string; url: string; lanUrl: string }
+interface GateHomeRoute { id: string; title: string; group: string; url: string; lanUrl: string }
 const gateHomeRoutes = ref<GateHomeRoute[]>([])
 const gateHomeLoading = ref(false)
 const gateHomeError = ref('')
@@ -88,7 +89,8 @@ function importGateHomeRoute() {
   const route = selectedRoute.value
   if (!route)
     return
-  model.value.title = Array.from(route.title).slice(0, 20).join('')
+  model.value.gateHome = routeLink(route)
+  model.value.title = model.value.gateHome.title
   model.value.url = route.url
   model.value.lanUrl = route.lanUrl
   formRef.value?.restoreValidation()
@@ -264,6 +266,7 @@ function getGroupListOptions() {
           </NSpace>
         </NCollapseItem>
       </NCollapse>
+      <NAlert v-if="model.gateHome" class="mb-4" type="info" :show-icon="false">已关联 GateHome 反代。首页的“GateHome 联动”可预览配置变化。<NButton text type="primary" @click="model.gateHome = null">解除关联</NButton></NAlert>
       <NForm ref="formRef" :model="model" :rules="rules">
         <NGrid cols="2" :x-gap="10" item-responsive>
           <NGridItem span="2 500:1">

@@ -33,7 +33,7 @@ func TestSunPanelRouteImport(t *testing.T) {
 		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &items) != nil || len(items) != 2 {
 			t.Fatal("route list incorrect")
 		}
-		if len(items[0]) != 4 || items[0]["url"] != "https://nas.example.com:18443/" || items[0]["lanUrl"] != "http://192.168.1.2:5000" || items[0]["title"] != "NAS" {
+		if len(items[0]) != 5 || items[0]["id"] == "" || items[0]["url"] != "https://nas.example.com:18443/" || items[0]["lanUrl"] != "http://192.168.1.2:5000" || items[0]["title"] != "NAS" {
 			t.Fatal("HTTPS mapping or export fields incorrect")
 		}
 		if items[1]["url"] != "http://plain.example.com:18080/" || items[1]["lanUrl"] != "http://[::1]:8000/" {

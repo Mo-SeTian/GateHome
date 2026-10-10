@@ -24,7 +24,7 @@ func fullBackupFixture(t *testing.T) (string, backupPayload) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	state.Config.Routes = []Route{{GroupID: "default", Name: "NAS", Host: "nas.example.test", Upstream: "http://127.0.0.1:5000", Enabled: true, Image: id, Auth: RouteAuthConfig{Enabled: true, Username: "visitor", FailureLimit: 5, FreezeSeconds: 3600}}}
+	state.Config.Routes = []Route{{ID: "TEST-ONLY-ROUTE", GroupID: "default", Name: "NAS", Host: "nas.example.test", Upstream: "http://127.0.0.1:5000", Enabled: true, Image: id, Auth: RouteAuthConfig{Enabled: true, Username: "visitor", FailureLimit: 5, FreezeSeconds: 3600}}}
 	state.RoutePasswordHashes = map[string]string{"default/nas.example.test": hash}
 	now := time.Now().UTC()
 	rule := "default/nas.example.test"

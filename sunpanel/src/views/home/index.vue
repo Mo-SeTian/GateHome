@@ -3,6 +3,7 @@ import { VueDraggable } from 'vue-draggable-plus'
 import { NBackTop, NButton, NButtonGroup, NDropdown, NModal, NSkeleton, NSpin, useDialog, useMessage } from 'naive-ui'
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { AppIcon, AppStarter, EditItem } from './components'
+import GateHomeImport from './components/GateHomeImport.vue'
 import { Clock, SearchBox, SystemMonitor } from '@/components/deskModule'
 import { SvgIcon } from '@/components/common'
 import { deletes, getListByGroupId, saveSort } from '@/api/panel/itemIcon'
@@ -45,15 +46,28 @@ const currentRightSelectItem = ref<Panel.ItemInfo | null>(null)
 const currentAddItenIconGroupId = ref<number | undefined>()
 
 const settingModalShow = ref(false)
+const gateHomeShow = ref(false)
 
 const items = ref<ItemGroup[]>([])
 const filterItems = ref<ItemGroup[]>([])
-const autoUrls = createAutoUrlResolver()
+const networkDetailsShow = ref(false)
+const autoUrlRevision = ref(0)
+const autoUrls = createAutoUrlResolver(() => { autoUrlRevision.value++ })
+const networkDetails = computed(() => {
+  void autoUrlRevision.value
+  const labels: Record<string, string> = { unconfigured: '未配置内网地址', same: '内外网地址相同', checking: '后台检测中', unchecked: '尚未检测', expired: '结果已过期', reachable: '内网可达', unreachable: '检测失败、超时或被浏览器限制' }
+  return items.value.flatMap(group => group.items || []).map((item) => {
+    const result = autoUrls.inspect(item.url, item.lanUrl)
+    const chosen = panelState.networkMode === PanelStateNetworkModeEnum.lan ? item.lanUrl || item.url : panelState.networkMode === PanelStateNetworkModeEnum.auto ? autoUrls.resolve(item.url, item.lanUrl) : item.url
+    return { item, chosen, status: labels[result.state], checkedAt: result.checkedAt }
+  })
+})
 let stopAutoUrlRefresh: (() => void) | undefined
 const networkModeOptions = computed(() => [
   { label: t('panelHome.autoMode'), key: PanelStateNetworkModeEnum.auto },
   { label: t('panelHome.lanMode'), key: PanelStateNetworkModeEnum.lan },
   { label: t('panelHome.wanMode'), key: PanelStateNetworkModeEnum.wan },
+  { label: '查看检测详情', key: 'details' },
 ])
 const networkModeTitle = computed(() => `${t('panelHome.networkMode')}: ${networkModeOptions.value.find(option => option.key === panelState.networkMode)?.label}`)
 
@@ -193,6 +207,10 @@ function handleEditSuccess(item: Panel.ItemInfo) {
 }
 
 function handleChangeNetwork(mode: string | number) {
+  if (mode === 'details') {
+    networkDetailsShow.value = true
+    return
+  }
   panelState.setNetworkMode(Number(mode) as PanelStateNetworkModeEnum)
   if (mode === PanelStateNetworkModeEnum.lan)
     ms.success(t('panelHome.changeToLanModelSuccess'))
@@ -523,6 +541,9 @@ function handleAddItem(itemIconGroupId?: number) {
     <!-- 悬浮按钮 -->
     <div class="fixed-element shadow-[0_0_10px_2px_rgba(0,0,0,0.2)]">
       <NButtonGroup vertical>
+        <NButton v-if="authStore.visitMode === VisitMode.VISIT_MODE_LOGIN" color="#2a2a2a6b" title="GateHome 联动" aria-label="GateHome 联动" @click="gateHomeShow = true">
+          <template #icon><SvgIcon class="text-white font-xl" icon="icon-park-outline-import-and-export" /></template>
+        </NButton>
         <!-- 网络模式切换按钮组 -->
         <NDropdown v-if="panelState.panelConfig.netModeChangeButtonShow" trigger="click" :options="networkModeOptions" :value="panelState.networkMode" @select="handleChangeNetwork">
           <NButton color="#2a2a2a6b" :title="networkModeTitle" :aria-label="networkModeTitle">
@@ -532,7 +553,7 @@ function handleAddItem(itemIconGroupId?: number) {
           </NButton>
         </NDropdown>
 
-        <NButton v-if="authStore.visitMode === VisitMode.VISIT_MODE_LOGIN" color="#2a2a2a6b" @click="settingModalShow = !settingModalShow">
+        <NButton v-if="authStore.visitMode === VisitMode.VISIT_MODE_LOGIN" color="#2a2a2a6b" title="应用与设置" aria-label="应用与设置" @click="settingModalShow = !settingModalShow">
           <template #icon>
             <SvgIcon class="text-white font-xl" icon="majesticons-applications" />
           </template>
@@ -545,6 +566,20 @@ function handleAddItem(itemIconGroupId?: number) {
         </NButton>
       </NButtonGroup>
 
+      <NModal v-model:show="networkDetailsShow" preset="card" title="网络检测详情" style="width: min(720px, calc(100vw - 24px)); border-radius: 1rem">
+        <p>{{ networkModeTitle }}。点击网站会直接使用下方地址。</p>
+        <p class="mb-4">检测只表示当前浏览器的连通性，不代表网站已登录或业务正常。</p>
+        <div class="max-h-[60vh] overflow-auto">
+          <article v-for="row in networkDetails" :key="row.item.id" class="py-3 border-b border-neutral-500/20 break-all">
+            <strong>{{ row.item.title }}</strong>
+            <div>实际打开：{{ row.chosen }}</div>
+            <div>内网检测：{{ row.status }}</div>
+            <div>最近检测：{{ row.checkedAt ? new Date(row.checkedAt).toLocaleString() : '暂无' }}</div>
+          </article>
+          <p v-if="!networkDetails.length">当前没有网站项目。</p>
+        </div>
+      </NModal>
+      <GateHomeImport v-model:visible="gateHomeShow" :groups="items" @done="getList" />
       <AppStarter v-model:visible="settingModalShow" />
       <!-- <Setting v-model:visible="settingModalShow" /> -->
     </div>

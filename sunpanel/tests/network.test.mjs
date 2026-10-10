@@ -9,6 +9,28 @@ const { resolveAutoUrl, createAutoUrlResolver, startAutoUrlRefresh } = await imp
 const defaultUrl = 'https://example.test/'
 const lanUrl = 'http://192.168.1.2:5000/'
 
+test('details report cached reachability and retain the last completed check time without extra probes', async (t) => {
+  let now = 100_000
+  t.mock.method(Date, 'now', () => now)
+  let finish
+  const probe = t.mock.method(globalThis, 'fetch', () => new Promise(resolve => { finish = resolve }))
+  const resolver = createAutoUrlResolver()
+  assert.equal(resolver.inspect(defaultUrl).state, 'unconfigured')
+  assert.equal(resolver.inspect(defaultUrl, defaultUrl).state, 'same')
+  assert.equal(resolver.inspect(defaultUrl, lanUrl).state, 'unchecked')
+  const pending = resolver.check([{ url: defaultUrl, lanUrl }])
+  assert.equal(resolver.inspect(defaultUrl, lanUrl).state, 'checking')
+  finish({ type: 'opaque' })
+  await pending
+  assert.deepEqual(resolver.inspect(defaultUrl, lanUrl), { state: 'reachable', checkedAt: now })
+  now += 60_001
+  assert.equal(resolver.inspect(defaultUrl, lanUrl).state, 'expired')
+  assert.equal(resolver.resolve(defaultUrl, lanUrl), defaultUrl)
+  resolver.invalidate()
+  assert.equal(resolver.inspect(defaultUrl, lanUrl).checkedAt, 100_000)
+  assert.equal(probe.mock.callCount(), 1)
+})
+
 test('missing, identical or unsupported LAN URLs use the default without probing', async (t) => {
   const probe = t.mock.method(globalThis, 'fetch', () => {
     throw new Error('unexpected probe')

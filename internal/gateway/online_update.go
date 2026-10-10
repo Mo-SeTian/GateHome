@@ -289,6 +289,11 @@ func (a *Admin) onlineUpdateRoutes(mux *http.ServeMux) {
 			return
 		}
 		state := a.store.Snapshot()
+		if err := checkBackupCapacity(a.store.paths, state); err != nil {
+			a.updateMu.Unlock()
+			apiError(w, 400, err.Error())
+			return
+		}
 		a.onlineUpdate.mu.Lock()
 		a.onlineUpdate.status = onlineUpdateStatus{Phase: "checking", Version: input.Version}
 		a.onlineUpdate.mu.Unlock()
@@ -310,6 +315,9 @@ func (a *Admin) onlineUpdateRoutes(mux *http.ServeMux) {
 }
 
 func (a *Admin) runOnlineUpdate(state State, version string) error {
+	if err := checkBackupCapacity(a.store.paths, state); err != nil {
+		return err
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	defer cancel()
 	client := onlineUpdateClient(state)
