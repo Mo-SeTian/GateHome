@@ -2,7 +2,7 @@
 
 一个自托管的反向代理与 DDNS 综合管理工具。Go 主程序内嵌中文管理界面与 Sun-Panel 前后端；启用首页时由主程序管理独立的 Sun-Panel 子进程。运行无需 Node.js、外部数据库或额外 Web 服务器，Sun-Panel 使用内置 SQLite。
 
-当前版本为 **0.0.45**，安装包见 [v0.0.45 Release](https://github.com/Mo-SeTian/GateHome/releases/tag/v0.0.45)。程序和 systemd 服务名为 `gatehouse`。
+当前版本为 **0.0.46**，安装包见 [v0.0.46 Release](https://github.com/Mo-SeTian/GateHome/releases/tag/v0.0.46)。程序和 systemd 服务名为 `gatehouse`。
 
 ## 主要功能
 
@@ -131,7 +131,7 @@ sudo bash /tmp/gatehome-install.sh install --proxy "$GATEHOME_INSTALL_PROXY"
 
 下载使用 HTTP/1.1；TLS 连接中断等下载错误会清除残缺文件并重试，最多尝试 4 次。下载和校验成功后才修改安装。如果出现 `curl: (56)` / `unexpected eof while reading`，说明下载连接提前断开；请检查服务器的网络或代理规则。使用 MSM 等分流工具时，安装需要访问 `raw.githubusercontent.com`、`github.com` 和 `release-assets.githubusercontent.com`。仍无法下载时，可在其他能访问 GitHub 的设备下载下面的安装包，复制到服务器离线安装。
 
-离线安装可使用 `make release` 生成的 **`版本/0.0.45/`** 完整目录，或解压 Release 中对应架构的 `gatehome-linux-*.tar.gz`，然后运行：
+离线安装可使用 `make release` 生成的 **`版本/0.0.46/`** 完整目录，或解压 Release 中对应架构的 `gatehome-linux-*.tar.gz`，然后运行：
 
 ```sh
 sudo bash install.sh
@@ -151,7 +151,7 @@ sudo bash install.sh
 
 安装完成后，`systemctl status gatehouse` 查看状态，`journalctl -u gatehouse` 查看启动诊断，`sudo systemctl restart gatehouse` 同时重启 Gatehouse 和已启用的 Sun-Panel，使监听变更生效。
 
-卸载会先要求输入 `UNINSTALL`，移除程序及 systemd 服务，默认保留配置、Token、证书和日志。只有另行输入 `DELETE DATA` 才永久删除 `config`、`log`、`data`、`sunpanel` 四个目录。重新安装使用保留的数据，不会重置密码。通过右上角账户按钮可以在线修改管理员账号密码；忘记账户时先停止服务，再运行：
+卸载会先要求输入 `UNINSTALL`，移除程序及 systemd 服务，默认保留配置、Token、证书和日志。只有另行输入 `DELETE DATA` 才永久删除 `config`、`log`、`data`、`sunpanel` 四个目录。重新安装使用保留的数据，不会重置密码。点击右上角账户按钮，在下拉菜单中选择“修改密码”可以在线修改管理员账号密码，也可选择“退出登录”；忘记账户时先停止服务，再运行：
 
 ```sh
 sudo systemctl stop gatehouse
@@ -252,7 +252,7 @@ DDNS 组以域名列表分别显示解析到的 IPv4 / A 与 IPv6 / AAAA，可�
 
 ## 管理员账户与公网访问
 
-管理界面使用管理员账号和密码登录，账号区分大小写，支持 1–64 字节；管理密码为 12–72 字节。点击右上角账户按钮修改账号或密码，须验证当前管理密码，新密码留空只修改账号；保存后所有管理员会话失效，需要重新登录。管理员账户与反代服务访问账号、Sun-Panel 用户账号分别管理。
+管理界面使用管理员账号和密码登录，账号区分大小写，支持 1–64 字节；管理密码为 12–72 字节。点击右上角账户按钮展开下拉菜单，选择“修改密码”修改账号或密码，选择“退出登录”结束当前会话。修改账户时须验证当前管理密码，新密码留空只修改账号；保存后所有管理员会话失效，需要重新登录。管理员账户与反代服务访问账号、Sun-Panel 用户账号分别管理。
 
 通过公网域名访问管理界面时，先通过服务器 IP 进入 **设置 → 管理界面反代访问**，开启“允许指定公网地址反代访问”，填写完整地址，例如 `https://gate.example.com:18443`。协议、域名与端口必须与实际访问地址一致，不包含路径、参数或账号；最多配置 20 个地址。
 

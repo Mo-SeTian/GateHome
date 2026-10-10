@@ -96,9 +96,14 @@ main { margin-left: 184px; flex: 1; min-width: 0; }
 .topbar-divider { height: 24px; width: 1px; background: var(--border); }
 .avatar { width: 34px; height: 34px; background: #eef1ff; border: 1px solid var(--border); display: grid; place-items: center; border-radius: 11px; color: #4256d5; font-weight: 650; }
 .account-button { display: flex; align-items: center; gap: 9px; border: 0; border-radius: 10px; background: transparent; color: var(--text); padding: 4px; min-height: 44px; font-size: 12px; }
-.account-button:hover { background: var(--primary-soft); }
+.account-button:hover, .account-menu[open]>.account-button { background: var(--primary-soft); }
 .account-button #account-name { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.account-button>.icon { width: 17px; height: 17px; color: var(--muted); }
+.account-button>[data-icon] .icon { width: 17px; height: 17px; color: var(--muted); transition: transform var(--motion-feedback) var(--ease-out); }
+.account-menu[open]>.account-button>[data-icon] .icon { transform: rotate(180deg); }
+.account-menu>.account-menu-items { min-width: 176px; transform-origin: top right; }
+.account-menu[open]>.account-menu-items { animation: account-menu-enter var(--motion-feedback) var(--ease-out); }
+.account-menu-items .text-button { min-height: 44px; gap: 10px; }
+@keyframes account-menu-enter { from { opacity: 0; transform: translateY(-4px) scale(.98); } to { opacity: 1; transform: none; } }
 .content { padding: 28px 28px 20px; max-width: 1580px; margin: auto; min-height: calc(100vh - 144px); }
 .content:focus { outline: none; }
 .page-heading { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-bottom: 24px; }

@@ -86,10 +86,11 @@ function applyAccount(data) {
   adminUsername=data.username;
   $('#account-name').textContent=adminUsername;
   $('#account-avatar').textContent=[...adminUsername][0]?.toUpperCase()||'G';
-  $('#account-button').setAttribute('aria-label','管理员账户设置：'+adminUsername);
+  $('#account-button').setAttribute('aria-label','管理员菜单：'+adminUsername);
 }
 function openAdminAccount() {
   if(busy) return;
+  $('#account-menu').open=false;$('#account-button').focus({preventScroll:true});
   const form=$('#account-form');form.reset();form.elements.username.value=adminUsername;$('.error',form).textContent='';openDialog($('#account-dialog'));
 }
 function accountInput(form) {
@@ -121,7 +122,7 @@ function toast(message) {
   $('#toast').textContent = message; $('#toast').hidden = false; if(!reducedMotion.matches) {$('#toast').getAnimations().forEach(a=>a.cancel());$('#toast').animate([{opacity:0,translate:'0 8px'},{opacity:1,translate:'0 0'}],{duration:180,easing:'ease-out'});}
   clearTimeout(toastTimer); toastTimer = setTimeout(() => { $('#toast').hidden = true; }, 4500);
 }
-function showLogin() { clearAccountPasswords();adminUsername='';$('#account-name').textContent='管理员';$('#account-avatar').textContent='G';resetDashboard();setNavigation(false,false); $('#login').hidden = false; $('#app').hidden = true; document.querySelectorAll('dialog').forEach(d=>d.close()); config = undefined; renderedPage='';clearTimeout(onlineUpdate.timer);onlineUpdate.request++;onlineUpdate.phase='';onlineUpdate.job=null;onlineUpdate.release=null;onlineUpdate.error='';abandonDiscovery();for(const state of Object.values(securityEvents)) {state.request++;state.view=null;state.filters=emptyEventFilters();state.applied=emptyEventFilters();state.loading=false;state.error='';} }
+function showLogin() { $('#account-menu').open=false;clearAccountPasswords();adminUsername='';$('#account-name').textContent='管理员';$('#account-avatar').textContent='G';resetDashboard();setNavigation(false,false); $('#login').hidden = false; $('#app').hidden = true; document.querySelectorAll('dialog').forEach(d=>d.close()); config = undefined; renderedPage='';clearTimeout(onlineUpdate.timer);onlineUpdate.request++;onlineUpdate.phase='';onlineUpdate.job=null;onlineUpdate.release=null;onlineUpdate.error='';abandonDiscovery();for(const state of Object.values(securityEvents)) {state.request++;state.view=null;state.filters=emptyEventFilters();state.applied=emptyEventFilters();state.loading=false;state.error='';} }
 function applyConfig(data) { config = data.config; revision = data.revision; dnsCredentialsConfigured=data.dns_credentials_configured||{}; certificateCredentialsConfigured=data.certificate_credentials_configured||{};routePasswordsConfigured=data.route_passwords_configured||{}; proxyPasswordConfigured=data.proxy_password_configured; githubTokenConfigured=!!data.github_token_configured; ipRequest++;dnsRecordsRequest++;dnsRecords={};dnsRecordsError=''; if(networkInfo) networkInfo.groups={}; }
 async function save(next, dnsTokens, proxyPassword, certificateTokens, routePasswords, githubToken) {
   const payload = {config:next, revision};
@@ -1242,7 +1243,7 @@ document.addEventListener('click',async event=>{
       if(action==='delete-ddns') {if(next.groups.some(g=>g.ddns_group_id===next.ddns.groups[index].id)) throw new Error('请先在反代组中解除对此 DDNS 组的绑定。');if(!confirm('删除此 DDNS 组及其凭据？DNS 中已有记录会保留。')) return;const id=next.ddns.groups[index].id;next.ddns.groups.splice(index,1);if(next.acme.dns_groups) Object.keys(next.acme.dns_groups).forEach(host=>{if(next.acme.dns_groups[host]===id) delete next.acme.dns_groups[host];});}else next.ddns.groups[index].enabled=!next.ddns.groups[index].enabled;
       await save(next);render();
     }
-    if(button.id==='logout') { await api('logout','POST',{}); showLogin(); }
+    if(button.id==='logout'||action==='logout') { $('#account-menu').open=false;await api('logout','POST',{}); showLogin(); }
     if(button.dataset.job) { const result=await api('jobs/'+button.dataset.job,'POST',{}); toast(result.message); await refreshStatus(); }
     if(action==='refresh-subscription') { const d=config.subscriptions[Number(button.dataset.index)]; const result=await api('subscriptions/'+encodeURIComponent(d.id)+'/refresh','POST',{}); toast(result.message); await refreshStatus(); render(); }
     if(action==='toggle-group'||action==='delete-group') {
@@ -1335,6 +1336,7 @@ document.addEventListener('keydown',event=>{
 });
 mobileNavigation.addEventListener('change',()=>setNavigation(false,false));
 compactCharts.addEventListener('change',()=>{if(page==='statistics'&&config) render();});
+document.addEventListener('focusin',event=>{const menu=$('#account-menu');if(menu.open&&!menu.contains(event.target)) menu.open=false;});
 document.addEventListener('click',event=>document.querySelectorAll('.object-menu[open]').forEach(menu=>{if(!menu.contains(event.target)) menu.open=false;}));
 document.addEventListener('keydown',event=>{
   if(event.key!=='Escape') return;

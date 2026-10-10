@@ -25,7 +25,7 @@ form.elements.current_password.value='TEST_ONLY_CURRENT_PASSWORD';context.api=as
 await assert.rejects(run('saveAdminAccount(form)'),/TEST_ONLY_FAILURE/);assert.equal(loggedOut,false);assert.equal(form.elements.current_password.value,'','failed request retained current password');
 run("applyAccount({username:'<script>TEST</script>'})");assert.equal(elements['#account-name'].textContent,'<script>TEST</script>');
 const html=readFileSync(new URL('../internal/gateway/web/index.html',import.meta.url),'utf8');
-assert.match(html,/id="account-button"[^>]*data-action="edit-admin-account"/);
+assert.match(html,/<details id="account-menu"[\s\S]*?<summary id="account-button"[^>]*aria-controls="account-menu-items"[\s\S]*?data-action="edit-admin-account"[\s\S]*?修改密码[\s\S]*?data-action="logout"[\s\S]*?退出登录/);
 assert.match(html,/id="login-form"[\s\S]*?name="username"/);
 assert.match(html,/id="account-dialog"[\s\S]*?name="current_password"[\s\S]*?name="new_password"[\s\S]*?name="confirm_password"/);
 assert.match(source,/if\(dialog.id==='account-dialog'\) clearAccountPasswords\(\)/);
