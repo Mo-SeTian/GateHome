@@ -93,18 +93,19 @@ func TestEncryptedBackupRoundTripAndTamper(t *testing.T) {
 	a, _ := testAdmin(t)
 	state := a.store.Snapshot()
 	state.ProxyPassword = "TEST_ONLY_PROXY_SECRET"
+	state.GitHubToken = "TEST_ONLY_GITHUB_TOKEN"
 	payload := backupPayload{State: state, Certificates: map[string][]byte{"staging-nas.example.com.json": []byte(`{"test":"TEST_ONLY_PRIVATE_KEY"}`)}}
 	data, err := encodeBackup(payload, "TEST_ONLY_BACKUP_PASSWORD")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, secret := range []string{state.CloudflareToken, state.PasswordHash, state.ProxyPassword, "TEST_ONLY_PRIVATE_KEY", "TEST_ONLY_BACKUP_PASSWORD"} {
+	for _, secret := range []string{state.CloudflareToken, state.PasswordHash, state.ProxyPassword, state.GitHubToken, "TEST_ONLY_PRIVATE_KEY", "TEST_ONLY_BACKUP_PASSWORD"} {
 		if bytes.Contains(data, []byte(secret)) {
 			t.Fatal("backup exposed a secret")
 		}
 	}
 	decoded, _, err := decodeBackup(data, "TEST_ONLY_BACKUP_PASSWORD")
-	if err != nil || decoded.State.CloudflareToken != state.CloudflareToken || decoded.State.ProxyPassword != state.ProxyPassword || len(decoded.Certificates) != 1 {
+	if err != nil || decoded.State.CloudflareToken != state.CloudflareToken || decoded.State.ProxyPassword != state.ProxyPassword || decoded.State.GitHubToken != state.GitHubToken || len(decoded.Certificates) != 1 {
 		t.Fatal("backup did not restore protected configuration")
 	}
 	if _, _, err := decodeBackup(data, "TEST_ONLY_WRONG_PASSWORD"); err == nil {
@@ -123,7 +124,7 @@ func TestEncryptedBackupRoundTripAndTamper(t *testing.T) {
 		t.Fatal(err)
 	}
 	store, err := OpenStore(dir)
-	if err != nil || store.Snapshot().ProxyPassword != state.ProxyPassword {
+	if err != nil || store.Snapshot().ProxyPassword != state.ProxyPassword || store.Snapshot().GitHubToken != state.GitHubToken {
 		t.Fatal("configuration restore failed")
 	}
 	info, err := os.Stat(filepath.Join(dir, "state.json"))

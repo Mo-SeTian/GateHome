@@ -30,7 +30,7 @@ func onlineTestMetadata(t *testing.T, data []byte) map[string]any {
 	t.Helper()
 	sum := sha256.Sum256(data)
 	return map[string]any{"tag_name": "v99.0.0", "published_at": "2026-10-08T00:00:00Z", "assets": []map[string]any{{
-		"name": "gatehouse-99.0.0-update.zip", "state": "uploaded", "size": len(data), "digest": "sha256:" + hex.EncodeToString(sum[:]),
+		"id": int64(123), "name": "gatehouse-99.0.0-update.zip", "state": "uploaded", "size": len(data), "digest": "sha256:" + hex.EncodeToString(sum[:]),
 		"browser_download_url": onlineReleaseBase + "download/v99.0.0/gatehouse-99.0.0-update.zip",
 	}}}
 }
@@ -42,94 +42,118 @@ func onlineTestClient(data []byte) *http.Client {
 }
 
 func TestOnlineUpdateThroughConfiguredProxy(t *testing.T) {
-	data := testRelease(t, "99.0.0", releaseArch())
-	metadata, _ := json.Marshal(onlineTestMetadata(t, data))
-	target := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/repos/Mo-SeTian/GateHome/releases/latest":
-			if r.Header.Get("Accept") != "application/vnd.github+json" {
-				t.Error("missing GitHub API headers")
+	for _, token := range []string{"", "TEST_ONLY_GITHUB_TOKEN"} {
+		name := "anonymous"
+		if token != "" {
+			name = "token"
+		}
+		t.Run(name, func(t *testing.T) {
+			data := testRelease(t, "99.0.0", releaseArch())
+			metadata, _ := json.Marshal(onlineTestMetadata(t, data))
+			target := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				wantAuth := ""
+				if r.Host == "api.github.com" && token != "" {
+					wantAuth = "Bearer " + token
+				}
+				if r.Header.Get("Authorization") != wantAuth {
+					t.Error("GitHub authorization missing or exposed to download host")
+				}
+				switch {
+				case r.URL.Path == "/repos/Mo-SeTian/GateHome/releases/latest":
+					if r.Header.Get("Accept") != "application/vnd.github+json" {
+						t.Error("missing GitHub API headers")
+					}
+					w.Write(metadata)
+				case r.URL.Path == "/repos/Mo-SeTian/GateHome/releases/assets/123":
+					if token == "" || r.Header.Get("Accept") != "application/octet-stream" {
+						t.Error("authenticated asset download did not use GitHub binary API")
+					}
+					http.Redirect(w, r, "https://release-assets.githubusercontent.com/test-package", http.StatusFound)
+				case strings.HasSuffix(r.URL.Path, "-update.zip"):
+					http.Redirect(w, r, "https://release-assets.githubusercontent.com/test-package", http.StatusFound)
+				case r.URL.Path == "/test-package":
+					w.Write(data)
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer target.Close()
+			targetURL, _ := url.Parse(target.URL)
+			var mu sync.Mutex
+			destinations := map[string]bool{}
+			proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != "CONNECT" || r.Header.Get("Proxy-Authorization") != "Basic "+base64.StdEncoding.EncodeToString([]byte("test:TEST_ONLY_PROXY_PASSWORD")) {
+					t.Error("update did not use configured proxy credentials")
+					http.Error(w, "proxy rejected", 407)
+					return
+				}
+				mu.Lock()
+				destinations[r.Host] = true
+				mu.Unlock()
+				upstream, err := net.Dial("tcp", targetURL.Host)
+				if err != nil {
+					t.Error("local fixture unavailable")
+					return
+				}
+				defer upstream.Close()
+				client, rw, err := w.(http.Hijacker).Hijack()
+				if err != nil {
+					t.Error("local tunnel failed")
+					return
+				}
+				defer client.Close()
+				rw.WriteString("HTTP/1.1 200 Connection Established\r\n\r\n")
+				rw.Flush()
+				go func() { io.Copy(upstream, client); upstream.Close() }()
+				io.Copy(client, upstream)
+			}))
+			defer proxy.Close()
+			state := State{Config: DefaultConfig(), ProxyPassword: "TEST_ONLY_PROXY_PASSWORD", GitHubToken: token}
+			state.Config.OutboundProxy = OutboundProxyConfig{Enabled: true, URL: proxy.URL, Username: "test"}
+			client := onlineUpdateClient(state)
+			defer closeClient(client)
+			client.Transport.(*http.Transport).TLSClientConfig = target.Client().Transport.(*http.Transport).TLSClientConfig
+			client.Transport.(*http.Transport).TLSClientConfig.ServerName = targetURL.Hostname()
+			release, err := latestOnlineRelease(context.Background(), client, token)
+			if err != nil || !release.UpdateAvailable || release.Version != "99.0.0" {
+				t.Fatal("version check through proxy failed")
 			}
-			w.Write(metadata)
-		case strings.HasSuffix(r.URL.Path, "-update.zip"):
-			http.Redirect(w, r, "https://release-assets.githubusercontent.com/test-package", http.StatusFound)
-		case r.URL.Path == "/test-package":
-			w.Write(data)
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer target.Close()
-	targetURL, _ := url.Parse(target.URL)
-	var mu sync.Mutex
-	destinations := map[string]bool{}
-	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != "CONNECT" || r.Header.Get("Proxy-Authorization") != "Basic "+base64.StdEncoding.EncodeToString([]byte("test:TEST_ONLY_PROXY_PASSWORD")) {
-			t.Error("update did not use configured proxy credentials")
-			http.Error(w, "proxy rejected", 407)
-			return
-		}
-		mu.Lock()
-		destinations[r.Host] = true
-		mu.Unlock()
-		upstream, err := net.Dial("tcp", targetURL.Host)
-		if err != nil {
-			t.Error("local fixture unavailable")
-			return
-		}
-		defer upstream.Close()
-		client, rw, err := w.(http.Hijacker).Hijack()
-		if err != nil {
-			t.Error("local tunnel failed")
-			return
-		}
-		defer client.Close()
-		rw.WriteString("HTTP/1.1 200 Connection Established\r\n\r\n")
-		rw.Flush()
-		go func() { io.Copy(upstream, client); upstream.Close() }()
-		io.Copy(client, upstream)
-	}))
-	defer proxy.Close()
-	state := State{Config: DefaultConfig(), ProxyPassword: "TEST_ONLY_PROXY_PASSWORD"}
-	state.Config.OutboundProxy = OutboundProxyConfig{Enabled: true, URL: proxy.URL, Username: "test"}
-	client := onlineUpdateClient(state)
-	defer closeClient(client)
-	client.Transport.(*http.Transport).TLSClientConfig = target.Client().Transport.(*http.Transport).TLSClientConfig
-	client.Transport.(*http.Transport).TLSClientConfig.ServerName = targetURL.Hostname()
-	release, err := latestOnlineRelease(context.Background(), client)
-	if err != nil || !release.UpdateAvailable || release.Version != "99.0.0" {
-		t.Fatal("version check through proxy failed")
-	}
-	downloaded, err := downloadOnlineRelease(context.Background(), client, release)
-	if err != nil || !bytes.Equal(data, downloaded) {
-		t.Fatal("verified download through proxy and CDN redirect failed")
-	}
-	m, err := NewMaintenance(t.TempDir(), "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	result, err := m.inspectUpdateVersion(downloaded, release.Version)
-	if err != nil || result["version"] != "99.0.0" || m.stage == nil || m.Busy() {
-		t.Fatal("download was not safely staged for the existing update protocol")
-	}
-	mu.Lock()
-	defer mu.Unlock()
-	for _, host := range []string{"api.github.com:443", "github.com:443", "release-assets.githubusercontent.com:443"} {
-		if !destinations[host] {
-			t.Fatal("a version, download or redirect request bypassed the configured proxy")
-		}
-	}
-	state.Config.OutboundProxy.Enabled = false
-	direct := onlineUpdateClient(state)
-	defer closeClient(direct)
-	if direct.Transport.(*http.Transport).Proxy != nil {
-		t.Fatal("disabled proxy still used for updates")
+			downloaded, err := downloadOnlineRelease(context.Background(), client, release, token)
+			if err != nil || !bytes.Equal(data, downloaded) {
+				t.Fatal("verified download through proxy and CDN redirect failed")
+			}
+			m, err := NewMaintenance(t.TempDir(), "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := m.inspectUpdateVersion(downloaded, release.Version)
+			if err != nil || result["version"] != "99.0.0" || m.stage == nil || m.Busy() {
+				t.Fatal("download was not safely staged for the existing update protocol")
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			for _, host := range []string{"api.github.com:443", "release-assets.githubusercontent.com:443"} {
+				if !destinations[host] {
+					t.Fatal("a version, download or redirect request bypassed the configured proxy")
+				}
+			}
+			if destinations["github.com:443"] != (token == "") {
+				t.Fatal("download did not use the expected anonymous or authenticated endpoint")
+			}
+			state.Config.OutboundProxy.Enabled = false
+			direct := onlineUpdateClient(state)
+			defer closeClient(direct)
+			if direct.Transport.(*http.Transport).Proxy != nil {
+				t.Fatal("disabled proxy still used for updates")
+			}
+
+		})
 	}
 }
 
 func TestOnlineUpdateRejectsUntrustedMetadataAndDownloads(t *testing.T) {
 	data := testRelease(t, "99.0.0", releaseArch())
-	for _, name := range []string{"draft", "prerelease", "tag", "url", "digest", "size", "missing", "duplicate"} {
+	for _, name := range []string{"draft", "prerelease", "tag", "url", "id", "digest", "size", "missing", "duplicate"} {
 		t.Run(name, func(t *testing.T) {
 			meta := onlineTestMetadata(t, data)
 			assets := meta["assets"].([]map[string]any)
@@ -140,6 +164,8 @@ func TestOnlineUpdateRejectsUntrustedMetadataAndDownloads(t *testing.T) {
 				meta["tag_name"] = "v../../unsafe"
 			case "url":
 				assets[0]["browser_download_url"] = "https://example.com/untrusted.zip"
+			case "id":
+				assets[0]["id"] = 0
 			case "digest":
 				assets[0]["digest"] = ""
 			case "size":
@@ -150,18 +176,18 @@ func TestOnlineUpdateRejectsUntrustedMetadataAndDownloads(t *testing.T) {
 				meta["assets"] = append(assets, assets[0])
 			}
 			body, _ := json.Marshal(meta)
-			if _, err := latestOnlineRelease(context.Background(), onlineTestClient(body)); err == nil {
+			if _, err := latestOnlineRelease(context.Background(), onlineTestClient(body), ""); err == nil {
 				t.Fatal("unsafe release metadata accepted")
 			}
 		})
 	}
 	meta, _ := json.Marshal(onlineTestMetadata(t, data))
-	release, err := latestOnlineRelease(context.Background(), onlineTestClient(meta))
+	release, err := latestOnlineRelease(context.Background(), onlineTestClient(meta), "")
 	if err != nil {
 		t.Fatal("valid fixture rejected")
 	}
 	for _, corrupt := range [][]byte{append(bytes.Clone(data), 0), bytes.Repeat([]byte{'x'}, len(data)), data[:len(data)-1]} {
-		if _, err := downloadOnlineRelease(context.Background(), onlineTestClient(corrupt), release); err == nil {
+		if _, err := downloadOnlineRelease(context.Background(), onlineTestClient(corrupt), release, ""); err == nil {
 			t.Fatal("corrupt or truncated package accepted")
 		}
 	}
@@ -170,7 +196,7 @@ func TestOnlineUpdateRejectsUntrustedMetadataAndDownloads(t *testing.T) {
 		client.Transport = onlineTestTransport(func(r *http.Request) (*http.Response, error) {
 			return &http.Response{StatusCode: 302, Header: http.Header{"Location": []string{address}}, Body: io.NopCloser(strings.NewReader("")), Request: r}, nil
 		})
-		if _, err := fetchOnlineUpdate(context.Background(), client, onlineReleaseAPI, 1024); err == nil {
+		if _, err := fetchOnlineUpdate(context.Background(), client, onlineReleaseAPI, 1024, ""); err == nil {
 			t.Fatal("untrusted redirect accepted")
 		}
 	}
@@ -208,7 +234,7 @@ func TestOnlineUpdateFailureDoesNotReplaceStageOrExposeSecrets(t *testing.T) {
 	client := &http.Client{Transport: onlineTestTransport(func(r *http.Request) (*http.Response, error) {
 		return nil, errors.New("TEST_ONLY_PROXY_PASSWORD TEST_ONLY_SIGNED_DOWNLOAD_TOKEN")
 	})}
-	_, err = fetchOnlineUpdate(context.Background(), client, onlineReleaseAPI, 1024)
+	_, err = fetchOnlineUpdate(context.Background(), client, onlineReleaseAPI, 1024, "")
 	if err == nil || strings.Contains(err.Error(), "TEST_ONLY_") {
 		t.Fatal("network failure exposed credentials or download tokens")
 	}

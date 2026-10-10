@@ -178,6 +178,7 @@ type State struct {
 	CloudflareToken        string                   `json:"cloudflare_token"`
 	Revision               int                      `json:"revision"`
 	ProxyPassword          string                   `json:"proxy_password"`
+	GitHubToken            string                   `json:"github_token,omitempty"`
 	DNSCredentials         map[string]DNSCredential `json:"dns_credentials"`
 	CertificateCredentials map[string]DNSCredential `json:"certificate_credentials"`
 	RoutePasswordHashes    map[string]string        `json:"route_password_hashes,omitempty"`
@@ -541,10 +542,10 @@ func (s *Store) UpdateDNS(c Config, tokens map[string]*string, legacyToken, prox
 }
 
 func (s *Store) UpdateCredentials(c Config, tokens, certificateTokens map[string]*string, legacyToken, proxyPassword *string, revision int) error {
-	return s.UpdateRouteCredentials(c, tokens, certificateTokens, legacyToken, proxyPassword, nil, revision)
+	return s.UpdateRouteCredentials(c, tokens, certificateTokens, legacyToken, proxyPassword, nil, nil, revision)
 }
 
-func (s *Store) UpdateRouteCredentials(c Config, tokens, certificateTokens map[string]*string, legacyToken, proxyPassword *string, routePasswords map[string]*string, revision int) error {
+func (s *Store) UpdateRouteCredentials(c Config, tokens, certificateTokens map[string]*string, legacyToken, proxyPassword *string, routePasswords map[string]*string, githubToken *string, revision int) error {
 	c = includeProxyDNSHosts(c)
 	if err := Validate(c); err != nil {
 		return err
@@ -614,6 +615,9 @@ func (s *Store) UpdateRouteCredentials(c Config, tokens, certificateTokens map[s
 	}
 	if proxyPassword != nil {
 		next.ProxyPassword = *proxyPassword
+	}
+	if githubToken != nil {
+		next.GitHubToken = *githubToken
 	}
 	if next.Config.OutboundProxy.URL != s.state.Config.OutboundProxy.URL || next.Config.OutboundProxy.Username != s.state.Config.OutboundProxy.Username {
 		if proxyPassword == nil {

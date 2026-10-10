@@ -422,9 +422,10 @@ func (a *Admin) getConfig(w http.ResponseWriter, r *http.Request) {
 		TokenConfigured                  bool            `json:"token_configured"`
 		Revision                         int             `json:"revision"`
 		ProxyPasswordConfigured          bool            `json:"proxy_password_configured"`
+		GitHubTokenConfigured            bool            `json:"github_token_configured"`
 		DNSCredentialsConfigured         map[string]bool `json:"dns_credentials_configured"`
 		CertificateCredentialsConfigured map[string]bool `json:"certificate_credentials_configured"`
-	}{routeConfigured, s.Config, s.CloudflareToken != "", s.Revision, s.ProxyPassword != "", configured, certConfigured})
+	}{routeConfigured, s.Config, s.CloudflareToken != "", s.Revision, s.ProxyPassword != "", s.GitHubToken != "", configured, certConfigured})
 }
 
 func (a *Admin) putConfig(w http.ResponseWriter, r *http.Request) {
@@ -432,6 +433,7 @@ func (a *Admin) putConfig(w http.ResponseWriter, r *http.Request) {
 		Config            Config             `json:"config"`
 		Revision          int                `json:"revision"`
 		ProxyPassword     *string            `json:"proxy_password"`
+		GitHubToken       *string            `json:"github_token"`
 		DNSTokens         map[string]*string `json:"dns_tokens"`
 		CertificateTokens map[string]*string `json:"certificate_tokens"`
 		RoutePasswords    map[string]*string `json:"route_passwords"`
@@ -463,6 +465,12 @@ func (a *Admin) putConfig(w http.ResponseWriter, r *http.Request) {
 		apiError(w, 400, "代理密码格式无效")
 		return
 	}
+	if input.GitHubToken != nil {
+		if err := validateGitHubToken(*input.GitHubToken); err != nil {
+			apiError(w, 400, err.Error())
+			return
+		}
+	}
 	a.updateMu.Lock()
 	defer a.updateMu.Unlock()
 	if a.maintenance.Busy() {
@@ -482,7 +490,7 @@ func (a *Admin) putConfig(w http.ResponseWriter, r *http.Request) {
 		apiError(w, 400, err.Error())
 		return
 	}
-	if err := a.store.UpdateRouteCredentials(input.Config, input.DNSTokens, input.CertificateTokens, nil, input.ProxyPassword, input.RoutePasswords, input.Revision); err != nil {
+	if err := a.store.UpdateRouteCredentials(input.Config, input.DNSTokens, input.CertificateTokens, nil, input.ProxyPassword, input.RoutePasswords, input.GitHubToken, input.Revision); err != nil {
 		apiError(w, 400, err.Error())
 		return
 	}

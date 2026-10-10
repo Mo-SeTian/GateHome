@@ -2,7 +2,7 @@
 
 一个自托管的反向代理与 DDNS 综合管理工具。Go 主程序内嵌中文管理界面与 Sun-Panel 前后端；启用首页时由主程序管理独立的 Sun-Panel 子进程。运行无需 Node.js、外部数据库或额外 Web 服务器，Sun-Panel 使用内置 SQLite。
 
-当前版本为 **0.0.44**，安装包见 [v0.0.44 Release](https://github.com/Mo-SeTian/GateHome/releases/tag/v0.0.44)。程序和 systemd 服务名为 `gatehouse`。
+当前版本为 **0.0.45**，安装包见 [v0.0.45 Release](https://github.com/Mo-SeTian/GateHome/releases/tag/v0.0.45)。程序和 systemd 服务名为 `gatehouse`。
 
 ## 主要功能
 
@@ -131,7 +131,7 @@ sudo bash /tmp/gatehome-install.sh install --proxy "$GATEHOME_INSTALL_PROXY"
 
 下载使用 HTTP/1.1；TLS 连接中断等下载错误会清除残缺文件并重试，最多尝试 4 次。下载和校验成功后才修改安装。如果出现 `curl: (56)` / `unexpected eof while reading`，说明下载连接提前断开；请检查服务器的网络或代理规则。使用 MSM 等分流工具时，安装需要访问 `raw.githubusercontent.com`、`github.com` 和 `release-assets.githubusercontent.com`。仍无法下载时，可在其他能访问 GitHub 的设备下载下面的安装包，复制到服务器离线安装。
 
-离线安装可使用 `make release` 生成的 **`版本/0.0.44/`** 完整目录，或解压 Release 中对应架构的 `gatehome-linux-*.tar.gz`，然后运行：
+离线安装可使用 `make release` 生成的 **`版本/0.0.45/`** 完整目录，或解压 Release 中对应架构的 `gatehome-linux-*.tar.gz`，然后运行：
 
 ```sh
 sudo bash install.sh
@@ -212,6 +212,10 @@ Sun-Panel 的前端和后端都编译进 Gatehouse 发布程序。**重启服务
 
 在 **设置 → 在线更新** 检查最新正式版，再点击“更新并重启”。后台通过已启用的出站代理下载；未启用代理时直连，代理失败不会绕过代理。仅接受本仓库正式 Release 的更高版本，不接受同版本、降级或预发布版本。
 
+在 **设置 → GitHub 访问令牌** 可保存可选的 GitHub Personal Access Token，保存后立即用于版本检查及更新包 API 下载，仍使用已保存的出站代理。留空保留已保存的 Token；勾选“清除已保存的 GitHub Token”后保存可恢复匿名访问。Token 不回显，随整站加密备份保存。
+
+读取本项目公开发布无需仓库写入或私有仓库权限：在 [GitHub Token 设置](https://github.com/settings/tokens) 创建 **Tokens (classic)** 时无需勾选任何 scope；也可创建 fine-grained Token，选择 **Public repositories**，不添加仓库权限。匿名 REST API 额度为每 IP 每小时 60 次；有效个人 Token 通常为每账号每小时 5,000 次，详情见 [GitHub API 额度说明](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api)。该额度针对 API 请求，不代表下载带宽或 CDN 无限访问。Token 无效或过期时会提示更换或清除。
+
 更新过程核对 GitHub 提供的 ZIP SHA-256、包内清单、版本和主机架构，再安排重启。版本检查最多 30 秒，下载任务最多 4 分钟；刷新设置页可继续查看进度。下载或校验失败时原服务继续运行。
 
 离线更新可在 **设置 → 上传版本更新** 选择 `gatehouse-<版本>-update.zip`，检查通过后应用。轻量 ZIP 仅含清单与两个 Linux 架构的程序；每个程序已经包含 Sun-Panel 前后端。
@@ -222,7 +226,7 @@ Docker 的可更新程序位于 `/data/app`，镜像启动器只读。镜像版�
 
 ## 加密备份与恢复
 
-在 **设置 → 备份与恢复** 填写备份密码并下载 ZIP；密码没有长度限制，也可以留空，留空时恢复也无需填写密码。备份覆盖全部已保存的业务数据：所有配置项、各 DNS 组与证书任务凭据、出站代理密码、管理员和每个服务的密码哈希、IP 冻结名单、证书与 ACME 账户私钥、反代服务图片、Sun-Panel 配置、数据库、全部上传文件、自定义文件、运行日志和语言文件、当前及轮转日志、已配置订阅的下载缓存。GateHome 内存登录会话、未保存的扫描结果及图片、维护暂存文件和程序文件不包含在内。单个备份内容上限为 64 MiB，超出时明确失败，不截断数据。
+在 **设置 → 备份与恢复** 填写备份密码并下载 ZIP；密码没有长度限制，也可以留空，留空时恢复也无需填写密码。备份覆盖全部已保存的业务数据：所有配置项、各 DNS 组与证书任务凭据、出站代理密码、GitHub Token、管理员和每个服务的密码哈希、IP 冻结名单、证书与 ACME 账户私钥、反代服务图片、Sun-Panel 配置、数据库、全部上传文件、自定义文件、运行日志和语言文件、当前及轮转日志、已配置订阅的下载缓存。GateHome 内存登录会话、未保存的扫描结果及图片、维护暂存文件和程序文件不包含在内。单个备份内容上限为 64 MiB，超出时明确失败，不截断数据。
 
 新备份使用 `gatehouse-backup-v2` 格式，旧程序明确拒绝，新版本继续支持 `gatehouse-backup-v1` 旧备份。ZIP 内是清单和 AES-256-GCM 加密数据，密钥由 scrypt 从备份密码派生。普通解压工具不会显示明文配置，需要在 Gatehouse 中输入导出时的密码恢复。请分别保存 ZIP 和密码，忘记备份密码无法解密。备份密码不持久化、不记日志；运行所需凭据仍保存在本机权限 `0600` 的配置文件里。
 

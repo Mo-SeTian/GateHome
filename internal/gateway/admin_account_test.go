@@ -50,7 +50,7 @@ func TestAdminAccountChangeRevokesSessionsAndKeepsServiceAccounts(t *testing.T) 
 	c := a.store.Snapshot().Config
 	c.Routes = []Route{{GroupID: "default", Host: "nas.example.test", Upstream: backend.URL, Enabled: true, Auth: RouteAuthConfig{Enabled: true, Username: "TEST_ONLY_VISITOR"}}}
 	servicePassword := "TEST_ONLY_SERVICE_PASSWORD"
-	if a.store.UpdateRouteCredentials(c, nil, nil, nil, nil, map[string]*string{routeKey(c.Routes[0]): &servicePassword}, a.store.Snapshot().Revision) != nil {
+	if a.store.UpdateRouteCredentials(c, nil, nil, nil, nil, map[string]*string{routeKey(c.Routes[0]): &servicePassword}, nil, a.store.Snapshot().Revision) != nil {
 		t.Fatal("service credentials setup failed")
 	}
 	a.proxy.ConfigureState(a.store.Snapshot())

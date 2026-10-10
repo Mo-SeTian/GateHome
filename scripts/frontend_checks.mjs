@@ -107,7 +107,7 @@ const certificateSettingsForm={elements:{enabled:{},email:{},staging:{},terms:{}
 const certificateSettings=vm.createContext({config:{acme:{enabled:false,email:'test@example.test',staging:true,accept_terms:false}},status:{jobs:{}},form:certificateSettingsForm,$:(selector)=>selector==='#cert-form'?certificateSettingsForm:selector==='.error'?certificateSettingsError:selector==='[data-job-summary]'?certificateSettingsJob:certificateSettingsDialog,openDialog:dialog=>{assert.equal(dialog,certificateSettingsDialog);},date:value=>value});
 vm.runInContext(certificateSettingsSource,certificateSettings);vm.runInContext('openCertificateSettings()',certificateSettings);
 assert.equal(certificateSettingsForm.elements.email.value,'test@example.test');assert.equal(certificateSettingsForm.elements.staging.value,'true');assert.equal(certificateSettingsForm.elements.enabled.checked,false);assert.equal(certificateSettingsForm.elements.terms.checked,false);
-const certificatePage=source.slice(source.indexOf('function certificatesHTML('),source.indexOf('function maintenanceHTML('));
+const certificatePage=source.slice(source.indexOf('function certificatesHTML('),source.indexOf('function onlineUpdateHTML('));
 assert.ok(!certificatePage.includes('<form'),'certificate page still exposes permanent settings as an inline form');
 console.log('Certificate settings modal: saved global values restored; task page has no inline settings form: PASS');
 

@@ -17,6 +17,7 @@ import (
 
 const onlineReleaseAPI = "https://api.github.com/repos/Mo-SeTian/GateHome/releases/latest"
 const onlineReleaseBase = "https://github.com/Mo-SeTian/GateHome/releases/"
+const onlineReleaseAssetsAPI = "https://api.github.com/repos/Mo-SeTian/GateHome/releases/assets/"
 
 type onlineRelease struct {
 	Version          string    `json:"version"`
@@ -25,6 +26,19 @@ type onlineRelease struct {
 	UpdateAvailable  bool      `json:"update_available"`
 	ReleaseURL       string    `json:"release_url"`
 	assetURL, digest string
+	assetID          int64
+}
+
+func validateGitHubToken(token string) error {
+	if len(token) > 512 {
+		return errors.New("GitHub Token 格式无效")
+	}
+	for _, ch := range token {
+		if ch <= ' ' || ch > '~' {
+			return errors.New("GitHub Token 格式无效，不可包含空格或控制字符")
+		}
+	}
+	return nil
 }
 
 type onlineUpdateStatus struct {
@@ -69,6 +83,9 @@ func onlineUpdateClient(state State) *http.Client {
 		if len(via) >= 5 || !allowedUpdateURL(r.URL) {
 			return errors.New("更新下载重定向地址不受信任")
 		}
+		if r.URL.Hostname() != "api.github.com" {
+			r.Header.Del("Authorization")
+		}
 		return nil
 	}
 	return c
@@ -85,19 +102,25 @@ func allowedUpdateURL(u *url.URL) bool {
 	return false
 }
 
-func fetchOnlineUpdate(ctx context.Context, c *http.Client, address string, limit int64) ([]byte, error) {
-	return fetchOnlineUpdateProgress(ctx, c, address, limit, nil)
+func fetchOnlineUpdate(ctx context.Context, c *http.Client, address string, limit int64, token string) ([]byte, error) {
+	return fetchOnlineUpdateProgress(ctx, c, address, limit, token, nil)
 }
 
-func fetchOnlineUpdateProgress(ctx context.Context, c *http.Client, address string, limit int64, progress func(int64)) ([]byte, error) {
+func fetchOnlineUpdateProgress(ctx context.Context, c *http.Client, address string, limit int64, token string, progress func(int64)) ([]byte, error) {
 	r, err := http.NewRequestWithContext(ctx, http.MethodGet, address, nil)
-	if err != nil {
+	if err != nil || !allowedUpdateURL(r.URL) {
 		return nil, errors.New("更新请求无效")
 	}
 	r.Header.Set("User-Agent", "GateHome/"+Version)
 	if r.URL.Hostname() == "api.github.com" {
 		r.Header.Set("Accept", "application/vnd.github+json")
+		if strings.HasPrefix(address, onlineReleaseAssetsAPI) {
+			r.Header.Set("Accept", "application/octet-stream")
+		}
 		r.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+		if token != "" {
+			r.Header.Set("Authorization", "Bearer "+token)
+		}
 	}
 	response, err := c.Do(r)
 	if err != nil {
@@ -105,8 +128,11 @@ func fetchOnlineUpdateProgress(ctx context.Context, c *http.Client, address stri
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		if response.StatusCode == 403 && response.Header.Get("X-RateLimit-Remaining") == "0" {
-			return nil, errors.New("GitHub 版本检查额度暂时用尽，请稍后重试")
+		if response.StatusCode == http.StatusUnauthorized && token != "" {
+			return nil, errors.New("GitHub Token 无效或已过期，请在设置中更换或清除后重试")
+		}
+		if (response.StatusCode == http.StatusForbidden || response.StatusCode == http.StatusTooManyRequests) && (response.Header.Get("X-RateLimit-Remaining") == "0" || response.Header.Get("Retry-After") != "") {
+			return nil, errors.New("GitHub 请求额度暂时用尽，请稍后重试；可在设置中配置 GitHub Token 提高 API 额度")
 		}
 		return nil, fmt.Errorf("GitHub 请求失败（HTTP %d），请稍后重试或检查出站代理", response.StatusCode)
 	}
@@ -127,8 +153,8 @@ func fetchOnlineUpdateProgress(ctx context.Context, c *http.Client, address stri
 	return data, nil
 }
 
-func latestOnlineRelease(ctx context.Context, c *http.Client) (onlineRelease, error) {
-	data, err := fetchOnlineUpdate(ctx, c, onlineReleaseAPI, 1<<20)
+func latestOnlineRelease(ctx context.Context, c *http.Client, token string) (onlineRelease, error) {
+	data, err := fetchOnlineUpdate(ctx, c, onlineReleaseAPI, 1<<20, token)
 	if err != nil {
 		return onlineRelease{}, err
 	}
@@ -138,6 +164,7 @@ func latestOnlineRelease(ctx context.Context, c *http.Client) (onlineRelease, er
 		Prerelease  bool      `json:"prerelease"`
 		PublishedAt time.Time `json:"published_at"`
 		Assets      []struct {
+			ID     int64  `json:"id"`
 			Name   string `json:"name"`
 			State  string `json:"state"`
 			URL    string `json:"browser_download_url"`
@@ -162,10 +189,11 @@ func latestOnlineRelease(ctx context.Context, c *http.Client) (onlineRelease, er
 		}
 		digest := strings.TrimPrefix(asset.Digest, "sha256:")
 		decoded, err := hex.DecodeString(digest)
-		if result.assetURL != "" || asset.State != "uploaded" || asset.URL != wantURL || asset.Size < 1 || asset.Size > maxUpdateBytes || !strings.HasPrefix(asset.Digest, "sha256:") || err != nil || len(decoded) != sha256.Size {
+		if result.assetURL != "" || asset.ID < 1 || asset.State != "uploaded" || asset.URL != wantURL || asset.Size < 1 || asset.Size > maxUpdateBytes || !strings.HasPrefix(asset.Digest, "sha256:") || err != nil || len(decoded) != sha256.Size {
 			return onlineRelease{}, errors.New("正式版本更新包的地址、大小或 SHA-256 校验信息无效")
 		}
 		result.assetURL, result.digest, result.Size = asset.URL, strings.ToLower(digest), asset.Size
+		result.assetID = asset.ID
 	}
 	if result.assetURL == "" {
 		return onlineRelease{}, errors.New("正式版本尚未提供完整的更新 ZIP，请稍后重试")
@@ -173,12 +201,16 @@ func latestOnlineRelease(ctx context.Context, c *http.Client) (onlineRelease, er
 	return result, nil
 }
 
-func downloadOnlineRelease(ctx context.Context, c *http.Client, release onlineRelease) ([]byte, error) {
-	return downloadOnlineReleaseProgress(ctx, c, release, nil)
+func downloadOnlineRelease(ctx context.Context, c *http.Client, release onlineRelease, token string) ([]byte, error) {
+	return downloadOnlineReleaseProgress(ctx, c, release, token, nil)
 }
 
-func downloadOnlineReleaseProgress(ctx context.Context, c *http.Client, release onlineRelease, progress func(int64)) ([]byte, error) {
-	data, err := fetchOnlineUpdateProgress(ctx, c, release.assetURL, release.Size, progress)
+func downloadOnlineReleaseProgress(ctx context.Context, c *http.Client, release onlineRelease, token string, progress func(int64)) ([]byte, error) {
+	address := release.assetURL
+	if token != "" {
+		address = fmt.Sprintf("%s%d", onlineReleaseAssetsAPI, release.assetID)
+	}
+	data, err := fetchOnlineUpdateProgress(ctx, c, address, release.Size, token, progress)
 	if err != nil {
 		return nil, err
 	}
@@ -199,9 +231,10 @@ func (a *Admin) onlineUpdateRoutes(mux *http.ServeMux) {
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 		defer cancel()
-		client := onlineUpdateClient(a.store.Snapshot())
+		state := a.store.Snapshot()
+		client := onlineUpdateClient(state)
 		defer closeClient(client)
-		release, err := latestOnlineRelease(ctx, client)
+		release, err := latestOnlineRelease(ctx, client, state.GitHubToken)
 		if err != nil {
 			apiError(w, 502, err.Error())
 			return
@@ -255,7 +288,7 @@ func (a *Admin) runOnlineUpdate(state State, version string) error {
 	defer cancel()
 	client := onlineUpdateClient(state)
 	defer closeClient(client)
-	release, err := latestOnlineRelease(ctx, client)
+	release, err := latestOnlineRelease(ctx, client, state.GitHubToken)
 	if err != nil {
 		return err
 	}
@@ -265,7 +298,7 @@ func (a *Admin) runOnlineUpdate(state State, version string) error {
 	a.onlineUpdate.mu.Lock()
 	a.onlineUpdate.status.Phase, a.onlineUpdate.status.Total = "downloading", release.Size
 	a.onlineUpdate.mu.Unlock()
-	data, err := downloadOnlineReleaseProgress(ctx, client, release, func(downloaded int64) {
+	data, err := downloadOnlineReleaseProgress(ctx, client, release, state.GitHubToken, func(downloaded int64) {
 		a.onlineUpdate.mu.Lock()
 		a.onlineUpdate.status.Downloaded = downloaded
 		a.onlineUpdate.mu.Unlock()

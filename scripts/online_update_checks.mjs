@@ -7,7 +7,7 @@ const helpers=source.slice(source.indexOf('function onlineUpdateHTML('),source.i
 const root={innerHTML:''},calls=[];
 let approve=true,loggedOut=false;
 const context=vm.createContext({
-  config:{outbound_proxy:{enabled:true}},status:{version:'0.0.21',maintenance_available:true},
+  githubTokenConfigured:false,config:{outbound_proxy:{enabled:true}},status:{version:'0.0.21',maintenance_available:true},
   $:()=>root,hydrateIcons:()=>{},panel:(title,description,body)=>body,icon:()=>'',
   esc:value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])),
   date:value=>String(value),confirm:()=>approve,showLogin:()=>{loggedOut=true;vm.runInContext('onlineUpdate.phase="";onlineUpdate.release=null;',context);},toast:()=>{},setTimeout:()=>1,clearTimeout:()=>{},

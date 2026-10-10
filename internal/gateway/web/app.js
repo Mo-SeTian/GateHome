@@ -69,7 +69,7 @@ let routeImageRequest=0,routeImagePending=false;
 const securityEvents=Object.fromEntries(['firewall','security'].map(kind=>[kind,{filters:emptyEventFilters(),applied:emptyEventFilters(),view:null,size:20,request:0,loading:false,error:''}]));
 let logPage=1,logSize=50;
 let statisticsView=null,statisticsHours='24',statisticsRule='',statisticsRequest=0,statisticsLoading=false,statisticsError='';
-let logView={entries:[],pages:1,total:0,through:0}, logCategory='',logResult='',logScope='project',logRule='',logSearch='',logIP='',logFrom='',logTo='',logMethod='',logStatus='',proxyPasswordConfigured=false;
+let logView={entries:[],pages:1,total:0,through:0}, logCategory='',logResult='',logScope='project',logRule='',logSearch='',logIP='',logFrom='',logTo='',logMethod='',logStatus='',proxyPasswordConfigured=false,githubTokenConfigured=false;
 let dnsCredentialsConfigured={};
 let certificateCredentialsConfigured={};
 let routePasswordsConfigured={};
@@ -122,13 +122,14 @@ function toast(message) {
   clearTimeout(toastTimer); toastTimer = setTimeout(() => { $('#toast').hidden = true; }, 4500);
 }
 function showLogin() { clearAccountPasswords();adminUsername='';$('#account-name').textContent='管理员';$('#account-avatar').textContent='G';resetDashboard();setNavigation(false,false); $('#login').hidden = false; $('#app').hidden = true; document.querySelectorAll('dialog').forEach(d=>d.close()); config = undefined; renderedPage='';clearTimeout(onlineUpdate.timer);onlineUpdate.request++;onlineUpdate.phase='';onlineUpdate.job=null;onlineUpdate.release=null;onlineUpdate.error='';abandonDiscovery();for(const state of Object.values(securityEvents)) {state.request++;state.view=null;state.filters=emptyEventFilters();state.applied=emptyEventFilters();state.loading=false;state.error='';} }
-function applyConfig(data) { config = data.config; revision = data.revision; dnsCredentialsConfigured=data.dns_credentials_configured||{}; certificateCredentialsConfigured=data.certificate_credentials_configured||{};routePasswordsConfigured=data.route_passwords_configured||{}; proxyPasswordConfigured=data.proxy_password_configured; ipRequest++;dnsRecordsRequest++;dnsRecords={};dnsRecordsError=''; if(networkInfo) networkInfo.groups={}; }
-async function save(next, dnsTokens, proxyPassword, certificateTokens, routePasswords) {
+function applyConfig(data) { config = data.config; revision = data.revision; dnsCredentialsConfigured=data.dns_credentials_configured||{}; certificateCredentialsConfigured=data.certificate_credentials_configured||{};routePasswordsConfigured=data.route_passwords_configured||{}; proxyPasswordConfigured=data.proxy_password_configured; githubTokenConfigured=!!data.github_token_configured; ipRequest++;dnsRecordsRequest++;dnsRecords={};dnsRecordsError=''; if(networkInfo) networkInfo.groups={}; }
+async function save(next, dnsTokens, proxyPassword, certificateTokens, routePasswords, githubToken) {
   const payload = {config:next, revision};
   if (dnsTokens !== undefined) payload.dns_tokens = dnsTokens;
   if (proxyPassword !== undefined) payload.proxy_password=proxyPassword;
   if (certificateTokens !== undefined) payload.certificate_tokens=certificateTokens;
   if (routePasswords !== undefined) payload.route_passwords=routePasswords;
+  if (githubToken !== undefined) payload.github_token=githubToken;
   applyConfig(await api('config', 'PUT', payload));
   await refreshStatus();
   toast('配置已保存' + (status.restart_required ? '，监听端口重启后生效' : ''));
@@ -416,7 +417,7 @@ function onlineUpdateHTML() {
   const available=release?.update_available&&release.version!==status.version;
   const message=onlineUpdate.job?.phase==='checking'?'正在确认本次更新版本…':({checking:'正在通过服务器检查 GitHub 最新正式版…',downloading:'1 / 3 · 正在后台下载，当前服务继续运行…',applying:'2 / 3 · 正在校验更新包并安排重启…'}[onlineUpdate.phase]||'');
   const progress=onlineUpdate.phase==='downloading'&&onlineUpdate.job?.total?`<div class="online-update-progress"><progress max="${onlineUpdate.job.total}" value="${onlineUpdate.job.downloaded}" aria-label="更新包下载进度"></progress><span>${Math.min(100,Math.floor(100*onlineUpdate.job.downloaded/onlineUpdate.job.total))}% · ${(onlineUpdate.job.downloaded/1048576).toFixed(1)} / ${(onlineUpdate.job.total/1048576).toFixed(1)} MiB</span></div>`:'';
-  return panel('在线更新','从 GateHome 的 GitHub 正式发布获取更新，使用设置中已保存的出站代理。',`<div class="panel-body online-update" aria-busy="${pending}"><ul class="info-list"><li><span>当前版本</span><b>v${esc(status.version||'加载中')}</b></li><li><span>更新连接</span><b>${config.outbound_proxy?.enabled?'使用已保存的出站代理':'直接连接 GitHub'}</b></li><li><span>最新正式版</span><b>${release?'v'+esc(release.version):'尚未检查'}</b></li>${release?`<li><span>发布时间 / 更新包</span><b>${date(release.published_at)} · ${(release.size/1048576).toFixed(1)} MiB</b></li>`:''}${onlineUpdate.job?.version?`<li><span>本次更新版本</span><b>v${esc(onlineUpdate.job.version)}</b></li>`:''}</ul><p class="form-note">下载后检查 GitHub SHA-256、包内文件哈希、版本和主机架构。更新时短暂中断服务，新版本启动检查失败会回滚。下载任务在服务器后台执行，刷新页面可继续查看进度。</p>${!supported?'<p class="form-note">当前启动方式支持检查版本；在线安装及自动重启需要 Linux 安装脚本或新版 Docker。</p>':''}<p class="online-update-status" role="status" aria-live="polite">${esc(message||(release?(available?'有新版本可用。':'当前版本已是最新，或高于最新正式版。'):''))}</p>${progress}<p class="error" role="alert">${esc(onlineUpdate.error)}</p><div class="form-actions"><button type="button" class="secondary" data-action="check-online-update" ${pending?'disabled':''}>${onlineUpdate.phase==='checking'?'检查中…':'检查更新'}</button><button type="button" class="primary" data-action="install-online-update" ${pending||!available||!supported||status.maintenance_busy?'disabled':''}>${pending&&onlineUpdate.phase!=='checking'?'更新中…':'更新并重启'}</button>${release?`<a href="${esc(release.release_url)}" target="_blank" rel="noopener noreferrer">${icon('external-link')}发行说明</a>`:''}</div></div>`);
+  return panel('在线更新','从 GateHome 的 GitHub 正式发布获取更新，使用设置中已保存的出站代理。',`<div class="panel-body online-update" aria-busy="${pending}"><ul class="info-list"><li><span>当前版本</span><b>v${esc(status.version||'加载中')}</b></li><li><span>更新连接</span><b>${config.outbound_proxy?.enabled?'使用已保存的出站代理':'直接连接 GitHub'}</b></li><li><span>GitHub API 认证</span><b>${githubTokenConfigured?'已配置 Token':'匿名访问'}</b></li><li><span>最新正式版</span><b>${release?'v'+esc(release.version):'尚未检查'}</b></li>${release?`<li><span>发布时间 / 更新包</span><b>${date(release.published_at)} · ${(release.size/1048576).toFixed(1)} MiB</b></li>`:''}${onlineUpdate.job?.version?`<li><span>本次更新版本</span><b>v${esc(onlineUpdate.job.version)}</b></li>`:''}</ul><p class="form-note">下载后检查 GitHub SHA-256、包内文件哈希、版本和主机架构。更新时短暂中断服务，新版本启动检查失败会回滚。下载任务在服务器后台执行，刷新页面可继续查看进度。</p>${!supported?'<p class="form-note">当前启动方式支持检查版本；在线安装及自动重启需要 Linux 安装脚本或新版 Docker。</p>':''}<p class="online-update-status" role="status" aria-live="polite">${esc(message||(release?(available?'有新版本可用。':'当前版本已是最新，或高于最新正式版。'):''))}</p>${progress}<p class="error" role="alert">${esc(onlineUpdate.error)}</p><div class="form-actions"><button type="button" class="secondary" data-action="check-online-update" ${pending?'disabled':''}>${onlineUpdate.phase==='checking'?'检查中…':'检查更新'}</button><button type="button" class="primary" data-action="install-online-update" ${pending||!available||!supported||status.maintenance_busy?'disabled':''}>${pending&&onlineUpdate.phase!=='checking'?'更新中…':'更新并重启'}</button>${release?`<a href="${esc(release.release_url)}" target="_blank" rel="noopener noreferrer">${icon('external-link')}发行说明</a>`:''}</div></div>`);
 }
 function renderOnlineUpdate() {
   const root=$('#online-update');if(!root||!config) return;
@@ -459,13 +460,16 @@ async function loadOnlineUpdateStatus() {
     renderOnlineUpdate();
   }
 }
+function githubTokenHTML() {
+  return panel('GitHub 访问令牌','为在线更新提供更高的 GitHub API 访问额度，保存后立即生效。',`<form id="github-token-form" class="panel-body"><label>GitHub Token（可选）<input name="token" type="password" maxlength="512" autocomplete="new-password" spellcheck="false" placeholder="${githubTokenConfigured?'已配置，留空保留':'不填写则匿名访问'}"><small>仅读取 GateHome 公开发布；classic Token 无需勾选任何权限，fine-grained Token 可选择 Public repositories，不必添加仓库权限。</small></label><p class="form-note">匿名 API 额度通常为每 IP 每小时 60 次；有效个人 Token 通常为每账号每小时 5,000 次。Token 用于版本检查和更新包 API 请求，不影响已保存的出站代理。保存后不回显，并随整站加密备份保存。</p><label class="check-label"><input name="clear_token" type="checkbox">清除已保存的 GitHub Token</label><p class="error" role="alert"></p><div class="form-actions"><button type="submit" class="primary">保存 GitHub Token</button></div></form>`);
+}
 function maintenanceHTML() {
   const supported=status.maintenance_available;
   const preview=maintenancePreview;
   const detail=!preview?'':`<div class="maintenance-preview"><b>${preview.kind==='update'?'更新包 v'+esc(preview.version):'备份 v'+esc(preview.version)}</b>${preview.kind==='restore'?`<p>${preview.groups} 个反代组 · ${preview.routes} 个服务 · ${preview.ddns_groups} 个 DDNS 组 · ${preview.firewalls} 个防火墙 · ${preview.subscriptions} 个订阅<br>${preview.sunpanel_files||0} 个 Sun-Panel 文件 · ${preview.images||0} 张图片资产 · ${preview.certificates||0} 个证书文件 · ${preview.log_entries||0} 条日志 · ${preview.subscription_caches||0} 个订阅缓存<br>${preview.includes_files?'':'此旧备份未包含日志、缓存与图片；恢复时保留服务器现有文件。<br>'}备份时间：${date(preview.created_at)} · ${preview.token_configured?'含 Cloudflare Token':'未配置 Cloudflare Token'}</p>`:''}<p>${esc(preview.message)}</p><button class="primary" data-action="apply-maintenance" ${!preview.can_apply?'disabled':''}>${preview.kind==='update'?'应用更新并重启':'恢复数据并重启'}</button></div>`;
   const backupDetail=preview?.kind==='restore'?detail:'',updateDetail=preview?.kind==='update'?detail:'';
   return panel('备份与恢复','备份配置与凭据、证书、服务图片、Sun-Panel 全部数据、日志和订阅缓存。',`<div class="panel-body two-col maintenance-forms"><form id="backup-form"><h3>下载加密备份</h3><label>备份密码<input name="password" type="password" autocomplete="new-password"></label><label>再次输入备份密码<input name="confirm_password" type="password" autocomplete="new-password"></label><p class="form-note">密码不限长度，可以留空；留空时恢复也无需填写密码。请保存设置的密码，恢复时需保持一致。ZIP 内的数据使用 AES-256-GCM 加密，含反代访问密码、IP 冻结名单与全部已保存的业务数据。登录会话、未保存的扫描结果和维护临时文件不备份。</p><p class="error" role="alert"></p><div class="form-actions"><button class="primary" type="submit">下载备份 ZIP</button></div></form><form id="restore-form"><h3>上传备份</h3><label>备份 ZIP<input name="file" type="file" accept=".zip,application/zip" required></label><label>导出时的备份密码<input name="password" type="password" autocomplete="off"></label><p class="form-note">密码不限长度；导出时留空，这里也留空。先检查备份再确认恢复。恢复后使用备份时的管理员账号和管理密码重新登录。</p><p class="error" role="alert"></p><div class="form-actions"><button class="secondary" type="submit">检查备份</button></div></form></div>${backupDetail}`) +
-    `<div id="online-update">${onlineUpdateHTML()}</div>` +
+    `<div id="online-update">${onlineUpdateHTML()}</div>` + githubTokenHTML() +
     panel('上传版本更新','使用本项目“更新版本”目录生成的 ZIP；只接受更高版本。',`<form id="update-form" class="panel-body"><label>更新 ZIP<input name="file" type="file" accept=".zip,application/zip" required></label><p class="form-note">检查版本、文件哈希和主机架构后再应用。只使用你信任的项目更新包；哈希校验用于检查文件完整性。</p><p class="form-note">${supported?'维护时短暂停止服务，新程序启动检查失败会回滚。':'此部署可导出备份及检查上传包。应用更新或恢复需要 Linux 安装脚本或新版 Docker 启动方式。'}</p><p class="error" role="alert"></p><div class="form-actions"><button type="submit" class="secondary">检查更新包</button></div></form>${updateDetail}`) +
     `<div class="app-version"><b>Gatehouse</b><button class="secondary" data-action="restart-service" ${!supported?'disabled':''}>重启服务</button><span>版本 ${esc(status.version||'加载中')}</span></div>`;
 }
@@ -1122,6 +1126,10 @@ document.addEventListener('submit',event=>{
       next.outbound_proxy={enabled:e.enabled.checked,url:e.url.value.trim(),username:e.username.value.trim()};
       const password=e.clear_password.checked?'':e.password.value||undefined;
       await save(next,undefined,password);e.password.value='';render();
+    } else if(form.id==='github-token-form') {
+      const token=e.clear_token.checked?'':e.token.value.trim()||undefined;
+      try {await save(next,undefined,undefined,undefined,undefined,token);} finally {e.token.value='';}
+      render();
     } else if(form.id==='log-retention-form') {
       next.log_retention={max_size_mb:Number(e.max_size_mb.value),keep_days:Number(e.keep_days.value)};
       await save(next);render();

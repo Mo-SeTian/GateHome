@@ -94,6 +94,9 @@ func (c Config) CertificateDNSGroup(host string) (DDNSGroup, error) {
 }
 
 func validateCredentials(s State) error {
+	if err := validateGitHubToken(s.GitHubToken); err != nil {
+		return err
+	}
 	if err := validateRouteCredentials(s); err != nil {
 		return err
 	}
