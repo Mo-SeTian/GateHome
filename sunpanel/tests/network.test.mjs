@@ -5,7 +5,7 @@ import ts from 'typescript'
 
 const source = readFileSync(new URL('../src/utils/network.ts', import.meta.url), 'utf8')
 const { outputText } = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ES2022 } })
-const { resolveAutoUrl, createAutoUrlResolver } = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`)
+const { resolveAutoUrl, createAutoUrlResolver, startAutoUrlRefresh } = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`)
 const defaultUrl = 'https://example.test/'
 const lanUrl = 'http://192.168.1.2:5000/'
 
@@ -111,4 +111,123 @@ test('new addresses are checked after edits; results belong to the current home 
   await nextPage.check([{ url: defaultUrl, lanUrl }])
   assert.equal(nextPage.resolve(defaultUrl, lanUrl), lanUrl)
   assert.equal(probe.mock.callCount(), 3)
+})
+
+test('expired results fall back immediately and a background recheck detects loss and recovery', async (t) => {
+  let now = 1000
+  let available = true
+  t.mock.method(Date, 'now', () => now)
+  const probe = t.mock.method(globalThis, 'fetch', async () => {
+    if (!available)
+      throw new TypeError('TEST_ONLY_NETWORK_LOSS')
+    return { type: 'opaque' }
+  })
+  const network = createAutoUrlResolver()
+  const items = [{ url: defaultUrl, lanUrl }]
+  await network.check(items)
+  now += 59_999
+  assert.equal(network.resolve(defaultUrl, lanUrl), lanUrl)
+  await network.check(items)
+  assert.equal(probe.mock.callCount(), 1)
+  now++
+  available = false
+  assert.equal(network.resolve(defaultUrl, lanUrl), defaultUrl)
+  assert.equal(probe.mock.callCount(), 1)
+  await network.check(items)
+  assert.equal(network.resolve(defaultUrl, lanUrl), defaultUrl)
+  now += 60_000
+  available = true
+  await network.check(items)
+  assert.equal(network.resolve(defaultUrl, lanUrl), lanUrl)
+  assert.equal(probe.mock.callCount(), 3)
+})
+
+test('a probe from the previous network cannot overwrite a newer unreachable result', async (t) => {
+  let finishOld
+  const probe = t.mock.method(globalThis, 'fetch', () => new Promise(resolve => { finishOld = resolve }))
+  const network = createAutoUrlResolver()
+  const items = [{ url: defaultUrl, lanUrl }]
+  const oldCheck = network.check(items)
+  network.invalidate()
+  probe.mock.mockImplementation(async () => { throw new TypeError('TEST_ONLY_NETWORK_LOSS') })
+  await network.check(items)
+  finishOld({ type: 'opaque' })
+  await oldCheck
+  assert.equal(network.resolve(defaultUrl, lanUrl), defaultUrl)
+  assert.equal(probe.mock.callCount(), 2)
+})
+
+function browserNetworkFixture(t) {
+  const fixture = {
+    document: Object.assign(new EventTarget(), { visibilityState: 'visible' }),
+    window: new EventTarget(),
+    navigator: { onLine: true, connection: new EventTarget() },
+  }
+  for (const [key, value] of Object.entries(fixture)) {
+    const previous = Object.getOwnPropertyDescriptor(globalThis, key)
+    Object.defineProperty(globalThis, key, { value, configurable: true })
+    t.after(() => previous ? Object.defineProperty(globalThis, key, previous) : delete globalThis[key])
+  }
+  t.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] })
+  return fixture
+}
+
+test('foreground checks, periodic refresh and debounced reconnection run silently; cleanup stops them', async (t) => {
+  const browser = browserNetworkFixture(t)
+  const probe = t.mock.method(globalThis, 'fetch', async () => ({ type: 'opaque' }))
+  const network = createAutoUrlResolver()
+  const items = [{ url: defaultUrl, lanUrl }]
+  await network.check(items)
+  const stop = startAutoUrlRefresh(network, () => items, () => true)
+  t.mock.timers.tick(60_000)
+  t.mock.timers.tick(200)
+  assert.equal(probe.mock.callCount(), 2)
+  await network.check(items)
+  browser.document.visibilityState = 'hidden'
+  browser.document.dispatchEvent(new Event('visibilitychange'))
+  t.mock.timers.tick(60_000)
+  assert.equal(probe.mock.callCount(), 2)
+  browser.navigator.onLine = false
+  browser.window.dispatchEvent(new Event('offline'))
+  assert.equal(network.resolve(defaultUrl, lanUrl), defaultUrl)
+  t.mock.timers.tick(200)
+  assert.equal(probe.mock.callCount(), 2)
+  browser.navigator.onLine = true
+  browser.document.visibilityState = 'visible'
+  browser.window.dispatchEvent(new Event('online'))
+  browser.navigator.connection.dispatchEvent(new Event('change'))
+  t.mock.timers.tick(199)
+  assert.equal(probe.mock.callCount(), 2)
+  t.mock.timers.tick(1)
+  assert.equal(probe.mock.callCount(), 3)
+  await network.check(items)
+  browser.document.dispatchEvent(new Event('visibilitychange'))
+  t.mock.timers.tick(200)
+  assert.equal(probe.mock.callCount(), 4)
+  await network.check(items)
+  const restored = Object.assign(new Event('pageshow'), { persisted: true })
+  browser.window.dispatchEvent(restored)
+  browser.document.dispatchEvent(new Event('visibilitychange'))
+  t.mock.timers.tick(200)
+  assert.equal(probe.mock.callCount(), 5)
+  await network.check(items)
+  stop()
+  browser.window.dispatchEvent(new Event('online'))
+  browser.document.dispatchEvent(new Event('visibilitychange'))
+  browser.navigator.connection.dispatchEvent(new Event('change'))
+  browser.window.dispatchEvent(restored)
+  t.mock.timers.tick(120_000)
+  assert.equal(probe.mock.callCount(), 5)
+})
+
+test('manual network modes never start automatic probes, including browsers without connection events', (t) => {
+  const browser = browserNetworkFixture(t)
+  delete browser.navigator.connection
+  const probe = t.mock.method(globalThis, 'fetch', async () => ({ type: 'opaque' }))
+  const stop = startAutoUrlRefresh(createAutoUrlResolver(), () => [{ url: defaultUrl, lanUrl }], () => false)
+  browser.document.dispatchEvent(new Event('visibilitychange'))
+  browser.window.dispatchEvent(new Event('online'))
+  t.mock.timers.tick(120_000)
+  assert.equal(probe.mock.callCount(), 0)
+  stop()
 })

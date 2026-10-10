@@ -83,7 +83,7 @@ async function handleSaveLocalIcon() {
     const file = await createLocalIconPng(itemIconInfo.value.text, color)
     const { code, data } = await uploadImage(file)
     if (code !== 0)
-      throw new Error('Icon upload failed')
+      return
     if (!unmounted && props.itemIcon === original) {
       emit('update:itemIcon', { ...itemIconInfo.value, itemType: 2, src: data.imageUrl })
       ms.success(t('iconItem.localIconSaved'))

@@ -40,6 +40,7 @@ type Admin struct {
 	logs         *Logs
 	maintenance  *Maintenance
 	onlineUpdate onlineUpdateJob
+	releaseCache onlineReleaseCache
 	dashboard    dashboardCache
 	telemetry    telemetryCollector
 	domainDNS    *domainDNS

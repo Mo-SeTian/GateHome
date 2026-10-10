@@ -25,6 +25,8 @@ type onlineRelease struct {
 	Size             int64     `json:"size"`
 	UpdateAvailable  bool      `json:"update_available"`
 	ReleaseURL       string    `json:"release_url"`
+	CheckedAt        time.Time `json:"checked_at"`
+	CacheUntil       time.Time `json:"cache_until"`
 	assetURL, digest string
 	assetID          int64
 }
@@ -42,16 +44,18 @@ func validateGitHubToken(token string) error {
 }
 
 type onlineUpdateStatus struct {
-	Phase      string `json:"phase"`
-	Version    string `json:"version"`
-	Downloaded int64  `json:"downloaded"`
-	Total      int64  `json:"total"`
-	Error      string `json:"error"`
+	Phase      string     `json:"phase"`
+	Version    string     `json:"version"`
+	Downloaded int64      `json:"downloaded"`
+	Total      int64      `json:"total"`
+	Error      string     `json:"error"`
+	RetryAt    *time.Time `json:"retry_at,omitempty"`
 }
 
 type onlineUpdateJob struct {
-	mu     sync.Mutex
-	status onlineUpdateStatus
+	mu                         sync.Mutex
+	status                     onlineUpdateStatus
+	preparedID, preparedDigest string
 }
 
 func (j *onlineUpdateJob) snapshot() onlineUpdateStatus {
@@ -64,6 +68,27 @@ func (j *onlineUpdateJob) setPhase(phase, message string) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	j.status.Phase, j.status.Error = phase, message
+	j.status.RetryAt = nil
+}
+
+func (j *onlineUpdateJob) setFailure(err error) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	j.status.Phase, j.status.Error, j.status.RetryAt = "error", err.Error(), nil
+	var limited *githubRateLimitError
+	if errors.As(err, &limited) {
+		j.status.RetryAt = &limited.retryAt
+	}
+}
+
+func (j *onlineUpdateJob) preparedStage(m *Maintenance, release onlineRelease) string {
+	j.mu.Lock()
+	id, digest := j.preparedID, j.preparedDigest
+	j.mu.Unlock()
+	if id != "" && digest == release.digest && m.verifiedUpdateStage(id, release.Version) {
+		return id
+	}
+	return ""
 }
 
 type updateProgressWriter struct {
@@ -131,8 +156,8 @@ func fetchOnlineUpdateProgress(ctx context.Context, c *http.Client, address stri
 		if response.StatusCode == http.StatusUnauthorized && token != "" {
 			return nil, errors.New("GitHub Token 无效或已过期，请在设置中更换或清除后重试")
 		}
-		if (response.StatusCode == http.StatusForbidden || response.StatusCode == http.StatusTooManyRequests) && (response.Header.Get("X-RateLimit-Remaining") == "0" || response.Header.Get("Retry-After") != "") {
-			return nil, errors.New("GitHub 请求额度暂时用尽，请稍后重试；可在设置中配置 GitHub Token 提高 API 额度")
+		if response.StatusCode == http.StatusTooManyRequests || (response.StatusCode == http.StatusForbidden && (response.Header.Get("X-RateLimit-Remaining") == "0" || response.Header.Get("Retry-After") != "")) {
+			return nil, &githubRateLimitError{retryAt: githubRetryTime(response.Header)}
 		}
 		return nil, fmt.Errorf("GitHub 请求失败（HTTP %d），请稍后重试或检查出站代理", response.StatusCode)
 	}
@@ -234,9 +259,9 @@ func (a *Admin) onlineUpdateRoutes(mux *http.ServeMux) {
 		state := a.store.Snapshot()
 		client := onlineUpdateClient(state)
 		defer closeClient(client)
-		release, err := latestOnlineRelease(ctx, client, state.GitHubToken)
+		release, err := a.releaseCache.latest(ctx, client, state)
 		if err != nil {
-			apiError(w, 502, err.Error())
+			onlineCheckError(w, err)
 			return
 		}
 		jsonResponse(w, 200, release)
@@ -274,7 +299,8 @@ func (a *Admin) onlineUpdateRoutes(mux *http.ServeMux) {
 		go func() {
 			defer a.updateMu.Unlock()
 			if err := a.runOnlineUpdate(state, input.Version); err != nil {
-				a.onlineUpdate.setPhase("error", err.Error())
+				a.releaseCache.noteLimit(state, err)
+				a.onlineUpdate.setFailure(err)
 				if a.logs != nil {
 					a.logs.Add(LogEntry{Category: "admin", Action: "在线更新", Target: input.Version, OK: false, Message: err.Error()})
 				}
@@ -288,36 +314,44 @@ func (a *Admin) runOnlineUpdate(state State, version string) error {
 	defer cancel()
 	client := onlineUpdateClient(state)
 	defer closeClient(client)
-	release, err := latestOnlineRelease(ctx, client, state.GitHubToken)
+	release, err := a.releaseCache.latest(ctx, client, state)
 	if err != nil {
 		return err
 	}
 	if release.Version != version || !release.UpdateAvailable {
 		return errors.New("最新正式版本已变化，请重新检查版本后更新")
 	}
-	a.onlineUpdate.mu.Lock()
-	a.onlineUpdate.status.Phase, a.onlineUpdate.status.Total = "downloading", release.Size
-	a.onlineUpdate.mu.Unlock()
-	data, err := downloadOnlineReleaseProgress(ctx, client, release, state.GitHubToken, func(downloaded int64) {
+	id := a.onlineUpdate.preparedStage(a.maintenance, release)
+	if id == "" {
 		a.onlineUpdate.mu.Lock()
-		a.onlineUpdate.status.Downloaded = downloaded
+		a.onlineUpdate.status.Phase, a.onlineUpdate.status.Total = "downloading", release.Size
 		a.onlineUpdate.mu.Unlock()
-	})
-	if err != nil {
-		return err
-	}
-	if ctx.Err() != nil {
-		return errors.New("更新下载超时，请检查网络或出站代理后重试")
+		data, err := downloadOnlineReleaseProgress(ctx, client, release, state.GitHubToken, func(downloaded int64) {
+			a.onlineUpdate.mu.Lock()
+			a.onlineUpdate.status.Downloaded = downloaded
+			a.onlineUpdate.mu.Unlock()
+		})
+		if err != nil {
+			return err
+		}
+		if ctx.Err() != nil {
+			return errors.New("更新下载超时，请检查网络或出站代理后重试")
+		}
+		a.onlineUpdate.setPhase("verifying", "")
+		result, err := a.maintenance.inspectUpdateVersion(data, release.Version)
+		if err != nil {
+			return err
+		}
+		id = result["id"].(string)
+		a.onlineUpdate.mu.Lock()
+		a.onlineUpdate.preparedID, a.onlineUpdate.preparedDigest = id, release.digest
+		a.onlineUpdate.mu.Unlock()
 	}
 	a.onlineUpdate.setPhase("verifying", "")
-	result, err := a.maintenance.inspectUpdateVersion(data, release.Version)
-	if err != nil {
-		return err
-	}
 	if err := checkRestartPorts(a.ports, state.Config); err != nil {
 		return err
 	}
-	if err := a.maintenance.schedule(result["id"].(string), "update"); err != nil {
+	if err := a.maintenance.schedule(id, "update"); err != nil {
 		return err
 	}
 	a.onlineUpdate.setPhase("restarting", "")

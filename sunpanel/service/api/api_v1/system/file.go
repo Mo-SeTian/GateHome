@@ -45,16 +45,24 @@ func (a *FileApi) UploadImg(c *gin.Context) {
 		}
 		fileName := cmn.Md5(fmt.Sprintf("%s%s", f.Filename, time.Now().String()))
 		fildDir := fmt.Sprintf("%s/%d/%d/%d/", configUpload, time.Now().Year(), time.Now().Month(), time.Now().Day())
-		isExist, _ := cmn.PathExists(fildDir)
-		if !isExist {
-			os.MkdirAll(fildDir, os.ModePerm)
+		if err := os.MkdirAll(fildDir, os.ModePerm); err != nil {
+			apiReturn.ErrorByCode(c, 1300)
+			return
 		}
 		filepath := fmt.Sprintf("%s%s%s", fildDir, fileName, fileExt)
-		c.SaveUploadedFile(f, filepath)
+		if err := c.SaveUploadedFile(f, filepath); err != nil {
+			os.Remove(filepath)
+			apiReturn.ErrorByCode(c, 1300)
+			return
+		}
 
 		// 像数据库添加记录
 		mFile := models.File{}
-		mFile.AddFile(userInfo.ID, f.Filename, fileExt, filepath)
+		if _, err := mFile.AddFile(userInfo.ID, f.Filename, fileExt, filepath); err != nil {
+			os.Remove(filepath)
+			apiReturn.ErrorByCode(c, 1200)
+			return
+		}
 		apiReturn.SuccessData(c, gin.H{
 			"imageUrl": "/sunpanel" + filepath[1:],
 		})

@@ -73,6 +73,17 @@ func (m *Maintenance) inspectUpdate(data []byte) (map[string]any, error) {
 	return m.inspectUpdateVersion(data, "")
 }
 
+func (m *Maintenance) verifiedUpdateStage(id, version string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.busy || m.stage == nil || m.stage.ID != id || m.stage.Kind != "update" || m.stage.Version != version || time.Since(m.stage.Created) > 15*time.Minute {
+		return false
+	}
+	binary, err := os.ReadFile(filepath.Join(m.dir, "update-staged"))
+	sum := sha256.Sum256(binary)
+	return err == nil && hex.EncodeToString(sum[:]) == m.stage.Digest
+}
+
 func (m *Maintenance) inspectUpdateVersion(data []byte, expectedVersion string) (map[string]any, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

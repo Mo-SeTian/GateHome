@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { VueDraggable } from 'vue-draggable-plus'
 import { NBackTop, NButton, NButtonGroup, NDropdown, NModal, NSkeleton, NSpin, useDialog, useMessage } from 'naive-ui'
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { AppIcon, AppStarter, EditItem } from './components'
 import { Clock, SearchBox, SystemMonitor } from '@/components/deskModule'
 import { SvgIcon } from '@/components/common'
@@ -14,7 +14,7 @@ import { PanelPanelConfigStyleEnum, PanelStateNetworkModeEnum } from '@/enums'
 import { VisitMode } from '@/enums/auth'
 import { router } from '@/router'
 import { t } from '@/locales'
-import { createAutoUrlResolver } from '@/utils/network'
+import { createAutoUrlResolver, startAutoUrlRefresh } from '@/utils/network'
 
 interface ItemGroup extends Panel.ItemIconGroup {
   sortStatus?: boolean
@@ -49,6 +49,7 @@ const settingModalShow = ref(false)
 const items = ref<ItemGroup[]>([])
 const filterItems = ref<ItemGroup[]>([])
 const autoUrls = createAutoUrlResolver()
+let stopAutoUrlRefresh: (() => void) | undefined
 const networkModeOptions = computed(() => [
   { label: t('panelHome.autoMode'), key: PanelStateNetworkModeEnum.auto },
   { label: t('panelHome.lanMode'), key: PanelStateNetworkModeEnum.lan },
@@ -270,6 +271,7 @@ function getDropdownMenuOptions() {
 }
 
 onMounted(() => {
+  stopAutoUrlRefresh = startAutoUrlRefresh(autoUrls, () => items.value.flatMap(group => group.items || []), () => panelState.networkMode === PanelStateNetworkModeEnum.auto)
   // 更新用户信息
   updateLocalUserInfo()
   getList()
@@ -281,6 +283,8 @@ onMounted(() => {
   if (panelState.panelConfig.logoText)
     setTitle(panelState.panelConfig.logoText)
 })
+
+onUnmounted(() => stopAutoUrlRefresh?.())
 
 // 前端搜索过滤
 function itemFrontEndSearch(keyword?: string) {
