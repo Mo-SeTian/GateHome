@@ -125,3 +125,52 @@ func TestSunPanelPortAndRemovedConfiguration(t *testing.T) {
 		t.Fatal("old homepage was retained")
 	}
 }
+
+func TestSunPanelLaunchURLValidation(t *testing.T) {
+	for _, value := range []string{"", "http://192.168.2.25:16680/", "https://panel.example.test/custom/?view=home#desk", "HTTP://panel.example.test/", "http://[fd00::25]:17777/", "/sunpanel/#/"} {
+		c := DefaultConfig()
+		c.SunPanel.LaunchURL = value
+		if err := Validate(c); err != nil {
+			t.Fatalf("valid launch URL rejected: %q: %v", value, err)
+		}
+	}
+	for _, value := range []string{"javascript:alert(1)", "data:text/html,test", "//other.example.test/", "/\\other.example.test/", "panel.example.test", "http:///sunpanel/", "https://user:FAKE_PASSWORD@example.test/", "http://example.test:99999/", "http://example.test/\n"} {
+		c := DefaultConfig()
+		c.SunPanel.LaunchURL = value
+		if Validate(c) == nil {
+			t.Fatalf("invalid launch URL accepted: %q", value)
+		}
+	}
+}
+
+func TestSunPanelLaunchURLSavedWithoutRestart(t *testing.T) {
+	a, handler := testAdmin(t)
+	cookie := loginForTest(t, handler)
+	s := a.store.Snapshot()
+	s.Config.SunPanel.LaunchURL = "https://panel.example.test/custom/#/"
+	w := adminRequest(handler, "PUT", "/api/config", map[string]any{"config": s.Config, "revision": s.Revision}, cookie, "")
+	if w.Code != 200 {
+		t.Fatal("launch URL save failed")
+	}
+	var status struct {
+		Restart bool `json:"restart_required"`
+	}
+	w = adminRequest(handler, "GET", "/api/status", nil, cookie, "")
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &status) != nil || status.Restart {
+		t.Fatal("launch URL change required a service restart")
+	}
+	reopened, err := OpenStorePaths(a.store.paths)
+	if err != nil || reopened.Snapshot().Config.SunPanel.LaunchURL != s.Config.SunPanel.LaunchURL {
+		t.Fatal("launch URL was not persisted")
+	}
+	backup, err := snapshotBackupPaths(a.store.paths, a.store.Snapshot())
+	if err != nil || backup.State.Config.SunPanel.LaunchURL != s.Config.SunPanel.LaunchURL {
+		t.Fatal("launch URL missing from backup")
+	}
+	s = a.store.Snapshot()
+	s.Config.SunPanel.LaunchURL = ""
+	w = adminRequest(handler, "PUT", "/api/config", map[string]any{"config": s.Config, "revision": s.Revision}, cookie, "")
+	if w.Code != 200 || a.store.Snapshot().Config.SunPanel.LaunchURL != "" {
+		t.Fatal("launch URL could not be cleared")
+	}
+}

@@ -11,16 +11,36 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
 
 type SunPanelConfig struct {
-	Enabled bool `json:"enabled"`
-	Port    int  `json:"port"`
+	Enabled   bool   `json:"enabled"`
+	Port      int    `json:"port"`
+	LaunchURL string `json:"launch_url,omitempty"`
 }
 
 func validateSunPanelListener(c SunPanelConfig, groups []ProxyGroup) error {
+	if c.LaunchURL != "" {
+		u, err := url.Parse(c.LaunchURL)
+		if err != nil || len(c.LaunchURL) > 2048 || strings.ContainsAny(c.LaunchURL, " \\\t\r\n") || u.User != nil {
+			return errors.New("Sun-Panel 访问地址须为无账号密码的 HTTP(S) 地址或以 / 开头的本站路径")
+		}
+		absolute := (strings.EqualFold(u.Scheme, "http") || strings.EqualFold(u.Scheme, "https")) && u.Hostname() != ""
+		localPath := strings.HasPrefix(c.LaunchURL, "/") && !strings.HasPrefix(c.LaunchURL, "//") && u.Scheme == "" && u.Host == ""
+		if !absolute && !localPath {
+			return errors.New("Sun-Panel 访问地址须为 HTTP(S) 地址或以 / 开头的本站路径")
+		}
+		if u.Port() != "" {
+			port, err := strconv.Atoi(u.Port())
+			if err != nil || port < 1 || port > 65535 {
+				return errors.New("Sun-Panel 访问地址中的端口须为 1–65535")
+			}
+		}
+	}
 	if c.Port == 0 && !c.Enabled {
 		return nil
 	}
