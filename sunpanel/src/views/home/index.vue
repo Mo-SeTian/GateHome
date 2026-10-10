@@ -14,7 +14,7 @@ import { PanelPanelConfigStyleEnum, PanelStateNetworkModeEnum } from '@/enums'
 import { VisitMode } from '@/enums/auth'
 import { router } from '@/router'
 import { t } from '@/locales'
-import { resolveAutoUrl } from '@/utils/network'
+import { createAutoUrlResolver } from '@/utils/network'
 
 interface ItemGroup extends Panel.ItemIconGroup {
   sortStatus?: boolean
@@ -48,7 +48,7 @@ const settingModalShow = ref(false)
 
 const items = ref<ItemGroup[]>([])
 const filterItems = ref<ItemGroup[]>([])
-const openingItems = new Set<Panel.ItemInfo>()
+const autoUrls = createAutoUrlResolver()
 const networkModeOptions = computed(() => [
   { label: t('panelHome.autoMode'), key: PanelStateNetworkModeEnum.auto },
   { label: t('panelHome.lanMode'), key: PanelStateNetworkModeEnum.lan },
@@ -78,38 +78,10 @@ function openPage(openMethod: number, url: string, title?: string) {
 
 function openItem(item: Panel.ItemInfo, openMethod = item.openMethod) {
   const lanUrl = item.lanUrl?.trim()
-  if (panelState.networkMode !== PanelStateNetworkModeEnum.auto || !lanUrl || lanUrl === item.url) {
-    openPage(openMethod, (panelState.networkMode === PanelStateNetworkModeEnum.lan && lanUrl) ? lanUrl : item.url, item.title)
-    return
-  }
-  if (openingItems.has(item))
-    return
-
-  // Reserve the tab inside the click event, before awaiting the network probe.
-  const popup = openMethod === 2 ? window.open('about:blank', '_blank') : null
-  if (openMethod === 2 && !popup) {
-    ms.warning(t('panelHome.popupBlocked'))
-    return
-  }
-  if (popup) {
-    popup.opener = null
-    popup.document.title = t('panelHome.checkingLan')
-    popup.document.body.textContent = t('panelHome.checkingLan')
-  }
-  openingItems.add(item)
-  const loading = ms.loading(t('panelHome.checkingLan'), { duration: 0 })
-  resolveAutoUrl(item.url, lanUrl).then((url) => {
-    if (popup) {
-      if (!popup.closed)
-        popup.location.replace(url)
-    }
-    else {
-      openPage(openMethod, url, item.title)
-    }
-  }).finally(() => {
-    openingItems.delete(item)
-    loading.destroy()
-  })
+  const url = panelState.networkMode === PanelStateNetworkModeEnum.auto
+    ? autoUrls.resolve(item.url, lanUrl)
+    : (panelState.networkMode === PanelStateNetworkModeEnum.lan && lanUrl) ? lanUrl : item.url
+  openPage(openMethod, url, item.title)
 }
 
 function handleItemClick(itemGroupIndex: number, item: Panel.ItemInfo) {
@@ -143,8 +115,11 @@ function getList() {
 // 从后端获取组下面的图标
 function updateItemIconGroupByNet(itemIconGroupIndex: number, itemIconGroupId: number) {
   getListByGroupId<Common.ListResponse<Panel.ItemInfo[]>>(itemIconGroupId).then((res) => {
-    if (res.code === 0)
+    if (res.code === 0) {
       items.value[itemIconGroupIndex].items = res.data.list
+      if (panelState.networkMode === PanelStateNetworkModeEnum.auto)
+        autoUrls.check(res.data.list)
+    }
   })
 }
 
@@ -221,8 +196,10 @@ function handleChangeNetwork(mode: string | number) {
   if (mode === PanelStateNetworkModeEnum.lan)
     ms.success(t('panelHome.changeToLanModelSuccess'))
 
-  else if (mode === PanelStateNetworkModeEnum.auto)
+  else if (mode === PanelStateNetworkModeEnum.auto) {
+    autoUrls.check(items.value.flatMap(group => group.items || []))
     ms.success(t('panelHome.changeToAutoModelSuccess'))
+  }
   else
     ms.success(t('panelHome.changeToWanModelSuccess'))
 }

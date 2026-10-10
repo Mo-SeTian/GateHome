@@ -5,7 +5,7 @@ import ts from 'typescript'
 
 const source = readFileSync(new URL('../src/utils/network.ts', import.meta.url), 'utf8')
 const { outputText } = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ES2022 } })
-const { resolveAutoUrl } = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`)
+const { resolveAutoUrl, createAutoUrlResolver } = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`)
 const defaultUrl = 'https://example.test/'
 const lanUrl = 'http://192.168.1.2:5000/'
 
@@ -63,4 +63,52 @@ test('a successful probe cancels its timeout', async (t) => {
   assert.equal(await resolveAutoUrl(defaultUrl, lanUrl), lanUrl)
   t.mock.timers.tick(1500)
   assert.equal(signal.aborted, false)
+})
+
+test('background checks populate cached choices; opening sites never starts or waits for a probe', async (t) => {
+  let finish
+  const probe = t.mock.method(globalThis, 'fetch', () => new Promise(resolve => { finish = resolve }))
+  const network = createAutoUrlResolver()
+  assert.equal(network.resolve(defaultUrl, lanUrl), defaultUrl)
+  assert.equal(probe.mock.callCount(), 0)
+  const checking = network.check([{ url: defaultUrl, lanUrl }])
+  assert.equal(network.resolve(defaultUrl, lanUrl), defaultUrl)
+  finish({ type: 'opaque' })
+  await checking
+  for (let i = 0; i < 3; i++)
+    assert.equal(network.resolve(defaultUrl, lanUrl), lanUrl)
+  assert.equal(probe.mock.callCount(), 1)
+})
+
+test('a batch checks each LAN address once across groups, duplicate entries and repeated loads', async (t) => {
+  const unreachable = 'http://192.168.1.3:5000/'
+  const probe = t.mock.method(globalThis, 'fetch', async (url) => {
+    if (url === unreachable)
+      throw new TypeError('Failed to fetch')
+    return { type: 'opaque' }
+  })
+  const network = createAutoUrlResolver()
+  const entries = [{ url: defaultUrl, lanUrl }, { url: `${defaultUrl}other`, lanUrl: ` ${lanUrl} ` }, { url: defaultUrl, lanUrl: unreachable }, { url: defaultUrl }, { url: lanUrl, lanUrl }]
+  await Promise.all([network.check(entries), network.check(entries)])
+  await network.check(entries)
+  assert.equal(probe.mock.callCount(), 2)
+  assert.equal(network.resolve(defaultUrl, lanUrl), lanUrl)
+  assert.equal(network.resolve(`${defaultUrl}other`, ` ${lanUrl} `), lanUrl)
+  assert.equal(network.resolve(defaultUrl, unreachable), defaultUrl)
+  assert.equal(network.resolve(defaultUrl), defaultUrl)
+})
+
+test('new addresses are checked after edits; results belong to the current home page', async (t) => {
+  const probe = t.mock.method(globalThis, 'fetch', async () => ({ type: 'opaque' }))
+  const firstPage = createAutoUrlResolver()
+  await firstPage.check([{ url: defaultUrl, lanUrl }])
+  const changedLanUrl = 'http://192.168.1.4:5000/'
+  assert.equal(firstPage.resolve(defaultUrl, changedLanUrl), defaultUrl)
+  await firstPage.check([{ url: defaultUrl, lanUrl: changedLanUrl }])
+  assert.equal(firstPage.resolve(defaultUrl, changedLanUrl), changedLanUrl)
+  const nextPage = createAutoUrlResolver()
+  assert.equal(nextPage.resolve(defaultUrl, lanUrl), defaultUrl)
+  await nextPage.check([{ url: defaultUrl, lanUrl }])
+  assert.equal(nextPage.resolve(defaultUrl, lanUrl), lanUrl)
+  assert.equal(probe.mock.callCount(), 3)
 })

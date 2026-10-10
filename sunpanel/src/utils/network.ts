@@ -35,3 +35,33 @@ export async function resolveAutoUrl(url: string, lanUrl?: string): Promise<stri
     clearTimeout(timer)
   }
 }
+
+// Each home page checks LAN addresses in the background; clicks only read results.
+export function createAutoUrlResolver() {
+  const probes = new Map<string, Promise<void>>()
+  const reachable = new Set<string>()
+  return {
+    check(items: { url: string; lanUrl?: string }[]) {
+      const pending: Promise<void>[] = []
+      for (const item of items) {
+        const lanUrl = item.lanUrl?.trim()
+        if (!lanUrl || lanUrl === item.url)
+          continue
+        let probe = probes.get(lanUrl)
+        if (!probe) {
+          probe = resolveAutoUrl(item.url, lanUrl).then((chosen) => {
+            if (chosen === lanUrl)
+              reachable.add(lanUrl)
+          })
+          probes.set(lanUrl, probe)
+        }
+        pending.push(probe)
+      }
+      return Promise.all(pending)
+    },
+    resolve(url: string, lanUrl?: string) {
+      const lan = lanUrl?.trim()
+      return lan && reachable.has(lan) ? lan : url
+    },
+  }
+}

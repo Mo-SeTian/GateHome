@@ -2,7 +2,7 @@
 
 一个自托管的反向代理与 DDNS 综合管理工具。Go 主程序内嵌中文管理界面与 Sun-Panel 前后端；启用首页时由主程序管理独立的 Sun-Panel 子进程。运行无需 Node.js、外部数据库或额外 Web 服务器，Sun-Panel 使用内置 SQLite。
 
-当前版本为 **0.0.47**，安装包见 [v0.0.47 Release](https://github.com/Mo-SeTian/GateHome/releases/tag/v0.0.47)。程序和 systemd 服务名为 `gatehouse`。
+当前版本为 **0.0.48**，安装包见 [v0.0.48 Release](https://github.com/Mo-SeTian/GateHome/releases/tag/v0.0.48)。程序和 systemd 服务名为 `gatehouse`。
 
 ## 主要功能
 
@@ -131,7 +131,7 @@ sudo bash /tmp/gatehome-install.sh install --proxy "$GATEHOME_INSTALL_PROXY"
 
 下载使用 HTTP/1.1；TLS 连接中断等下载错误会清除残缺文件并重试，最多尝试 4 次。下载和校验成功后才修改安装。如果出现 `curl: (56)` / `unexpected eof while reading`，说明下载连接提前断开；请检查服务器的网络或代理规则。使用 MSM 等分流工具时，安装需要访问 `raw.githubusercontent.com`、`github.com` 和 `release-assets.githubusercontent.com`。仍无法下载时，可在其他能访问 GitHub 的设备下载下面的安装包，复制到服务器离线安装。
 
-离线安装可使用 `make release` 生成的 **`版本/0.0.47/`** 完整目录，或解压 Release 中对应架构的 `gatehome-linux-*.tar.gz`，然后运行：
+离线安装可使用 `make release` 生成的 **`版本/0.0.48/`** 完整目录，或解压 Release 中对应架构的 `gatehome-linux-*.tar.gz`，然后运行：
 
 ```sh
 sudo bash install.sh
@@ -307,9 +307,9 @@ Docker host 网络无需额外映射。bridge 模式可用 `SUNPANEL_PORT=自定
 
 导入需要在同一浏览器、同一主机地址登录 GateHome 管理页；Sun-Panel 自身登录不能替代管理权限。管理端内嵌页面与独立端口均支持该入口，未登录时会提示先登录并刷新列表。接口只提供网站名称、分组及两个网址，不导出账号、密码或 DNS 凭据。
 
-在 Sun-Panel 右下角的网络模式菜单选择 **自动（内网优先）**，点击网站时会由当前浏览器检测该网站的内网地址：1.5 秒内收到 HTTP 响应就使用内网地址，检测失败或超时则打开默认网址。未填写内网地址时直接使用默认网址；当前页面、新窗口和页面内嵌三种打开方式均支持。右键菜单仍可指定打开内网或默认地址，网络模式仅保存在当前浏览器。
+在 Sun-Panel 右下角的网络模式菜单选择 **自动（内网优先）**。首页加载、切换到自动模式或新增网站地址后，当前浏览器会统一在后台检测已配置的内网地址，并缓存本次首页的检测结果：1.5 秒内收到 HTTP 响应就使用内网地址，失败或超时则使用默认网址。同一内网地址只检测一次；重新加载或刷新首页会重新检测。点击网站直接读取结果，不再显示检测提示或等待跳转；检测尚未完成、或未填写内网地址时直接使用默认网址。当前页面、新窗口和页面内嵌三种打开方式均支持；右键菜单仍可指定打开内网或默认地址，网络模式仅保存在当前浏览器。
 
-检测只发送不携带登录凭据的 HEAD 请求，不依赖 GateHome 服务器的网络，也不在后台扫描。HTTP 登录页或错误响应表示服务已连通；它不代表已登录或页面内容正常。浏览器拒绝本地网络权限、不接受内网站点证书或拦截 HTTPS 页面访问 HTTP 地址时，会回退默认网址；可使用手动内网模式直接打开。[Chrome 本地网络访问说明](https://developer.chrome.com/blog/local-network-access)。
+检测仅针对首页中已配置的内网地址，发送不携带登录凭据的 HEAD 请求，由当前浏览器判断连通性。HTTP 登录页或错误响应表示服务已连通；它不代表已登录或页面内容正常。浏览器拒绝本地网络权限、不接受内网站点证书或拦截 HTTPS 页面访问 HTTP 地址时，会回退默认网址；可使用手动内网模式直接打开。[Chrome 本地网络访问说明](https://developer.chrome.com/blog/local-network-access)。
 
 | 用途 | 位置 |
 | --- | --- |
