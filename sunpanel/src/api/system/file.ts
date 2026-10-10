@@ -1,5 +1,11 @@
 import { post } from '@/utils/request'
 
+export function uploadImage(file: File) {
+  const data = new FormData()
+  data.append('imgfile', file)
+  return post<{ imageUrl: string }>({ url: '/file/uploadImg', data })
+}
+
 export function getList<T>() {
   return post<T>({
     url: '/file/getList',

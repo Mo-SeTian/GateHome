@@ -17,6 +17,7 @@ const props = defineProps<Props>()
 const emit = defineEmits<Emit>()
 const ms = useMessage()
 const submitLoading = ref(false)
+const savingLocalIcon = ref(false)
 const getIconLoading = ref([false, false])
 const itemIconGroupOptions = ref<{
   label: string
@@ -186,6 +187,7 @@ async function getIconByUrl(url: string, loadingIndex: number) {
 }
 
 watch(() => props.visible, (newValue) => {
+  savingLocalIcon.value = false
   ++gateHomeRequest
   gateHomeLoading.value = false
   gateHomeLoaded.value = false
@@ -277,7 +279,7 @@ function getGroupListOptions() {
         </NGrid>
 
         <NFormItem path="icon" :label="$t('common.icon')">
-          <IconEditor v-model:item-icon="model.icon" />
+          <IconEditor v-model:item-icon="model.icon" v-model:saving="savingLocalIcon" />
         </NFormItem>
         <NFormItem path="url" :label="$t('iconItem.url')">
           <!-- <NSelect :style="{ width: '100px' }" :options="urlProtocolOptions" /> -->
@@ -306,7 +308,7 @@ function getGroupListOptions() {
     </div>
 
     <template #footer>
-      <NButton type="success" :loading="submitLoading" style="float: right;" @click="handleValidateButtonClick">
+      <NButton type="success" :loading="submitLoading" :disabled="savingLocalIcon" style="float: right;" @click="handleValidateButtonClick">
         {{ $t('common.save') }}
       </NButton>
     </template>

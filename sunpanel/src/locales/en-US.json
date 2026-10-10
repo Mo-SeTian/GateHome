@@ -231,6 +231,10 @@
     "newWindowOpen": "Open in new window",
     "onlineIcon": "Online icon",
     "onlineIconLibrary": "Online icon library",
+    "saveLocalIcon": "Save icon locally",
+    "localIconHint": "The local image works without the online icon service and is included in full-site backups.",
+    "localIconSaved": "Icon uploaded. Save the item to apply it.",
+    "localIconSaveFail": "Could not save the icon. Check its name and your connection, then try again.",
     "openMethod": "Open method",
     "selectUpload": "Local upload",
     "url": "URL"

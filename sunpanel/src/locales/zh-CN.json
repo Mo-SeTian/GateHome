@@ -231,6 +231,10 @@
     "newWindowOpen": "新窗口打开",
     "onlineIcon": "在线图标",
     "onlineIconLibrary": "在线图标库",
+    "saveLocalIcon": "保存为本地图标",
+    "localIconHint": "转为本地图片后不再依赖在线图标服务，可随整站备份恢复。",
+    "localIconSaved": "图标已上传，请保存项目",
+    "localIconSaveFail": "图标保存失败，请检查图标名称和网络后重试",
     "openMethod": "打开方式",
     "selectUpload": "本地上传",
     "url": "地址"

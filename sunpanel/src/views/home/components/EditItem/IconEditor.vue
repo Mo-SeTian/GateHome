@@ -1,9 +1,12 @@
 <script setup lang="ts">
-import { NButton, NColorPicker, NInput, NRadio, NUpload } from 'naive-ui'
+import { NButton, NColorPicker, NInput, NRadio, NUpload, useMessage } from 'naive-ui'
 import type { UploadFileInfo } from 'naive-ui'
-import { computed, defineProps } from 'vue'
+import { computed, defineProps, onUnmounted, ref } from 'vue'
+import { uploadImage } from '@/api/system/file'
 import { ItemIcon } from '@/components/common'
+import { t } from '@/locales'
 import { useAuthStore } from '@/store'
+import { createLocalIconPng } from '@/utils/localIcon'
 import { apiRespErrMsg } from '@/utils/request/apiMessage'
 
 const props = defineProps<{
@@ -11,8 +14,16 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{
   (e: 'update:itemIcon', visible: Panel.ItemIcon): void // 定义修改父组件（prop内）的值的事件
+  (e: 'update:saving', saving: boolean): void
 }>()
 const authStore = useAuthStore()
+const ms = useMessage()
+const savingLocalIcon = ref(false)
+const iconPreview = ref<HTMLElement | null>(null)
+let unmounted = false
+onUnmounted(() => {
+  unmounted = true
+})
 
 // 默认图标背景色
 const defautSwatchesBackground = [
@@ -60,6 +71,35 @@ function handleResetBackgroundColor() {
   handleChange()
 }
 
+async function handleSaveLocalIcon() {
+  if (savingLocalIcon.value || !itemIconInfo.value.text?.trim())
+    return
+  const original = props.itemIcon
+  savingLocalIcon.value = true
+  emit('update:saving', true)
+  try {
+    const preview = iconPreview.value?.querySelector('svg')
+    const color = preview ? getComputedStyle(preview).color : '#ffffff'
+    const file = await createLocalIconPng(itemIconInfo.value.text, color)
+    const { code, data } = await uploadImage(file)
+    if (code !== 0)
+      throw new Error('Icon upload failed')
+    if (!unmounted && props.itemIcon === original) {
+      emit('update:itemIcon', { ...itemIconInfo.value, itemType: 2, src: data.imageUrl })
+      ms.success(t('iconItem.localIconSaved'))
+    }
+  }
+  catch {
+    if (!unmounted)
+      ms.error(t('iconItem.localIconSaveFail'))
+  }
+  finally {
+    savingLocalIcon.value = false
+    if (!unmounted)
+      emit('update:saving', false)
+  }
+}
+
 const handleUploadFinish = ({
   file,
   event,
@@ -86,6 +126,7 @@ const handleUploadFinish = ({
   <div>
     <div class="mb-[10px]">
       <NRadio
+        :disabled="savingLocalIcon"
         :checked="itemIconInfo.itemType === 1 "
         :value="1"
         name="iconType"
@@ -95,6 +136,7 @@ const handleUploadFinish = ({
       </NRadio>
 
       <NRadio
+        :disabled="savingLocalIcon"
         :checked="itemIconInfo.itemType === 2"
         :value="2"
         name="iconType"
@@ -104,6 +146,7 @@ const handleUploadFinish = ({
       </NRadio>
 
       <NRadio
+        :disabled="savingLocalIcon"
         :checked="itemIconInfo.itemType === 3"
         :value="3"
         name="iconType"
@@ -113,15 +156,15 @@ const handleUploadFinish = ({
       </NRadio>
     </div>
 
-    <div class=" h-[100px]">
+    <div class="min-h-[100px]">
       <div class="flex">
         <div>
-          <div class="border rounded-2xl bg-slate-200 overflow-hidden rounded-2xl transparent-grid">
+          <div ref="iconPreview" class="border rounded-2xl bg-slate-200 overflow-hidden rounded-2xl transparent-grid">
             <ItemIcon :item-icon="itemIconInfo" />
           </div>
         </div>
         <!-- 文字 -->
-        <div class="ml-[20px]">
+        <div class="ml-[20px] min-w-0 flex-1">
           <!-- <NImage :src="model.icon" preview-disabled /> -->
           <div v-if="itemIconInfo.itemType === 1">
             <NInput v-model:value="itemIconInfo.text" class="mb-[5px]" size="small" type="text" @input="handleChange" />
@@ -129,11 +172,18 @@ const handleUploadFinish = ({
 
           <div v-if="itemIconInfo.itemType === 3">
             <div>
-              <NInput v-model:value="itemIconInfo.text" class="mb-[5px]" size="small" type="text" :placeholder="$t('iconItem.inputIconName')" @input="handleChange" />
-
-              <NButton quaternary type="info">
-                <a target="_blank" href="https://icon-sets.iconify.design/">{{ $t('iconItem.onlineIconLibrary') }}</a>
-              </NButton>
+              <NInput v-model:value="itemIconInfo.text" :disabled="savingLocalIcon" class="mb-[5px]" size="small" type="text" :placeholder="$t('iconItem.inputIconName')" @input="handleChange" />
+              <div class="flex flex-wrap gap-2">
+                <NButton size="small" type="primary" secondary :loading="savingLocalIcon" :disabled="savingLocalIcon || !itemIconInfo.text?.trim()" @click="handleSaveLocalIcon">
+                  {{ $t('iconItem.saveLocalIcon') }}
+                </NButton>
+                <NButton tag="a" href="https://icon-sets.iconify.design/" target="_blank" rel="noopener" size="small" quaternary type="info">
+                  {{ $t('iconItem.onlineIconLibrary') }}
+                </NButton>
+              </div>
+              <div class="mt-2 text-xs opacity-70">
+                {{ $t('iconItem.localIconHint') }}
+              </div>
             </div>
           </div>
 
@@ -164,6 +214,7 @@ const handleUploadFinish = ({
         <div class="w-[150px] flex items-center mr-[10px]">
           <NColorPicker
             v-model:value="itemIconInfo.backgroundColor"
+            :disabled="savingLocalIcon"
             size="small"
             :modes="['hex']"
             :swatches="defautSwatchesBackground"
@@ -172,7 +223,7 @@ const handleUploadFinish = ({
           />
         </div>
         <div v-if="itemIconInfo.backgroundColor !== initData.backgroundColor" class="w-auto text-slate-500 mr-[10px] cursor-pointer">
-          <NButton quaternary type="info" @click="handleResetBackgroundColor">
+          <NButton :disabled="savingLocalIcon" quaternary type="info" @click="handleResetBackgroundColor">
             {{ $t('common.reset') }}
           </NButton>
         </div>

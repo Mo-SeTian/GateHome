@@ -16,6 +16,7 @@
     "build-only": "vite build",
     "type-check": "vue-tsc --noEmit",
     "test:network": "node --test tests/network.test.mjs",
+    "test:icon": "node --test tests/local-icon.test.mjs",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "bootstrap": "pnpm install && pnpm run common:prepare",
