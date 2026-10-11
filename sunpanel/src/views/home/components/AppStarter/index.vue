@@ -17,6 +17,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'update:visible', visible: boolean): void
+  (e: 'iconUpdated', item: Panel.ItemInfo): void
 }>()
 
 const componentName = ref('UserInfo')
@@ -42,6 +43,11 @@ const apps = ref<App[]>([
     name: t('apps.itemGroupManage.appName'),
     componentName: 'ItemGroupManage',
     icon: 'material-symbols-ad-group-outline-rounded',
+  },
+  {
+    name: t('apps.iconManage.appName'),
+    componentName: 'IconManage',
+    icon: 'lucide:wallpaper',
   },
   {
     name: t('apps.uploadsFileManager.appName'),
@@ -151,8 +157,13 @@ onUnmounted(() => {
                   <div
                     v-for=" (item, index) in apps"
                     :key="index"
+                    role="button"
+                    tabindex="0"
+                    :aria-pressed="componentName === item.componentName"
                     :style="{ color: componentName === item.componentName ? 'var(--n-color-target)' : '' }"
                     @click="handleClickApp(item)"
+                    @keydown.enter="handleClickApp(item)"
+                    @keydown.space.prevent="handleClickApp(item)"
                   >
                     <div
                       class="bg-white dark:bg-zinc-800 p-[10px] rounded-lg mb-[5px] font-bold cursor-pointer flex items-center hover:bg-slate-50 focus:bg-slate-50"
@@ -174,7 +185,7 @@ onUnmounted(() => {
             </NLayoutSider>
             <NLayoutContent :content-style="{ height }">
               <div class="rounded-2xl h-full overflow-auto transition-all duration-500 min-w-[300px] h-full" :class="(isSmallScreen && !collapsed) ? 'opacity-0' : 'opacity-100'">
-                <AppLoader :component-name="componentName" class="h-full" />
+                <AppLoader :component-name="componentName" class="h-full" @icon-updated="emit('iconUpdated', $event)" />
               </div>
             </NLayoutContent>
           </NLayout>

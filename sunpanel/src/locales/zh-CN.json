@@ -98,6 +98,30 @@
       "transmuteStandard": "浏览器书签转换工具",
       "warnConfigFileLow": "配置文件版本过低，但是兼容"
     },
+    "iconManage": {
+      "appName": "图标管理",
+      "allGroups": "全部分组",
+      "count": "{count} / {total} 项",
+      "editLabel": "编辑 {title} 的图标",
+      "editTitle": "编辑图标 · {title}",
+      "empty": "当前账号还没有网站项目",
+      "help": "管理当前账号所有网站的图标。仅修改图标，不改变名称、网址或分组；保存后桌面立即生效。",
+      "helpLabel": "查看图标管理说明",
+      "kinds": {
+        "local": "本地图片",
+        "online": "在线图标",
+        "remote": "远程图片",
+        "text": "文字",
+        "unset": "未设置"
+      },
+      "loadFailed": "图标列表读取失败，请重试",
+      "noGroup": "未分组",
+      "noMatch": "没有匹配的网站项目",
+      "preview": "{title} 的图标预览",
+      "refresh": "刷新",
+      "saveFailed": "图标保存失败，请重试",
+      "search": "搜索网站名称或网址"
+    },
     "itemGroupManage": {
       "appName": "分组管理",
       "deleteWarnText": "你确定删除此分组[{name}]，删除后此分组应用图标将丢失？",

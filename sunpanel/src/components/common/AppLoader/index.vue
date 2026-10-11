@@ -5,6 +5,7 @@ import { NSpin } from 'naive-ui'
 const props = defineProps<{
   componentName: string | null
 }>()
+const emit = defineEmits<{ (e: 'iconUpdated', item: Panel.ItemInfo): void }>()
 const loading = shallowRef(false)
 const dynamicComponent = shallowRef('')
 
@@ -34,7 +35,7 @@ onMounted(() => {
 <template>
   <div class="h-full">
     <NSpin :show="loading" style="height: 100%;" content-style="height: 100%;" :delay="500" description="loading...">
-      <component :is="dynamicComponent" v-if="dynamicComponent" />
+      <component :is="dynamicComponent" v-if="dynamicComponent" @icon-updated="emit('iconUpdated', $event)" />
       <!-- <component :is="getComponent(componentName || '')" v-if="dynamicComponent" /> -->
       <div
         v-else-if="!dynamicComponent"

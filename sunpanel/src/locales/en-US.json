@@ -98,6 +98,30 @@
       "transmuteStandard": "Transmute Standard",
       "warnConfigFileLow": "The configuration file version is too low but compatible"
     },
+    "iconManage": {
+      "appName": "Icon management",
+      "allGroups": "All groups",
+      "count": "{count} / {total} items",
+      "editLabel": "Edit icon for {title}",
+      "editTitle": "Edit icon · {title}",
+      "empty": "This account has no website items yet",
+      "help": "Manage icons for all websites in your account. Only the icon changes; names, URLs and groups stay intact. Saved icons appear on the desktop immediately.",
+      "helpLabel": "About icon management",
+      "kinds": {
+        "local": "Local image",
+        "online": "Online icon",
+        "remote": "Remote image",
+        "text": "Text",
+        "unset": "Not set"
+      },
+      "loadFailed": "Could not load icons. Please retry.",
+      "noGroup": "Ungrouped",
+      "noMatch": "No matching websites",
+      "preview": "Icon preview for {title}",
+      "refresh": "Refresh",
+      "saveFailed": "Could not save the icon. Please retry.",
+      "search": "Search website names or URLs"
+    },
     "itemGroupManage": {
       "appName": "Group Management",
       "deleteWarnText": "Are you sure you want to delete this group [{name}]? The application icons in this group will be lost after deletion.",

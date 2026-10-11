@@ -108,6 +108,16 @@ function handleItemClick(itemGroupIndex: number, item: Panel.ItemInfo) {
   openItem(item)
 }
 
+function updateManagedIcon(updated: Panel.ItemInfo) {
+  for (const group of items.value) {
+    const item = group.items?.find(item => item.id === updated.id)
+    if (item) {
+      item.icon = updated.icon
+      item.updateTime = updated.updateTime
+    }
+  }
+}
+
 function handWindowIframeIdLoad(payload: Event) {
   windowIframeIsLoad.value = false
 }
@@ -580,7 +590,7 @@ function handleAddItem(itemIconGroupId?: number) {
         </div>
       </NModal>
       <GateHomeImport v-model:visible="gateHomeShow" :groups="items" @done="getList" />
-      <AppStarter v-model:visible="settingModalShow" />
+      <AppStarter v-model:visible="settingModalShow" @icon-updated="updateManagedIcon" />
       <!-- <Setting v-model:visible="settingModalShow" /> -->
     </div>
 

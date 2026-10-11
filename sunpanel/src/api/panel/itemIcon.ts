@@ -1,5 +1,13 @@
 import { post } from '@/utils/request'
 
+export function getIconList() {
+  return post<Common.ListResponse<Panel.ItemInfo[]>>({ url: '/panel/itemIcon/getIconList' })
+}
+
+export function editIcon(item: Panel.ItemInfo, icon: Panel.ItemIcon | null) {
+  return post<Panel.ItemInfo>({ url: '/panel/itemIcon/editIcon', data: { id: item.id, updateTime: item.updateTime, icon } })
+}
+
 export function addMultiple<T>(req: Panel.ItemInfo[]) {
   return post<T>({
     url: '/panel/itemIcon/addMultiple',

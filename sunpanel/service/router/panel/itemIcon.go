@@ -11,6 +11,8 @@ func InitItemIcon(router *gin.RouterGroup) {
 	itemIcon := api_v1.ApiGroupApp.ApiPanel.ItemIcon
 	r := router.Group("", middleware.LoginInterceptor)
 	{
+		r.POST("/panel/itemIcon/getIconList", itemIcon.GetIconList)
+		r.POST("/panel/itemIcon/editIcon", itemIcon.EditIcon)
 		r.POST("/panel/itemIcon/gateHome/import", itemIcon.GateHomeImport)
 		r.POST("/panel/itemIcon/gateHome/sync", itemIcon.GateHomeSync)
 		r.POST("/panel/itemIcon/portable/export", itemIcon.PortableExport)
