@@ -53,11 +53,6 @@ const gateHomeShow = ref(false)
 const items = ref<ItemGroup[]>([])
 const filterItems = ref<ItemGroup[]>([])
 const networkDetailsShow = ref(false)
-const healthSelectedId = ref<number | null>(null)
-function openHealthDetails(item: Panel.ItemInfo) {
-  healthSelectedId.value = item.id || null
-  networkDetailsShow.value = true
-}
 const autoUrlRevision = ref(0)
 const siteHealth = ref<Record<number, SiteHealth>>({})
 const healthPending = new Map<number, string>()
@@ -134,7 +129,7 @@ const networkDetails = computed(() => {
     const result = autoUrls.inspect(item.url, item.lanUrl)
     const chosen = panelState.networkMode === PanelStateNetworkModeEnum.lan ? item.lanUrl || item.url : panelState.networkMode === PanelStateNetworkModeEnum.auto ? autoUrls.resolve(item.url, item.lanUrl) : item.url
     return { item, chosen, status: labels[result.state], checkedAt: result.checkedAt, serverHealth: displayedHealth(item), lanHealth: item.id ? siteHealth.value[item.id]?.lan : undefined }
-  }).filter(row => healthSelectedId.value === null || row.item.id === healthSelectedId.value)
+  })
 })
 let stopAutoUrlRefresh: (() => void) | undefined
 const networkModeOptions = computed(() => [
@@ -293,7 +288,6 @@ function handleEditSuccess(item: Panel.ItemInfo) {
 
 function handleChangeNetwork(mode: string | number) {
   if (mode === 'details') {
-    healthSelectedId.value = null
     networkDetailsShow.value = true
     return
   }
@@ -544,8 +538,6 @@ function handleAddItem(itemIconGroupId?: number) {
                     <AppIcon
                       :class="itemGroup.sortStatus ? 'cursor-move' : 'cursor-pointer'"
                       :item-info="item"
-                      :health="displayedHealth(item)"
-                      @health-details="openHealthDetails(item)"
                       :icon-text-color="panelState.panelConfig.iconTextColor"
                       :icon-text-info-hide-description="panelState.panelConfig.iconTextInfoHideDescription || false"
                       :icon-text-icon-hide-title="panelState.panelConfig.iconTextIconHideTitle || false"
@@ -583,8 +575,6 @@ function handleAddItem(itemIconGroupId?: number) {
                     <AppIcon
                       :class="itemGroup.sortStatus ? 'cursor-move' : 'cursor-pointer'"
                       :item-info="item"
-                      :health="displayedHealth(item)"
-                      @health-details="openHealthDetails(item)"
                       :icon-text-color="panelState.panelConfig.iconTextColor"
                       :icon-text-info-hide-description="!panelState.panelConfig.iconTextInfoHideDescription"
                       :icon-text-icon-hide-title="panelState.panelConfig.iconTextIconHideTitle || false"
