@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -102,6 +103,50 @@ func TestMCPProtocolPermissionsAndRevocation(t *testing.T) {
 	}
 	if _, err := client.ListTools(ctx, nil); err == nil {
 		t.Fatal("revoked client remained authenticated")
+	}
+}
+
+func TestMCPManagementGuide(t *testing.T) {
+	a, h := testAdmin(t)
+	token, err := a.store.saveMCP(MCPConfig{Enabled: true, Read: true}, false, a.store.Snapshot().Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, client := mcpTestClient(t, h, token)
+	if client.InitializeResult().Instructions != mcpManagementGuide {
+		t.Fatal("MCP initialization omitted the editing guide")
+	}
+	prompts, err := client.ListPrompts(ctx, nil)
+	if err != nil || len(prompts.Prompts) != 1 || prompts.Prompts[0].Name != "gatehome_management_guide" {
+		t.Fatal("management prompt discovery failed")
+	}
+	prompt, err := client.GetPrompt(ctx, &mcp.GetPromptParams{Name: "gatehome_management_guide"})
+	if err != nil || len(prompt.Messages) != 1 || prompt.Messages[0].Role != "user" {
+		t.Fatal("management prompt retrieval failed")
+	}
+	text, ok := prompt.Messages[0].Content.(*mcp.TextContent)
+	if !ok || text.Text != mcpManagementGuide || strings.Contains(text.Text, token) {
+		t.Fatal("management prompt differs or disclosed a token")
+	}
+	tools, err := client.ListTools(ctx, nil)
+	if err != nil {
+		t.Fatal("tool discovery failed")
+	}
+	available := map[string]bool{}
+	for _, tool := range tools.Tools {
+		available[tool.Name] = true
+	}
+	for _, name := range regexp.MustCompile(`\b(?:gatehome|sunpanel)_[a-z_]+\b`).FindAllString(mcpManagementGuide, -1) {
+		if !available[name] {
+			t.Fatalf("management guide references an unavailable tool: %s", name)
+		}
+	}
+	w := adminRequest(h, "GET", "/api/mcp", nil, loginForTest(t, h), "")
+	var settings struct {
+		Guide string `json:"guide"`
+	}
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &settings) != nil || settings.Guide != text.Text {
+		t.Fatal("web guide differs from the MCP prompt")
 	}
 }
 

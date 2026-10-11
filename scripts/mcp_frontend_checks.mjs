@@ -80,6 +80,13 @@ assert.equal(JSON.parse(copied.at(-1)).mcpServers.gatehome.headers.Authorization
 context.copyButton.dataset.action='mcp-copy-endpoint';
 await vm.runInContext('mcpSettingsAction(copyButton)',context);
 assert.equal(copied.at(-1),'http://127.0.0.1:16666/mcp');
+context.guideDoc=readFileSync(new URL('../internal/gateway/web/mcp-guide.txt',import.meta.url),'utf8');
+vm.runInContext('mcpSettings.data.guide=guideDoc',context);
+context.copyButton.dataset.action='mcp-copy-prompt';
+await vm.runInContext('mcpSettingsAction(copyButton)',context);
+assert.equal(copied.at(-1),context.guideDoc);
+assert.ok(!copied.at(-1).includes('TEST_ONLY_NEW_TOKEN'),'a copied management prompt must not include the active token');
+assert.ok(vm.runInContext('mcpSettingsHTML()',context).includes('&lt;REDACTED&gt;'),'the prompt must render as escaped text');
 
 const olderWrite=vm.runInContext('saveMCPSettings(null,true)',context);
 const olderResult=pending.shift();

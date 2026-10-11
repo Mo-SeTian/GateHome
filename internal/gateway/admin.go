@@ -268,7 +268,7 @@ func (a *Admin) Handler() http.Handler {
 	sub, _ := fs.Sub(webFiles, "web")
 	files := http.FileServer(http.FS(sub))
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/" && r.URL.Path != "/app.js" && r.URL.Path != "/style.css" && r.URL.Path != "/icons.svg" && r.URL.Path != "/sunpanel-admin.js" && r.URL.Path != "/mcp-admin.js" && r.URL.Path != "/mcp-sdk-license.txt" && r.URL.Path != "/dashboard.js" && r.URL.Path != "/china-outline.svg" {
+		if r.URL.Path != "/" && r.URL.Path != "/app.js" && r.URL.Path != "/style.css" && r.URL.Path != "/icons.svg" && r.URL.Path != "/sunpanel-admin.js" && r.URL.Path != "/mcp-admin.js" && r.URL.Path != "/mcp-sdk-license.txt" && r.URL.Path != "/context-help.js" && r.URL.Path != "/dashboard.js" && r.URL.Path != "/china-outline.svg" {
 			http.NotFound(w, r)
 			return
 		}
@@ -301,7 +301,11 @@ func (a *Admin) Handler() http.Handler {
 					apiError(w, 403, "请求来源未获允许")
 					return
 				}
-				a.sunPanel.Handler().ServeHTTP(w, r)
+				if r.Method == "POST" && r.URL.Path == "/sunpanel/api/file/importImg" {
+					a.sunPanelImageImport(w, r)
+				} else {
+					a.sunPanel.Handler().ServeHTTP(w, r)
+				}
 			})(w, r)
 			return
 		}

@@ -137,6 +137,10 @@ func imageURL(raw string) (*url.URL, error) {
 }
 
 func downloadRouteImage(ctx context.Context, raw string) ([]byte, error) {
+	return downloadRouteImageWithProxy(ctx, raw, State{})
+}
+
+func downloadRouteImageWithProxy(ctx context.Context, raw string, state State) ([]byte, error) {
 	u, err := imageURL(raw)
 	if err != nil {
 		return nil, err
@@ -165,6 +169,29 @@ func downloadRouteImage(ctx context.Context, raw string) ([]byte, error) {
 			}
 			return nil, errors.New("图片地址无法连接")
 		}}
+	if state.Config.OutboundProxy.Enabled {
+		proxyClient := outboundClient(state, 8*time.Second)
+		defer closeClient(proxyClient)
+		proxy := proxyClient.Transport.(*http.Transport).Proxy
+		transport.Proxy = func(req *http.Request) (*url.URL, error) {
+			addresses, err := net.DefaultResolver.LookupNetIP(req.Context(), "ip", req.URL.Hostname())
+			if err != nil {
+				return nil, errors.New("图片地址解析失败")
+			}
+			local := false
+			for _, ip := range addresses {
+				ip = ip.Unmap()
+				if !ip.IsGlobalUnicast() && !ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip == netip.MustParseAddr("100.100.100.200") {
+					return nil, errors.New("不允许此图片地址")
+				}
+				local = local || ip.IsPrivate() || ip.IsLoopback()
+			}
+			if local {
+				return nil, nil
+			}
+			return proxy(req)
+		}
+	}
 	defer transport.CloseIdleConnections()
 	client := &http.Client{Transport: transport, Timeout: 8 * time.Second, CheckRedirect: func(r *http.Request, via []*http.Request) error {
 		if len(via) >= 3 {
@@ -178,6 +205,7 @@ func downloadRouteImage(ctx context.Context, raw string) ([]byte, error) {
 		return nil, errors.New("图片 URL 无效")
 	}
 	req.Header.Set("User-Agent", "Gatehouse-ImageImport/1.0")
+	req.Header.Set("Accept", "image/png,image/jpeg,image/webp,image/gif,image/x-icon,*/*;q=0.1")
 	response, err := client.Do(req)
 	if err != nil {
 		return nil, errors.New("图片下载失败，请检查地址、网络或 HTTPS 证书")

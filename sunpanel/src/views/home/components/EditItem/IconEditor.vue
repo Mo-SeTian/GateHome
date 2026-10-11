@@ -2,11 +2,11 @@
 import { NButton, NColorPicker, NInput, NRadio, NUpload, useMessage } from 'naive-ui'
 import type { UploadFileInfo } from 'naive-ui'
 import { computed, defineProps, onUnmounted, ref } from 'vue'
-import { uploadImage } from '@/api/system/file'
+import { importImage, uploadImage } from '@/api/system/file'
 import { ItemIcon } from '@/components/common'
 import { t } from '@/locales'
 import { useAuthStore } from '@/store'
-import { createLocalIconPng } from '@/utils/localIcon'
+import { createLocalIconPng, isImageURL } from '@/utils/localIcon'
 import { apiRespErrMsg } from '@/utils/request/apiMessage'
 
 const props = defineProps<{
@@ -72,16 +72,23 @@ function handleResetBackgroundColor() {
 }
 
 async function handleSaveLocalIcon() {
-  if (savingLocalIcon.value || !itemIconInfo.value.text?.trim())
+  const source = (itemIconInfo.value.itemType === 2 ? itemIconInfo.value.src : itemIconInfo.value.text)?.trim()
+  if (savingLocalIcon.value || !source)
     return
   const original = props.itemIcon
   savingLocalIcon.value = true
   emit('update:saving', true)
   try {
-    const preview = iconPreview.value?.querySelector('svg')
-    const color = preview ? getComputedStyle(preview).color : '#ffffff'
-    const file = await createLocalIconPng(itemIconInfo.value.text, color)
-    const { code, data } = await uploadImage(file)
+    let result
+    if (isImageURL(source)) {
+      result = await importImage(source)
+    }
+    else {
+      const preview = iconPreview.value?.querySelector('svg')
+      const color = preview ? getComputedStyle(preview).color : '#ffffff'
+      result = await uploadImage(await createLocalIconPng(source, color))
+    }
+    const { code, data } = result
     if (code !== 0)
       return
     if (!unmounted && props.itemIcon === original) {
@@ -89,9 +96,9 @@ async function handleSaveLocalIcon() {
       ms.success(t('iconItem.localIconSaved'))
     }
   }
-  catch {
+  catch (error) {
     if (!unmounted)
-      ms.error(t('iconItem.localIconSaveFail'))
+      ms.error((error instanceof Error ? error.message : (error as { msg?: string })?.msg) || t('iconItem.localIconSaveFail'))
   }
   finally {
     savingLocalIcon.value = false
@@ -189,20 +196,26 @@ const handleUploadFinish = ({
 
           <!-- 图片 -->
           <div v-if="itemIconInfo.itemType === 2">
-            <NInput v-model:value="itemIconInfo.src" class="mb-[5px] w-full" size="small" type="text" :placeholder="$t('iconItem.inputIconUrlOrUpload')" @input="handleChange" />
-            <NUpload
-              action="/sunpanel/api/file/uploadImg"
-              :show-file-list="false"
-              name="imgfile"
-              :headers="{
-                token: authStore.token as string,
-              }"
-              @finish="handleUploadFinish"
-            >
-              <NButton size="small">
-                {{ $t('iconItem.selectUpload') }}
+            <NInput v-model:value="itemIconInfo.src" :disabled="savingLocalIcon" class="mb-[5px] w-full" size="small" type="text" :placeholder="$t('iconItem.inputIconUrlOrUpload')" @input="handleChange" />
+            <div class="flex flex-wrap gap-2">
+              <NButton size="small" type="primary" secondary :loading="savingLocalIcon" :disabled="savingLocalIcon || !isImageURL(itemIconInfo.src)" @click="handleSaveLocalIcon">
+                {{ $t('iconItem.saveLocalIcon') }}
               </NButton>
-            </NUpload>
+              <NUpload
+                action="/sunpanel/api/file/uploadImg"
+                :disabled="savingLocalIcon"
+                :show-file-list="false"
+                name="imgfile"
+                :headers="{
+                  token: authStore.token as string,
+                }"
+                @finish="handleUploadFinish"
+              >
+                <NButton size="small" :disabled="savingLocalIcon">
+                  {{ $t('iconItem.selectUpload') }}
+                </NButton>
+              </NUpload>
+            </div>
           </div>
         </div>
       </div>

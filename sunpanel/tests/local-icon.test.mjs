@@ -10,8 +10,15 @@ const iconify = require('@iconify/vue')
 const source = readFileSync(new URL('../src/utils/localIcon.ts', import.meta.url), 'utf8')
 const { outputText } = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ES2022 } })
 const moduleText = outputText.replace('@iconify/vue', pathToFileURL(require.resolve('@iconify/vue')).href)
-const { createLocalIconPng } = await import(`data:text/javascript;base64,${Buffer.from(moduleText).toString('base64')}`)
+const { createLocalIconPng, isImageURL } = await import(`data:text/javascript;base64,${Buffer.from(moduleText).toString('base64')}`)
 iconify.addIcon('test:local-icon', { width: 24, height: 24, body: '<path fill="currentColor" d="M0 0h24v24H0z"/><path fill="#ff0000" d="M0 0h12v12H0z"/>' })
+
+test('image URLs are distinguished from icon library names and local upload paths', () => {
+  for (const value of ['https://images.example.test:39919/icon.png', ' HTTP://192.0.2.1/icon?size=32 '])
+    assert.equal(isImageURL(value), true)
+  for (const value of [undefined, '', 'mdi:home', '/sunpanel/uploads/icon.png', 'javascript:alert(1)'])
+    assert.equal(isImageURL(value), false)
+})
 
 function browserFixture(t, { imageError = false, encodeError = false, width = 128, height = 128 } = {}) {
   const state = { revoked: [], drawn: [], svg: null }

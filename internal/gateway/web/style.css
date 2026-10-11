@@ -235,8 +235,44 @@ label small { font-weight: 400; font-size: 12px; line-height: 1.7; }
 .mcp-client-guide summary::before { content: ''; width: 6px; height: 6px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(-45deg); transition: transform var(--motion-feedback); }
 .mcp-client-guide[open] summary::before { transform: rotate(45deg); }
 .mcp-client-guide textarea { margin: 12px 0; background: var(--background); line-height: 1.7; }
+.mcp-management-prompt { margin-top: 9px; background: var(--background); line-height: 1.8; }
 @media(max-width:1100px) { .mcp-layout { grid-template-columns: minmax(0,1fr); gap: 0; } }
 @media(max-width:680px) { .mcp-steps { grid-template-columns: minmax(0,1fr); gap: 16px; padding: 20px; } .mcp-copy-row { flex-direction: column; } }
+.help-heading { display:flex; align-items:center; gap:6px; min-width:0; }
+.help-heading>h1,.help-heading>h2,.help-heading>h3 { margin-bottom:0; }
+.page-heading .help-heading { margin-bottom:4px; }
+.login-card .help-heading { margin-bottom:20px; }
+.editor-upstream>.field-title { display:inline-block; }
+.field-caption { display:flex; align-items:center; gap:4px; }
+.context-help { display:inline-block; flex-shrink:0; vertical-align:middle; margin-left:4px; font-weight:400; }
+.context-help>summary { display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; padding:0; color:var(--muted); border-radius:5px; list-style:none; }
+.context-help>summary::-webkit-details-marker { display:none; }
+.context-help>summary:hover,.context-help[open]>summary { color:var(--primary); background:var(--primary-soft); }
+.context-help>summary .icon { width:16px; height:16px; }
+.help-popup { position:fixed; z-index:30; width:min(360px,calc(100% - 24px)); max-height:min(420px,70vh); overflow:auto; padding:14px 16px; background:var(--surface); color:var(--text); border:1px solid var(--border); border-radius:8px; box-shadow:0 8px 28px #252c3e24; display:flex; flex-direction:column; gap:10px; font-size:12px; line-height:1.7; text-align:left; }
+.help-popup p,.help-popup small,.help-popup .hint { display:block; margin:0; padding:0; color:var(--text); font-weight:400; font-size:12px; line-height:1.7; background:none; border:0; }
+.help-popup small { white-space:normal; }
+.help-popup a { overflow-wrap:anywhere; }
+@media(max-width:680px) { .context-help>summary { width:44px; height:44px; } }
+.context-help:not([open])>.help-popup { display:none; }
+.help-popup .info-list li { flex-direction:column; gap:2px; padding:8px 0; font-size:12px; }
+.help-popup .info-list b { text-align:left; }
+.settings-columns { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:18px; align-items:start; }
+.settings-column { min-width:0; }
+.settings-section-heading { font-size:13px; font-weight:600; letter-spacing:0; color:var(--muted); margin:0 0 12px; }
+.content[data-page="settings"] .panel { margin-bottom:18px; }
+.content[data-page="settings"] .panel-heading { padding:12px 16px; gap:12px; }
+.content[data-page="settings"] .panel-body { padding:16px; }
+.content[data-page="settings"] .form-grid { gap:14px; }
+.content[data-page="settings"] .toggle-row { padding-bottom:12px; margin-bottom:14px; gap:12px; }
+.content[data-page="settings"] .form-actions { margin-top:14px; padding-top:12px; gap:8px; }
+.content[data-page="settings"] .info-list li { padding:8px 0; }
+.content[data-page="settings"] .check-label { min-height:24px; }
+.content[data-page="settings"] .maintenance-forms { gap:16px; }
+.content[data-page="settings"] .maintenance-forms h3 { margin-bottom:12px; }
+.content[data-page="settings"] .page-heading { margin-bottom:18px; }
+@media(max-width:1100px) { .settings-columns { grid-template-columns:minmax(0,1fr); gap:0; } }
+@media(max-width:680px) { .content[data-page="settings"] .check-label { min-height:44px; } }
 .record-label { display: flex; align-items: center; justify-content: space-between; margin-top: 24px; margin-bottom: 12px; font-size: 13px; }
 .record-input-row { display: grid; grid-template-columns: 1fr 110px 44px; gap: 10px; margin-top: 12px; }
 .event { padding: 17px 24px; display: flex; gap: 13px; border-bottom: 1px solid #e9ecf2; align-items: flex-start; }

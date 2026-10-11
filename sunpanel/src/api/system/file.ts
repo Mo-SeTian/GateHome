@@ -6,6 +6,10 @@ export function uploadImage(file: File) {
   return post<{ imageUrl: string }>({ url: '/file/uploadImg', data })
 }
 
+export function importImage(url: string) {
+  return post<{ imageUrl: string }>({ url: '/file/importImg', data: { url: url.trim() } })
+}
+
 export function getList<T>() {
   return post<T>({
     url: '/file/getList',

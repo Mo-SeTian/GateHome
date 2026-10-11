@@ -29,6 +29,14 @@ GateHome 内置 MCP 服务端，使用官方 [MCP Go SDK](https://github.com/mod
 
 将占位符替换为在 AI 管理页生成的 API Token。页面中的示例始终使用占位符，不会自动放入真实 Token。此令牌与 GitHub Token、GateHome 管理密码、Sun-Panel 登录密码无关。支持 Bearer 认证，不提供 OAuth 登录、stdio 传输或旧版 HTTP SSE 入口；只支持 OAuth 的客户端不能直接连接。支持标准 MCP 初始化、工具发现与工具调用，HTTP 响应不依赖持久会话。
 
+## 给 AI 的管理提示词
+
+在 **AI 管理 → AI 管理提示词** 点击 **复制 AI 管理提示词**，粘贴给已连接 MCP 的 AI，再说明具体任务，例如“将指定反代的上游地址改为新的内网地址，并保持其余配置”。提示词不包含真实 API Token 或项目配置。
+
+同一份指引也通过 MCP 初始化响应的 `instructions` 自动提供；支持 MCP 提示词的客户端可通过 `prompts/list` 发现 **gatehome_management_guide**，再用 `prompts/get` 读取，无需参数。部分客户端需要手动选择或粘贴提示词。
+
+指引覆盖：先读取真实工具 schema 与最新配置；完整分区保存、保留其他字段与凭据；使用 `revision` / `updatedAt` / `preferencesRevision` 处理并发；反代导入与关联更新；维护预览、具体操作授权，以及保存后的验证。全文见 [AI 管理提示词](../internal/gateway/web/mcp-guide.txt)。提示词是操作参考，实际访问权限仍由服务端授权控制。
+
 ## 权限与工具
 
 三类权限分别生效，授予修改或维护不会自动授予查询。通常保留查询权限，按需要开启另外两项。工具发现会列出全部工具，未授权的调用会被服务端拒绝。

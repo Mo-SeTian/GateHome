@@ -224,7 +224,7 @@
     "getIcon": "获取图标",
     "geticonFail": "图标获取失败",
     "iconGroup": "分组",
-    "inputIconName": "请输入图标名称",
+    "inputIconName": "例如 mdi:home，或完整 HTTP(S) 图片 URL",
     "inputIconUrlOrUpload": "输入图标地址或上传",
     "lanUrl": "内网地址",
     "lanUrlInputPlaceholder": "http(s)://（内网模式，会跳转该地址）",

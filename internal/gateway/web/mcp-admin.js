@@ -29,7 +29,7 @@ function mcpSettingsHTML() {
     <div class="form-actions"><button type="submit" class="primary">${icon('save')}保存授权设置</button></div>
   </form>`,`<span class="badge ${c?.enabled?'':'gray'}">${c?c.enabled?'已启用':'未启用':'读取中'}</span>`);
   const token=panel('API Token','外部 AI 的专用凭据，与管理密码和 GitHub Token 分开。',`<div class="panel-body">
-    <p class="form-note mcp-first-note">${data?.token_configured?'已创建 API Token。完整 Token 只在创建或重新生成后显示一次。':'创建 API Token 后，请开启服务、选择权限并保存。首次启用并保存也会自动创建 Token。'}</p>
+    <p data-visible-note class="form-note mcp-first-note">${data?.token_configured?'已创建 API Token。完整 Token 只在创建或重新生成后显示一次。':'创建 API Token 后，请开启服务、选择权限并保存。首次启用并保存也会自动创建 Token。'}</p>
     ${mcpSettings.token?`<label class="mcp-new-token">新 API Token（请立即保存）<input id="mcp-token" type="password" readonly autocomplete="off" spellcheck="false" value="${esc(mcpSettings.token)}"></label><div class="mcp-inline-actions"><button type="button" class="secondary" data-action="mcp-copy-token">复制 API Token</button><button type="button" class="secondary" data-action="mcp-toggle-token" aria-pressed="false">显示 Token</button></div><p class="form-note">离开此页或刷新浏览器后不再显示。如已丢失，请重新生成。</p>`:''}
     <div class="form-actions"><button type="button" class="${data?.token_configured?'secondary':'primary'}" data-action="mcp-rotate-token" ${!c?'disabled':''}>${icon(data?.token_configured?'refresh':'plus')}${data?.token_configured?'重新生成 API Token':'创建 API Token'}</button></div>
   </div>`,`<span class="badge ${data?.token_configured?'':'gray'}">${data?.token_configured?'已创建':'未创建'}</span>`);
@@ -40,7 +40,8 @@ function mcpSettingsHTML() {
     <details class="mcp-client-guide"><summary>查看客户端配置示例</summary><p class="form-note">将 YOUR_API_TOKEN 替换为刚创建的 Token。不同客户端的配置字段可能不同。</p><label class="sr-only" for="mcp-client-config">MCP 客户端配置示例</label><textarea id="mcp-client-config" class="mono" rows="10" readonly spellcheck="false">${esc(mcpClientConfig())}</textarea><button type="button" class="secondary" data-action="mcp-copy-config">复制配置示例</button></details>
     <p class="form-note">连接地址使用 GateHome 管理端口。远程 AI 需能访问此地址；通过公网接入时，换成可访问的 HTTPS 管理域名，并保留 /mcp。仅支持 OAuth 登录的客户端不能直接接入。</p>
   </div>`);
-  return `<div class="mcp-layout"><div>${authorization}</div><div>${token}${guide}</div></div>`;
+  const prompt=panel('AI 管理提示词','连接 MCP 后，将提示词粘贴给 AI，再说明你希望修改的内容。',`<div class="panel-body"><label for="mcp-management-prompt">编辑与联动参考指引</label><textarea id="mcp-management-prompt" class="mcp-management-prompt" rows="10" readonly spellcheck="false">${esc(data?.guide||'读取设置后可查看和复制提示词…')}</textarea><p class="form-note">涵盖完整分区保存、版本冲突、网站编辑、反代联动与维护验证。支持 MCP 提示词的客户端也可直接选择 <code>gatehome_management_guide</code>；初始化说明会提供同一份指引。</p><div class="form-actions"><button type="button" class="primary" data-action="mcp-copy-prompt" ${!data?.guide?'disabled':''}>复制 AI 管理提示词</button></div></div>`);
+  return `<div class="mcp-layout"><div>${authorization}${prompt}</div><div>${token}${guide}</div></div>`;
 }
 function mcpDefaults(data) {
   const c=data.config;
@@ -119,6 +120,7 @@ async function mcpSettingsAction(button) {
   if(button.dataset.action==='mcp-copy-token') return copyMCPText(mcpSettings.token,$('#mcp-token'));
   if(button.dataset.action==='mcp-copy-endpoint') return copyMCPText(location.origin+'/mcp',$('#mcp-endpoint'));
   if(button.dataset.action==='mcp-copy-config') return copyMCPText(mcpClientConfig(),$('#mcp-client-config'));
+  if(button.dataset.action==='mcp-copy-prompt') return copyMCPText(mcpSettings.data.guide,$('#mcp-management-prompt'));
   if(button.dataset.action==='mcp-rotate-token') {
     if(mcpSettings.data.token_configured&&!confirm('重新生成后，所有使用旧 API Token 的 AI 客户端都会失去访问权限。确认重新生成？')) return;
     button.disabled=true;button.setAttribute('aria-busy','true');

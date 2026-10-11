@@ -5,7 +5,7 @@ import vm from 'node:vm';
 const source=readFileSync(new URL('../internal/gateway/web/app.js',import.meta.url),'utf8');
 const motion=source.slice(source.indexOf('function openDialog('),source.indexOf('function setNavigation('));
 const reducedMotion={matches:false};
-const context=vm.createContext({reducedMotion,getComputedStyle:()=>({opacity:'1',transform:'none'}),document:{activeElement:{}},focusSelector:()=> 'opener'});
+const context=vm.createContext({reducedMotion,getComputedStyle:()=>({opacity:'1',transform:'none'}),document:{activeElement:{}},focusSelector:()=> 'opener',closeContextHelp:()=>{},prepareContextHelp:()=>{}});
 vm.runInContext('let routeImageRequest=0,routeImagePending=false;const dialogMotions=new WeakMap(),dialogOpeners=new WeakMap();'+motion,context);
 
 // Control completion deterministically: a canceled exit must never close a reopened dialog.

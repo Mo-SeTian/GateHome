@@ -1,5 +1,9 @@
 import { buildIcon, loadIcon } from '@iconify/vue'
 
+export function isImageURL(value?: string): boolean {
+  return /^https?:\/\//i.test(value?.trim() || '')
+}
+
 export async function createLocalIconPng(name: string, color: string): Promise<File> {
   const icon = buildIcon(await loadIcon(name.trim()), { height: 128 })
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
