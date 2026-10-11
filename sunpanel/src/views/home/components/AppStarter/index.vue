@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { NLayout, NLayoutContent, NLayoutSider, NSpace } from 'naive-ui'
+import { NButton, NLayout, NLayoutContent, NLayoutSider, NSpace } from 'naive-ui'
 import { useAuthStore } from '@/store'
 import { AppLoader, RoundCardModal, SvgIcon } from '@/components/common'
 import { t } from '@/locales'
@@ -87,6 +87,7 @@ function getScreenWidth() {
 
 function handleResize() {
   screenWidth.value = getScreenWidth()
+  height.value = `${Math.min(500, Math.max(120, window.innerHeight - 112))}px`
   if (screenWidth.value < 640) {
     collapsed.value = true
     isSmallScreen.value = true
@@ -125,10 +126,10 @@ onUnmounted(() => {
       size="small"
     >
       <template #header>
-        <div class="flex items-center select-none" @click="collapsed = !collapsed">
-          <div class="text-3xl cursor-pointer" style="color:var(--n-color-target)">
-            <SvgIcon class=" transition-all duration-500" :icon="collapsed ? 'tabler-layout-sidebar-right-collapse-filled' : 'tabler-layout-sidebar-left-collapse-filled'" />
-          </div>
+        <div class="flex items-center select-none">
+          <NButton quaternary circle :aria-label="collapsed ? '展开应用菜单' : '收起应用菜单'" :aria-expanded="!collapsed" @click="collapsed = !collapsed">
+            <SvgIcon class="text-2xl transition-all duration-500" :icon="collapsed ? 'tabler-layout-sidebar-right-collapse-filled' : 'tabler-layout-sidebar-left-collapse-filled'" />
+          </NButton>
           <div class="ml-1">
             {{ title === '' ? defaultTitle : title }}
           </div>
@@ -183,8 +184,8 @@ onUnmounted(() => {
                 </div>
               </div>
             </NLayoutSider>
-            <NLayoutContent :content-style="{ height }">
-              <div class="rounded-2xl h-full overflow-auto transition-all duration-500 min-w-[300px] h-full" :class="(isSmallScreen && !collapsed) ? 'opacity-0' : 'opacity-100'">
+            <NLayoutContent v-show="!isSmallScreen || collapsed" :content-style="{ height }">
+              <div class="rounded-2xl h-full overflow-auto transition-all duration-500 min-w-0">
                 <AppLoader :component-name="componentName" class="h-full" @icon-updated="emit('iconUpdated', $event)" />
               </div>
             </NLayoutContent>

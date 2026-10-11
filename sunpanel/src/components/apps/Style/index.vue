@@ -76,7 +76,7 @@ function resetPanelConfig() {
 </script>
 
 <template>
-  <div class="bg-slate-200 dark:bg-zinc-900 rounded-[10px] p-[8px] overflow-auto">
+  <div class="style-settings bg-slate-200 dark:bg-zinc-900 rounded-[10px] p-[8px] overflow-auto">
     <NCard style="border-radius:10px" size="small">
       <div class="text-slate-500 mb-[5px] font-bold">
         LOGO
@@ -236,15 +236,15 @@ function resetPanelConfig() {
         {{ $t('apps.baseSettings.contentArea') }}
       </div>
 
-      <NGrid cols="2">
-        <NGridItem span="12 400:12">
+      <NGrid cols="1">
+        <NGridItem>
           <div class="flex items-center mt-[5px]">
             <span class="mr-[10px]">{{ $t('apps.baseSettings.netModeChangeButtonShow') }}</span>
             <NSwitch v-model:value="panelState.panelConfig.netModeChangeButtonShow" />
           </div>
         </NGridItem>
 
-        <NGridItem span="12 400:12">
+        <NGridItem>
           <div class="flex items-center mt-[10px]">
             <span class="mr-[10px]">{{ $t('apps.baseSettings.maxWidth') }}</span>
             <div class="flex">
@@ -255,19 +255,19 @@ function resetPanelConfig() {
             </div>
           </div>
         </NGridItem>
-        <NGridItem span="12 400:12">
+        <NGridItem>
           <div class="flex items-center mt-[10px]">
             <span class="mr-[10px]">{{ $t('apps.baseSettings.leftRightMargin') }}</span>
             <NSlider v-model:value="panelState.panelConfig.marginX" class="max-w-[200px]" :step="1" :max="100" />
           </div>
         </NGridItem>
-        <NGridItem span="12 400:12">
+        <NGridItem>
           <div class="flex items-center mt-[10px]">
             <span class="mr-[10px]">{{ $t('apps.baseSettings.topMargin') }} (%)</span>
             <NSlider v-model:value="panelState.panelConfig.marginTop" class="max-w-[200px]" :step="1" :max="50" />
           </div>
         </NGridItem>
-        <NGridItem span="12 400:6">
+        <NGridItem>
           <div class="flex items-center mt-[10px]">
             <span class="mr-[10px]">{{ $t('apps.baseSettings.bottomMargin') }} (%)</span>
             <NSlider v-model:value="panelState.panelConfig.marginBottom" class="max-w-[200px]" :step="1" :max="50" />
@@ -306,6 +306,12 @@ function resetPanelConfig() {
     </NCard>
   </div>
 </template>
+
+<style scoped>
+@media (max-width: 639px) {
+  .style-settings .flex.items-center { flex-wrap: wrap; row-gap: 8px; }
+}
+</style>
 
 <style scoped>
 .text-shadow{

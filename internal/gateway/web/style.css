@@ -210,7 +210,7 @@ label small { font-weight: 400; font-size: 12px; line-height: 1.7; }
 .switch input:focus-visible+span { outline: 3px solid var(--ring); outline-offset: 3px; }
 .check-label { flex-direction: row; align-items: flex-start; font-size: 12px; line-height: 1.8; gap: 10px; font-weight: 400; min-height: 32px; }
 .check-label input { width: 18px; min-height: 18px; height: 18px; padding: 0; margin: 2px 0 0; flex-shrink: 0; accent-color: var(--primary); }
-.form-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px; padding-top: 22px; border-top: 1px solid var(--border); }
+.form-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; margin-top: 24px; padding-top: 22px; border-top: 1px solid var(--border); }
 .form-note { font-size: 12px; color: var(--muted); margin: 12px 0 0; line-height: 1.8; overflow-wrap: anywhere; }
 .mcp-steps { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 24px; list-style: none; padding: 20px 24px; margin: 0 0 24px; background: var(--primary-soft); border: 1px solid var(--border); border-radius: var(--radius); }
 .mcp-steps li { display: flex; align-items: flex-start; gap: 12px; min-width: 0; }
@@ -521,14 +521,17 @@ body:has(dialog:modal), body.nav-open { overflow: hidden; }
 }
 @media (max-width: 680px) {
   html { scroll-padding-top: 80px; }
-  .topbar { padding-inline: 16px; }
+  .topbar { padding-left: max(16px,env(safe-area-inset-left)); padding-right: max(16px,env(safe-area-inset-right)); gap: 8px; }
+  .topbar-location { flex: 1; min-width: 0; }
+  #breadcrumb { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .topbar>div:last-child { flex-shrink: 0; }
   .topbar>div { gap: 12px; }
   .topbar .topbar-location { gap: 10px; }
   .topbar-divider { display: none; }
   .avatar { width: 30px; height: 30px; border-radius: 9px; }
   .account-button #account-name { display: none; }
   .account-button { gap: 5px; }
-  .content { padding: 24px 16px 16px; }
+  .content { padding: 24px max(16px,env(safe-area-inset-right)) 16px max(16px,env(safe-area-inset-left)); }
   .page-heading { flex-direction: column; gap: 18px; margin-bottom: 24px; }
   .heading-actions { justify-content: flex-start; width: 100%; }
   .page-heading h1 { font-size: 26px; }
@@ -576,9 +579,11 @@ body:has(dialog:modal), body.nav-open { overflow: hidden; }
   dialog, #firewall-dialog { width: calc(100vw - 20px); max-height: calc(100dvh - 24px); border-radius: 10px; }
   dialog form { max-height: calc(100dvh - 24px); }
   .dialog-heading { padding: 20px; }
+  .dialog-heading>div { min-width: 0; overflow-wrap: anywhere; }
   .dialog-body { padding: 20px; }
-  .dialog-actions { gap: 8px; padding: 16px 20px; }
-  .dialog-actions button { flex: 1; }
+  .dialog-actions { flex-wrap: wrap; gap: 8px; padding: 16px 20px max(16px,env(safe-area-inset-bottom)); }
+  .dialog-actions button { flex: 1 1 100px; min-width: 0; white-space: normal; }
+  .form-actions>button { flex: 1 1 auto; max-width: 100%; white-space: normal; }
   #toast { bottom: max(16px,env(safe-area-inset-bottom)); padding: 12px 18px; width: max-content; }
   .subscription-choices { grid-template-columns: 1fr; }
   .firewall-group { padding: 16px; }
@@ -858,5 +863,66 @@ input[aria-invalid="true"] { border-color: var(--danger); }
 .mcp-client-list {display:grid;gap:8px;margin-top:12px}.mcp-client-row{border:1px solid var(--border,#e2e6ee);border-radius:8px;padding:12px;margin-top:8px}.mcp-client-row summary{cursor:pointer;display:flex;justify-content:space-between;gap:12px;align-items:center;min-height:40px}.mcp-client-form{margin-top:12px}.mcp-client-permissions{display:flex;flex-wrap:wrap;gap:12px;margin-top:12px}@media(max-width:680px){.mcp-client-row summary,.mcp-client-permissions label{min-height:44px}}
 
 .service-health-result {display:inline-flex;align-items:center;flex-wrap:wrap;gap:5px;text-align:left;font-size:12px;min-height:40px;padding:0}.service-health-result .mono{font-size:12px;color:var(--muted)}#service-health-notices:empty{display:none}@media(max-width:680px){.service-health-result{min-height:44px}}
+
+/* Compact phone layouts retain the full touch area of interactive controls. */
+@media(max-width:680px) {
+  .content { padding-top:16px; }
+  .page-heading { gap:12px; margin-bottom:16px; }
+  .page-heading h1 { font-size:24px; }
+  .panel, .content[data-page="settings"] .panel { margin-bottom:12px; }
+  .panel-heading, .content[data-page="settings"] .panel-heading { padding:12px 14px; gap:8px 12px; }
+  .panel-body, .content[data-page="settings"] .panel-body { padding:14px; }
+  label { gap:6px; }
+  .form-grid, .content[data-page="settings"] .form-grid { gap:12px; }
+  .form-actions, .content[data-page="settings"] .form-actions { margin-top:14px; padding-top:12px; gap:8px; }
+  .toggle-row { padding-bottom:12px; margin-bottom:12px; }
+  .field-caption, .help-heading { min-height:24px; }
+  .context-help>summary { margin:-10px; }
+  .dialog-heading { padding:14px 16px; }
+  .dialog-body { padding:16px; }
+  .dialog-actions { padding-inline:16px; padding-top:12px; }
+  .maintenance-forms { gap:20px; }
+  .maintenance-forms h3 { margin-bottom:12px; }
+  .info-list li { gap:4px; padding:8px 0; }
+  .group-heading p { margin-top:4px; }
+  .group-panel>.panel-heading { gap:8px 12px; }
+  .table-wrap tr { padding:6px 0; }
+  .table-wrap td, .ddns-records-table td:first-child, .ddns-records-table td:nth-child(2), .ddns-records-table td:nth-child(3) { min-height:28px; padding:6px 12px 6px 92px; }
+  .table-wrap td::before { top:6px; left:12px; width:72px; }
+  .table-wrap td:has(.service-cell) { padding:8px 12px; }
+  .table-wrap td:has(.service-address-link) { padding:6px 12px; }
+  .table-wrap td:has(.service-address-link)::before { position:static; display:block; width:auto; margin-bottom:4px; }
+  .table-wrap td:has(.table-actions) { padding:4px 12px; }
+  .service-address-link { padding:8px 0; }
+  .certificate-task-info { gap:12px; }
+  .certificate-task-info dt { margin-bottom:4px; }
+  .dashboard-meta { margin-bottom:12px; }
+  .dashboard-grid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+  .dashboard-widget.widget-wide, .dashboard-widget[data-widget="server"], .dashboard-widget[data-widget="storage"], .dashboard-widget[data-widget="traffic"], .dashboard-widget[data-widget="transfer"], .dashboard-widget:has(.widget-controls) { grid-column:1 / -1; }
+  .widget-heading { padding:10px 12px; }
+  .widget-body { min-height:0; padding:12px; }
+  .widget-body>.table-wrap { margin:-12px; }
+  .widget-metric { font-size:28px; }
+  .widget-note { margin-top:6px; line-height:1.6; }
+  .widget-pair { margin-top:10px; }
+  .traffic-values { gap:12px; }
+  .traffic-values b { margin-top:6px; }
+  .sunpanel-hero { padding:16px; gap:16px; }
+  .sunpanel-columns .panel { margin-bottom:12px; }
+  .sunpanel-launch { padding:12px 14px; gap:12px; }
+  .sunpanel-launch-row { gap:12px; margin-bottom:12px; }
+  .sunpanel-guide li { padding:10px 0; }
+  .mcp-steps { gap:12px; padding:14px; margin-bottom:12px; }
+  .mcp-permissions { gap:8px; margin-bottom:16px; }
+  .log-filters { gap:12px; padding:14px; }
+  .freeze-row { padding:14px; gap:12px; }
+}
+@media(min-width:360px) and (max-width:680px) {
+  .log-filters label, .log-filters label:has(#log-status) { flex:1 1 calc(50% - 12px); min-width:0; }
+  .log-filters .log-search, .log-filters label:has(#log-rule) { flex-basis:100%; }
+  #webdav-backup-form .form-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  #webdav-backup-form .span-2 { grid-column:1 / -1; }
+  #webdav-backup-form label:has([name="username"]), #webdav-backup-form label:has([name="password"]), #webdav-backup-form label:has([name="backup_password"]), #webdav-backup-form label:has([name="confirm_backup_password"]), #webdav-backup-form label:has([name="schedule_enabled"]) { grid-column:1 / -1; }
+}
 
 .backup-layout {display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px;align-items:start}.backup-layout>div{min-width:0}.backup-layout .maintenance-forms{grid-template-columns:1fr}.remote-backup-name{overflow-wrap:anywhere}.remote-backup-status{border-top:1px solid var(--border)}@media(max-width:1100px){.backup-layout{grid-template-columns:minmax(0,1fr)}}

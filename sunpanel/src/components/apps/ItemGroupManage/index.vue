@@ -148,31 +148,27 @@ onMounted(() => {
       >
         <div v-for="(item, index) in groups" :key="index" class="w-full">
           <NCard size="small" style="border-radius:10px;margin-bottom: 10px;">
-            <div class="flex" :class="sortStatus ? 'cursor-move' : ''">
-              <div class="flex items-center">
+            <div class="flex items-center gap-2" :class="sortStatus ? 'cursor-move' : ''">
+              <div class="flex items-center flex-1 min-w-0">
                 <span class="mr-[10px]">
                   <SvgIcon class="text-[20px]" icon="material-symbols:ad-group-outline-rounded" />
                   <!-- <SvgIcon class="text-[20px]" :icon="item.icon" /> -->
                 </span>
-                <span>
+                <span class="break-words min-w-0">
                   {{ item.title }}
                 </span>
               </div>
-              <div class="ml-auto">
-                <span>
-                  <NButton strong secondary type="success" size="small" @click="handleEditGroup(item)">
-                    <template #icon>
-                      <SvgIcon icon="basil:edit-solid" />
-                    </template>
-                  </NButton>
-                </span>
-                <span class="ml-[10px]">
-                  <NButton strong secondary type="error" size="small" class="ml-[10px]" @click="handleDelete(item)">
-                    <template #icon>
-                      <SvgIcon icon="material-symbols:delete" />
-                    </template>
-                  </NButton>
-                </span>
+              <div class="ml-auto flex shrink-0 gap-2">
+                <NButton strong secondary type="success" size="small" :aria-label="`${$t('common.edit')} ${item.title}`" @click="handleEditGroup(item)">
+                  <template #icon>
+                    <SvgIcon icon="basil:edit-solid" />
+                  </template>
+                </NButton>
+                <NButton strong secondary type="error" size="small" :aria-label="`${$t('common.delete')} ${item.title}`" @click="handleDelete(item)">
+                  <template #icon>
+                    <SvgIcon icon="material-symbols:delete" />
+                  </template>
+                </NButton>
               </div>
             </div>
           </NCard>

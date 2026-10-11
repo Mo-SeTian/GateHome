@@ -141,7 +141,7 @@ function startUpload() {
 
 <template>
   <div>
-    <div class="mb-[10px]">
+    <div class="mb-[10px] flex flex-wrap gap-2">
       <NRadio
         :disabled="disabled"
         :checked="itemIconInfo.itemType === 1 "
@@ -232,7 +232,7 @@ function startUpload() {
         </div>
       </div>
 
-      <div class="flex items-center mt-[10px]">
+      <div class="flex flex-wrap items-center gap-y-2 mt-[10px]">
         <div class="w-auto text-slate-500 mr-[10px]">
           {{ $t('common.backgroundColor') }}
         </div>

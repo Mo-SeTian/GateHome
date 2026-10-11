@@ -174,7 +174,7 @@ onUnmounted(() => {
 
 <template>
   <div class="icon-manager p-3 h-full flex flex-col gap-3">
-    <div class="flex items-center gap-2">
+    <div class="flex flex-wrap items-center gap-2">
       <h2 class="font-bold text-base">
         {{ $t('apps.iconManage.appName') }}
       </h2>
@@ -218,7 +218,7 @@ onUnmounted(() => {
                 {{ item.title }}
               </div>
               <div class="flex flex-wrap items-center gap-2 mt-1">
-                <span class="text-sm">{{ groupTitle(item) }}</span>
+                <span class="text-sm truncate max-w-full" :title="groupTitle(item)">{{ groupTitle(item) }}</span>
                 <NTag size="small" :bordered="false">
                   {{ $t(`apps.iconManage.kinds.${iconKind(item.icon)}`) }}
                 </NTag>
@@ -234,7 +234,7 @@ onUnmounted(() => {
         </NCard>
       </div>
     </div>
-    <NPagination v-if="filtered.length > 24" v-model:page="page" :item-count="filtered.length" :page-size="24" :page-slot="5" />
+    <NPagination v-if="filtered.length > 24" v-model:page="page" class="shrink-0" :item-count="filtered.length" :page-size="24" :page-slot="5" />
     <NModal v-model:show="batchShow" preset="card" title="批量保存本地图标" class="icon-edit-modal" style="width:min(640px, calc(100vw - 24px));border-radius:1rem" :closable="!batchRunning" :mask-closable="!batchRunning" :close-on-esc="!batchRunning">
       <p role="status" aria-live="polite">
         已保存 {{ batchRows.filter(row => row.state === '已保存').length }} / {{ batchRows.length }} 个；仅修改图标。

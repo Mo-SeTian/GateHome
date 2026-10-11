@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { NAvatar, NImage } from 'naive-ui'
-import { computed, ref, withDefaults } from 'vue'
+import { computed, withDefaults } from 'vue'
 import { SvgIconOnline } from '@/components/common'
 import { isImageURL } from '@/utils/localIcon'
 
@@ -12,10 +12,10 @@ interface Prop {
 
 const props = withDefaults(defineProps<Prop>(), { size: 70 })
 const defaultBackground = '#2a2a2a6b'
-const defaultStyle = ref({
+const defaultStyle = computed(() => ({
   width: `${props.size}px`,
   height: `${props.size}px`,
-})
+}))
 const iconExt = computed(() => {
   return props.itemIcon?.src?.split('.').pop()
 })

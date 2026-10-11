@@ -131,6 +131,8 @@ function handleChangeLanuage(value: Language) {
         justify-content: center;
         align-items: center;
         height: 100vh;
+        height: 100dvh;
+        overflow: auto;
         background-color: #f2f6ff;
     }
 
@@ -150,12 +152,19 @@ function handleChangeLanuage(value: Language) {
     }
 
     .login-card {
-        margin: 20px;
-        min-width:400px;
+        margin: auto;
+        width: 400px;
+        max-width: 100%;
+        min-width: 0;
     }
 
   .login-title{
     text-align: center;
     margin: 20px;
+  }
+  @media (max-width: 639px) {
+    .login-container { padding:16px; }
+    .login-card .n-input, .login-card .n-button { min-height:44px; }
+    .login-card .n-input input { font-size:16px; }
   }
   </style>

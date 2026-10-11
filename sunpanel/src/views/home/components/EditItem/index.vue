@@ -232,7 +232,7 @@ function getGroupListOptions() {
 
 <template>
   <NModal v-model:show="show" preset="card" size="small" style="width: 600px;border-radius: 1rem;" :title="itemInfo ? t('iconItem.edit') : t('iconItem.add')">
-    <div class="h-[600px] overflow-auto p-[5px]">
+    <div class="p-[5px]">
       <NCollapse class="mb-5" @update:expanded-names="expandGateHome">
         <NCollapseItem title="从 GateHome 导入" name="gatehome">
           <NSpace vertical :size="12">
@@ -311,9 +311,11 @@ function getGroupListOptions() {
     </div>
 
     <template #footer>
-      <NButton type="success" :loading="submitLoading" :disabled="savingLocalIcon" style="float: right;" @click="handleValidateButtonClick">
-        {{ $t('common.save') }}
-      </NButton>
+      <div class="flex justify-end">
+        <NButton type="success" :loading="submitLoading" :disabled="savingLocalIcon" @click="handleValidateButtonClick">
+          {{ $t('common.save') }}
+        </NButton>
+      </div>
     </template>
   </NModal>
 </template>

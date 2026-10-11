@@ -8,3 +8,41 @@ body {
 	padding-bottom: constant(safe-area-inset-bottom);
 	padding-bottom: env(safe-area-inset-bottom);
 }
+
+.n-card.n-modal {
+	max-width: calc(100vw - 24px);
+	max-height: calc(100vh - 24px);
+	max-height: calc(100dvh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+}
+
+.n-card.n-modal > .n-card__content {
+	min-height: 0;
+	overflow: auto;
+}
+
+.n-card.n-modal > .n-card-header,
+.n-card.n-modal > .n-card__footer,
+.n-card.n-modal > .n-card__action {
+	flex-shrink: 0;
+}
+
+.n-card.n-modal .n-card-header__main {
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+
+@media (max-width: 639px) {
+	.n-card.n-modal .n-button,
+	.n-card.n-modal .n-input,
+	.n-card.n-modal .n-base-selection,
+	.n-card.n-modal .n-base-close {
+		min-height: 44px;
+	}
+	.n-card.n-modal .n-base-close { min-width: 44px; }
+	.n-card.n-modal .n-input input,
+	.n-card.n-modal .n-input textarea { font-size: 16px; }
+	.n-card.n-modal .n-card__footer { display: flow-root; }
+	.n-card.n-modal .n-form-item-feedback-wrapper:empty { min-height: 8px; }
+	.n-card.n-modal .n-pagination { flex-wrap: wrap; row-gap: 8px; }
+	.n-card.n-modal .n-pagination-item { min-width: 44px; min-height: 44px; }
+}
