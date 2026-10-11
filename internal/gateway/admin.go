@@ -45,6 +45,7 @@ type Admin struct {
 	telemetry    telemetryCollector
 	domainDNS    *domainDNS
 	discovery    serviceDiscovery
+	health       serviceHealthCache
 }
 
 func NewAdmin(store *Store, proxy *Proxy, certs *Certificates, jobs *Jobs, adminPort int) *Admin {
@@ -103,6 +104,7 @@ func (a *Admin) Handler() http.Handler {
 	a.statisticsRoutes(mux)
 	a.ipBlockRoutes(mux)
 	a.serviceDiscoveryRoutes(mux)
+	a.serviceHealthRoutes(mux)
 	a.routeImageRoutes(mux)
 	mcpHandler := a.mcpRoutes(mux)
 	mux.HandleFunc("GET /api/logs", a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
@@ -279,7 +281,7 @@ func (a *Admin) Handler() http.Handler {
 			mcpHandler.ServeHTTP(w, r)
 			return
 		}
-		if strings.HasPrefix(r.URL.Path, "/api/") && r.URL.Path != "/api/status" && r.URL.Path != "/api/dashboard" && r.URL.Path != "/api/logs" && r.URL.Path != "/api/statistics" && r.URL.Path != "/api/ddns/records" && r.URL.Path != "/api/maintenance/online-update-status" && !(r.Method == "GET" && (r.URL.Path == "/api/ip-blocks" || strings.HasPrefix(r.URL.Path, "/api/service-discovery/") || strings.HasPrefix(r.URL.Path, "/api/route-images/"))) {
+		if strings.HasPrefix(r.URL.Path, "/api/") && r.URL.Path != "/api/status" && r.URL.Path != "/api/dashboard" && r.URL.Path != "/api/service-health" && r.URL.Path != "/api/logs" && r.URL.Path != "/api/statistics" && r.URL.Path != "/api/ddns/records" && r.URL.Path != "/api/maintenance/online-update-status" && !(r.Method == "GET" && (r.URL.Path == "/api/ip-blocks" || strings.HasPrefix(r.URL.Path, "/api/service-discovery/") || strings.HasPrefix(r.URL.Path, "/api/route-images/"))) {
 			started := time.Now()
 			logged := &loggedResponseWriter{ResponseWriter: w}
 			w = logged
@@ -303,6 +305,8 @@ func (a *Admin) Handler() http.Handler {
 				}
 				if r.Method == "POST" && r.URL.Path == "/sunpanel/api/file/importImg" {
 					a.sunPanelImageImport(w, r)
+				} else if r.Method == "POST" && r.URL.Path == "/sunpanel/api/site/health" {
+					a.sunPanelSiteHealth(w, r)
 				} else {
 					a.sunPanel.Handler().ServeHTTP(w, r)
 				}

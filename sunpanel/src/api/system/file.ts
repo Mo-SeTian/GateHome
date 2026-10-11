@@ -22,3 +22,7 @@ export function deletes<T>(ids: number[]) {
     data: { ids },
   })
 }
+
+export function deletePreview() {
+  return post<{ list: File.Info[]; bytes: number }>({ url: '/file/deletePreview' })
+}

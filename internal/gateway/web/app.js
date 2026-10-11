@@ -1,4 +1,5 @@
 'use strict';
+let serviceHealthData={routes:{},options:{enabled:true,interval:60}},serviceHealthRequest=0,serviceHealthLoading=false;
 const $ = (selector, scope = document) => scope.querySelector(selector);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const clone = value => structuredClone(value);
@@ -127,7 +128,7 @@ function toast(message) {
   clearTimeout(toastTimer); toastTimer = setTimeout(() => { $('#toast').hidden = true; }, 4500);
 }
 function showLogin() { resetMCPSettings(); $('#account-menu').open=false;clearAccountPasswords();adminUsername='';$('#account-name').textContent='管理员';$('#account-avatar').textContent='G';resetDashboard();setNavigation(false,false); $('#login').hidden = false; $('#app').hidden = true; document.querySelectorAll('dialog').forEach(d=>d.close()); config = undefined;backupCapacity=null;backupCapacityError='';backupCapacityRequest++; renderedPage='';clearTimeout(onlineUpdate.timer);onlineUpdate.request++;onlineUpdate.phase='';onlineUpdate.job=null;onlineUpdate.release=null;onlineUpdate.error='';abandonDiscovery();for(const state of Object.values(securityEvents)) {state.request++;state.view=null;state.filters=emptyEventFilters();state.applied=emptyEventFilters();state.loading=false;state.error='';} }
-function applyConfig(data) { config = data.config; revision = data.revision; dnsCredentialsConfigured=data.dns_credentials_configured||{}; certificateCredentialsConfigured=data.certificate_credentials_configured||{};routePasswordsConfigured=data.route_passwords_configured||{}; proxyPasswordConfigured=data.proxy_password_configured; githubTokenConfigured=!!data.github_token_configured; ipRequest++;dnsRecordsRequest++;dnsRecords={};dnsRecordsError=''; if(networkInfo) networkInfo.groups={}; }
+function applyConfig(data) { serviceHealthRequest++; serviceHealthData={routes:{},options:{enabled:true,interval:60}}; config = data.config; revision = data.revision; dnsCredentialsConfigured=data.dns_credentials_configured||{}; certificateCredentialsConfigured=data.certificate_credentials_configured||{};routePasswordsConfigured=data.route_passwords_configured||{}; proxyPasswordConfigured=data.proxy_password_configured; githubTokenConfigured=!!data.github_token_configured; ipRequest++;dnsRecordsRequest++;dnsRecords={};dnsRecordsError=''; if(networkInfo) networkInfo.groups={}; }
 async function save(next, dnsTokens, proxyPassword, certificateTokens, routePasswords, githubToken) {
   const payload = {config:next, revision};
   if (dnsTokens !== undefined) payload.dns_tokens = dnsTokens;
@@ -194,7 +195,7 @@ function routeTable(accessOnly = false, overview = false, groupID = '') {
     const identity=`<div class="service-cell"><span class="service-icon">${icon('server')}${routeImageHTML(r.image)}</span><div><b>${esc(r.name||r.host)}</b><small class="mono">${esc(r.host)}</small>${groupID?'':`<small>${esc(groupName(r.group_id))}</small>`}</div></div>`;
     const status=badge(routeActive(r)?'已启用':r.enabled?'组已停用':'已停用',routeActive(r)?'':'gray');
     const controls=`<div class="table-actions">${edit}${overview?'':objectMenu(r.name||r.host,`<button class="text-button" data-action="toggle-route" data-index="${i}">${r.enabled?'停用':'启用'}</button><button class="text-button danger" data-action="delete-route" data-index="${i}">删除服务</button>`)}</div>`;
-    return `<tr data-route-key="${esc(key)}"><td>${identity}</td>${accessOnly?`<td>${esc(f?.name||'未配置')}</td><td>${f?badge(waiting?'等待订阅，暂拒访问':'规则可用',waiting?'amber':'')+`<small>未命中${actionLabel(f.default_action)}</small>`:'不限制来源 IP'}</td>`:`<td class="service-address">${serviceAddressHTML(r)}</td><td><span class="protocol">${r.tls?'HTTPS':'HTTP'}</span></td><td>${esc(f?.name||'未配置')}</td><td>${r.auth?.enabled?'独立账号':'公开访问'}</td>`}<td>${status}</td><td>${controls}</td></tr>`;
+    return `<tr data-route-key="${esc(key)}"><td>${identity}</td>${accessOnly?`<td>${esc(f?.name||'未配置')}</td><td>${f?badge(waiting?'等待订阅，暂拒访问':'规则可用',waiting?'amber':'')+`<small>未命中${actionLabel(f.default_action)}</small>`:'不限制来源 IP'}</td>`:`<td class="service-address">${serviceAddressHTML(r)}</td><td><span class="protocol">${r.tls?'HTTPS':'HTTP'}</span></td><td>${esc(f?.name||'未配置')}</td><td>${r.auth?.enabled?'独立账号':'公开访问'}</td>`}<td>${status}<div data-service-health="${esc(r.id)}">${serviceHealthBadgeHTML(r.id)}</div></td><td>${controls}</td></tr>`;
   }).join('')}</tbody></table></div>`;
 }
 function firewallsHTML() {
@@ -226,7 +227,7 @@ function groupsHTML() {
     const actions=discoveryButton(g.id)+addRouteButton(g.id)+objectMenu(g.name,`<button class="text-button" data-action="edit-group" data-index="${i}">编辑组</button><button class="text-button" data-action="toggle-group" data-index="${i}">${g.enabled?'停用组':'启用组'}</button><button class="text-button danger" data-action="delete-group" data-index="${i}">删除组</button>`);
     return groupPanel('proxy',g.id,g.name,summary,routeTable(false,false,g.id),actions,groupBadge(g));
   }).join('');
-  return heading('PROXY GROUPS','反向代理','按组管理服务；点击组名展开或收起，编辑配置使用弹窗。',action)+(groups||empty('还没有反代组','先创建一个监听入口。',action))+'<p class="proxy-note">组内按域名分流。监听端口修改后需重启；访问账号和防火墙保存后生效。</p>';
+  return heading('PROXY GROUPS','反向代理','按组管理服务；点击组名展开或收起，编辑配置使用弹窗。',action)+serviceHealthPanelHTML()+(groups||empty('还没有反代组','先创建一个监听入口。',action))+'<p class="proxy-note">组内按域名分流。监听端口修改后需重启；访问账号和防火墙保存后生效。</p>';
 }
 function prepareTables(scope) {
   scope.querySelectorAll('.table-wrap').forEach(el=>{
@@ -765,6 +766,7 @@ function render() {
 async function refreshStatus() {
   try {
     status=await api('status');
+    if(page==='routes'||page==='overview') refreshServiceHealth().catch(()=>{});
     $('#connection-label').textContent='已连接';
     $('.connection').classList.remove('offline');
     $('#restart-banner').hidden=!status.restart_required;
@@ -1094,6 +1096,8 @@ document.addEventListener('submit',event=>{
   if(!config) return;
   if(form.id==='account-form') return submitForm(form,()=>saveAdminAccount(form));
   if(form.id==='dashboard-form') return submitForm(form,saveDashboardSettings);
+  if(form.classList.contains('mcp-client-form')) return submitForm(form,()=>saveMCPClient(form));
+  if(form.id==='service-health-form') return submitForm(form,async()=>{const next=clone(config);next.service_health={enabled:form.elements.enabled.checked,interval:Number(form.elements.interval.value)};await save(next);await refreshServiceHealth();toast('服务健康检查设置已保存');});
   if(form.id==='mcp-form') return submitForm(form,()=>saveMCPSettings(form));
   if(form.dataset.eventFilters) {
     const kind=form.dataset.eventFilters;securityEvents[kind].filters={...emptyEventFilters(),...Object.fromEntries(new FormData(form))};
@@ -1185,6 +1189,8 @@ document.addEventListener('click',async event=>{
   if(action==='edit-admin-account') return openAdminAccount();
   if(action==='edit-dashboard') return toggleDashboardEditing();
   if(action==='configure-dashboard') return openDashboardSettings();
+  if(action==='service-health-details') {openServiceHealthDetails(button.dataset.routeId);return;}
+  if(action==='refresh-service-health') {button.disabled=true;try{await refreshServiceHealth();}catch(e){toast(e.message);}finally{button.disabled=false;}return;}
   if(action==='refresh-mcp'||action.startsWith('mcp-')) return mcpSettingsAction(button);
   if(action==='move-widget') return moveDashboardWidget(button.dataset.widget,Number(button.dataset.direction));
   if(action==='toggle-group-panel') return toggleGroupPanel(button);
@@ -1385,3 +1391,44 @@ setInterval(async()=>{
     document.querySelectorAll('[data-job-summary]').forEach(el=>{ const kind=el.dataset.jobSummary; const job=status.jobs?.[kind]; el.textContent=job?job.message+' · 最近检查：'+date(job.last_run):'尚未运行任务。'; });
   } catch { /* Connection status is visible; never replace a form with a polling error. */ }
 },5000);
+
+
+
+function serviceHealthBadgeHTML(id) {
+ const result=serviceHealthData.routes[id];
+ if(!result) return badge('等待检测','gray');
+ const state=result.healthy?'':result.state==='disabled'?'gray':'red';
+ return `<button type="button" id="service-health-route-${esc(id)}" class="text-button service-health-result ${state}" data-action="service-health-details" data-route-id="${esc(id)}" aria-label="查看服务健康诊断">${badge(result.label,state)}${result.checked_at?`<span class="mono">${Number(result.duration_ms)} ms${result.status?' · HTTP '+Number(result.status):''}</span>`:''}</button>`;
+}
+function serviceHealthPanelHTML() {
+ const options=config.service_health?.interval?config.service_health:{enabled:true,interval:60};
+ return panel('服务健康检查','由服务器检查已启用反代的上游，验证 TLS 证书且不跟随重定向；与浏览器内网连通性检测分别显示。',`<form id="service-health-form" class="panel-body"><div class="form-grid"><label class="check-label"><input type="checkbox" name="enabled" ${options.enabled?'checked':''}>定期检查反代上游</label><label>检查间隔（秒）<input name="interval" type="number" min="30" max="86400" value="${Number(options.interval)}" required></label></div><p class="form-note">连续两次失败记录故障，恢复后记录一次恢复事件。通知显示在本页和项目日志，不重复提醒；网站需要登录时显示“需要验证”。</p><p class="error" role="alert"></p><div class="form-actions"><button class="secondary" type="button" data-action="refresh-service-health">刷新检测结果</button><button class="primary" type="submit">保存检查设置</button></div></form><div class="panel-body" id="service-health-notices" role="status" aria-live="polite"></div>`);
+}
+async function refreshServiceHealth() {
+ if(!config||serviceHealthLoading) return;
+ serviceHealthLoading=true;const request=++serviceHealthRequest;
+ try {
+  const data=await api('service-health');
+  if(request!==serviceHealthRequest||!config) return;
+  const messages=[];
+  if(serviceHealthData.notices) {
+   const previous=serviceHealthData.notices.at(-1)?.time||'';
+   for(const notice of data.notices||[]) {
+    if(notice.time>previous) {const route=config.routes.find(r=>r.id===notice.route_id);messages.push((route?.name||route?.host||'服务')+'：'+notice.message);}
+   }
+  }
+  serviceHealthData=data;
+  document.querySelectorAll('[data-service-health]').forEach(el=>{el.innerHTML=serviceHealthBadgeHTML(el.dataset.serviceHealth);});
+  const notices=$('#service-health-notices');
+  if(notices) notices.innerHTML=(data.notices||[]).slice(-3).reverse().map(n=>{const route=config.routes.find(r=>r.id===n.route_id);return `<p>${esc(route?.name||route?.host||'服务')}：${esc(n.message)} · ${date(n.time)}</p>`;}).join('')||'检测结果会定期更新；故障与恢复记录可在项目日志中查看。';
+  if(messages.length&&page==='routes') toast(messages.join('；'));
+ } finally {serviceHealthLoading=false;}
+}
+
+function openServiceHealthDetails(id) {
+ const route=config.routes.find(r=>r.id===id),result=serviceHealthData.routes[id];
+ if(!route||!result) return;
+ $('#service-health-detail-title').textContent=(route.name||route.host)+' · 健康诊断';
+ $('#service-health-detail').innerHTML=`<ul class="info-list"><li><span>服务器检查状态</span><b>${esc(result.label)}</b></li><li><span>响应时间</span><b>${Number(result.duration_ms)} ms</b></li><li><span>HTTP 状态</span><b>${result.status?Number(result.status):'未收到 HTTP 响应'}</b></li><li><span>最近检测</span><b>${result.checked_at?date(result.checked_at):'尚未检测'}</b></li>${result.tls_expires_at?`<li><span>证书到期</span><b>${date(result.tls_expires_at)}</b></li>`:''}</ul><p class="form-note" data-visible-note>${esc(result.message||'健康检查未启用')}</p><p class="form-note">此结果由服务器直连上游得到；Sun-Panel 自动内网选择仍由当前浏览器判断。</p>`;
+ openDialog($('#service-health-dialog'));
+}

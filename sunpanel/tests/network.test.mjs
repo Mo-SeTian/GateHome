@@ -52,7 +52,7 @@ test('opaque and authentication responses prove LAN reachability', async (t) => 
   assert.equal(options.cache, 'no-store')
   assert.equal(options.credentials, 'omit')
   assert.equal(options.referrerPolicy, 'no-referrer')
-  assert.equal(options.redirect, 'follow')
+  assert.equal(options.redirect, 'manual')
 })
 
 test('network or browser policy failure uses the default URL', async (t) => {
@@ -252,4 +252,22 @@ test('manual network modes never start automatic probes, including browsers with
   t.mock.timers.tick(120_000)
   assert.equal(probe.mock.callCount(), 0)
   stop()
+})
+
+
+test('HTTPS probes never contact an unverified certificate from the browser', async (t) => {
+  const probe=t.mock.method(globalThis,'fetch',async()=>({type:'opaque'}))
+  const secureLAN='https://192.168.2.2/'
+  assert.equal(await resolveAutoUrl(defaultUrl,secureLAN),defaultUrl)
+  assert.equal(await resolveAutoUrl(defaultUrl,secureLAN,async()=>false),defaultUrl)
+  assert.equal(await resolveAutoUrl(defaultUrl,secureLAN,async()=>{throw new Error('TEST_ONLY_TLS_FAILURE')}),defaultUrl)
+  assert.equal(probe.mock.callCount(),0)
+  assert.equal(await resolveAutoUrl(defaultUrl,secureLAN,async()=>true),secureLAN)
+  assert.equal(probe.mock.callCount(),1)
+})
+
+test('HTTP redirects prove reachability without following the untrusted HTTPS target', async (t) => {
+ const probe=t.mock.method(globalThis,'fetch',async()=>({type:'opaqueredirect'}))
+ assert.equal(await resolveAutoUrl(defaultUrl,lanUrl),lanUrl)
+ assert.equal(probe.mock.calls[0].arguments[1].redirect,'manual')
 })

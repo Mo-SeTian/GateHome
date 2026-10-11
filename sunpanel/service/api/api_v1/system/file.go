@@ -1,9 +1,11 @@
 package system
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path"
+	"path/filepath"
 	"strings"
 	"sun-panel/api/api_v1/common/apiData/commonApiStructs"
 	"sun-panel/api/api_v1/common/apiReturn"
@@ -14,7 +16,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/gin-gonic/gin/binding"
 	"gorm.io/gorm"
 )
 
@@ -116,8 +117,17 @@ func (a *FileApi) GetList(c *gin.Context) {
 		return
 	}
 
+	refs, err := assetReferences(global.Db, userInfo.ID)
+	if err != nil {
+		apiReturn.Error(c, "无法检查图片引用，请稍后重试")
+		return
+	}
 	data := []map[string]interface{}{}
 	for _, v := range list {
+		var size int64
+		if info, err := os.Stat(v.Src); err == nil {
+			size = info.Size()
+		}
 		data = append(data, map[string]interface{}{
 			"src":        "/sunpanel" + v.Src[1:],
 			"fileName":   v.FileName,
@@ -125,6 +135,8 @@ func (a *FileApi) GetList(c *gin.Context) {
 			"createTime": v.CreatedAt,
 			"updateTime": v.UpdatedAt,
 			"path":       v.Src,
+			"references": refs[assetKey(v.Src)],
+			"size":       size,
 		})
 	}
 	apiReturn.SuccessListData(c, data, count)
@@ -132,30 +144,67 @@ func (a *FileApi) GetList(c *gin.Context) {
 
 func (a *FileApi) Deletes(c *gin.Context) {
 	req := commonApiStructs.RequestDeleteIds[uint]{}
-	userInfo, _ := base.GetCurrentUserInfo(c)
-	if err := c.ShouldBindBodyWith(&req, binding.JSON); err != nil {
-		apiReturn.ErrorParamFomat(c, err.Error())
+	user, _ := base.GetCurrentUserInfo(c)
+	if c.ShouldBindJSON(&req) != nil || len(req.Ids) == 0 || len(req.Ids) > 100 {
+		apiReturn.Error(c, "请选择 1–100 个文件")
 		return
 	}
-
-	global.Db.Transaction(func(tx *gorm.DB) error {
-		files := []models.File{}
-
-		if err := tx.Order("created_at desc").Find(&files, "user_id=? AND id in ?", userInfo.ID, req.Ids).Error; err != nil {
+	type movedFile struct{ source, staged string }
+	moved := []movedFile{}
+	err := global.Db.Transaction(func(tx *gorm.DB) error {
+		var files []models.File
+		if err := tx.Where("user_id=? AND id in ?", user.ID, req.Ids).Find(&files).Error; err != nil {
 			return err
 		}
-
-		for _, v := range files {
-			os.Remove(v.Src)
+		if len(files) != len(req.Ids) {
+			return errors.New("missing file")
 		}
-
-		if err := tx.Order("created_at desc").Delete(&files, "user_id=? AND id in ?", userInfo.ID, req.Ids).Error; err != nil {
+		// Acquire the SQLite write transaction before checking live references.
+		if err := tx.Delete(&files).Error; err != nil {
 			return err
 		}
-
+		refs, err := assetReferences(tx, user.ID)
+		if err != nil {
+			return err
+		}
+		for _, file := range files {
+			if len(refs[assetKey(file.Src)]) != 0 {
+				return errors.New("referenced file")
+			}
+			source, err := checkedAssetPath(file.Src)
+			if err != nil {
+				return err
+			}
+			if _, err := os.Lstat(source); os.IsNotExist(err) {
+				continue
+			} else if err != nil {
+				return err
+			}
+			stage, err := os.CreateTemp(filepath.Dir(source), ".asset-delete-")
+			if err != nil {
+				return err
+			}
+			stage.Close()
+			if err := os.Rename(source, stage.Name()); err != nil {
+				os.Remove(stage.Name())
+				return err
+			}
+			moved = append(moved, movedFile{source, stage.Name()})
+		}
 		return nil
 	})
-
+	if err != nil {
+		for i := len(moved) - 1; i >= 0; i-- {
+			os.Rename(moved[i].staged, moved[i].source)
+		}
+		apiReturn.Error(c, "删除未完成：图片仍被使用、文件已变化或存储不可写，请刷新后重试")
+		return
+	}
+	for _, file := range moved {
+		if os.Remove(file.staged) != nil {
+			apiReturn.Error(c, "文件引用已移除，但临时文件清理失败，请检查存储目录权限")
+			return
+		}
+	}
 	apiReturn.Success(c)
-
 }

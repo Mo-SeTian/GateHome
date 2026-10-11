@@ -2,9 +2,11 @@
 import { computed } from 'vue'
 import { NEllipsis } from 'naive-ui'
 import { ItemIcon } from '@/components/common'
+import type { HealthResult } from '@/api/panel/serviceHealth'
 import { PanelPanelConfigStyleEnum } from '@/enums'
 
 interface Prop {
+  health?: HealthResult
   itemInfo?: Panel.ItemInfo
   size?: number // 默认70
   forceBackground?: string // 强制背景色
@@ -17,6 +19,8 @@ interface Prop {
 const props = withDefaults(defineProps<Prop>(), {
   size: 70,
 })
+
+const emit = defineEmits<{ (e: 'healthDetails'): void }>()
 
 const defaultBackground = '#2a2a2a6b'
 
@@ -35,7 +39,10 @@ const textColor = computed(() => {
 </script>
 
 <template>
-  <div class="app-icon w-full">
+  <div class="app-icon w-full relative">
+    <button v-if="health" type="button" class="service-health-badge" :class="[{ 'service-health-compact': style === PanelPanelConfigStyleEnum.icon }, health.state === 'auth_required' ? 'service-health-auth' : health.healthy ? 'service-health-ok' : 'service-health-error']" :title="`${health.message} · ${health.duration_ms} ms`" :aria-label="`${itemInfo?.title}：${health.label}，查看诊断`" @click.stop="emit('healthDetails')">
+      <span aria-hidden="true" /><span class="health-status-label">{{ health.label }}</span>
+    </button>
     <!-- 详情图标 -->
     <div
       v-if="style === PanelPanelConfigStyleEnum.info"
@@ -85,3 +92,19 @@ const textColor = computed(() => {
     </div>
   </div>
 </template>
+
+<style scoped>
+.service-health-badge {position:absolute;right:5px;top:5px;z-index:1;display:flex;align-items:center;gap:4px;max-width:calc(100% - 10px);font-size:12px;line-height:18px;padding:1px 5px;border-radius:6px;background:rgba(255,255,255,.94);color:#176a44;cursor:pointer;border:1px solid rgba(24,160,88,.35)}
+.service-health-badge>span:first-child{width:5px;height:5px;border-radius:50%;background:currentColor;flex:none}
+.service-health-auth{color:#946200;border-color:rgba(148,98,0,.35)}
+.service-health-error{color:#b42318;border-color:rgba(180,35,24,.35)}
+.service-health-badge:focus-visible{outline:2px solid currentColor;outline-offset:2px}
+.service-health-compact{width:18px;height:18px;justify-content:center;padding:0;border-radius:50%}
+.service-health-compact .health-status-label{display:none}
+.service-health-compact:before{content:'';position:absolute;inset:-13px;border-radius:50%}
+@media(max-width:639px){
+  .service-health-badge{width:18px;height:18px;justify-content:center;padding:0;border-radius:50%}
+  .service-health-badge .health-status-label{display:none}
+  .service-health-badge:before{content:'';position:absolute;inset:-13px;border-radius:50%}
+}
+</style>

@@ -50,6 +50,7 @@ func (a *Admin) SunPanelHandler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/sunpanel/routes", a.requireAuth(a.sunPanelRoutes))
 	mux.HandleFunc("POST /sunpanel/api/file/importImg", a.sunPanelImageImport)
+	mux.HandleFunc("POST /sunpanel/api/site/health", a.sunPanelSiteHealth)
 	mux.Handle("/", a.sunPanel.Handler())
 	return mux
 }

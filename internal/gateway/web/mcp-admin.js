@@ -16,9 +16,9 @@ function mcpSettingsHTML() {
   const data=mcpSettings.data,c=data?.config,endpoint=location.origin+'/mcp';
   const options=mcpSettings.users.map(user=>`<option value="${Number(user.id)}" ${user.id===c?.sunpanel_user_id?'selected':''}>${esc(user.name||user.username)} (${esc(user.username)})</option>`).join('');
   const missing=c?.sunpanel_user_id&&!mcpSettings.users.some(user=>user.id===c.sunpanel_user_id)?`<option value="${Number(c.sunpanel_user_id)}" selected>已绑定账号 #${Number(c.sunpanel_user_id)} · 刷新确认</option>`:'';
-  const authorization=panel('服务与授权','保存后立即生效，可随时调整 AI 的管理范围。',!c?`<div class="panel-body"><p role="status">${esc(mcpSettings.error||'正在读取 MCP 设置…')}</p><button class="secondary" data-action="refresh-mcp">重新读取</button></div>`:`<form id="mcp-form" class="panel-body">
+  const authorization=panel('服务总开关与兼容 Token 授权','保存后立即生效，可随时调整 AI 的管理范围。',!c?`<div class="panel-body"><p role="status">${esc(mcpSettings.error||'正在读取 MCP 设置…')}</p><button class="secondary" data-action="refresh-mcp">重新读取</button></div>`:`<form id="mcp-form" class="panel-body">
     <div class="toggle-row"><div><b>启用 MCP 服务</b><p>关闭后，API Token 无法调用管理工具。</p></div><label class="switch"><input name="enabled" type="checkbox" ${c.enabled?'checked':''}><span></span><span class="sr-only">启用 MCP 服务</span></label></div>
-    <fieldset class="mcp-permissions"><legend>AI 管理权限</legend>
+    <fieldset class="mcp-permissions"><legend>兼容 Token 权限</legend>
       <label class="check-label"><input name="read" type="checkbox" ${c.read?'checked':''}><span><b>查询</b><small>查看配置、运行状态、日志与首页内容。</small></span></label>
       <label class="check-label"><input name="write" type="checkbox" ${c.write?'checked':''}><span><b>配置修改</b><small>修改反代、网站、分组，执行联动与任务。</small></span></label>
       <label class="check-label"><input name="maintenance" type="checkbox" ${c.maintenance?'checked':''}><span><b>维护操作</b><small>重启服务、更新版本、恢复已检查的备份。</small></span></label>
@@ -28,7 +28,7 @@ function mcpSettingsHTML() {
     <p class="form-note">默认仅勾选查询。AI 无法读取已保存的密码与私钥，也不能修改自己的授权。</p><p class="error" role="alert">${esc(mcpSettings.error)}</p>
     <div class="form-actions"><button type="submit" class="primary">${icon('save')}保存授权设置</button></div>
   </form>`,`<span class="badge ${c?.enabled?'':'gray'}">${c?c.enabled?'已启用':'未启用':'读取中'}</span>`);
-  const token=panel('API Token','外部 AI 的专用凭据，与管理密码和 GitHub Token 分开。',`<div class="panel-body">
+  const token=panel('新 Token 与兼容入口','外部 AI 的专用凭据，与管理密码和 GitHub Token 分开。',`<div class="panel-body">
     <p data-visible-note class="form-note mcp-first-note">${data?.token_configured?'已创建 API Token。完整 Token 只在创建或重新生成后显示一次。':'创建 API Token 后，请开启服务、选择权限并保存。首次启用并保存也会自动创建 Token。'}</p>
     ${mcpSettings.token?`<label class="mcp-new-token">新 API Token（请立即保存）<input id="mcp-token" type="password" readonly autocomplete="off" spellcheck="false" value="${esc(mcpSettings.token)}"></label><div class="mcp-inline-actions"><button type="button" class="secondary" data-action="mcp-copy-token">复制 API Token</button><button type="button" class="secondary" data-action="mcp-toggle-token" aria-pressed="false">显示 Token</button></div><p class="form-note">离开此页或刷新浏览器后不再显示。如已丢失，请重新生成。</p>`:''}
     <div class="form-actions"><button type="button" class="${data?.token_configured?'secondary':'primary'}" data-action="mcp-rotate-token" ${!c?'disabled':''}>${icon(data?.token_configured?'refresh':'plus')}${data?.token_configured?'重新生成 API Token':'创建 API Token'}</button></div>
@@ -41,7 +41,7 @@ function mcpSettingsHTML() {
     <p class="form-note">连接地址使用 GateHome 管理端口。远程 AI 需能访问此地址；通过公网接入时，换成可访问的 HTTPS 管理域名，并保留 /mcp。仅支持 OAuth 登录的客户端不能直接接入。</p>
   </div>`);
   const prompt=panel('AI 管理提示词','连接 MCP 后，将提示词粘贴给 AI，再说明你希望修改的内容。',`<div class="panel-body"><label for="mcp-management-prompt">编辑与联动参考指引</label><textarea id="mcp-management-prompt" class="mcp-management-prompt" rows="10" readonly spellcheck="false">${esc(data?.guide||'读取设置后可查看和复制提示词…')}</textarea><p class="form-note">涵盖完整分区保存、版本冲突、网站编辑、反代联动与维护验证。支持 MCP 提示词的客户端也可直接选择 <code>gatehome_management_guide</code>；初始化说明会提供同一份指引。</p><div class="form-actions"><button type="button" class="primary" data-action="mcp-copy-prompt" ${!data?.guide?'disabled':''}>复制 AI 管理提示词</button></div></div>`);
-  return `<div class="mcp-layout"><div>${authorization}${prompt}</div><div>${token}${guide}</div></div>`;
+  return `<div class="mcp-layout"><div>${authorization}${prompt}</div><div>${token}${mcpClientsHTML()}${guide}</div></div>`;
 }
 function mcpDefaults(data) {
   const c=data.config;
@@ -76,11 +76,13 @@ async function refreshMCPUsers(button) {
   try {
     const users=await api('mcp/sunpanel-users');
     if(request!==mcpSettings.request||!config||page!=='mcp') return;
-    const select=$('#mcp-form').elements.sunpanel_user_id,selected=select.value;
     mcpSettings.users=users;
-    select.innerHTML='<option value="0">不授权 Sun-Panel</option>'+users.map(user=>`<option value="${Number(user.id)}">${esc(user.name||user.username)} (${esc(user.username)})</option>`).join('');
-    select.value=selected;
-    if(!select.value) select.value='0';
+    document.querySelectorAll('#mcp-settings select[name="sunpanel_user_id"]').forEach(select=>{
+      const selected=select.value;
+      select.innerHTML='<option value="0">不授权 Sun-Panel</option>'+users.map(user=>`<option value="${Number(user.id)}">${esc(user.name||user.username)}</option>`).join('');
+      if(selected!=='0'&&!users.some(user=>String(user.id)===selected)) select.insertAdjacentHTML('beforeend',`<option value="${Number(selected)}">账号 #${Number(selected)} · 不可用</option>`);
+      select.value=selected;
+    });
     mcpSettings.error='';$('.error',$('#mcp-form')).textContent='';
   } catch(e) {if(request===mcpSettings.request&&$('#mcp-form')) $('.error',$('#mcp-form')).textContent=e.message;}
   finally {button.disabled=false;}
@@ -112,6 +114,13 @@ async function copyMCPText(value,field) {
   } catch {toast('浏览器未允许复制，请在对应输入框中手动复制');}
 }
 async function mcpSettingsAction(button) {
+  if(button.dataset.action==='mcp-client-rotate'||button.dataset.action==='mcp-client-revoke') {
+    const operation=button.dataset.action==='mcp-client-revoke'?'revoke':'rotate';
+    if(!confirm(operation==='revoke'?'撤销此客户端 Token？其后续请求将立即失效。':'重新生成此客户端 Token？旧 Token 将立即失效。')) return;
+    button.disabled=true;button.setAttribute('aria-busy','true');
+    try {await saveMCPClient(null,operation,button.dataset.clientId);} catch(e) {toast(e.message);} finally {button.disabled=false;button.removeAttribute('aria-busy');}
+    return;
+  }
   if(button.dataset.action==='refresh-mcp') return loadMCPSettings();
   if(button.dataset.action==='mcp-refresh-users') return refreshMCPUsers(button);
   if(button.dataset.action==='mcp-toggle-token') {
@@ -128,4 +137,28 @@ async function mcpSettingsAction(button) {
     catch(e) {toast(e.message);}
     finally {button.disabled=false;button.removeAttribute('aria-busy');}
   }
+}
+
+function mcpClientFields(client={name:'',config:{enabled:true,read:true},expires_at:null}) {
+ const c=client.config;
+ const expires=client.expires_at?new Date(new Date(client.expires_at).getTime()-new Date(client.expires_at).getTimezoneOffset()*60000).toISOString().slice(0,16):'';
+ const users=mcpSettings.users.map(u=>`<option value="${Number(u.id)}" ${Number(u.id)===c.sunpanel_user_id?'selected':''}>${esc(u.name||u.username)}</option>`).join('');
+ const missing=c.sunpanel_user_id&&!mcpSettings.users.some(u=>Number(u.id)===c.sunpanel_user_id)?`<option value="${Number(c.sunpanel_user_id)}" selected>账号 #${Number(c.sunpanel_user_id)} · 刷新确认</option>`:'';
+ return `<div class="form-grid"><label>客户端名称<input name="name" maxlength="40" required value="${esc(client.name)}" autocomplete="off" placeholder="例如：日常查询 AI"></label><label>到期时间（留空长期有效）<input name="expires_at" type="datetime-local" value="${esc(expires)}"></label><label class="span-2">Sun-Panel 账号<select name="sunpanel_user_id"><option value="0">不授权 Sun-Panel</option>${users}${missing}</select></label></div><div class="mcp-client-permissions"><label class="check-label"><input name="enabled" type="checkbox" ${c.enabled?'checked':''}>启用</label>${[['read','查询'],['write','配置修改'],['maintenance','维护操作']].map(([key,label])=>`<label class="check-label"><input name="${key}" type="checkbox" ${c[key]?'checked':''}>${label}</label>`).join('')}</div>`;
+}
+function mcpClientsHTML() {
+ const rows=mcpSettings.data?.clients||[];
+ return panel('客户端 Token','每个 AI 独立设置权限、账号与有效期。总开关关闭时，全部 Token 停止访问。',`<div class="panel-body"><button type="button" class="secondary" data-action="mcp-refresh-users">${icon('refresh')}刷新 Sun-Panel 账号</button><div class="mcp-client-list">${rows.map(c=>{
+  const expired=c.expires_at&&new Date(c.expires_at)<=new Date(),inactive=c.revoked_at||expired||!c.config.enabled;
+  return `<details class="mcp-client-row"><summary><b>${esc(c.name)}</b><span class="badge ${inactive?'gray':''}">${c.revoked_at?'已撤销':expired?'已过期':c.config.enabled?'已启用':'已暂停'}</span></summary>${c.revoked_at?'<p class="form-note">此 Token 已撤销，不能重新启用。</p>':`<form class="mcp-client-form" data-client-id="${esc(c.id)}">${mcpClientFields(c)}<p class="error" role="alert"></p><div class="form-actions"><button class="primary" type="submit">保存</button><button class="secondary" type="button" data-action="mcp-client-rotate" data-client-id="${esc(c.id)}">重新生成</button><button class="text-button danger" type="button" data-action="mcp-client-revoke" data-client-id="${esc(c.id)}">撤销 Token</button></div></form>`}</details>`;
+ }).join('')}</div><details class="mcp-client-row"><summary>创建客户端 Token</summary><form class="mcp-client-form">${mcpClientFields()}<p class="error" role="alert"></p><div class="form-actions"><button class="primary" type="submit">创建 Token</button></div></form></details></div>`);
+}
+async function saveMCPClient(form,operation='save',id='') {
+ const client=operation==='save'?{id:form.dataset.clientId||'',name:form.elements.name.value,config:mcpFormConfig(form),expires_at:form.elements.expires_at.value?new Date(form.elements.expires_at.value).toISOString():null}:mcpSettings.data.clients.find(c=>c.id===id);
+ const request=++mcpSettings.request;
+ const data=await api('mcp/clients','POST',{client,revision:mcpSettings.data.revision,rotate:operation==='rotate',revoke:operation==='revoke'});
+ if(request!==mcpSettings.request||!config||page!=='mcp') return;
+ mcpSettings.token=data.token||'';data.token='';mcpSettings.data=mcpDefaults(data);renderMCPSettings();
+ const fresh=await api('config');
+ if(request===mcpSettings.request&&config&&page==='mcp') {applyConfig(fresh);renderMCPSettings();toast(operation==='revoke'?'此客户端 Token 已撤销':mcpSettings.token?'新客户端 Token 已生成，请立即复制保存':'客户端设置已保存');}
 }

@@ -202,6 +202,7 @@ func run() error {
 			go func() { errorsCh <- server.Serve(listener) }()
 		}
 	}
+	admin.StartServiceHealth(ctx)
 	jobs.Start(ctx)
 	subscriptions.Start(ctx)
 	logs.Start(ctx)

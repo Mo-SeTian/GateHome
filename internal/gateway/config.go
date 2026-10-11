@@ -156,7 +156,8 @@ func (c Config) CertificateRequest(id string) (CertificateRequest, bool) {
 }
 
 type Config struct {
-	SunPanel SunPanelConfig `json:"sunpanel"`
+	ServiceHealth ServiceHealthConfig `json:"service_health"`
+	SunPanel      SunPanelConfig      `json:"sunpanel"`
 	// Read-only compatibility fields for migrating the original on-disk format.
 	HTTPPort      int                 `json:"http_port,omitempty"`
 	HTTPSPort     int                 `json:"https_port,omitempty"`
@@ -176,6 +177,7 @@ type Config struct {
 type State struct {
 	MCP                    MCPConfig                `json:"mcp,omitempty"`
 	MCPTokenHash           string                   `json:"mcp_token_hash,omitempty"`
+	MCPClients             []MCPClient              `json:"mcp_clients,omitempty"`
 	AdminUsername          string                   `json:"admin_username"`
 	Config                 Config                   `json:"config"`
 	PasswordHash           string                   `json:"password_hash"`
@@ -721,6 +723,9 @@ func validDomain(s string) bool {
 func inZone(host, zone string) bool { return host == zone || strings.HasSuffix(host, "."+zone) }
 
 func Validate(c Config) error {
+	if c.ServiceHealth.Interval != 0 && (c.ServiceHealth.Interval < 30 || c.ServiceHealth.Interval > 86400) {
+		return errors.New("健康检查间隔需为 30–86400 秒")
+	}
 	if err := validateSunPanelListener(c.SunPanel, c.Groups); err != nil {
 		return err
 	}

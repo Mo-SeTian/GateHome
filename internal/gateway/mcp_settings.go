@@ -3,11 +3,9 @@ package gateway
 import (
 	"crypto/rand"
 	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/hex"
 	"errors"
 	"net/http"
-	"strings"
 )
 
 type MCPConfig struct {
@@ -21,9 +19,8 @@ type MCPConfig struct {
 type mcpInternalKey struct{}
 
 func validMCPToken(state State, header string) bool {
-	token, ok := strings.CutPrefix(header, "Bearer ")
-	sum := sha256.Sum256([]byte(token))
-	return state.MCP.Enabled && ok && len(token) == 70 && strings.HasPrefix(token, "ghmcp_") && len(state.MCPTokenHash) == 64 && subtle.ConstantTimeCompare([]byte(hex.EncodeToString(sum[:])), []byte(state.MCPTokenHash)) == 1
+	_, ok := mcpClientForToken(state, header)
+	return ok
 }
 
 func (s *Store) saveMCP(config MCPConfig, rotate bool, revision int) (string, error) {
@@ -54,9 +51,10 @@ func (s *Store) saveMCP(config MCPConfig, rotate bool, revision int) (string, er
 }
 
 func (a *Admin) mcpSettingsRoutes(mux *http.ServeMux) {
+	a.mcpClientRoutes(mux)
 	status := func(w http.ResponseWriter, token string) {
 		state := a.store.Snapshot()
-		jsonResponse(w, 200, map[string]any{"config": state.MCP, "token_configured": state.MCPTokenHash != "", "revision": state.Revision, "token": token, "guide": mcpManagementGuide})
+		jsonResponse(w, 200, map[string]any{"config": state.MCP, "token_configured": state.MCPTokenHash != "", "revision": state.Revision, "token": token, "guide": mcpManagementGuide, "clients": publicMCPClients(state)})
 	}
 	mux.HandleFunc("GET /api/mcp", a.requireAuth(func(w http.ResponseWriter, r *http.Request) { status(w, "") }))
 	mux.HandleFunc("GET /api/mcp/sunpanel-users", a.requireAuth(func(w http.ResponseWriter, r *http.Request) {

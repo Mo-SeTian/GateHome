@@ -6,6 +6,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -39,10 +40,14 @@ type mcpID struct {
 
 func (a *Admin) mcpPermission(req *mcp.CallToolRequest, scope mcpScope) error {
 	state := a.store.Snapshot()
-	if req.Extra == nil || !validMCPToken(state, req.Extra.Header.Get("Authorization")) {
+	if req.Extra == nil {
 		return errors.New("MCP 令牌失效或服务已关闭，请重新连接")
 	}
-	allowed := (scope == mcpRead && state.MCP.Read) || (scope == mcpWrite && state.MCP.Write) || (scope == mcpMaintenance && state.MCP.Maintenance)
+	client, valid := mcpClientForToken(state, req.Extra.Header.Get("Authorization"))
+	if !valid {
+		return errors.New("MCP 令牌失效或服务已关闭，请重新连接")
+	}
+	allowed := (scope == mcpRead && client.Config.Read) || (scope == mcpWrite && client.Config.Write) || (scope == mcpMaintenance && client.Config.Maintenance)
 	if !allowed {
 		return errors.New("此 MCP 令牌未获该类操作权限，请在 GateHome 设置中授权")
 	}
@@ -55,11 +60,18 @@ func addMCPTool[In any](a *Admin, server *mcp.Server, name, description string, 
 		err := a.mcpPermission(req, scope)
 		var output any
 		if err == nil {
-			ctx = context.WithValue(ctx, mcpOwnerKey{}, a.store.Snapshot().MCP.SunPanelUserID)
+			client, _ := mcpClientForToken(a.store.Snapshot(), req.Extra.Header.Get("Authorization"))
+			ctx = context.WithValue(ctx, mcpOwnerKey{}, client.Config.SunPanelUserID)
 			output, err = call(ctx, args)
 		}
-		// Audit only the tool name and outcome, never arguments, headers or results.
-		a.logs.Add(LogEntry{Category: "admin", Action: "MCP 工具", Target: name, OK: err == nil, DurationMS: time.Since(started).Milliseconds(), Message: "MCP 工具调用"})
+		// Store the client identity and safe operation identifiers, never credentials.
+		actor := "未授权客户端"
+		if req.Extra != nil {
+			if client, ok := mcpClientForToken(a.store.Snapshot(), req.Extra.Header.Get("Authorization")); ok {
+				actor = client.Name + " [" + client.ID + "]"
+			}
+		}
+		a.logs.Add(LogEntry{Category: "admin", Action: "MCP 工具", Target: name, OK: err == nil, DurationMS: time.Since(started).Milliseconds(), Message: a.mcpSafeText(actor + " · " + mcpOperationSummary(name, args))})
 		if err != nil {
 			return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: a.mcpSafeText(err.Error())}}}, nil, nil
 		}
@@ -158,6 +170,7 @@ func (a *Admin) mcpRoutes(mux *http.ServeMux) http.Handler {
 		return &mcp.GetPromptResult{Messages: []*mcp.PromptMessage{{Role: "user", Content: &mcp.TextContent{Text: mcpManagementGuide}}}}, nil
 	})
 	for _, tool := range []struct{ name, description, path string }{
+		{"gatehome_get_service_health", "读取服务器侧的反代上游健康状态、HTTP 状态、响应时间和 TLS 检测结果；不代表客户端内网连通性。", "/api/service-health"},
 		{"gatehome_get_config", "读取反代组、反代项、DDNS、证书任务、防火墙、订阅、首页与系统配置，以及版本 revision；凭据只返回已配置状态。", "/api/config"},
 		{"gatehome_get_status", "读取运行状态、监听端口、证书状态和任务结果。", "/api/status"},
 		{"gatehome_get_capacity", "读取备份与回滚容量估算及是否超过上限，不停服。", "/api/maintenance/capacity"},
@@ -202,12 +215,12 @@ func (a *Admin) mcpRoutes(mux *http.ServeMux) http.Handler {
 	})
 	type configArgs struct {
 		Revision int    `json:"revision"`
-		Section  string `json:"section" jsonschema:"groups routes ddns acme firewalls subscriptions sunpanel outbound_proxy admin_access log_retention dashboard 之一"`
+		Section  string `json:"section" jsonschema:"groups routes ddns acme firewalls subscriptions sunpanel outbound_proxy admin_access log_retention dashboard service_health 之一"`
 		Value    any    `json:"value" jsonschema:"该配置分区的完整 JSON 值；修改前先读取配置，保留其他字段"`
 	}
 	addMCPTool(a, server, "gatehome_update_config", "替换一个配置分区，保留其他分区和已保存凭据。须先读取配置并提供最新 revision；沿用网页校验和热加载，端口变更需单独重启。不接受密码或令牌字段。", mcpWrite, func(ctx context.Context, args configArgs) (any, error) {
 		switch args.Section {
-		case "groups", "routes", "ddns", "acme", "firewalls", "subscriptions", "sunpanel", "outbound_proxy", "admin_access", "log_retention", "dashboard":
+		case "groups", "routes", "ddns", "acme", "firewalls", "subscriptions", "sunpanel", "outbound_proxy", "admin_access", "log_retention", "dashboard", "service_health":
 		default:
 			return nil, errors.New("不支持的配置分区")
 		}
@@ -475,6 +488,9 @@ func mcpRestoreRedactions(value, previous any) (any, error) {
 func (a *Admin) mcpSafeText(value string) string {
 	state := a.store.Snapshot()
 	secrets := []string{state.CloudflareToken, state.GitHubToken, state.ProxyPassword, state.PasswordHash, state.MCPTokenHash}
+	for _, client := range state.MCPClients {
+		secrets = append(secrets, client.Hash)
+	}
 	for _, credential := range state.DNSCredentials {
 		secrets = append(secrets, credential.Token)
 	}
@@ -498,3 +514,19 @@ func (a *Admin) mcpSafeText(value string) string {
 
 var mcpTextURL = regexp.MustCompile(`https?://[^\s"<>\\]+`)
 var mcpBearer = regexp.MustCompile(`(?i)Bearer [a-z0-9._~+/=-]{8,}`)
+
+// Only schema identifiers are included; website titles, URLs and arguments are excluded.
+func mcpOperationSummary(name string, args any) string {
+	data, _ := json.Marshal(args)
+	var fields map[string]any
+	json.Unmarshal(data, &fields)
+	for _, key := range []string{"section", "operation", "id", "groupId"} {
+		if value, ok := fields[key]; ok {
+			text := fmt.Sprint(value)
+			if len(text) <= 64 && regexp.MustCompile(`^[a-zA-Z0-9_.-]+$`).MatchString(text) {
+				return name + " · " + key + "=" + text
+			}
+		}
+	}
+	return name
+}

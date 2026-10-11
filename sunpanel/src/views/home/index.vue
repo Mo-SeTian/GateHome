@@ -16,6 +16,8 @@ import { VisitMode } from '@/enums/auth'
 import { router } from '@/router'
 import { t } from '@/locales'
 import { createAutoUrlResolver, startAutoUrlRefresh } from '@/utils/network'
+import { getSiteHealth } from '@/api/panel/serviceHealth'
+import type { HealthResult, SiteHealth } from '@/api/panel/serviceHealth'
 
 interface ItemGroup extends Panel.ItemIconGroup {
   sortStatus?: boolean
@@ -51,16 +53,88 @@ const gateHomeShow = ref(false)
 const items = ref<ItemGroup[]>([])
 const filterItems = ref<ItemGroup[]>([])
 const networkDetailsShow = ref(false)
+const healthSelectedId = ref<number | null>(null)
+function openHealthDetails(item: Panel.ItemInfo) {
+  healthSelectedId.value = item.id || null
+  networkDetailsShow.value = true
+}
 const autoUrlRevision = ref(0)
-const autoUrls = createAutoUrlResolver(() => { autoUrlRevision.value++ })
+const siteHealth = ref<Record<number, SiteHealth>>({})
+const healthPending = new Map<number, string>()
+let healthActive = true
+let healthTimer: ReturnType<typeof setInterval> | undefined
+function rememberHealth(rows: SiteHealth[]) {
+  if (!healthActive)
+    return
+  const current = items.value.flatMap(group => group.items || [])
+  for (const row of rows) {
+    if (current.some(item => item.id === row.id && item.url === row.url && (item.lanUrl || '') === row.lanUrl))
+      siteHealth.value[row.id] = row
+  }
+}
+async function verifyHTTPS(lanUrl: string) {
+  if (authStore.visitMode !== VisitMode.VISIT_MODE_LOGIN)
+    return false
+  const item = items.value.flatMap(group => group.items || []).find(item => item.lanUrl?.trim() === lanUrl)
+  if (!item?.id)
+    return false
+  const result = await getSiteHealth([item.id], true)
+  if (result.code !== 0)
+    return false
+  const row = result.data.find(row => row.id === item.id && row.lanUrl === lanUrl)
+  if (row && healthActive) {
+    const saved = siteHealth.value[row.id]
+    const prior = saved?.url === row.url ? saved : undefined
+    siteHealth.value[row.id] = { ...row, default: prior?.default || row.default }
+  }
+  return row?.lan.tls_verified === true
+}
+const autoUrls = createAutoUrlResolver(() => { autoUrlRevision.value++ }, verifyHTTPS)
+async function refreshSiteHealth(sites: Panel.ItemInfo[]) {
+  if (!healthActive || document.visibilityState === 'hidden' || authStore.visitMode !== VisitMode.VISIT_MODE_LOGIN)
+    return
+  const signatures = new Map<number, string>()
+  for (const item of sites) {
+    const signature = JSON.stringify([item.url, item.lanUrl || ''])
+    if (item.id && healthPending.get(item.id) !== signature)
+      signatures.set(item.id, signature)
+  }
+  const ids = [...signatures.keys()]
+  for (const [id, signature] of signatures)
+    healthPending.set(id, signature)
+  try {
+    for (let start = 0; start < ids.length && healthActive; start += 24) {
+      const response = await getSiteHealth(ids.slice(start, start + 24))
+      if (response.code === 0)
+        rememberHealth(response.data)
+    }
+  }
+  catch {
+    // Background diagnostics remain silent and keep the last completed result.
+  }
+  finally {
+    for (const [id, signature] of signatures) {
+      if (healthPending.get(id) === signature)
+        healthPending.delete(id)
+    }
+  }
+}
+function displayedHealth(item: Panel.ItemInfo): HealthResult | undefined {
+  void autoUrlRevision.value
+  const saved = item.id ? siteHealth.value[item.id] : undefined
+  const row = saved?.url === item.url && saved.lanUrl === (item.lanUrl || '') ? saved : undefined
+  const chosen = panelState.networkMode === PanelStateNetworkModeEnum.lan ? item.lanUrl || item.url : panelState.networkMode === PanelStateNetworkModeEnum.auto ? autoUrls.resolve(item.url, item.lanUrl) : item.url
+  const result = chosen === item.lanUrl && item.lanUrl ? row?.lan : row?.default
+  return result?.checked_at && Date.now() - new Date(result.checked_at).getTime() < 120000 ? result : undefined
+}
 const networkDetails = computed(() => {
   void autoUrlRevision.value
   const labels: Record<string, string> = { unconfigured: '未配置内网地址', same: '内外网地址相同', checking: '后台检测中', unchecked: '尚未检测', expired: '结果已过期', reachable: '内网可达', unreachable: '检测失败、超时或被浏览器限制' }
   return items.value.flatMap(group => group.items || []).map((item) => {
     const result = autoUrls.inspect(item.url, item.lanUrl)
     const chosen = panelState.networkMode === PanelStateNetworkModeEnum.lan ? item.lanUrl || item.url : panelState.networkMode === PanelStateNetworkModeEnum.auto ? autoUrls.resolve(item.url, item.lanUrl) : item.url
-    return { item, chosen, status: labels[result.state], checkedAt: result.checkedAt }
-  })
+    return { item, chosen, status: labels[result.state], checkedAt: result.checkedAt, serverHealth: displayedHealth(item), lanHealth: item.id ? siteHealth.value[item.id]?.lan : undefined }
+  }).filter(row => healthSelectedId.value === null || row.item.id === healthSelectedId.value)
 })
 let stopAutoUrlRefresh: (() => void) | undefined
 const networkModeOptions = computed(() => [
@@ -142,6 +216,7 @@ function updateItemIconGroupByNet(itemIconGroupIndex: number, itemIconGroupId: n
   getListByGroupId<Common.ListResponse<Panel.ItemInfo[]>>(itemIconGroupId).then((res) => {
     if (res.code === 0) {
       items.value[itemIconGroupIndex].items = res.data.list
+      refreshSiteHealth(res.data.list)
       if (panelState.networkMode === PanelStateNetworkModeEnum.auto)
         autoUrls.check(res.data.list)
     }
@@ -218,6 +293,7 @@ function handleEditSuccess(item: Panel.ItemInfo) {
 
 function handleChangeNetwork(mode: string | number) {
   if (mode === 'details') {
+    healthSelectedId.value = null
     networkDetailsShow.value = true
     return
   }
@@ -299,6 +375,7 @@ function getDropdownMenuOptions() {
 }
 
 onMounted(() => {
+  healthTimer = setInterval(() => refreshSiteHealth(items.value.flatMap(group => group.items || [])), 60000)
   stopAutoUrlRefresh = startAutoUrlRefresh(autoUrls, () => items.value.flatMap(group => group.items || []), () => panelState.networkMode === PanelStateNetworkModeEnum.auto)
   // 更新用户信息
   updateLocalUserInfo()
@@ -312,7 +389,11 @@ onMounted(() => {
     setTitle(panelState.panelConfig.logoText)
 })
 
-onUnmounted(() => stopAutoUrlRefresh?.())
+onUnmounted(() => {
+  healthActive = false
+  clearInterval(healthTimer)
+  stopAutoUrlRefresh?.()
+})
 
 // 前端搜索过滤
 function itemFrontEndSearch(keyword?: string) {
@@ -463,6 +544,8 @@ function handleAddItem(itemIconGroupId?: number) {
                     <AppIcon
                       :class="itemGroup.sortStatus ? 'cursor-move' : 'cursor-pointer'"
                       :item-info="item"
+                      :health="displayedHealth(item)"
+                      @health-details="openHealthDetails(item)"
                       :icon-text-color="panelState.panelConfig.iconTextColor"
                       :icon-text-info-hide-description="panelState.panelConfig.iconTextInfoHideDescription || false"
                       :icon-text-icon-hide-title="panelState.panelConfig.iconTextIconHideTitle || false"
@@ -500,6 +583,8 @@ function handleAddItem(itemIconGroupId?: number) {
                     <AppIcon
                       :class="itemGroup.sortStatus ? 'cursor-move' : 'cursor-pointer'"
                       :item-info="item"
+                      :health="displayedHealth(item)"
+                      @health-details="openHealthDetails(item)"
                       :icon-text-color="panelState.panelConfig.iconTextColor"
                       :icon-text-info-hide-description="!panelState.panelConfig.iconTextInfoHideDescription"
                       :icon-text-icon-hide-title="panelState.panelConfig.iconTextIconHideTitle || false"
@@ -585,6 +670,9 @@ function handleAddItem(itemIconGroupId?: number) {
             <div>实际打开：{{ row.chosen }}</div>
             <div>内网检测：{{ row.status }}</div>
             <div>最近检测：{{ row.checkedAt ? new Date(row.checkedAt).toLocaleString() : '暂无' }}</div>
+            <div v-if="row.serverHealth">服务器检查：{{ row.serverHealth.label }} · {{ row.serverHealth.duration_ms }} ms <span v-if="row.serverHealth.status">· HTTP {{ row.serverHealth.status }}</span></div>
+            <div v-if="row.serverHealth">{{ row.serverHealth.message }}</div>
+            <div v-if="row.lanHealth?.state === 'tls_untrusted'">内网证书不可信，自动模式不会请求该 HTTPS 地址；已回退默认网址。</div>
           </article>
           <p v-if="!networkDetails.length">当前没有网站项目。</p>
         </div>
