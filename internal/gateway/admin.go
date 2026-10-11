@@ -23,6 +23,7 @@ import (
 var webFiles embed.FS
 
 type Admin struct {
+	webDAV       remoteBackupRuntime
 	sunPanel     *SunPanel
 	store        *Store
 	proxy        *Proxy
@@ -96,6 +97,7 @@ func (a *Admin) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/config", a.requireAuth(a.putConfig))
 	mux.HandleFunc("GET /api/status", a.requireAuth(a.status))
 	a.maintenanceRoutes(mux)
+	a.webDAVBackupRoutes(mux)
 	mux.HandleFunc("GET /api/sunpanel/routes", a.requireAuth(a.sunPanelRoutes))
 	a.onlineUpdateRoutes(mux)
 	a.dashboardRoutes(mux)
@@ -270,7 +272,7 @@ func (a *Admin) Handler() http.Handler {
 	sub, _ := fs.Sub(webFiles, "web")
 	files := http.FileServer(http.FS(sub))
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/" && r.URL.Path != "/app.js" && r.URL.Path != "/style.css" && r.URL.Path != "/icons.svg" && r.URL.Path != "/sunpanel-admin.js" && r.URL.Path != "/mcp-admin.js" && r.URL.Path != "/mcp-sdk-license.txt" && r.URL.Path != "/context-help.js" && r.URL.Path != "/dashboard.js" && r.URL.Path != "/china-outline.svg" {
+		if r.URL.Path != "/" && r.URL.Path != "/app.js" && r.URL.Path != "/style.css" && r.URL.Path != "/icons.svg" && r.URL.Path != "/sunpanel-admin.js" && r.URL.Path != "/mcp-admin.js" && r.URL.Path != "/backup-admin.js" && r.URL.Path != "/mcp-sdk-license.txt" && r.URL.Path != "/context-help.js" && r.URL.Path != "/dashboard.js" && r.URL.Path != "/china-outline.svg" {
 			http.NotFound(w, r)
 			return
 		}
@@ -281,7 +283,7 @@ func (a *Admin) Handler() http.Handler {
 			mcpHandler.ServeHTTP(w, r)
 			return
 		}
-		if strings.HasPrefix(r.URL.Path, "/api/") && r.URL.Path != "/api/status" && r.URL.Path != "/api/dashboard" && r.URL.Path != "/api/service-health" && r.URL.Path != "/api/logs" && r.URL.Path != "/api/statistics" && r.URL.Path != "/api/ddns/records" && r.URL.Path != "/api/maintenance/online-update-status" && !(r.Method == "GET" && (r.URL.Path == "/api/ip-blocks" || strings.HasPrefix(r.URL.Path, "/api/service-discovery/") || strings.HasPrefix(r.URL.Path, "/api/route-images/"))) {
+		if strings.HasPrefix(r.URL.Path, "/api/") && r.URL.Path != "/api/status" && r.URL.Path != "/api/dashboard" && r.URL.Path != "/api/service-health" && !(r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/api/backups/")) && r.URL.Path != "/api/logs" && r.URL.Path != "/api/statistics" && r.URL.Path != "/api/ddns/records" && r.URL.Path != "/api/maintenance/online-update-status" && !(r.Method == "GET" && (r.URL.Path == "/api/ip-blocks" || strings.HasPrefix(r.URL.Path, "/api/service-discovery/") || strings.HasPrefix(r.URL.Path, "/api/route-images/"))) {
 			started := time.Now()
 			logged := &loggedResponseWriter{ResponseWriter: w}
 			w = logged

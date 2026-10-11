@@ -10,6 +10,7 @@
   <script src="/dashboard.js" defer></script>
   <script src="/sunpanel-admin.js" defer></script>
   <script src="/mcp-admin.js" defer></script>
+  <script src="/backup-admin.js" defer></script>
   <script src="/context-help.js" defer></script>
   <script src="/app.js" defer></script>
 </head>
@@ -38,6 +39,7 @@
         <button data-page="ip-blocks"><span class="nav-icon" data-icon="shield"></span>IP 拦截名单</button>
         <button data-page="statistics"><span class="nav-icon" data-icon="chart"></span>统计</button>
         <button data-page="mcp"><span class="nav-icon" data-icon="layers"></span>AI 管理</button>
+        <button data-page="backups"><span class="nav-icon" data-icon="download"></span>备份与恢复</button>
         <button data-page="settings"><span class="nav-icon" data-icon="settings"></span>设置</button>
       </nav>
       <div class="sidebar-foot"><span class="sidebar-server" data-icon="server"></span><span>本地网关<small>Cloudflare · Let's Encrypt</small></span><span class="status-dot"></span></div>
@@ -50,6 +52,7 @@
       <footer><span class="footer-brand">GATEHOUSE</span><span>让连接井然有序</span><span id="uptime"></span></footer>
     </main>
   </div>
+  <dialog id="webdav-restore-dialog"><form id="webdav-restore-form"><div class="dialog-heading"><div><span class="eyebrow">RESTORE BACKUP</span><h2 id="webdav-restore-title">检查远程备份</h2></div><button type="button" class="icon-button" data-action="close-dialog" aria-label="关闭远程备份检查"><span data-icon="close"></span></button></div><input name="name" type="hidden"><p id="webdav-restore-file" class="mono remote-backup-name"></p><label>备份解密密码<input name="password" type="password" autocomplete="off"><small>留空时使用已保存的加密密码；旧备份可填写当时的密码。</small></label><p class="error" role="alert"></p><div class="dialog-actions"><button type="button" class="secondary" data-action="close-dialog">取消</button><button type="submit" class="primary">检查备份</button></div></form></dialog>
   <dialog id="service-health-dialog"><form id="service-health-detail-form"><div class="dialog-heading"><div><span class="eyebrow">SERVICE HEALTH</span><h2 id="service-health-detail-title">服务健康诊断</h2></div><button type="button" class="icon-button" data-action="close-dialog" aria-label="关闭服务健康诊断"><span data-icon="close"></span></button></div><div id="service-health-detail"></div><div class="dialog-actions"><button type="button" class="secondary" data-action="close-dialog">关闭</button></div></form></dialog>
   <dialog id="account-dialog" aria-labelledby="account-title"><form id="account-form"><div class="dialog-heading"><div><h2 id="account-title">管理员账户</h2><p>用于登录 GateHome 管理界面，与反代服务的独立访问账号分开。</p></div><button type="button" class="icon-button" data-action="close-dialog" aria-label="关闭账户设置"><span data-icon="close"></span></button></div><label>管理员账号<input name="username" autocomplete="username" required maxlength="64"><small>1–64 字节，区分大小写；支持中文，不含控制字符或首尾空格。</small></label><label>当前管理密码<input name="current_password" type="password" autocomplete="current-password" required maxlength="72"><small>修改账号或密码前，验证当前管理员密码。</small></label><label>新管理密码（可选）<input name="new_password" type="password" autocomplete="new-password" maxlength="72"><small>12–72 字节；留空时只修改账号，保持原管理密码。</small></label><label>再次输入新管理密码<input name="confirm_password" type="password" autocomplete="new-password" maxlength="72"></label><p class="form-note">保存后所有管理员会话都会退出，请使用新账号和管理密码重新登录。各反代服务的访问账号密码保持独立。</p><p class="error" role="alert"></p><div class="dialog-actions"><button type="button" class="secondary" data-action="close-dialog">取消</button><button type="submit" class="primary">保存管理账户</button></div></form></dialog>
   <dialog id="discovery-dialog"><form id="discovery-form" novalidate>

@@ -95,6 +95,9 @@ func (c Config) CertificateDNSGroup(host string) (DDNSGroup, error) {
 }
 
 func validateCredentials(s State) error {
+	if err := validateWebDAVBackupState(s.WebDAVBackup); err != nil {
+		return err
+	}
 	if s.MCPTokenHash != "" {
 		decoded, err := hex.DecodeString(s.MCPTokenHash)
 		if err != nil || len(decoded) != 32 {

@@ -65,24 +65,7 @@ func (a *Admin) maintenanceRoutes(mux *http.ServeMux) {
 			apiError(w, 409, "维护功能不可用或正在执行操作")
 			return
 		}
-		if err := checkBackupCapacity(a.store.paths, a.store.Snapshot()); err != nil {
-			apiError(w, 400, err.Error())
-			return
-		}
-		// Keep all rotated log files at the same complete-record snapshot.
-		if a.logs != nil {
-			a.logs.mu.Lock()
-		}
-		var payload backupPayload
-		var err error
-		if a.sunPanel != nil {
-			payload, err = a.sunPanel.snapshot(a.store.paths, a.store.Snapshot())
-		} else {
-			payload, err = snapshotBackupPaths(a.store.paths, a.store.Snapshot())
-		}
-		if a.logs != nil {
-			a.logs.mu.Unlock()
-		}
+		payload, err := a.backupSnapshot()
 		if err != nil {
 			apiError(w, 400, err.Error())
 			return

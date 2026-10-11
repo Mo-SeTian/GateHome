@@ -36,6 +36,20 @@ func safeSunPanelBackupFile(name string) bool {
 	return false
 }
 
+func sunPanelBackupImageCount(files map[string][]byte) int {
+	count := 0
+	for name := range files {
+		if !strings.HasPrefix(name, "sunpanel/uploads/") {
+			continue
+		}
+		switch strings.ToLower(path.Ext(name)) {
+		case ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".svg":
+			count++
+		}
+	}
+	return count
+}
+
 func sunPanelFileCount(files map[string][]byte) int {
 	n := 0
 	for name := range files {

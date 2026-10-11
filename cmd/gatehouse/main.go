@@ -203,6 +203,7 @@ func run() error {
 		}
 	}
 	admin.StartServiceHealth(ctx)
+	admin.StartWebDAVBackups(ctx)
 	jobs.Start(ctx)
 	subscriptions.Start(ctx)
 	logs.Start(ctx)

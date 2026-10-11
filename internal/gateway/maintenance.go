@@ -153,7 +153,7 @@ func (m *Maintenance) inspectBackup(data []byte, password string, adminPort int)
 	if compatible != nil && m.Available() {
 		message = compatible.Error()
 	}
-	return map[string]any{"id": id, "version": manifest.Version, "created_at": manifest.CreatedAt, "can_apply": canApply, "routes": len(c.Routes), "groups": len(c.Groups), "sunpanel_files": sunPanelFileCount(payload.Files), "ddns_groups": len(c.DDNS.Groups), "firewalls": len(c.Firewalls), "subscriptions": len(c.Subscriptions), "certificates": len(payload.Certificates), "images": images, "log_entries": logs, "subscription_caches": caches, "includes_files": payload.Files != nil, "token_configured": payload.State.HasDNSToken(), "message": message}, nil
+	return map[string]any{"id": id, "version": manifest.Version, "created_at": manifest.CreatedAt, "can_apply": canApply, "routes": len(c.Routes), "groups": len(c.Groups), "sunpanel_files": sunPanelFileCount(payload.Files), "sunpanel_images": sunPanelBackupImageCount(payload.Files), "ddns_groups": len(c.DDNS.Groups), "firewalls": len(c.Firewalls), "subscriptions": len(c.Subscriptions), "certificates": len(payload.Certificates), "images": images, "log_entries": logs, "subscription_caches": caches, "includes_files": payload.Files != nil, "token_configured": payload.State.HasDNSToken(), "message": message}, nil
 }
 
 func stageID() (string, error) {

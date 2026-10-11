@@ -7,7 +7,7 @@ function newID() {
   const bytes=new Uint8Array(16);crypto.getRandomValues(bytes);bytes[6]=(bytes[6]&15)|64;bytes[8]=(bytes[8]&63)|128;
   const hex=[...bytes].map(b=>b.toString(16).padStart(2,'0')).join('');return hex.slice(0,8)+'-'+hex.slice(8,12)+'-'+hex.slice(12,16)+'-'+hex.slice(16,20)+'-'+hex.slice(20);
 }
-const pages = {sunpanel:'浏览器首页',overview:'概览',routes:'反向代理',ddns:'动态域名',certificates:'SSL 证书',access:'防火墙管理',subscriptions:'订阅管理',mcp:'AI 管理',settings:'设置',logs:'日志',statistics:'统计','firewall-logs':'防火墙拦截记录','ip-blocks':'IP 拦截名单'};
+const pages = {sunpanel:'浏览器首页',overview:'概览',routes:'反向代理',ddns:'动态域名',certificates:'SSL 证书',access:'防火墙管理',subscriptions:'订阅管理',mcp:'AI 管理',backups:'备份与恢复',settings:'设置',logs:'日志',statistics:'统计','firewall-logs':'防火墙拦截记录','ip-blocks':'IP 拦截名单'};
 const iconNames = new Set(['overview','routes','globe','certificate','shield','download','logs','chart','settings','server','gateway','router','layers','activity','refresh','plus','close','logout','menu','more','back','edit','chevron-down','chevron-up','chevron-left','chevron-right','external-link','trash','play','pause','login','filter','unlock','save','upload','info']);
 function icon(name) { return `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="/icons.svg#${iconNames.has(name)?name:'layers'}"></use></svg>`; }
 function hydrateIcons(scope=document) {
@@ -45,6 +45,7 @@ function openDialog(dialog) {
 function closeDialog(dialog) {
   if(!dialog?.open) return;
   if(dialog.id==='account-dialog') clearAccountPasswords();
+  if(dialog.id==='webdav-restore-dialog') $('#webdav-restore-form').elements.password.value='';
   if(dialog.id==='route-dialog') {++routeImageRequest;routeImagePending=false;}
   if(dialog.id==='discovery-dialog') abandonDiscovery();
   const from={opacity:getComputedStyle(dialog).opacity,transform:getComputedStyle(dialog).transform};
@@ -127,7 +128,7 @@ function toast(message) {
   $('#toast').textContent = message; $('#toast').hidden = false; if(!reducedMotion.matches) {$('#toast').getAnimations().forEach(a=>a.cancel());$('#toast').animate([{opacity:0,translate:'0 8px'},{opacity:1,translate:'0 0'}],{duration:180,easing:'ease-out'});}
   clearTimeout(toastTimer); toastTimer = setTimeout(() => { $('#toast').hidden = true; }, 4500);
 }
-function showLogin() { resetMCPSettings(); $('#account-menu').open=false;clearAccountPasswords();adminUsername='';$('#account-name').textContent='管理员';$('#account-avatar').textContent='G';resetDashboard();setNavigation(false,false); $('#login').hidden = false; $('#app').hidden = true; document.querySelectorAll('dialog').forEach(d=>d.close()); config = undefined;backupCapacity=null;backupCapacityError='';backupCapacityRequest++; renderedPage='';clearTimeout(onlineUpdate.timer);onlineUpdate.request++;onlineUpdate.phase='';onlineUpdate.job=null;onlineUpdate.release=null;onlineUpdate.error='';abandonDiscovery();for(const state of Object.values(securityEvents)) {state.request++;state.view=null;state.filters=emptyEventFilters();state.applied=emptyEventFilters();state.loading=false;state.error='';} }
+function showLogin() { resetMCPSettings(); resetRemoteBackups(); $('#account-menu').open=false;clearAccountPasswords();adminUsername='';$('#account-name').textContent='管理员';$('#account-avatar').textContent='G';resetDashboard();setNavigation(false,false); $('#login').hidden = false; $('#app').hidden = true; document.querySelectorAll('dialog').forEach(d=>d.close()); config = undefined;backupCapacity=null;backupCapacityError='';backupCapacityRequest++; renderedPage='';clearTimeout(onlineUpdate.timer);onlineUpdate.request++;onlineUpdate.phase='';onlineUpdate.job=null;onlineUpdate.release=null;onlineUpdate.error='';abandonDiscovery();for(const state of Object.values(securityEvents)) {state.request++;state.view=null;state.filters=emptyEventFilters();state.applied=emptyEventFilters();state.loading=false;state.error='';} }
 function applyConfig(data) { serviceHealthRequest++; serviceHealthData={routes:{},options:{enabled:true,interval:60}}; config = data.config; revision = data.revision; dnsCredentialsConfigured=data.dns_credentials_configured||{}; certificateCredentialsConfigured=data.certificate_credentials_configured||{};routePasswordsConfigured=data.route_passwords_configured||{}; proxyPasswordConfigured=data.proxy_password_configured; githubTokenConfigured=!!data.github_token_configured; ipRequest++;dnsRecordsRequest++;dnsRecords={};dnsRecordsError=''; if(networkInfo) networkInfo.groups={}; }
 async function save(next, dnsTokens, proxyPassword, certificateTokens, routePasswords, githubToken) {
   const payload = {config:next, revision};
@@ -483,13 +484,13 @@ async function loadBackupCapacity() {
 function maintenanceHTML() {
   const supported=status.maintenance_available;
   const preview=maintenancePreview;
-  const detail=!preview?'':`<div class="maintenance-preview"><b>${preview.kind==='update'?'更新包 v'+esc(preview.version):'备份 v'+esc(preview.version)}</b>${preview.kind==='restore'?`<p>${preview.groups} 个反代组 · ${preview.routes} 个服务 · ${preview.ddns_groups} 个 DDNS 组 · ${preview.firewalls} 个防火墙 · ${preview.subscriptions} 个订阅<br>${preview.sunpanel_files||0} 个 Sun-Panel 文件 · ${preview.images||0} 张图片资产 · ${preview.certificates||0} 个证书文件 · ${preview.log_entries||0} 条日志 · ${preview.subscription_caches||0} 个订阅缓存<br>${preview.includes_files?'':'此旧备份未包含日志、缓存与图片；恢复时保留服务器现有文件。<br>'}备份时间：${date(preview.created_at)} · ${preview.token_configured?'含 Cloudflare Token':'未配置 Cloudflare Token'}</p>`:''}<p>${esc(preview.message)}</p><button class="primary" data-action="apply-maintenance" ${!preview.can_apply?'disabled':''}>${preview.kind==='update'?'应用更新并重启':'恢复数据并重启'}</button></div>`;
+  const detail=!preview?'':`<div class="maintenance-preview"><b>${preview.kind==='update'?'更新包 v'+esc(preview.version):'备份 v'+esc(preview.version)}</b>${preview.kind==='restore'?`<p>${preview.groups} 个反代组 · ${preview.routes} 个服务 · ${preview.ddns_groups} 个 DDNS 组 · ${preview.firewalls} 个防火墙 · ${preview.subscriptions} 个订阅<br>${preview.sunpanel_files||0} 个 Sun-Panel 文件（${preview.sunpanel_images||0} 张图片） · ${preview.images||0} 张反代图片 · ${preview.certificates||0} 个证书文件 · ${preview.log_entries||0} 条日志 · ${preview.subscription_caches||0} 个订阅缓存<br>${preview.includes_files?'':'此旧备份未包含日志、缓存与图片；恢复时保留服务器现有文件。<br>'}备份时间：${date(preview.created_at)} · ${preview.token_configured?'含 Cloudflare Token':'未配置 Cloudflare Token'}</p>`:''}<p>${esc(preview.message)}</p><button class="primary" data-action="apply-maintenance" ${!preview.can_apply?'disabled':''}>${preview.kind==='update'?'应用更新并重启':'恢复数据并重启'}</button></div>`;
   const backupDetail=preview?.kind==='restore'?detail:'',updateDetail=preview?.kind==='update'?detail:'';
   const backup=panel('备份与恢复','备份配置与凭据、证书、服务图片、Sun-Panel 全部数据、日志和订阅缓存。',`<div class="panel-body two-col maintenance-forms"><form id="backup-form"><h3>下载加密备份</h3><label>备份密码<input name="password" type="password" autocomplete="new-password"></label><label>再次输入备份密码<input name="confirm_password" type="password" autocomplete="new-password"></label><p class="form-note">密码不限长度，可以留空；留空时恢复也无需填写密码。请保存设置的密码，恢复时需保持一致。ZIP 内的数据使用 AES-256-GCM 加密，含反代访问密码、IP 冻结名单与全部已保存的业务数据。登录会话、未保存的扫描结果和维护临时文件不备份。</p><p class="error" role="alert"></p><div class="form-actions"><button class="primary" type="submit">下载备份 ZIP</button></div></form><form id="restore-form"><h3>上传备份</h3><label>备份 ZIP<input name="file" type="file" accept=".zip,application/zip" required></label><label>导出时的备份密码<input name="password" type="password" autocomplete="off"></label><p class="form-note">密码不限长度；导出时留空，这里也留空。先检查备份再确认恢复。恢复后使用备份时的管理员账号和管理密码重新登录。</p><p class="error" role="alert"></p><div class="form-actions"><button class="secondary" type="submit">检查备份</button></div></form></div>${backupDetail}`);
   const upload=panel('上传版本更新','使用本项目“更新版本”目录生成的 ZIP；只接受更高版本。',`<form id="update-form" class="panel-body"><label>更新 ZIP<input name="file" type="file" accept=".zip,application/zip" required></label><p class="form-note">检查版本、文件哈希和主机架构后再应用。只使用你信任的项目更新包；哈希校验用于检查文件完整性。</p><p data-visible-note class="form-note">${supported?'维护时短暂停止服务，新程序启动检查失败会回滚。':'此部署可导出备份及检查上传包。应用更新或恢复需要 Linux 安装脚本或新版 Docker 启动方式。'}</p><p class="error" role="alert"></p><div class="form-actions"><button type="submit" class="secondary">检查更新包</button></div></form>${updateDetail}`);
   return {
     updates:'<h2 class="settings-section-heading">维护与更新</h2><div id="online-update">'+onlineUpdateHTML()+'</div>'+githubTokenHTML()+upload,
-    backups:'<h2 class="settings-section-heading">备份与容量</h2>'+backup+'<div id="backup-capacity">'+backupCapacityHTML()+'</div>',
+    backups:backup+'<div id="backup-capacity">'+backupCapacityHTML()+'</div>',
     version:`<div class="app-version"><b>Gatehouse</b><button class="secondary" data-action="restart-service" ${!supported?'disabled':''}>重启服务</button><span>版本 ${esc(status.version||'加载中')}</span></div>`
   };
 }
@@ -520,7 +521,7 @@ function settingsHTML() {
   const listeners=panel('反代组监听','HTTP / HTTPS 填写 0 即关闭该协议。修改监听或组启停后需重启；爱快按组配置 TCP 映射，Docker bridge 同步发布非零端口。',(rows?`<div class="table-wrap"><table><thead><tr><th>反代组</th><th>HTTP</th><th>HTTPS</th><th>状态</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></div>`:empty('还没有反代组','到反向代理页面创建组和域名规则。')) + '<div class="context-note"><ul class="info-list"><li><span>管理入口</span><b>默认 0.0.0.0:16666，可通过服务器 IP 访问</b></li><li><span>Docker bridge</span><b>为各组非零端口添加 compose.bridge.yaml 映射</b></li><li><span>IP 黑白名单</span><b>Linux Docker 推荐 host 网络，保留来源 IP</b></li><li><span>订阅更新</span><b>立即应用规则，无需重启</b></li><li><span>爱快映射</span><b>按组映射业务端口；管理可使用 SSH 隧道</b></li></ul></div>');
   const maintenance=maintenanceHTML();
   return heading('SETTINGS','系统设置','按访问、运行和维护分类配置；标题旁的标识可查看说明。','<button class="primary" data-action="add-group"><span data-icon="plus"></span>添加反代组</button>')+
-    '<div class="settings-columns"><div class="settings-column"><h2 class="settings-section-heading">访问与网络</h2>'+adminAccessHTML()+outbound+maintenance.updates+'</div><div class="settings-column"><h2 class="settings-section-heading">运行与日志</h2>'+logRetentionHTML()+listeners+maintenance.backups+'</div></div>'+maintenance.version;
+    '<div class="settings-columns"><div class="settings-column"><h2 class="settings-section-heading">访问与网络</h2>'+adminAccessHTML()+outbound+maintenance.updates+'</div><div class="settings-column"><h2 class="settings-section-heading">运行与日志</h2>'+logRetentionHTML()+listeners+'</div></div>'+maintenance.version;
 }
 function readLogFilters() {logCategory=$('#log-category')?.value||'';logRule=$('#log-rule')?.value||'';logResult=$('#log-result').value;logMethod=$('#log-method')?.value||'';logStatus=$('#log-status')?.value||'';logSearch=$('#log-search').value.trim();logIP=$('#log-ip')?.value.trim()||'';logFrom=$('#log-from').value;logTo=$('#log-to').value;}
 function logCategoryName(category) { return {access:'反向代理',admin:'管理操作',ddns:'DDNS',subscriptions:'IP 订阅',certificates:'SSL 证书'}[category]||category; }
@@ -714,6 +715,7 @@ function render() {
   if (!config) return;
   const content=$('#content'),changed=renderedPage!==page;
   if(changed&&renderedPage==='mcp') resetMCPSettings();
+  if(changed&&renderedPage==='backups') resetRemoteBackups();
   if(changed&&page!=='routes') {dialogMotions.get($('#route-dialog'))?.cancel();$('#route-dialog').close();}
   const entryState=pageMotion?.playState==='running'?{opacity:getComputedStyle(content).opacity,transform:getComputedStyle(content).transform}:{opacity:.25,transform:'translateY(8px)'};
   const focused=content.contains(document.activeElement)?focusSelector(document.activeElement):'';
@@ -733,6 +735,7 @@ function render() {
   if (page==='subscriptions') html=subscriptionsHTML();
   if (page==='mcp') html=mcpHTML();
   if (page==='settings') html=settingsHTML();
+  if (page==='backups') html=backupsHTML();
   if (page==='logs') html=logsHTML();
   if (page==='statistics') html=statisticsHTML();
   if (page==='ip-blocks') html=ipBlocksHTML();
@@ -759,7 +762,8 @@ function render() {
   }
   renderedPage=page;
   if(changed&&page==='mcp') loadMCPSettings();
-  if(changed&&page==='settings') {loadOnlineUpdateStatus();loadBackupCapacity();}
+  if(changed&&page==='settings') loadOnlineUpdateStatus();
+  if(changed&&page==='backups') {loadBackupCapacity();loadRemoteBackups();}
   if(changed&&page==='overview') loadDashboard();
   if(page==='ddns') {loadIPInfo().catch(e=>{if($('#ip-results')) $('#ip-results').textContent=e.message;});loadDNSRecords();}
 }
@@ -1096,6 +1100,8 @@ document.addEventListener('submit',event=>{
   if(!config) return;
   if(form.id==='account-form') return submitForm(form,()=>saveAdminAccount(form));
   if(form.id==='dashboard-form') return submitForm(form,saveDashboardSettings);
+  if(form.id==='webdav-backup-form') return submitForm(form,()=>saveWebDAVSettings(form));
+  if(form.id==='webdav-restore-form') return submitForm(form,()=>inspectWebDAVBackup(form));
   if(form.classList.contains('mcp-client-form')) return submitForm(form,()=>saveMCPClient(form));
   if(form.id==='service-health-form') return submitForm(form,async()=>{const next=clone(config);next.service_health={enabled:form.elements.enabled.checked,interval:Number(form.elements.interval.value)};await save(next);await refreshServiceHealth();toast('服务健康检查设置已保存');});
   if(form.id==='mcp-form') return submitForm(form,()=>saveMCPSettings(form));
@@ -1189,6 +1195,7 @@ document.addEventListener('click',async event=>{
   if(action==='edit-admin-account') return openAdminAccount();
   if(action==='edit-dashboard') return toggleDashboardEditing();
   if(action==='configure-dashboard') return openDashboardSettings();
+  if(['refresh-remote-backups','list-webdav-backups','test-webdav-backup','run-webdav-backup','download-webdav-backup','inspect-webdav-backup'].includes(action)) return remoteBackupAction(button);
   if(action==='service-health-details') {openServiceHealthDetails(button.dataset.routeId);return;}
   if(action==='refresh-service-health') {button.disabled=true;try{await refreshServiceHealth();}catch(e){toast(e.message);}finally{button.disabled=false;}return;}
   if(action==='refresh-mcp'||action.startsWith('mcp-')) return mcpSettingsAction(button);
@@ -1382,6 +1389,7 @@ setInterval(async()=>{
   if(!config||document.hidden||busy||dashboardDrag||dashboardSaving) return;
   try {
     await refreshStatus();
+    if(page==='backups'&&!document.querySelector('dialog[open]')&&!remoteBackups.data?.busy) await loadRemoteBackups();
     if(page==='overview'&&!dashboardDrag&&!dashboardSaving&&!document.querySelector('dialog[open]')) await loadDashboard();
     if((page==='subscriptions'||page==='access')&&!document.querySelector('dialog[open]')) render();
     if(page==='ddns') config.ddns.groups.forEach(g=>{const badgeElement=$('[data-ddns-status="'+g.id+'"]');if(badgeElement) badgeElement.innerHTML=ddnsBadge(g);const summary=$('[data-ddns-summary="'+g.id+'"]');if(summary) summary.textContent=ddnsSummary(g);const button=$('[data-ddns-run="'+g.id+'"]');if(button) button.disabled=!g.enabled||!!ddnsGroupStatus(g)?.running;});
