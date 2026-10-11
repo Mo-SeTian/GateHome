@@ -174,6 +174,8 @@ type Config struct {
 }
 
 type State struct {
+	MCP                    MCPConfig                `json:"mcp,omitempty"`
+	MCPTokenHash           string                   `json:"mcp_token_hash,omitempty"`
 	AdminUsername          string                   `json:"admin_username"`
 	Config                 Config                   `json:"config"`
 	PasswordHash           string                   `json:"password_hash"`

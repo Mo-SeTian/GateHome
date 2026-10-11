@@ -2,7 +2,7 @@
 
 一个自托管的反向代理与 DDNS 综合管理工具。Go 主程序内嵌中文管理界面与 Sun-Panel 前后端；启用首页时由主程序管理独立的 Sun-Panel 子进程。运行无需 Node.js、外部数据库或额外 Web 服务器，Sun-Panel 使用内置 SQLite。
 
-当前版本为 **0.0.51**，安装包见 [v0.0.51 Release](https://github.com/Mo-SeTian/GateHome/releases/tag/v0.0.51)。程序和 systemd 服务名为 `gatehouse`。
+当前版本为 **0.0.52**，安装包见 [v0.0.52 Release](https://github.com/Mo-SeTian/GateHome/releases/tag/v0.0.52)。程序和 systemd 服务名为 `gatehouse`。
 
 ## 主要功能
 
@@ -11,6 +11,7 @@
 - **访问保护**：独立服务账号、IP / CIDR 和订阅规则、Coraza WAF 与 OWASP CRS、自定义 HTTP 规则、限速和自动 IP 冻结。
 - **监控与日志**：可配置概览组件、服务器资源与流量、访问地域分析、独立防火墙记录、分页筛选、日志空间与保留期限。
 - **Sun-Panel 浏览器首页**：集成 v1.3.0 开源版，管理页内嵌访问、独立端口、多用户桌面、自身导入导出，以及从 GateHome 反代项导入默认网址和内网地址。
+- **AI 管理 MCP**：在管理地址内置 `/mcp`，分别授权查询、配置修改和维护操作，可管理指定账号的 Sun-Panel 桌面与反代联动。
 - **维护**：在线更新、代理下载、加密备份恢复，以及 `config`、`log`、`data`、`sunpanel` 四目录持久化。
 
 反代、DDNS、防火墙和证书任务按组折叠，添加与编辑通过弹窗完成；管理界面适配电脑和手机。访问控制作用于代理层，不修改 Linux 的 nftables / iptables。
@@ -294,6 +295,14 @@ Linux 资源数据来自 `/proc`，上传为 TX、下载为 RX，数据量自网
 
 IP 归属地由内嵌 ip2region 双栈离线库查询，显示在日志 IP 下方，不向外部服务发送访客 IP。归属地为估算，数据库随程序发布更新。详见 [概览组件说明](docs/dashboard-0.0.23.md) 和 [记录查询说明](docs/security-records-0.0.17.md)。
 
+## AI 管理 MCP
+
+在 **设置 → AI 管理 · MCP** 开启服务，分别授权查询、修改、维护，并生成专用令牌。如需管理 Sun-Panel，刷新账号列表并绑定一个账号。首次启用默认仅勾选查询，完整令牌只在创建或重置后显示一次。
+
+支持 Streamable HTTP 和自定义 Bearer 请求头的客户端可以连接 `http://服务器IP:16666/mcp`；端口跟随管理端口，公网接入使用 HTTPS。授权保存立即生效，关闭或重置令牌后旧连接不能继续调用工具。本体与 Sun-Panel 同步重启和更新，无需额外 MCP 容器或端口。
+
+AI 可以查询状态、日志和配置，修改反代 / DDNS / 防火墙等配置、管理网站与分组、导入反代及预览关联更新，并在获得维护权限后执行重启、在线更新和已检查备份的恢复。已有密码、Token 和私钥不返回，AI 不能扩大自己的授权。详细工具清单、客户端配置及权限说明见 [MCP 接入文档](docs/MCP.md)。
+
 ## Sun-Panel 浏览器首页
 
 感谢 [hslr-s/sun-panel](https://github.com/hslr-s/sun-panel)（作者：红烧猎人）。本项目引用并修改 **v1.3.0** 开源源码，保留其 [MIT 许可证](sunpanel/LICENSE)。全部源码位于 [`sunpanel/`](sunpanel/)，具体修改和上游提交见 [集成说明](sunpanel/INTEGRATION.md)。
@@ -437,3 +446,5 @@ node scripts/security_checks.mjs
 - [lego Cloudflare provider](https://go-acme.github.io/lego/dns/cloudflare/)
 
 反代与 DDNS 功能参考 Lucky 的使用场景，未复制其源码或品牌素材；浏览器首页基于上述 Sun-Panel 开源项目。
+
+MCP 服务端使用 [Model Context Protocol 官方 Go SDK](https://github.com/modelcontextprotocol/go-sdk) v1.8.0，保留上游 [许可证文本](internal/gateway/web/mcp-sdk-license.txt)，随程序嵌入分发。

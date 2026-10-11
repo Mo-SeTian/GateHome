@@ -1,6 +1,11 @@
 package gateway
 
 import (
+	"bytes"
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -10,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -69,12 +75,14 @@ func validateSunPanelListener(c SunPanelConfig, groups []ProxyGroup) error {
 
 // The worker shares the release binary, but isolates upstream globals and cwd.
 type SunPanel struct {
-	failure chan error
-	mu      sync.Mutex
-	dir     string
-	cmd     *exec.Cmd
-	done    chan error
-	proxy   *httputil.ReverseProxy
+	failure   chan error
+	mu        sync.Mutex
+	dir       string
+	cmd       *exec.Cmd
+	done      chan error
+	proxy     *httputil.ReverseProxy
+	bridgeKey []byte
+	bridgeURL string
 }
 
 func NewSunPanel(paths StoragePaths) *SunPanel {
@@ -108,9 +116,23 @@ func (s *SunPanel) start() error {
 	}
 	defer file.Close()
 	target, _ := url.Parse("http://" + listener.Addr().String())
+	keyPipe, keyWriter, err := os.Pipe()
+	if err != nil {
+		return errors.New("Sun-Panel 管理连接初始化失败")
+	}
+	defer keyPipe.Close()
+	defer keyWriter.Close()
+	bridgeKey := make([]byte, 32)
+	rand.Read(bridgeKey)
 	cmd := exec.Command(exe, "-sunpanel-worker", dir)
 	configureSunPanelProcess(cmd)
-	cmd.ExtraFiles = []*os.File{file}
+	cmd.ExtraFiles = []*os.File{file, keyPipe}
+	for _, value := range os.Environ() {
+		if !strings.HasPrefix(value, "GATEHOUSE_MCP_BRIDGE_FD=") {
+			cmd.Env = append(cmd.Env, value)
+		}
+	}
+	cmd.Env = append(cmd.Env, "GATEHOUSE_MCP_BRIDGE_FD=4")
 	// Upstream logs may contain account data; never forward them to GateHome logs.
 	cmd.Stdout, cmd.Stderr = io.Discard, io.Discard
 	if err := cmd.Start(); err != nil {
@@ -130,6 +152,11 @@ func (s *SunPanel) start() error {
 			}
 		}
 	}()
+	if _, err := keyWriter.Write(bridgeKey); err != nil {
+		s.stop()
+		return errors.New("Sun-Panel 管理连接初始化失败")
+	}
+	keyWriter.Close()
 	client := &http.Client{Timeout: 300 * time.Millisecond}
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
@@ -143,6 +170,7 @@ func (s *SunPanel) start() error {
 		if err == nil {
 			response.Body.Close()
 			if response.StatusCode == 204 {
+				s.bridgeKey, s.bridgeURL = bridgeKey, target.String()
 				s.proxy = httputil.NewSingleHostReverseProxy(target)
 				s.proxy.ErrorLog = nil
 				s.proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
@@ -161,11 +189,18 @@ func (s *SunPanel) stop() {
 		stopChild(s.cmd, s.done)
 		s.cmd = nil
 		s.proxy = nil
+		clear(s.bridgeKey)
+		s.bridgeKey, s.bridgeURL = nil, ""
 	}
 }
 func (s *SunPanel) Stop() { s.mu.Lock(); defer s.mu.Unlock(); s.stop() }
 func (s *SunPanel) Handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The worker bridge is never exposed on either public Sun-Panel entrance.
+		if p := path.Clean(r.URL.Path); p == "/sunpanel/integration" || strings.HasPrefix(p, "/sunpanel/integration/") {
+			http.NotFound(w, r)
+			return
+		}
 		s.mu.Lock()
 		proxy := s.proxy
 		s.mu.Unlock()
@@ -180,6 +215,48 @@ func (s *SunPanel) Handler() http.Handler {
 		w.Header().Set("Content-Security-Policy", "frame-ancestors 'self'")
 		proxy.ServeHTTP(w, r)
 	})
+}
+
+func (s *SunPanel) bridgeCall(ctx context.Context, action string, userID uint, data any) (json.RawMessage, error) {
+	s.mu.Lock()
+	address, key := s.bridgeURL, hex.EncodeToString(s.bridgeKey)
+	s.mu.Unlock()
+	if address == "" || len(key) != 64 {
+		return nil, errors.New("Sun-Panel 未运行或正在备份，请稍后重试")
+	}
+	body, err := json.Marshal(map[string]any{"action": action, "userId": userID, "data": data})
+	if err != nil {
+		return nil, errors.New("Sun-Panel 请求格式无效")
+	}
+	req, err := http.NewRequestWithContext(ctx, "POST", address+"/sunpanel/integration/mcp", bytes.NewReader(body))
+	if err != nil {
+		return nil, errors.New("Sun-Panel 管理连接不可用")
+	}
+	req.Header.Set("Authorization", "Bearer "+key)
+	req.Header.Set("Content-Type", "application/json")
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = nil
+	defer transport.CloseIdleConnections()
+	client := &http.Client{Transport: transport, Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	response, err := client.Do(req)
+	if err != nil {
+		return nil, errors.New("Sun-Panel 管理连接失败，请稍后重试")
+	}
+	defer response.Body.Close()
+	var result struct {
+		Data  json.RawMessage `json:"data"`
+		Error string          `json:"error"`
+	}
+	if json.NewDecoder(io.LimitReader(response.Body, 2<<20)).Decode(&result) != nil {
+		return nil, errors.New("Sun-Panel 返回无效响应")
+	}
+	if response.StatusCode != 200 || result.Error != "" {
+		if result.Error == "" {
+			return nil, errors.New("Sun-Panel 管理请求未完成")
+		}
+		return nil, errors.New(result.Error)
+	}
+	return result.Data, nil
 }
 
 func (s *SunPanel) snapshot(paths StoragePaths, state State) (backupPayload, error) {

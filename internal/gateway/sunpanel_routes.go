@@ -10,7 +10,10 @@ import (
 // Only the fields needed to create a bookmark cross the integration boundary.
 func (a *Admin) sunPanelRoutes(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
-	c := a.store.Snapshot().Config
+	jsonResponse(w, http.StatusOK, sunPanelRouteList(a.store.Snapshot().Config))
+}
+
+func sunPanelRouteList(c Config) []map[string]string {
 	items := []map[string]string{}
 	for _, route := range c.Routes {
 		for _, group := range c.Groups {
@@ -39,7 +42,7 @@ func (a *Admin) sunPanelRoutes(w http.ResponseWriter, r *http.Request) {
 			items = append(items, map[string]string{"id": route.ID, "title": name, "group": group.Name, "url": scheme + "://" + host + "/", "lanUrl": upstream.String()})
 		}
 	}
-	jsonResponse(w, http.StatusOK, items)
+	return items
 }
 
 // The standalone Sun-Panel port exposes just this authenticated integration API.

@@ -104,6 +104,7 @@ func (a *Admin) Handler() http.Handler {
 	a.ipBlockRoutes(mux)
 	a.serviceDiscoveryRoutes(mux)
 	a.routeImageRoutes(mux)
+	mcpHandler := a.mcpRoutes(mux)
 	mux.HandleFunc("GET /api/logs", a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
 		category, result := r.URL.Query().Get("category"), r.URL.Query().Get("result")
 		scope, rule := r.URL.Query().Get("scope"), r.URL.Query().Get("rule")
@@ -267,13 +268,17 @@ func (a *Admin) Handler() http.Handler {
 	sub, _ := fs.Sub(webFiles, "web")
 	files := http.FileServer(http.FS(sub))
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/" && r.URL.Path != "/app.js" && r.URL.Path != "/style.css" && r.URL.Path != "/icons.svg" && r.URL.Path != "/sunpanel-admin.js" && r.URL.Path != "/dashboard.js" && r.URL.Path != "/china-outline.svg" {
+		if r.URL.Path != "/" && r.URL.Path != "/app.js" && r.URL.Path != "/style.css" && r.URL.Path != "/icons.svg" && r.URL.Path != "/sunpanel-admin.js" && r.URL.Path != "/mcp-admin.js" && r.URL.Path != "/mcp-sdk-license.txt" && r.URL.Path != "/dashboard.js" && r.URL.Path != "/china-outline.svg" {
 			http.NotFound(w, r)
 			return
 		}
 		files.ServeHTTP(w, r)
 	})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/mcp" {
+			mcpHandler.ServeHTTP(w, r)
+			return
+		}
 		if strings.HasPrefix(r.URL.Path, "/api/") && r.URL.Path != "/api/status" && r.URL.Path != "/api/dashboard" && r.URL.Path != "/api/logs" && r.URL.Path != "/api/statistics" && r.URL.Path != "/api/ddns/records" && r.URL.Path != "/api/maintenance/online-update-status" && !(r.Method == "GET" && (r.URL.Path == "/api/ip-blocks" || strings.HasPrefix(r.URL.Path, "/api/service-discovery/") || strings.HasPrefix(r.URL.Path, "/api/route-images/"))) {
 			started := time.Now()
 			logged := &loggedResponseWriter{ResponseWriter: w}
@@ -323,6 +328,11 @@ func (a *Admin) Handler() http.Handler {
 
 func (a *Admin) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// This unexported context value can only be set by an authorized MCP tool.
+		if r.Context().Value(mcpInternalKey{}) == true {
+			next(w, r)
+			return
+		}
 		if r.Header.Get("Sec-Fetch-Site") == "cross-site" || !a.requestOriginAllowed(r) {
 			apiError(w, 403, "管理请求来源未获允许")
 			return

@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"net/netip"
 	"time"
@@ -94,6 +95,15 @@ func (c Config) CertificateDNSGroup(host string) (DDNSGroup, error) {
 }
 
 func validateCredentials(s State) error {
+	if s.MCPTokenHash != "" {
+		decoded, err := hex.DecodeString(s.MCPTokenHash)
+		if err != nil || len(decoded) != 32 {
+			return errors.New("MCP 令牌摘要格式无效")
+		}
+	}
+	if s.MCP.Enabled && (s.MCPTokenHash == "" || (!s.MCP.Read && !s.MCP.Write && !s.MCP.Maintenance)) {
+		return errors.New("MCP 授权配置无效")
+	}
 	if err := validateGitHubToken(s.GitHubToken); err != nil {
 		return err
 	}

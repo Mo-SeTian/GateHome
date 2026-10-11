@@ -59,14 +59,44 @@ func (a *ItemIcon) GateHomeImport(c *gin.Context) {
 		apiReturn.Error(c, "请选择 1–100 个反代项")
 		return
 	}
+	created, skipped, err := ImportGateHome(global.Db, user.ID, input.Items)
+	if err != nil {
+		apiReturn.Error(c, "批量导入未完成，请刷新分组和反代列表后重试")
+		return
+	}
+	apiReturn.SuccessData(c, gin.H{"created": created, "skipped": skipped})
+}
+
+func (a *ItemIcon) GateHomeSync(c *gin.Context) {
+	user, _ := base.GetCurrentUserInfo(c)
+	var input struct {
+		Items []GateHomeSyncItem `json:"items"`
+	}
+	if c.ShouldBindJSON(&input) != nil || len(input.Items) == 0 || len(input.Items) > 100 {
+		apiReturn.Error(c, "请选择需要更新的关联项目")
+		return
+	}
+	err := SyncGateHome(global.Db, user.ID, input.Items)
+	if err != nil {
+		apiReturn.Error(c, "关联更新未完成，项目可能已变化，请刷新后重新预览")
+		return
+	}
+	apiReturn.SuccessData(c, gin.H{"updated": len(input.Items)})
+}
+
+// ImportGateHome shares ownership checks and duplicate handling with MCP.
+func ImportGateHome(db *gorm.DB, userID uint, items []models.ItemIcon) (int, int, error) {
+	if len(items) == 0 || len(items) > 100 {
+		return 0, 0, errors.New("请选择 1–100 个反代项")
+	}
 	created, skipped := 0, 0
-	err := global.Db.Transaction(func(tx *gorm.DB) error {
+	err := db.Transaction(func(tx *gorm.DB) error {
 		var existing []models.ItemIcon
-		if err := tx.Where("user_id=?", user.ID).Find(&existing).Error; err != nil {
+		if err := tx.Where("user_id=?", userID).Find(&existing).Error; err != nil {
 			return err
 		}
-		for _, item := range input.Items {
-			if !validLink(item.GateHome) || !ownedGroup(tx, item.ItemIconGroupId, user.ID) || !validSite(item.Url, false) || !validSite(item.LanUrl, true) {
+		for _, item := range items {
+			if !validLink(item.GateHome) || !ownedGroup(tx, item.ItemIconGroupId, userID) || !validSite(item.Url, false) || !validSite(item.LanUrl, true) {
 				return errors.New("导入数据或目标分组无效")
 			}
 			duplicate := false
@@ -80,7 +110,7 @@ func (a *ItemIcon) GateHomeImport(c *gin.Context) {
 				skipped++
 				continue
 			}
-			item.BaseModel, item.User, item.UserId = models.BaseModel{}, models.User{}, user.ID
+			item.BaseModel, item.User, item.UserId = models.BaseModel{}, models.User{}, userID
 			encoded, err := json.Marshal(item.Icon)
 			if err != nil {
 				return err
@@ -94,30 +124,23 @@ func (a *ItemIcon) GateHomeImport(c *gin.Context) {
 		}
 		return nil
 	})
-	if err != nil {
-		apiReturn.Error(c, "批量导入未完成，请刷新分组和反代列表后重试")
-		return
-	}
-	apiReturn.SuccessData(c, gin.H{"created": created, "skipped": skipped})
+	return created, skipped, err
 }
 
-func (a *ItemIcon) GateHomeSync(c *gin.Context) {
-	user, _ := base.GetCurrentUserInfo(c)
-	var input struct {
-		Items []struct {
-			ID        uint                `json:"id"`
-			UpdatedAt time.Time           `json:"updatedAt"`
-			Route     models.GateHomeLink `json:"route"`
-		} `json:"items"`
+type GateHomeSyncItem struct {
+	ID        uint                `json:"id"`
+	UpdatedAt time.Time           `json:"updatedAt"`
+	Route     models.GateHomeLink `json:"route"`
+}
+
+func SyncGateHome(db *gorm.DB, userID uint, items []GateHomeSyncItem) error {
+	if len(items) == 0 || len(items) > 100 {
+		return errors.New("请选择需要更新的关联项目")
 	}
-	if c.ShouldBindJSON(&input) != nil || len(input.Items) == 0 || len(input.Items) > 100 {
-		apiReturn.Error(c, "请选择需要更新的关联项目")
-		return
-	}
-	err := global.Db.Transaction(func(tx *gorm.DB) error {
-		for _, request := range input.Items {
+	return db.Transaction(func(tx *gorm.DB) error {
+		for _, request := range items {
 			var item models.ItemIcon
-			if !validLink(&request.Route) || tx.Where("id=? AND user_id=?", request.ID, user.ID).First(&item).Error != nil || item.GateHome == nil || item.GateHome.RouteID != request.Route.RouteID || !item.UpdatedAt.Equal(request.UpdatedAt) {
+			if !validLink(&request.Route) || tx.Where("id=? AND user_id=?", request.ID, userID).First(&item).Error != nil || item.GateHome == nil || item.GateHome.RouteID != request.Route.RouteID || !item.UpdatedAt.Equal(request.UpdatedAt) {
 				return errors.New("项目已变化，请重新预览")
 			}
 			if item.Title == item.GateHome.Title {
@@ -136,9 +159,4 @@ func (a *ItemIcon) GateHomeSync(c *gin.Context) {
 		}
 		return nil
 	})
-	if err != nil {
-		apiReturn.Error(c, "关联更新未完成，项目可能已变化，请刷新后重新预览")
-		return
-	}
-	apiReturn.SuccessData(c, gin.H{"updated": len(input.Items)})
 }

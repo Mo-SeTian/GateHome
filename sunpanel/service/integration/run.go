@@ -24,6 +24,16 @@ var frontend embed.FS
 
 // Run uses a listener inherited from the parent, so no internal TCP port is exposed.
 func Run(data string) error {
+	var bridgeKey []byte
+	if os.Getenv("GATEHOUSE_MCP_BRIDGE_FD") == "4" {
+		pipe := os.NewFile(4, "sunpanel-management-key")
+		bridgeKey = make([]byte, 32)
+		_, err := io.ReadFull(pipe, bridgeKey)
+		pipe.Close()
+		if err != nil {
+			return errors.New("Sun-Panel 管理连接初始化失败")
+		}
+	}
 	syscall.Umask(0077)
 	if err := os.Chdir(data); err != nil {
 		return err
@@ -55,6 +65,17 @@ func Run(data string) error {
 	defer global.Logger.Sync()
 	web, _ := fs.Sub(frontend, "web")
 	handler := router.NewRouter(http.FS(web))
+	if len(bridgeKey) == 32 {
+		base := handler
+		bridge := MCPBridge(bridgeKey)
+		handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/sunpanel/integration/mcp" {
+				bridge.ServeHTTP(w, r)
+				return
+			}
+			base.ServeHTTP(w, r)
+		})
+	}
 	listener, err := net.FileListener(os.NewFile(3, "sunpanel-listener"))
 	if err != nil {
 		return err
