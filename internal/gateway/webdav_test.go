@@ -409,3 +409,25 @@ func TestWebDAVBackupSettingsValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestWebDAVRootDirectoryRetention(t *testing.T) {
+	root := t.TempDir()
+	server := httptest.NewServer(&webdav.Handler{FileSystem: webdav.Dir(root), LockSystem: webdav.NewMemLS()})
+	defer server.Close()
+	state := State{WebDAVBackup: WebDAVBackupState{InstanceID: strings.Repeat("a", 24), Config: WebDAVBackupConfig{URL: server.URL + "/", Keep: 1}}}
+	client, err := newWebDAVClient(state)
+	if err != nil {
+		t.Fatal("client initialization failed")
+	}
+	defer client.close()
+	for _, stamp := range []string{"20261011T010000Z", "20261011T020000Z"} {
+		if _, err := client.upload(context.Background(), davName(client.id, stamp, "aaaaaaaaaaaa"), []byte("TEST_ONLY_ARCHIVE"), 1); err != nil {
+			t.Fatal("root upload failed")
+		}
+	}
+	rows, err := client.list(context.Background())
+	files, _ := filepath.Glob(filepath.Join(root, "*.zip"))
+	if err != nil || len(rows) != 1 || len(files) != 1 || !strings.Contains(rows[0].Name, "20261011T020000Z") {
+		t.Fatal("root listing or retention failed")
+	}
+}

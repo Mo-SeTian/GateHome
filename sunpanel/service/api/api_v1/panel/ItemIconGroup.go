@@ -1,7 +1,6 @@
 package panel
 
 import (
-	"math"
 	"sun-panel/api/api_v1/common/apiData/commonApiStructs"
 	"sun-panel/api/api_v1/common/apiReturn"
 	"sun-panel/api/api_v1/common/base"
@@ -11,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type ItemIconGroup struct {
@@ -18,27 +18,33 @@ type ItemIconGroup struct {
 
 func (a *ItemIconGroup) Edit(c *gin.Context) {
 	userInfo, _ := base.GetCurrentUserInfo(c)
-	req := models.ItemIconGroup{}
+	var input struct {
+		ID          uint   `json:"id"`
+		Icon        string `json:"icon"`
+		Title       string `json:"title"`
+		Description string `json:"description"`
+		Sort        int    `json:"sort"`
+	}
 
-	if err := c.ShouldBindBodyWith(&req, binding.JSON); err != nil {
+	if err := c.ShouldBindBodyWith(&input, binding.JSON); err != nil {
 		apiReturn.ErrorParamFomat(c, err.Error())
 		return
 	}
 
-	req.UserId = userInfo.ID
-
+	req := models.ItemIconGroup{BaseModel: models.BaseModel{ID: input.ID}, Icon: input.Icon, Title: input.Title, Description: input.Description, Sort: input.Sort, UserId: userInfo.ID}
+	var result *gorm.DB
 	if req.ID != 0 {
-		// 修改
-		updateField := []string{"IconJson", "Icon", "Title", "Url", "LanUrl", "Description", "OpenMethod", "GroupId", "UserId"}
+		fields := []string{"Icon", "Title", "Description"}
 		if req.Sort != 0 {
-			updateField = append(updateField, "Sort")
+			fields = append(fields, "Sort")
 		}
-		global.Db.Model(&models.ItemIconGroup{}).
-			Select(updateField).
-			Where("id=?", req.ID).Updates(&req)
+		result = global.Db.Model(&models.ItemIconGroup{}).Omit(clause.Associations).Select(fields).Where("id=? AND user_id=?", req.ID, userInfo.ID).Updates(&req)
 	} else {
-		// 创建
-		global.Db.Create(&req)
+		result = global.Db.Omit(clause.Associations).Create(&req)
+	}
+	if result.Error != nil || result.RowsAffected != 1 {
+		apiReturn.Error(c, "分组保存失败，请刷新后重试")
+		return
 	}
 
 	apiReturn.SuccessData(c, req)
@@ -102,7 +108,12 @@ func (a *ItemIconGroup) Deletes(c *gin.Context) {
 		apiReturn.ErrorDatabase(c, err.Error())
 		return
 	} else {
-		if math.Abs(float64(len(req.Ids))-float64(count)) < 1 {
+		var deleting int64
+		if err := global.Db.Model(&models.ItemIconGroup{}).Where("user_id=? AND id in ?", userInfo.ID, req.Ids).Count(&deleting).Error; err != nil {
+			apiReturn.ErrorDatabase(c, err.Error())
+			return
+		}
+		if count-deleting < 1 {
 			apiReturn.ErrorCode(c, 1201, "At least one must be retained", nil)
 			return
 		}

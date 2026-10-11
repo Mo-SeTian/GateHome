@@ -41,13 +41,17 @@ func (a *UserConfig) Get(c *gin.Context) {
 
 func (a *UserConfig) Set(c *gin.Context) {
 	userInfo, _ := base.GetCurrentUserInfo(c)
-	req := models.UserConfig{}
+	var input struct {
+		Panel        map[string]interface{} `json:"panel"`
+		SearchEngine map[string]interface{} `json:"searchEngine"`
+	}
 
-	if err := c.ShouldBindBodyWith(&req, binding.JSON); err != nil {
+	if err := c.ShouldBindBodyWith(&input, binding.JSON); err != nil {
 		apiReturn.ErrorParamFomat(c, err.Error())
 		return
 	}
 
+	req := models.UserConfig{UserId: userInfo.ID, Panel: input.Panel, SearchEngine: input.SearchEngine}
 	// 处理字段
 	if jb, err := json.Marshal(req.Panel); err != nil {
 		req.PanelJson = "{}"
@@ -77,7 +81,7 @@ func (a *UserConfig) Set(c *gin.Context) {
 		}
 	} else {
 		// 修改
-		if err := global.Db.Where("user_id=?", userInfo.ID).Updates(&req).Error; err != nil {
+		if err := global.Db.Model(&models.UserConfig{}).Where("user_id=?", userInfo.ID).Updates(map[string]interface{}{"panel_json": req.PanelJson, "search_engine_json": req.SearchEngineJson}).Error; err != nil {
 			apiReturn.ErrorDatabase(c, err.Error())
 			return
 		}

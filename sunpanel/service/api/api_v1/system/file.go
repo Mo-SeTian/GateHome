@@ -3,15 +3,17 @@ package system
 import (
 	"errors"
 	"fmt"
+	"io"
+	"mime/multipart"
+	"net/http"
 	"os"
-	"path"
 	"path/filepath"
 	"strings"
 	"sun-panel/api/api_v1/common/apiData/commonApiStructs"
 	"sun-panel/api/api_v1/common/apiReturn"
 	"sun-panel/api/api_v1/common/base"
 	"sun-panel/global"
-	"sun-panel/lib/cmn"
+	"sun-panel/lib/imageasset"
 	"sun-panel/models"
 	"time"
 
@@ -21,91 +23,111 @@ import (
 
 type FileApi struct{}
 
+var uploadWorkers = make(chan struct{}, 4)
+
+const uploadBodyLimit = 64 << 20
+
+func beginUpload(c *gin.Context) bool {
+	select {
+	case uploadWorkers <- struct{}{}:
+	default:
+		c.JSON(http.StatusTooManyRequests, gin.H{"code": 429, "msg": "上传任务过多，请稍后重试"})
+		return false
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, uploadBodyLimit)
+	if c.Request.ParseMultipartForm(2<<20) != nil {
+		<-uploadWorkers
+		if c.Request.MultipartForm != nil {
+			c.Request.MultipartForm.RemoveAll()
+		}
+		apiReturn.ErrorByCode(c, 1300)
+		return false
+	}
+	return true
+}
+func finishUpload(c *gin.Context) { c.Request.MultipartForm.RemoveAll(); <-uploadWorkers }
+func saveUpload(f *multipart.FileHeader, userID uint, imageOnly bool) (string, error) {
+	if f.Size > imageasset.Limit {
+		return "", errors.New("file too large")
+	}
+	source, err := f.Open()
+	if err != nil {
+		return "", err
+	}
+	defer source.Close()
+	data, err := io.ReadAll(io.LimitReader(source, imageasset.Limit+1))
+	if err != nil || len(data) > imageasset.Limit {
+		return "", errors.New("invalid file")
+	}
+	ext := strings.ToLower(filepath.Ext(f.Filename))
+	if imageOnly && !imageasset.Validate(f.Filename, data) {
+		return "", errors.New("invalid image")
+	}
+	now := time.Now()
+	dir := filepath.Join(global.Config.GetValueString("base", "source_path"), fmt.Sprint(now.Year()), fmt.Sprint(int(now.Month())), fmt.Sprint(now.Day()))
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return "", err
+	}
+	file, err := os.CreateTemp(dir, "upload-*"+ext)
+	if err != nil {
+		return "", err
+	}
+	name := file.Name()
+	if !filepath.IsAbs(name) {
+		name = "./" + filepath.ToSlash(name)
+	}
+	_, err = file.Write(data)
+	closeErr := file.Close()
+	if err != nil || closeErr != nil {
+		os.Remove(name)
+		return "", errors.New("file write failed")
+	}
+	if _, err := (&models.File{}).AddFile(userID, f.Filename, ext, name); err != nil {
+		os.Remove(name)
+		return "", err
+	}
+	return "/sunpanel" + strings.TrimPrefix(filepath.ToSlash(name), "."), nil
+}
 func (a *FileApi) UploadImg(c *gin.Context) {
-	userInfo, _ := base.GetCurrentUserInfo(c)
-	configUpload := global.Config.GetValueString("base", "source_path")
+	if !beginUpload(c) {
+		return
+	}
+	defer finishUpload(c)
+	user, _ := base.GetCurrentUserInfo(c)
 	f, err := c.FormFile("imgfile")
 	if err != nil {
 		apiReturn.ErrorByCode(c, 1300)
 		return
-	} else {
-		fileExt := strings.ToLower(path.Ext(f.Filename))
-		agreeExts := []string{
-			".png",
-			".jpg",
-			".gif",
-			".jpeg",
-			".webp",
-			".svg",
-			".ico",
-		}
-
-		if !cmn.InArray(agreeExts, fileExt) {
-			apiReturn.ErrorByCode(c, 1301)
-			return
-		}
-		fileName := cmn.Md5(fmt.Sprintf("%s%s", f.Filename, time.Now().String()))
-		fildDir := fmt.Sprintf("%s/%d/%d/%d/", configUpload, time.Now().Year(), time.Now().Month(), time.Now().Day())
-		if err := os.MkdirAll(fildDir, os.ModePerm); err != nil {
-			apiReturn.ErrorByCode(c, 1300)
-			return
-		}
-		filepath := fmt.Sprintf("%s%s%s", fildDir, fileName, fileExt)
-		if err := c.SaveUploadedFile(f, filepath); err != nil {
-			os.Remove(filepath)
-			apiReturn.ErrorByCode(c, 1300)
-			return
-		}
-
-		// 像数据库添加记录
-		mFile := models.File{}
-		if _, err := mFile.AddFile(userInfo.ID, f.Filename, fileExt, filepath); err != nil {
-			os.Remove(filepath)
-			apiReturn.ErrorByCode(c, 1200)
-			return
-		}
-		apiReturn.SuccessData(c, gin.H{
-			"imageUrl": "/sunpanel" + filepath[1:],
-		})
 	}
-}
-
-func (a *FileApi) UploadFiles(c *gin.Context) {
-	userInfo, _ := base.GetCurrentUserInfo(c)
-	configUpload := global.Config.GetValueString("base", "source_path")
-
-	form, err := c.MultipartForm()
+	source, err := saveUpload(f, user.ID, true)
 	if err != nil {
-		apiReturn.ErrorByCode(c, 1300)
+		apiReturn.Error(c, "图片上传失败：请检查图片格式、大小和存储权限")
 		return
 	}
-	files := form.File["files[]"]
+	apiReturn.SuccessData(c, gin.H{"imageUrl": source})
+}
+func (a *FileApi) UploadFiles(c *gin.Context) {
+	if !beginUpload(c) {
+		return
+	}
+	defer finishUpload(c)
+	user, _ := base.GetCurrentUserInfo(c)
+	files := c.Request.MultipartForm.File["files[]"]
+	if len(files) == 0 || len(files) > 100 {
+		apiReturn.Error(c, "请选择 1–100 个文件")
+		return
+	}
 	errFiles := []string{}
 	succMap := map[string]string{}
 	for _, f := range files {
-		fileExt := strings.ToLower(path.Ext(f.Filename))
-		fileName := cmn.Md5(fmt.Sprintf("%s%s", f.Filename, time.Now().String()))
-		fildDir := fmt.Sprintf("%s/%d/%d/%d/", configUpload, time.Now().Year(), time.Now().Month(), time.Now().Day())
-		isExist, _ := cmn.PathExists(fildDir)
-		if !isExist {
-			os.MkdirAll(fildDir, os.ModePerm)
-		}
-		filepath := fmt.Sprintf("%s%s%s", fildDir, fileName, fileExt)
-		if c.SaveUploadedFile(f, filepath) != nil {
+		source, err := saveUpload(f, user.ID, false)
+		if err != nil {
 			errFiles = append(errFiles, f.Filename)
 		} else {
-			// 成功
-			// 像数据库添加记录
-			mFile := models.File{}
-			mFile.AddFile(userInfo.ID, f.Filename, fileExt, filepath)
-			succMap[f.Filename] = "/sunpanel" + filepath[1:]
+			succMap[f.Filename] = source
 		}
 	}
-
-	apiReturn.SuccessData(c, gin.H{
-		"succMap":  succMap,
-		"errFiles": errFiles,
-	})
+	apiReturn.SuccessData(c, gin.H{"succMap": succMap, "errFiles": errFiles})
 }
 
 func (a *FileApi) GetList(c *gin.Context) {

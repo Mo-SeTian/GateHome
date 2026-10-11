@@ -177,8 +177,13 @@ func CommandRun() {
 
 		newPassword := "12345678"
 
+		hash, err := cmn.HashPassword(newPassword)
+		if err != nil {
+			fmt.Println("Password reset failed")
+			os.Exit(1)
+		}
 		updateInfo := models.User{
-			Password: cmn.PasswordEncryption(newPassword),
+			Password: hash,
 			Token:    "",
 		}
 		// 重置第一个管理员的密码

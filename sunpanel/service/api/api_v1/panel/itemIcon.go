@@ -1,11 +1,13 @@
 package panel
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
 	"path"
+	"path/filepath"
 	"strings"
 	"sun-panel/api/api_v1/common/apiData/commonApiStructs"
 	"sun-panel/api/api_v1/common/apiData/panelApiStructs"
@@ -20,20 +22,41 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
+	"sun-panel/models/datatype"
 )
 
 type ItemIcon struct {
 }
 
+// Only editable website fields are accepted; ownership and ORM associations are server controlled.
+type itemIconInput struct {
+	ID              uint                      `json:"id"`
+	Title           string                    `json:"title"`
+	Url             string                    `json:"url"`
+	LanUrl          string                    `json:"lanUrl"`
+	Description     string                    `json:"description"`
+	OpenMethod      int                       `json:"openMethod"`
+	Sort            int                       `json:"sort"`
+	ItemIconGroupId int                       `json:"itemIconGroupId"`
+	Icon            datatype.ItemIconIconInfo `json:"icon"`
+	GateHome        *models.GateHomeLink      `json:"gateHome,omitempty"`
+}
+
+func (v itemIconInput) model(userID uint) models.ItemIcon {
+	return models.ItemIcon{BaseModel: models.BaseModel{ID: v.ID}, Title: v.Title, Url: v.Url, LanUrl: v.LanUrl, Description: v.Description, OpenMethod: v.OpenMethod, Sort: v.Sort, ItemIconGroupId: v.ItemIconGroupId, Icon: v.Icon, GateHome: v.GateHome, UserId: userID}
+}
+
 func (a *ItemIcon) Edit(c *gin.Context) {
 	userInfo, _ := base.GetCurrentUserInfo(c)
-	req := models.ItemIcon{}
+	input := itemIconInput{}
 
-	if err := c.ShouldBindBodyWith(&req, binding.JSON); err != nil {
+	if err := c.ShouldBindBodyWith(&input, binding.JSON); err != nil {
 		apiReturn.ErrorParamFomat(c, err.Error())
 		return
 	}
 
+	req := input.model(userInfo.ID)
 	if req.ItemIconGroupId == 0 {
 		// apiReturn.Error(c, "Group is mandatory")
 		apiReturn.ErrorParamFomat(c, "Group is mandatory")
@@ -53,12 +76,12 @@ func (a *ItemIcon) Edit(c *gin.Context) {
 
 	if req.ID != 0 {
 		// 修改
-		updateField := []string{"IconJson", "Icon", "Title", "Url", "LanUrl", "Description", "OpenMethod", "GroupId", "UserId", "ItemIconGroupId", "GateHome"}
+		updateField := []string{"IconJson", "Icon", "Title", "Url", "LanUrl", "Description", "OpenMethod", "ItemIconGroupId", "GateHome"}
 		if req.Sort != 0 {
 			updateField = append(updateField, "Sort")
 		}
 		result := global.Db.Model(&models.ItemIcon{}).
-			Select(updateField).
+			Omit(clause.Associations).Select(updateField).
 			Where("id=? AND user_id=?", req.ID, userInfo.ID).Updates(&req)
 		if result.Error != nil || result.RowsAffected != 1 {
 			apiReturn.Error(c, "项目保存失败，请刷新后重试")
@@ -67,7 +90,7 @@ func (a *ItemIcon) Edit(c *gin.Context) {
 	} else {
 		req.Sort = 9999
 		// 创建
-		if err := global.Db.Create(&req).Error; err != nil {
+		if err := global.Db.Omit(clause.Associations).Create(&req).Error; err != nil {
 			apiReturn.Error(c, "项目保存失败")
 			return
 		}
@@ -79,27 +102,34 @@ func (a *ItemIcon) Edit(c *gin.Context) {
 // 添加多个图标
 func (a *ItemIcon) AddMultiple(c *gin.Context) {
 	userInfo, _ := base.GetCurrentUserInfo(c)
-	// type Request
-	req := []models.ItemIcon{}
-
-	if err := c.ShouldBindBodyWith(&req, binding.JSON); err != nil {
+	var input []itemIconInput
+	if err := c.ShouldBindBodyWith(&input, binding.JSON); err != nil {
 		apiReturn.ErrorParamFomat(c, err.Error())
 		return
 	}
-
-	for i := 0; i < len(req); i++ {
-		if req[i].ItemIconGroupId == 0 {
-			apiReturn.ErrorParamFomat(c, "Group is mandatory")
+	if len(input) == 0 || len(input) > 100 {
+		apiReturn.Error(c, "请选择 1–100 个网站")
+		return
+	}
+	req := make([]models.ItemIcon, len(input))
+	for i, v := range input {
+		if !ownedGroup(global.Db, v.ItemIconGroupId, userInfo.ID) || (v.GateHome != nil && !validLink(v.GateHome)) {
+			apiReturn.Error(c, "分组或关联信息无效")
 			return
 		}
-		req[i].UserId = userInfo.ID
-		// json转字符串
-		if j, err := json.Marshal(req[i].Icon); err == nil {
-			req[i].IconJson = string(j)
+		req[i] = v.model(userInfo.ID)
+		req[i].ID = 0
+		data, err := json.Marshal(req[i].Icon)
+		if err != nil {
+			apiReturn.ErrorParamFomat(c, "图标信息无效")
+			return
 		}
+		req[i].IconJson = string(data)
 	}
-
-	global.Db.Create(&req)
+	if global.Db.Omit(clause.Associations).Create(&req).Error != nil {
+		apiReturn.Error(c, "项目保存失败")
+		return
+	}
 
 	apiReturn.SuccessData(c, req)
 }
@@ -216,68 +246,52 @@ func (a *ItemIcon) GetSiteFavicon(c *gin.Context) {
 		return
 	}
 	resp := panelApiStructs.ItemIconGetSiteFaviconResp{}
-	fullUrl := ""
-	if iconUrl, err := siteFavicon.GetOneFaviconURL(req.Url); err != nil {
-		apiReturn.Error(c, "acquisition failed: get ico error:"+err.Error())
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 8*time.Second)
+	defer cancel()
+	fullUrl, err := siteFavicon.GetOneFaviconURLContext(ctx, req.Url)
+	if err != nil {
+		apiReturn.Error(c, "图标获取失败："+err.Error())
 		return
-	} else {
-		fullUrl = iconUrl
 	}
-
 	parsedURL, err := url.Parse(req.Url)
 	if err != nil {
-		apiReturn.Error(c, "acquisition failed:"+err.Error())
+		apiReturn.Error(c, "网站地址无效")
 		return
 	}
-
-	protocol := parsedURL.Scheme
-	global.Logger.Debug("protocol:", protocol)
-	global.Logger.Debug("fullUrl:", fullUrl)
-
-	// 如果URL以双斜杠（//）开头，则使用当前页面协议
-	if strings.HasPrefix(fullUrl, "//") {
-		fullUrl = protocol + "://" + fullUrl[2:]
-	} else if !strings.HasPrefix(fullUrl, "http://") && !strings.HasPrefix(fullUrl, "https://") {
-		// 如果URL既不以http://开头也不以https://开头，则默认为http协议
-		fullUrl = "http://" + fullUrl
-	}
-	global.Logger.Debug("fullUrl:", fullUrl)
-	// 去除图标的get参数
-	{
-		parsedIcoURL, err := url.Parse(fullUrl)
-		if err != nil {
-			apiReturn.Error(c, "acquisition failed: parsed ico URL :"+err.Error())
-			return
-		}
-		fullUrl = parsedIcoURL.Scheme + "://" + parsedIcoURL.Host + parsedIcoURL.Path
-	}
-	global.Logger.Debug("fullUrl:", fullUrl)
 
 	// 生成保存目录
 	configUpload := global.Config.GetValueString("base", "source_path")
 	savePath := fmt.Sprintf("%s/%d/%d/%d/", configUpload, time.Now().Year(), time.Now().Month(), time.Now().Day())
 	isExist, _ := cmn.PathExists(savePath)
 	if !isExist {
-		os.MkdirAll(savePath, os.ModePerm)
+		if err := os.MkdirAll(savePath, 0755); err != nil {
+			apiReturn.Error(c, "图标目录不可写")
+			return
+		}
 	}
 
 	// 下载
 	var imgInfo *os.File
 	{
 		var err error
-		if imgInfo, err = siteFavicon.DownloadImage(fullUrl, savePath, 1024*1024); err != nil {
+		if imgInfo, err = siteFavicon.DownloadImageContext(ctx, fullUrl, savePath, 1024*1024); err != nil {
 			apiReturn.Error(c, "acquisition failed: download"+err.Error())
 			return
 		}
 	}
 
 	// 保存到数据库
-	ext := path.Ext(fullUrl)
+	imagePath := imgInfo.Name()
+	if !filepath.IsAbs(imagePath) {
+		imagePath = "./" + filepath.ToSlash(imagePath)
+	}
+	ext := path.Ext(imagePath)
 	mFile := models.File{}
-	if _, err := mFile.AddFile(userInfo.ID, parsedURL.Host, ext, imgInfo.Name()); err != nil {
-		apiReturn.ErrorDatabase(c, err.Error())
+	if _, err := mFile.AddFile(userInfo.ID, parsedURL.Host, ext, imagePath); err != nil {
+		os.Remove(imgInfo.Name())
+		apiReturn.Error(c, "图标记录保存失败")
 		return
 	}
-	resp.IconUrl = "/sunpanel" + imgInfo.Name()[1:]
+	resp.IconUrl = "/sunpanel" + strings.TrimPrefix(imagePath, ".")
 	apiReturn.SuccessData(c, resp)
 }

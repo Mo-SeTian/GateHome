@@ -42,9 +42,14 @@ func (a UsersApi) Create(c *gin.Context) {
 		return
 	}
 
+	hash, err := cmn.HashPassword(param.Password)
+	if err != nil {
+		apiReturn.ErrorParamFomat(c, err.Error())
+		return
+	}
 	mUser := models.User{
 		Username:  strings.TrimSpace(param.Username),
-		Password:  cmn.PasswordEncryption(param.Password),
+		Password:  hash,
 		Name:      param.Name,
 		HeadImage: param.HeadImage,
 		Status:    1,
@@ -97,7 +102,7 @@ func (a UsersApi) Deletes(c *gin.Context) {
 				return err
 			}
 			// 删除用户配置
-			if err := tx.Delete(&models.ModuleConfig{}, "user_id=?", v).Error; err != nil {
+			if err := tx.Delete(&models.UserConfig{}, "user_id=?", v).Error; err != nil {
 				return err
 			}
 			// // 删除文件记录（不删除资源文件）
@@ -113,7 +118,7 @@ func (a UsersApi) Deletes(c *gin.Context) {
 
 		// 验证是否还存在管理员
 		var count int64
-		if err := tx.Model(&models.User{}).Where("role=?", 1).Count(&count).Error; err != nil {
+		if err := tx.Model(&models.User{}).Where("role=1 AND status=1").Count(&count).Error; err != nil {
 			return err
 		} else if count == 0 {
 			return ErrUsersApiAtLeastKeepOne
@@ -158,35 +163,51 @@ func (a UsersApi) Update(c *gin.Context) {
 	}
 
 	allowField := []string{"Username", "Name", "Mail", "Token", "Role"}
+	if param.Status == 1 || param.Status == 2 {
+		allowField = append(allowField, "Status")
+	}
 
 	// 密码不为默认“-”空，修改密码
 	if param.Password != "-" {
-		param.Password = cmn.PasswordEncryption(param.Password)
+		hash, err := cmn.HashPassword(param.Password)
+		if err != nil {
+			apiReturn.ErrorParamFomat(c, err.Error())
+			return
+		}
+		param.Password = hash
 		allowField = append(allowField, "Password")
 	}
 
-	mUser := models.User{}
-
-	userInfo := models.User{}
-	// 验证账号是否存在
-	if user, err := mUser.CheckUsernameExist(param.Username); err != nil {
-		userInfo = user
-		if user.ID != param.ID {
-			apiReturn.ErrorByCode(c, 1006)
-			// apiReturn.Error(c, global.Lang.Get("register.mail_exist"))
-			return
+	var previous models.User
+	err := global.Db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.First(&previous, param.ID).Error; err != nil {
+			return err
 		}
-	} else {
-		userInfo = user
-	}
-
-	param.Token = "" // 修改资料就重置token
-	if err := global.Db.Select(allowField).Where("id=?", param.ID).Updates(&param).Error; err != nil {
-		apiReturn.ErrorDatabase(c, err.Error())
+		var count int64
+		if err := tx.Model(&models.User{}).Where("username=? AND id<>?", param.Username, param.ID).Count(&count).Error; err != nil {
+			return err
+		}
+		if count != 0 {
+			return errors.New("username exists")
+		}
+		param.Token = ""
+		if err := tx.Select(allowField).Where("id=?", param.ID).Updates(&param).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&models.User{}).Where("role=1 AND status=1").Count(&count).Error; err != nil {
+			return err
+		}
+		if count == 0 {
+			return ErrUsersApiAtLeastKeepOne
+		}
+		return nil
+	})
+	if err != nil {
+		apiReturn.Error(c, "保存失败：账号不存在、用户名重复或需要保留一个管理员")
 		return
 	}
-	// global.Logger.Debug("修改资料清空token", userInfo.Token)
-	global.UserToken.Delete(userInfo.Token) // 更新用户信息
+	global.UserToken.Delete(previous.Token)
+	param.Password = ""
 	// 返回token等基本信息
 	apiReturn.SuccessData(c, param)
 }

@@ -7,12 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"encoding/xml"
 	"errors"
-	"image"
-	_ "image/gif"
-	_ "image/jpeg"
-	_ "image/png"
 	"io"
 	"net/http"
 	"os"
@@ -22,12 +17,12 @@ import (
 	"sun-panel/api/api_v1/common/apiReturn"
 	"sun-panel/api/api_v1/common/base"
 	"sun-panel/global"
+	"sun-panel/lib/imageasset"
 	"sun-panel/models"
 	"sun-panel/models/datatype"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	_ "golang.org/x/image/webp"
 	"gorm.io/gorm"
 )
 
@@ -57,30 +52,7 @@ type portableManifest struct {
 	Images    map[string]string `json:"images"`
 }
 
-func portableImageValid(name string, data []byte) bool {
-	if len(data) == 0 || len(data) > 10<<20 {
-		return false
-	}
-	switch strings.ToLower(path.Ext(name)) {
-	case ".png", ".jpg", ".jpeg", ".gif", ".webp":
-		config, _, err := image.DecodeConfig(bytes.NewReader(data))
-		return err == nil && config.Width > 0 && config.Height > 0 && config.Width <= 16384 && config.Height <= 16384
-	case ".ico":
-		return len(data) >= 22 && bytes.Equal(data[:4], []byte{0, 0, 1, 0})
-	case ".svg":
-		decoder := xml.NewDecoder(bytes.NewReader(data))
-		for {
-			token, err := decoder.Token()
-			if err != nil {
-				return false
-			}
-			if start, ok := token.(xml.StartElement); ok {
-				return start.Name.Local == "svg"
-			}
-		}
-	}
-	return false
-}
+func portableImageValid(name string, data []byte) bool { return imageasset.Validate(name, data) }
 
 func buildPortable(db *gorm.DB, userID uint, root string) ([]byte, error) {
 	manifest := portableManifest{Format: "gatehome-sunpanel-v1", CreatedAt: time.Now().UTC(), Groups: []portableGroup{}, Images: map[string]string{}}

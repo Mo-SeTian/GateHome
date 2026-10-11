@@ -1,176 +1,190 @@
 package siteFavicon
 
 import (
+	"bytes"
+	"context"
 	"errors"
-	"fmt"
+	"github.com/PuerkitoBio/goquery"
 	"io"
+	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
-	"path"
-	"regexp"
-	"strconv"
 	"strings"
-	"sun-panel/lib/cmn"
+	"sun-panel/lib/imageasset"
 	"time"
-
-	"github.com/PuerkitoBio/goquery"
 )
 
-func IsHTTPURL(url string) bool {
-	httpPattern := `^(http://|https://|//)`
-	match, err := regexp.MatchString(httpPattern, url)
-	if err != nil {
-		return false
+func safeURL(raw string) (*url.URL, error) {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || len(raw) > 4096 || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User != nil {
+		return nil, errors.New("需要不含账号密码的 HTTP/HTTPS 地址")
 	}
-	return match
+	if ip, err := netip.ParseAddr(u.Hostname()); err == nil && !allowedAddress(ip) {
+		return nil, errors.New("不允许此图标地址")
+	}
+	return u, nil
 }
 
-func GetOneFaviconURL(urlStr string) (string, error) {
-	iconURLs, err := getFaviconURL(urlStr)
+// LAN and loopback services are supported, but metadata/link-local destinations are never fetched.
+func allowedAddress(ip netip.Addr) bool {
+	ip = ip.Unmap()
+	return (ip.IsGlobalUnicast() || ip.IsLoopback()) && !ip.IsLinkLocalUnicast() && ip != netip.MustParseAddr("100.100.100.200")
+}
+func faviconClient() (*http.Client, *http.Transport) {
+	transport := &http.Transport{Proxy: nil, TLSHandshakeTimeout: 3 * time.Second, ResponseHeaderTimeout: 5 * time.Second, MaxResponseHeaderBytes: 32 << 10,
+		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
+			host, port, err := net.SplitHostPort(address)
+			if err != nil {
+				return nil, err
+			}
+			ips, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+			if err != nil || len(ips) == 0 {
+				return nil, errors.New("地址解析失败")
+			}
+			for _, ip := range ips {
+				if !allowedAddress(ip) {
+					return nil, errors.New("不允许此图标地址")
+				}
+			}
+			for _, ip := range ips {
+				conn, err := (&net.Dialer{Timeout: 2 * time.Second}).DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
+				if err == nil {
+					return conn, nil
+				}
+			}
+			return nil, errors.New("图标地址无法连接")
+		}}
+	client := &http.Client{Transport: transport, Timeout: 8 * time.Second, CheckRedirect: func(r *http.Request, via []*http.Request) error {
+		if len(via) >= 3 {
+			return errors.New("重定向过多")
+		}
+		_, err := safeURL(r.URL.String())
+		return err
+	}}
+	return client, transport
+}
+func fetch(ctx context.Context, raw, method string) (*http.Response, func(), error) {
+	u, err := safeURL(raw)
+	if err != nil {
+		return nil, nil, err
+	}
+	client, transport := faviconClient()
+	req, err := http.NewRequestWithContext(ctx, method, u.String(), nil)
+	if err != nil {
+		transport.CloseIdleConnections()
+		return nil, nil, errors.New("图标地址无效")
+	}
+	req.Header.Set("User-Agent", "Sun-Panel-ImageImport/1.0")
+	response, err := client.Do(req)
+	if err != nil {
+		transport.CloseIdleConnections()
+		return nil, nil, errors.New("图标访问失败或超时")
+	}
+	close := func() { response.Body.Close(); transport.CloseIdleConnections() }
+	if response.StatusCode != http.StatusOK {
+		close()
+		return nil, nil, errors.New("图标服务器未返回成功响应")
+	}
+	return response, close, nil
+}
+func boundedRead(r io.Reader, limit int64) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(r, limit+1))
+	if err != nil {
+		return nil, errors.New("图标读取失败")
+	}
+	if int64(len(data)) > limit {
+		return nil, errors.New("内容超过大小限制")
+	}
+	return data, nil
+}
+func IsHTTPURL(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && (u.Scheme == "http" || u.Scheme == "https" || strings.HasPrefix(raw, "//"))
+}
+func GetOneFaviconURL(raw string) (string, error) {
+	return GetOneFaviconURLContext(context.Background(), raw)
+}
+func GetOneFaviconURLContext(ctx context.Context, raw string) (string, error) {
+	response, close, err := fetch(ctx, raw, "GET")
 	if err != nil {
 		return "", err
 	}
-
-	for _, v := range iconURLs {
-		// 标准的路径地址
-		if IsHTTPURL(v) {
-			return v, nil
-		} else {
-			urlInfo, _ := url.Parse(urlStr)
-			fullUrl := urlInfo.Scheme + "://" + urlInfo.Host + "/" + strings.TrimPrefix(v, "/")
-			return fullUrl, nil
-		}
+	defer close()
+	data, err := boundedRead(response.Body, 2<<20)
+	if err != nil {
+		return "", err
 	}
-	return "", fmt.Errorf("not found ico")
+	doc, err := goquery.NewDocumentFromReader(bytes.NewReader(data))
+	if err != nil {
+		return "", errors.New("页面解析失败")
+	}
+	icon := ""
+	doc.Find("link").Each(func(_ int, s *goquery.Selection) {
+		if icon != "" {
+			return
+		}
+		rel, _ := s.Attr("rel")
+		href, _ := s.Attr("href")
+		if !strings.Contains(strings.ToLower(rel), "icon") || href == "" {
+			return
+		}
+		reference, err := url.Parse(href)
+		if err != nil {
+			return
+		}
+		resolved := response.Request.URL.ResolveReference(reference).String()
+		if _, err := safeURL(resolved); err == nil {
+			icon = resolved
+		}
+	})
+	if icon == "" {
+		return "", errors.New("页面未提供图标")
+	}
+	return icon, nil
 }
-
-// 获取远程文件的大小
-func GetRemoteFileSize(url string) (int64, error) {
-	resp, err := http.Head(url)
+func GetRemoteFileSize(raw string) (int64, error) {
+	response, close, err := fetch(context.Background(), raw, "HEAD")
 	if err != nil {
 		return 0, err
 	}
-	defer resp.Body.Close()
-
-	// 检查HTTP响应状态
-	if resp.StatusCode != http.StatusOK {
-		return 0, fmt.Errorf("HTTP request failed, status code: %d", resp.StatusCode)
-	}
-
-	// 获取Content-Length字段，即文件大小
-	size := resp.ContentLength
-	return size, nil
+	defer close()
+	return response.ContentLength, nil
 }
-
-// 下载图片
-func DownloadImage(url, savePath string, maxSize int64) (*os.File, error) {
-	// 获取远程文件大小
-	fileSize, err := GetRemoteFileSize(url)
+func DownloadImage(raw, savePath string, maxSize int64) (*os.File, error) {
+	return DownloadImageContext(context.Background(), raw, savePath, maxSize)
+}
+func DownloadImageContext(ctx context.Context, raw, savePath string, maxSize int64) (*os.File, error) {
+	if maxSize <= 0 || maxSize > imageasset.Limit {
+		return nil, errors.New("图片大小限制无效")
+	}
+	response, close, err := fetch(ctx, raw, "GET")
 	if err != nil {
 		return nil, err
 	}
-
-	// 判断文件大小是否在阈值内
-	if fileSize > maxSize {
-		return nil, fmt.Errorf("文件太大，不下载。大小：%d字节", fileSize)
-	}
-
-	// 发送HTTP GET请求获取图片数据
-	response, err := http.Get(url)
+	defer close()
+	data, err := boundedRead(response.Body, maxSize)
 	if err != nil {
 		return nil, err
 	}
-	defer response.Body.Close()
-
-	// 检查HTTP响应状态
-	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP request failed, status code: %d", response.StatusCode)
-	}
-
-	urlFileName := path.Base(url)
-	fileExt := path.Ext(url)
-	fileName := cmn.Md5(fmt.Sprintf("%s%s", urlFileName, time.Now().String())) + fileExt
-
-	destination := savePath + "/" + fileName
-
-	// 创建本地文件用于保存图片
-	file, err := os.Create(destination)
+	ext, err := imageasset.Extension(data)
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
-
-	// 将图片数据写入本地文件
-	_, err = io.Copy(file, response.Body)
+	file, err := os.CreateTemp(savePath, "favicon-*"+ext)
 	if err != nil {
-		return nil, err
+		return nil, errors.New("图标目录不可写")
+	}
+	_, err = file.Write(data)
+	closeErr := file.Close()
+	if err != nil || closeErr != nil {
+		os.Remove(file.Name())
+		return nil, errors.New("图标保存失败")
 	}
 	return file, nil
 }
-
-func GetOneFaviconURLAndUpload(urlStr string) (string, bool) {
-	//www.iqiyipic.com/pcwimg/128-128-logo.png
-	iconURLs, err := getFaviconURL(urlStr)
-	if err != nil {
-		return "", false
-	}
-
-	for _, v := range iconURLs {
-		// 标准的路径地址
-		if IsHTTPURL(v) {
-			return v, true
-		} else {
-			urlInfo, _ := url.Parse(urlStr)
-			fullUrl := urlInfo.Scheme + "://" + urlInfo.Host + "/" + strings.TrimPrefix(v, "/")
-			return fullUrl, true
-		}
-	}
-	return "", false
-}
-
-func getFaviconURL(url string) ([]string, error) {
-	var icons []string
-	icons = make([]string, 0)
-	client := &http.Client{}
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return icons, err
-	}
-
-	// 设置User-Agent头字段，模拟浏览器请求
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return icons, err
-	}
-
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return icons, errors.New("HTTP request failed with status code " + strconv.Itoa(resp.StatusCode))
-	}
-
-	doc, err := goquery.NewDocumentFromReader(resp.Body)
-	if err != nil {
-		return icons, err
-	}
-
-	// 查找所有link标签，筛选包含rel属性为"icon"的标签
-	doc.Find("link").Each(func(i int, s *goquery.Selection) {
-		rel, _ := s.Attr("rel")
-		href, _ := s.Attr("href")
-
-		if strings.Contains(rel, "icon") && href != "" {
-			// fmt.Println(href)
-			icons = append(icons, href)
-		}
-	})
-
-	if len(icons) == 0 {
-		return icons, errors.New("favicon not found on the page")
-	}
-
-	return icons, nil
+func GetOneFaviconURLAndUpload(raw string) (string, bool) {
+	icon, err := GetOneFaviconURL(raw)
+	return icon, err == nil
 }

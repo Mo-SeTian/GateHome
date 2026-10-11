@@ -213,7 +213,7 @@ func AssetsTakeFileToPath(assetsPath, targetPath string) error {
 	return os.WriteFile(targetPath, bytes, 0666)
 }
 
-// 密码加密
+// 仅用于验证旧版本密码；新密码使用 HashPassword。
 func PasswordEncryption(password string) string {
 	return Md5(Md5(Md5(password)))
 }

@@ -91,22 +91,26 @@ func (a *UserApi) UpdatePasssword(c *gin.Context) {
 	}
 	userInfo, _ := base.GetCurrentUserInfo(c)
 	mUser := models.User{}
-	if v, err := mUser.GetUserInfoByUid(userInfo.ID); err != nil {
+	previous, err := mUser.GetUserInfoByUid(userInfo.ID)
+	if err != nil {
+		apiReturn.Error(c, "账号不存在，请重新登录")
+		return
+	}
+	if !cmn.VerifyPassword(previous.Password, params.OldPassword) {
+		apiReturn.ErrorByCode(c, 1007)
+		return
+	}
+	hash, err := cmn.HashPassword(params.NewPassword)
+	if err != nil {
 		apiReturn.ErrorParamFomat(c, err.Error())
 		return
-	} else {
-		if v.Password != cmn.PasswordEncryption(params.OldPassword) {
-			// 旧密码不正确
-			apiReturn.ErrorByCode(c, 1007)
-			return
-		}
 	}
-	res := global.Db.Model(&models.User{}).Where("id", userInfo.ID).Updates(map[string]interface{}{
-		"password": cmn.PasswordEncryption(params.NewPassword),
+	res := global.Db.Model(&models.User{}).Where("id=? AND password=? AND status=1", userInfo.ID, previous.Password).Updates(map[string]interface{}{
+		"password": hash,
 		"token":    "",
 	})
-	if res.Error != nil {
-		apiReturn.ErrorDatabase(c, res.Error.Error())
+	if res.Error != nil || res.RowsAffected != 1 {
+		apiReturn.Error(c, "账号已变化或密码保存失败，请重试")
 		return
 	}
 	// 删除token

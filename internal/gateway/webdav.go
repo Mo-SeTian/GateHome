@@ -243,7 +243,7 @@ func (d *webDAVClient) list(ctx context.Context) ([]webDAVFile, error) {
 			continue
 		}
 		target := d.base.ResolveReference(relative)
-		if target.Scheme != d.base.Scheme || !strings.EqualFold(target.Host, d.base.Host) || path.Dir(target.Path) != strings.TrimSuffix(d.base.Path, "/") {
+		if target.Scheme != d.base.Scheme || !strings.EqualFold(target.Host, d.base.Host) || path.Dir(target.Path) != path.Clean(d.base.Path) {
 			continue
 		}
 		name := path.Base(target.Path)
