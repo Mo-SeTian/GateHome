@@ -25,7 +25,7 @@ const reducedMotion=window.matchMedia('(prefers-reduced-motion: reduce)');
 const mobileNavigation=window.matchMedia('(max-width: 900px)');
 const compactCharts=window.matchMedia('(max-width: 680px)');
 const collapsedGroups=new Set();
-let renderedPage='',pageMotion;
+let renderedPage='',pageMotion,navigationMotion;
 const dialogMotions=new WeakMap(),dialogOpeners=new WeakMap();
 function focusSelector(el) {
   if(!el) return '';
@@ -64,6 +64,17 @@ function setNavigation(open,restoreFocus=true) {
   $('#sidebar').inert=mobileNavigation.matches&&!open;
   if(open) requestAnimationFrame(()=>{if(document.body.classList.contains('nav-open')) $('#sidebar nav .active')?.focus();});
   else if(restoreFocus&&mobileNavigation.matches) $('#nav-toggle').focus();
+}
+function updateNavigationIndicator(animate=true) {
+  const nav=$('#sidebar nav'),target=$('button.active',nav),indicator=$('.nav-indicator',nav);
+  if(!target) return;
+  const transform=`translateY(${target.offsetTop}px)`,height=target.offsetHeight+'px',ready=nav.classList.contains('nav-indicator-ready');
+  if(ready&&indicator.style.transform===transform&&indicator.style.height===height) return;
+  const from=getComputedStyle(indicator).transform;
+  navigationMotion?.cancel();
+  indicator.style.height=height;indicator.style.transform=transform;indicator.hidden=false;
+  nav.classList.add('nav-indicator-ready');
+  if(animate&&ready&&!reducedMotion.matches) navigationMotion=indicator.animate([{transform:from},{transform}],{duration:240,easing:'cubic-bezier(.2,.8,.2,1)'});
 }
 let ipBlockView={entries:[]},ipBlockRule='',ipBlockSearch='',ipBlockPage=1,ipBlockRequest=0,ipBlockError='',ipBlockReceived=0;
 let maintenancePreview=null;
@@ -724,6 +735,7 @@ function render() {
   $('#breadcrumb').textContent='工作空间 / '+pages[page];
   $('#route-count').textContent=config.routes.length;
   document.querySelectorAll('nav [data-page]').forEach(b=>{b.classList.toggle('active',b.dataset.page===page);if(b.dataset.page===page) b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');});
+  updateNavigationIndicator(changed&&!!renderedPage);
   let html;
   if (page==='sunpanel') html=sunPanelHTML();
   if (page==='overview') html=overviewHTML();
@@ -1371,6 +1383,7 @@ document.addEventListener('keydown',event=>{
   }
 });
 mobileNavigation.addEventListener('change',()=>setNavigation(false,false));
+window.addEventListener('resize',()=>updateNavigationIndicator(false));
 compactCharts.addEventListener('change',()=>{if(page==='statistics'&&config) render();});
 document.addEventListener('focusin',event=>{const menu=$('#account-menu');if(menu.open&&!menu.contains(event.target)) menu.open=false;});
 document.addEventListener('click',event=>document.querySelectorAll('.object-menu[open]').forEach(menu=>{if(!menu.contains(event.target)) menu.open=false;}));
@@ -1381,6 +1394,8 @@ document.addEventListener('keydown',event=>{
 reducedMotion.addEventListener('change',()=>{
   if(!reducedMotion.matches) return;
   pageMotion?.cancel();
+  navigationMotion?.cancel();
+  document.querySelectorAll('.widget-metric,.traffic-values b').forEach(el=>el.getAnimations().forEach(motion=>motion.cancel()));
   document.querySelectorAll('dialog').forEach(dialog=>{const motion=dialogMotions.get(dialog);if(motion?.effect.getTiming().fill==='forwards') dialog.close();motion?.cancel();});
 });
 hydrateIcons();setNavigation(false,false);

@@ -79,7 +79,11 @@ async function loadDashboard() {
     const value=await api('dashboard');
     if(request!==dashboardRequest||!config||page!=='overview'||dashboardDrag||dashboardSaving) return;
     dashboardView=value;dashboardError='';
-    document.querySelectorAll('.dashboard-widget').forEach(card=>{const body=card.querySelector('.widget-body');body.innerHTML=widgetBody(card.dataset.widget);prepareTables(body);hydrateIcons(body);});
+    document.querySelectorAll('.dashboard-widget').forEach(card=>{
+      const body=card.querySelector('.widget-body'),selector='.widget-metric,.traffic-values b',previous=[...body.querySelectorAll(selector)].map(el=>el.textContent);
+      body.innerHTML=widgetBody(card.dataset.widget);prepareTables(body);hydrateIcons(body);
+      if(!reducedMotion.matches) body.querySelectorAll(selector).forEach((el,i)=>{if(previous[i]!==undefined&&previous[i]!==el.textContent) el.animate([{opacity:.5,transform:'translateY(3px)'},{opacity:1,transform:'none'}],{duration:160,easing:'ease-out'});});
+    });
     const sample=$('.dashboard-meta span');if(sample) sample.textContent='最近采样：'+date(value.sampled_at)+' · 每 5 秒刷新';
     const error=$('#dashboard-error');if(error) error.textContent='';
   } catch(error) {

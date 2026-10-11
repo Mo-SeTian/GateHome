@@ -59,6 +59,18 @@ const revoked=run('loadDashboard()');run('resetDashboard()');resolvers[2]({resou
 assert.equal(run('dashboardView'),null);
 assert.equal(run('dashboardEditing'),false,'logout retained editing mode');
 
+// Polling animates changed values only; unchanged cards and reduced motion stay still.
+const numberMotion=[];
+let metricValue='0次';
+const metricBody={querySelectorAll:()=>[{textContent:metricValue,animate:(frames,options)=>numberMotion.push({frames,options})}],set innerHTML(html){metricValue=html.match(/class="widget-metric">([^<]+)/)[1]+'次';}};
+context.document.querySelectorAll=()=>[{dataset:{widget:'requests'},querySelector:()=>metricBody}];
+context.reducedMotion={matches:false};context.api=async()=>({resources:{},sampled_at:'METRIC'});
+context.status.requests=1;await run('loadDashboard()');assert.equal(metricValue,'1次');assert.equal(numberMotion.length,1);
+await run('loadDashboard()');assert.equal(numberMotion.length,1,'unchanged polling replayed number motion');
+context.reducedMotion.matches=true;context.status.requests=2;await run('loadDashboard()');assert.equal(metricValue,'2次');assert.equal(numberMotion.length,1,'reduced motion animated a metric update');
+context.document.querySelectorAll=()=>[];
+console.log('Dashboard metrics: immediate values, changed-only feedback and reduced motion PASS');
+
 // A pointer cancellation removes visual state without committing any data.
 let released=false,removed=false;
 const handle={hasPointerCapture:()=>true,releasePointerCapture:()=>{released=true;},setAttribute:()=>{}};

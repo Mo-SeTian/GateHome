@@ -58,6 +58,24 @@ dialog.id='route-dialog';
 call('openDialog');assert.equal(dialog.opens,3,'route editing must always use a native modal');call('closeDialog');
 console.log('Dialog entry, canceled/replaced exit, exact settling and reduced motion: PASS');
 
+// Selection must settle independently of animation completion and accept a new target mid-flight.
+const navClasses=new Set(),indicator={hidden:true,style:{},animations:[],visual:'none',animate(frames,options){const a=new ControlledAnimation(options);a.frames=frames;this.animations.push(a);return a;}};
+const nav={classList:{contains:name=>navClasses.has(name),add:name=>navClasses.add(name)}},selected={offsetTop:0,offsetHeight:42};
+const navPreference={matches:false};
+const navigation=vm.createContext({reducedMotion:navPreference,$:selector=>selector==='#sidebar nav'?nav:selector==='button.active'?selected:indicator,getComputedStyle:()=>({transform:indicator.visual})});
+vm.runInContext('let navigationMotion;'+source.slice(source.indexOf('function updateNavigationIndicator('),source.indexOf('let ipBlockView=')),navigation);
+const move=animate=>vm.runInContext(`updateNavigationIndicator(${animate})`,navigation);
+move(true);assert.equal(indicator.hidden,false);assert.equal(indicator.style.transform,'translateY(0px)');assert.equal(indicator.animations.length,0,'initial selection flew in from an unrelated position');
+indicator.visual='matrix(1, 0, 0, 1, 0, 0)';selected.offsetTop=46;move(true);
+const interruptedNav=indicator.animations.at(-1);assert.equal(indicator.style.transform,'translateY(46px)','semantic destination waited for animation completion');
+indicator.visual='matrix(1, 0, 0, 1, 0, 19)';selected.offsetTop=580;move(true);
+assert.equal(interruptedNav.canceled,true);assert.equal(indicator.animations.at(-1).frames[0].transform,indicator.visual,'rapid navigation restarted at the old button instead of its visual position');
+assert.equal(indicator.style.transform,'translateY(580px)');
+const count=indicator.animations.length;move(true);assert.equal(indicator.animations.length,count,'a data refresh restarted navigation motion');
+selected.offsetTop=604;selected.offsetHeight=44;move(false);assert.equal(indicator.style.height,'44px');assert.equal(indicator.style.transform,'translateY(604px)');assert.equal(indicator.animations.length,count,'resizing animated stale geometry');
+navPreference.matches=true;selected.offsetTop=92;move(true);assert.equal(indicator.style.transform,'translateY(92px)');assert.equal(indicator.animations.length,count,'reduced motion created a navigation travel animation');
+console.log('Navigation indicator: initial placement, interruption continuity, unchanged refresh, resized geometry and reduced motion: PASS');
+
 const collapsedGroups=new Set(),groupClasses=new Set(),groupAttributes=new Map([['aria-expanded','true'],['aria-controls','group-panel-proxy-home']]);
 const groupBody={hidden:false,animations:[],getAnimations(){return this.animations;},animate(frames,options){const a=new ControlledAnimation(options);this.animations.push(a);return a;}};
 const disclosure={dataset:{panel:'proxy:home'},getAttribute:key=>groupAttributes.get(key),setAttribute:(key,value)=>groupAttributes.set(key,value),querySelector:()=>({textContent:'Home'}),closest:()=>({classList:{toggle(name,on){if(on) groupClasses.add(name);else groupClasses.delete(name);}}})};
