@@ -163,6 +163,34 @@ func TestMCPSettingsSecretStorageAndHTTPBoundary(t *testing.T) {
 	}
 }
 
+func TestMCPTokenCreationBeforeActivation(t *testing.T) {
+	a, h := testAdmin(t)
+	cookie := loginForTest(t, h)
+	w := adminRequest(h, "POST", "/api/mcp/rotate-token", map[string]any{"revision": a.store.Snapshot().Revision}, cookie, "")
+	var response struct {
+		Token string `json:"token"`
+	}
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &response) != nil || response.Token == "" {
+		t.Fatal("API token creation failed")
+	}
+	token := response.Token
+	state := a.store.Snapshot()
+	if state.MCP.Enabled || state.MCP.Read || state.MCP.Write || state.MCP.Maintenance || validMCPToken(state, "Bearer "+token) {
+		t.Fatal("token creation enabled service or granted permissions")
+	}
+	contents, err := os.ReadFile(a.store.path)
+	if err != nil || strings.Contains(string(contents), token) {
+		t.Fatal("API token persisted in plaintext")
+	}
+	w = adminRequest(h, "PUT", "/api/mcp", map[string]any{"revision": state.Revision, "config": MCPConfig{Enabled: true, Read: true}}, cookie, "")
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &response) != nil || response.Token != "" {
+		t.Fatal("activation regenerated or repeated the existing token")
+	}
+	if !validMCPToken(a.store.Snapshot(), "Bearer "+token) {
+		t.Fatal("activation did not accept the API token created earlier")
+	}
+}
+
 func TestMCPRedactionPreservesCredentialURLsOnEdit(t *testing.T) {
 	a, _ := testAdmin(t)
 	old := map[string]any{"id": "route", "url": "https://service.example.test/?token=TEST_ONLY_URL_CREDENTIAL&view=home"}

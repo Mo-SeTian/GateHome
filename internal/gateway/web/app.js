@@ -6,7 +6,7 @@ function newID() {
   const bytes=new Uint8Array(16);crypto.getRandomValues(bytes);bytes[6]=(bytes[6]&15)|64;bytes[8]=(bytes[8]&63)|128;
   const hex=[...bytes].map(b=>b.toString(16).padStart(2,'0')).join('');return hex.slice(0,8)+'-'+hex.slice(8,12)+'-'+hex.slice(12,16)+'-'+hex.slice(16,20)+'-'+hex.slice(20);
 }
-const pages = {sunpanel:'浏览器首页',overview:'概览',routes:'反向代理',ddns:'动态域名',certificates:'SSL 证书',access:'防火墙管理',subscriptions:'订阅管理',settings:'设置',logs:'日志',statistics:'统计','firewall-logs':'防火墙拦截记录','ip-blocks':'IP 拦截名单'};
+const pages = {sunpanel:'浏览器首页',overview:'概览',routes:'反向代理',ddns:'动态域名',certificates:'SSL 证书',access:'防火墙管理',subscriptions:'订阅管理',mcp:'AI 管理',settings:'设置',logs:'日志',statistics:'统计','firewall-logs':'防火墙拦截记录','ip-blocks':'IP 拦截名单'};
 const iconNames = new Set(['overview','routes','globe','certificate','shield','download','logs','chart','settings','server','gateway','router','layers','activity','refresh','plus','close','logout','menu','more','back','edit','chevron-down','chevron-up','chevron-left','chevron-right','external-link','trash','play','pause','login','filter','unlock','save','upload']);
 function icon(name) { return `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="/icons.svg#${iconNames.has(name)?name:'layers'}"></use></svg>`; }
 function hydrateIcons(scope=document) {
@@ -510,7 +510,7 @@ function settingsHTML() {
   const rows=config.groups.map((g,i)=>`<tr><td><b>${esc(g.name)}</b></td><td class="mono">${g.http_port||'已关闭'}</td><td class="mono">${g.https_port||'已关闭'}</td><td>${groupBadge(g)}</td><td><button class="text-button" data-action="edit-group" data-index="${i}">编辑组</button></td></tr>`).join('');
   const p=config.outbound_proxy;
   return heading('SETTINGS','系统设置','集中配置各组监听端口和后台请求代理。','<button class="primary" data-action="add-group"><span data-icon="plus"></span>添加反代组</button>') +
-    adminAccessHTML()+`<div id="mcp-settings">${mcpSettingsHTML()}</div>`+logRetentionHTML()+
+    adminAccessHTML()+logRetentionHTML()+
     panel('出站代理服务器','用于在线更新、订阅、Cloudflare API、证书 HTTP 请求及公网 DNS 解析；保存后立即生效。',`<form id="outbound-form" class="panel-body"><div class="toggle-row"><div><b>启用出站代理</b><p>公网 IP 探测及内网反向代理连接保持直连。</p></div><label class="switch"><input name="enabled" type="checkbox" ${p.enabled?'checked':''}><span></span><span class="sr-only">启用出站代理</span></label></div><div class="form-grid"><label class="span-2">代理地址<input name="url" value="${esc(p.url)}" placeholder="http://127.0.0.1:7890"><small>支持 HTTP、HTTPS、SOCKS5 / SOCKS5H，需填写端口。地址中不要填写账号密码。Docker 内的 127.0.0.1 指容器自身。</small></label><label>代理用户名（可选）<input name="username" value="${esc(p.username)}" autocomplete="off"></label><label>代理密码（可选）<input name="password" type="password" autocomplete="new-password" placeholder="${proxyPasswordConfigured?'已配置，留空保留':'无需认证可留空'}"><small>密码不回显；变更服务器或用户名后需重新填写。</small></label><label class="check-label span-2"><input name="clear_password" type="checkbox">清除已保存的代理密码</label></div><p class="form-note">代理连接失败时会记录错误，不自动退回直连。证书 DNS 传播检查仍需直接访问 DNS 服务。</p><p class="error" role="alert"></p><div class="form-actions"><button type="submit" class="primary">保存代理设置</button></div></form>`) +
     '<div class="hint">爱快为每组分别配置 TCP 映射。例如外网 18443 映射到第一组 HTTPS 18443，外网 19443 映射到第二组 HTTPS 19443。修改监听或组启停状态后需重启服务。</div>' +
     panel('反代组监听','HTTP / HTTPS 填写 0 即关闭该协议。',rows?`<div class="table-wrap"><table><thead><tr><th>反代组</th><th>HTTP</th><th>HTTPS</th><th>状态</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></div>`:empty('还没有反代组','到反向代理页面创建组和域名规则。')) +
@@ -707,7 +707,7 @@ function downloadStatistics() {
 function render() {
   if (!config) return;
   const content=$('#content'),changed=renderedPage!==page;
-  if(changed&&renderedPage==='settings') resetMCPSettings();
+  if(changed&&renderedPage==='mcp') resetMCPSettings();
   if(changed&&page!=='routes') {dialogMotions.get($('#route-dialog'))?.cancel();$('#route-dialog').close();}
   const entryState=pageMotion?.playState==='running'?{opacity:getComputedStyle(content).opacity,transform:getComputedStyle(content).transform}:{opacity:.25,transform:'translateY(8px)'};
   const focused=content.contains(document.activeElement)?focusSelector(document.activeElement):'';
@@ -725,6 +725,7 @@ function render() {
   if (page==='access') html=firewallsHTML();
   if (page==='firewall-logs') html=firewallLogsHTML();
   if (page==='subscriptions') html=subscriptionsHTML();
+  if (page==='mcp') html=mcpHTML();
   if (page==='settings') html=settingsHTML();
   if (page==='logs') html=logsHTML();
   if (page==='statistics') html=statisticsHTML();
@@ -751,7 +752,8 @@ function render() {
     if(!reducedMotion.matches) content.querySelectorAll('.stat-value').forEach((el,i)=>{if(values[i]!==el.textContent) el.animate([{opacity:.4},{opacity:1}],{duration:160});});
   }
   renderedPage=page;
-  if(changed&&page==='settings') {loadOnlineUpdateStatus();loadBackupCapacity();loadMCPSettings();}
+  if(changed&&page==='mcp') loadMCPSettings();
+  if(changed&&page==='settings') {loadOnlineUpdateStatus();loadBackupCapacity();}
   if(changed&&page==='overview') loadDashboard();
   if(page==='ddns') {loadIPInfo().catch(e=>{if($('#ip-results')) $('#ip-results').textContent=e.message;});loadDNSRecords();}
 }
