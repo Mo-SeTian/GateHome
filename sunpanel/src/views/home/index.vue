@@ -2,7 +2,6 @@
 import { VueDraggable } from 'vue-draggable-plus'
 import { NBackTop, NButton, NButtonGroup, NDropdown, NModal, NSkeleton, NSpin, useDialog, useMessage } from 'naive-ui'
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
-import { useWindowSize } from '@vueuse/core'
 import { AppIcon, AppStarter, EditItem } from './components'
 import GateHomeImport from './components/GateHomeImport.vue'
 import { Clock, SearchBox, SystemMonitor } from '@/components/deskModule'
@@ -30,8 +29,6 @@ const ms = useMessage()
 const dialog = useDialog()
 const panelState = usePanelState()
 const authStore = useAuthStore()
-const { width: screenWidth } = useWindowSize()
-const isSmallScreen = computed(() => screenWidth.value < 640)
 
 const scrollContainerRef = ref<HTMLElement | undefined>(undefined)
 
@@ -539,7 +536,6 @@ function handleAddItem(itemIconGroupId?: number) {
                 >
                   <div v-for="item, index in itemGroup.items" :key="index" :title="item.description" @contextmenu="(e) => handleContextMenu(e, itemGroupIndex, item)">
                     <AppIcon
-                      :size="isSmallScreen ? 56 : 70"
                       :class="itemGroup.sortStatus ? 'cursor-move' : 'cursor-pointer'"
                       :item-info="item"
                       :icon-text-color="panelState.panelConfig.iconTextColor"
@@ -552,7 +548,6 @@ function handleAddItem(itemIconGroupId?: number) {
 
                   <div v-if="itemGroup.items.length === 0" class="not-drag">
                     <AppIcon
-                      :size="isSmallScreen ? 56 : 70"
                       :class="itemGroup.sortStatus ? 'cursor-move' : 'cursor-pointer'"
                       :item-info="{ icon: { itemType: 3, text: 'subway:add' }, title: t('common.add'), url: '', openMethod: 0 }"
                       :icon-text-color="panelState.panelConfig.iconTextColor"
@@ -578,7 +573,6 @@ function handleAddItem(itemIconGroupId?: number) {
                 >
                   <div v-for="item, index in itemGroup.items" :key="index" :title="item.description" @contextmenu="(e) => handleContextMenu(e, itemGroupIndex, item)">
                     <AppIcon
-                      :size="isSmallScreen ? 56 : 70"
                       :class="itemGroup.sortStatus ? 'cursor-move' : 'cursor-pointer'"
                       :item-info="item"
                       :icon-text-color="panelState.panelConfig.iconTextColor"
@@ -591,7 +585,6 @@ function handleAddItem(itemIconGroupId?: number) {
 
                   <div v-if="itemGroup.items.length === 0" class="not-drag">
                     <AppIcon
-                      :size="isSmallScreen ? 56 : 70"
                       class="cursor-pointer"
                       :item-info="{ icon: { itemType: 3, text: 'subway:add' }, title: $t('common.add'), url: '', openMethod: 0 }"
                       :icon-text-color="panelState.panelConfig.iconTextColor"
@@ -632,7 +625,7 @@ function handleAddItem(itemIconGroupId?: number) {
 
     <!-- 悬浮按钮 -->
     <div class="fixed-element shadow-[0_0_10px_2px_rgba(0,0,0,0.2)]">
-      <NButtonGroup :vertical="!isSmallScreen">
+      <NButtonGroup vertical>
         <NButton v-if="authStore.visitMode === VisitMode.VISIT_MODE_LOGIN" color="#2a2a2a6b" title="GateHome 联动" aria-label="GateHome 联动" @click="gateHomeShow = true">
           <template #icon><SvgIcon class="text-white font-xl" icon="icon-park-outline-import-and-export" /></template>
         </NButton>
@@ -682,8 +675,8 @@ function handleAddItem(itemIconGroupId?: number) {
     <NBackTop
       :listen-to="() => scrollContainerRef"
       :right="10"
-      :bottom="isSmallScreen ? 76 : 10"
-      :style="{ backgroundColor: 'transparent', border: 'none', boxShadow: 'none', bottom: `max(${isSmallScreen ? 76 : 10}px, env(safe-area-inset-bottom))` }"
+      :bottom="10"
+      style="background-color:transparent;border: none;box-shadow: none;"
     >
       <div class="shadow-[0_0_10px_2px_rgba(0,0,0,0.2)]">
         <NButton color="#2a2a2a6b">
@@ -780,7 +773,6 @@ html {
 .group-action:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; border-radius: 4px; }
 
 
-
 .icon-info-box {
   width: 100%;
   display: grid;
@@ -799,19 +791,11 @@ html {
 
 @media (max-width: 500px) {
   .icon-info-box{
-    grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   }
 }
 
 @media (max-width: 639px) {
   .sun-main-content { padding-bottom: calc(100px + env(safe-area-inset-bottom)); }
-  .group-buttons { opacity: 1; }
-  .group-action { width: 44px; height: 44px; }
-  .item-list { margin-top: 24px; }
-  .group-heading { font-size: 18px; margin-bottom: 12px; }
-  .icon-info-box { grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 12px; }
-  .icon-small-box { grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 12px; }
-  .fixed-element { right: max(12px,env(safe-area-inset-right)); bottom: max(16px,env(safe-area-inset-bottom)); }
-  .fixed-element :deep(.n-button), :deep(.n-back-top .n-button) { min-width: 44px; min-height: 44px; }
 }
 </style>
