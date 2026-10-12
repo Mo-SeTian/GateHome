@@ -2,7 +2,7 @@
 
 一个自托管的反向代理与 DDNS 综合管理工具。Go 主程序内嵌中文管理界面与 Sun-Panel 前后端；启用首页时由主程序管理独立的 Sun-Panel 子进程。运行无需 Node.js、外部数据库或额外 Web 服务器，Sun-Panel 使用内置 SQLite。
 
-当前版本为 **0.0.58**，安装包见 [v0.0.58 Release](https://github.com/Mo-SeTian/GateHome/releases/tag/v0.0.58)。程序和 systemd 服务名为 `gatehouse`。
+当前版本为 **0.0.59**，安装包见 [v0.0.59 Release](https://github.com/Mo-SeTian/GateHome/releases/tag/v0.0.59)。程序和 systemd 服务名为 `gatehouse`。
 
 ## 主要功能
 
@@ -132,7 +132,7 @@ sudo bash /tmp/gatehome-install.sh install --proxy "$GATEHOME_INSTALL_PROXY"
 
 下载使用 HTTP/1.1；TLS 连接中断等下载错误会清除残缺文件并重试，最多尝试 4 次。下载和校验成功后才修改安装。如果出现 `curl: (56)` / `unexpected eof while reading`，说明下载连接提前断开；请检查服务器的网络或代理规则。使用 MSM 等分流工具时，安装需要访问 `raw.githubusercontent.com`、`github.com` 和 `release-assets.githubusercontent.com`。仍无法下载时，可在其他能访问 GitHub 的设备下载下面的安装包，复制到服务器离线安装。
 
-离线安装可使用 `make release` 生成的 **`版本/0.0.51/`** 完整目录，或解压 Release 中对应架构的 `gatehome-linux-*.tar.gz`，然后运行：
+离线安装可使用 `make release` 生成的 **`版本/0.0.59/`** 完整目录，或解压 Release 中对应架构的 `gatehome-linux-*.tar.gz`，然后运行：
 
 ```sh
 sudo bash install.sh
@@ -314,6 +314,8 @@ Linux 资源数据来自 `/proc`，上传为 TX、下载为 RX，数据量自网
 IP 归属地由内嵌 ip2region 双栈离线库查询，显示在日志 IP 下方，不向外部服务发送访客 IP。归属地为估算，数据库随程序发布更新。详见 [概览组件说明](docs/dashboard-0.0.23.md) 和 [记录查询说明](docs/security-records-0.0.17.md)。
 
 管理界面的说明文案收纳在标题或字段旁的信息标识中，鼠标悬停、键盘聚焦或手机点按可查看；状态、错误与实际配置数据直接展示。备份与恢复位于左侧独立页面；系统设置按访问与网络、运行与日志、维护与更新分组，使用紧凑的两列布局，窄屏自动切换单列。
+
+手机端收紧卡片留白和表格行距，概览中的 CPU、内存等简短指标并排显示，日志筛选和 WebDAV 定时选项在空间足够时使用两列。Sun-Panel 手机图标、分组间距和弹窗适配小屏，长分组名称与分页不会挤出操作区。GateHome 侧栏选中底色连续滑动，菜单展开与变化的概览数值提供轻微动效，支持快速连续操作、键盘导航和系统“减少动态效果”偏好。
 
 ## AI 管理 MCP
 
