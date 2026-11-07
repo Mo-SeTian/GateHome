@@ -1,5 +1,5 @@
 'use strict';
-let serviceHealthData={routes:{},options:{enabled:true,interval:60}},serviceHealthRequest=0,serviceHealthLoading=false;
+let serviceHealthData={routes:{}},serviceHealthRequest=0,serviceHealthPending=null;
 const $ = (selector, scope = document) => scope.querySelector(selector);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const clone = value => structuredClone(value);
@@ -31,7 +31,10 @@ function focusSelector(el) {
   if(!el) return '';
   if(el.dataset.hpAction) return 'button[data-hp-action="'+CSS.escape(el.dataset.hpAction)+'"]'+['id','page','group'].filter(k=>el.dataset[k]!==undefined).map(k=>'[data-'+k+'="'+CSS.escape(el.dataset[k])+'"]').join('');
   if(el.id) return '#'+CSS.escape(el.id);
-  if(el.dataset.action||el.dataset.page) return 'button'+['action','page','index','group','panel','kind','pageNumber'].filter(k=>el.dataset[k]!==undefined).map(k=>`[data-${k.replace(/[A-Z]/g,c=>'-'+c.toLowerCase())}="${CSS.escape(el.dataset[k])}"]`).join('');
+  if(el.dataset.action||el.dataset.page) {
+    const scope=el.closest('.object-menu')?'.object-menu button':'button:not(.object-menu button)';
+    return scope+['action','page','index','group','panel','kind','pageNumber','routeId'].filter(k=>el.dataset[k]!==undefined).map(k=>`[data-${k.replace(/[A-Z]/g,c=>'-'+c.toLowerCase())}="${CSS.escape(el.dataset[k])}"]`).join('');
+  }
   return '';
 }
 function trapDialogFocus(event) {
@@ -152,8 +155,8 @@ function toast(message) {
   $('#toast').textContent = message; $('#toast').hidden = false; if(!reducedMotion.matches) {$('#toast').getAnimations().forEach(a=>a.cancel());$('#toast').animate([{opacity:0,translate:'0 8px'},{opacity:1,translate:'0 0'}],{duration:180,easing:'ease-out'});}
   clearTimeout(toastTimer); toastTimer = setTimeout(() => { $('#toast').hidden = true; }, 4500);
 }
-function showLogin() { resetMCPSettings(); resetRemoteBackups(); $('#account-menu').open=false;clearAccountPasswords();adminUsername='';$('#account-name').textContent='管理员';$('#account-avatar').textContent='G';resetDashboard();setNavigation(false,false); $('#login').hidden = false; $('#app').hidden = true; document.querySelectorAll('dialog').forEach(d=>d.close()); config = undefined;backupCapacity=null;backupCapacityError='';backupCapacityRequest++; renderedPage='';clearTimeout(onlineUpdate.timer);onlineUpdate.request++;onlineUpdate.phase='';onlineUpdate.job=null;onlineUpdate.release=null;onlineUpdate.error='';abandonDiscovery();for(const state of Object.values(securityEvents)) {state.request++;state.view=null;state.filters=emptyEventFilters();state.applied=emptyEventFilters();state.loading=false;state.error='';} }
-function applyConfig(data) { serviceHealthRequest++; serviceHealthData={routes:{},options:{enabled:true,interval:60}}; config = data.config; revision = data.revision; dnsCredentialsConfigured=data.dns_credentials_configured||{}; certificateCredentialsConfigured=data.certificate_credentials_configured||{};routePasswordsConfigured=data.route_passwords_configured||{}; proxyPasswordConfigured=data.proxy_password_configured; githubTokenConfigured=!!data.github_token_configured; ipRequest++;dnsRecordsRequest++;dnsRecords={};dnsRecordsError=''; if(networkInfo) networkInfo.groups={}; }
+function showLogin() { resetMCPSettings(); resetRemoteBackups(); $('#account-menu').open=false;clearAccountPasswords();adminUsername='';$('#account-name').textContent='管理员';$('#account-avatar').textContent='G';resetDashboard();setNavigation(false,false); $('#login').hidden = false; $('#app').hidden = true; document.querySelectorAll('dialog').forEach(d=>d.close()); config = undefined;routeFilter='';backupCapacity=null;backupCapacityError='';backupCapacityRequest++; renderedPage='';clearTimeout(onlineUpdate.timer);onlineUpdate.request++;onlineUpdate.phase='';onlineUpdate.job=null;onlineUpdate.release=null;onlineUpdate.error='';abandonDiscovery();for(const state of Object.values(securityEvents)) {state.request++;state.view=null;state.filters=emptyEventFilters();state.applied=emptyEventFilters();state.error='';} }
+function applyConfig(data) { serviceHealthRequest++; serviceHealthPending=null; serviceHealthData={routes:{}}; config = data.config; revision = data.revision; dnsCredentialsConfigured=data.dns_credentials_configured||{}; certificateCredentialsConfigured=data.certificate_credentials_configured||{};routePasswordsConfigured=data.route_passwords_configured||{}; proxyPasswordConfigured=data.proxy_password_configured; githubTokenConfigured=!!data.github_token_configured; ipRequest++;dnsRecordsRequest++;dnsRecords={};dnsRecordsError=''; if(networkInfo) networkInfo.groups={}; }
 async function save(next, dnsTokens, proxyPassword, certificateTokens, routePasswords, githubToken) {
   const payload = {config:next, revision};
   if (dnsTokens !== undefined) payload.dns_tokens = dnsTokens;
@@ -255,14 +258,20 @@ function groupBadge(g) {
 let routeFilter = '';
 function activeRouteFilter() {return config.groups.some(g=>g.id===routeFilter)?routeFilter:'';}
 function routeHealthStats() {
-  const enabled=config.routes.filter(routeActive);
-  let ok=0,bad=0,waiting=0;const failing=[];
-  for (const route of enabled) {
-    const result=serviceHealthData.routes[route.id];
+  const options=config.service_health||{enabled:true,interval:60},failing=[];
+  let ok=0,waiting=0,last='';
+  for (const route of config.routes.filter(routeActive)) {
+    const result=serviceHealthSample(route.id);
     if (!result) {waiting++;continue;}
-    if (result.healthy) ok++; else {bad++;failing.push(route);}
+    if (result.checked_at>last) last=result.checked_at;
+    if (result.healthy) ok++; else failing.push(route);
   }
-  return {total:config.routes.length,ok,bad,waiting,failing};
+  return {total:config.routes.length,ok,bad:failing.length,waiting,failing,last,options};
+}
+function serviceHealthSample(id) {
+  if(config.service_health?.enabled===false) return;
+  const result=serviceHealthData.routes[id];
+  if(result?.checked_at&&!result.checked_at.startsWith('0001')&&!['disabled','pending','cancelled'].includes(result.state)) return result;
 }
 function sinceLabel(iso) {
   const time=iso?new Date(iso).getTime():0;
@@ -274,23 +283,39 @@ function sinceLabel(iso) {
   return Math.round(seconds/86400)+' 天前';
 }
 function routeStatusBandHTML() {
-  const stats=routeHealthStats(),interval=serviceHealthData.options?.interval||60;
-  const last=Object.values(serviceHealthData.routes).map(r=>r.checked_at).filter(Boolean).sort().at(-1);
-  const names=stats.failing.map(r=>r.name||r.host).join('、');
-  return `<div class="status-band" role="status" aria-label="服务健康汇总">
-    <div class="stat" style="--i:0"><span class="stat-ic brand">${icon('routes')}</span><div><div class="stat-label">服务总数</div><div class="stat-value">${stats.total}<small>个</small></div></div></div>
-    <div class="stat" style="--i:1"><span class="stat-ic ok">${icon('check')}</span><div><div class="stat-label">正在正常</div><div class="stat-value" style="color:var(--success)">${stats.ok}</div></div></div>
-    <div class="stat" style="--i:2"><span class="stat-ic bad">${icon('info')}</span><div><div class="stat-label">需要处理</div><div class="stat-value"${stats.bad?' style="color:var(--danger)"':''}>${stats.bad}</div></div></div>
-    <div class="stat" style="--i:3"><span class="stat-ic neutral">${icon('gateway')}</span><div><div class="stat-label">监听组</div><div class="stat-value">${config.groups.filter(g=>g.enabled).length}<small>组</small></div></div></div>
-    <div class="stat stat-check" style="--i:4">
+  const stats=routeHealthStats(),check=routeHealthCheckText(stats);
+  return `<div class="status-band" role="group" aria-label="服务健康汇总">
+    <div class="stat"><span class="stat-ic brand">${icon('routes')}</span><div><div class="stat-label">服务总数</div><div class="stat-value">${stats.total}<small>个</small></div></div></div>
+    <div class="stat"><span class="stat-ic ok">${icon('check')}</span><div><div class="stat-label">健康</div><div class="stat-value" data-health-ok>${stats.ok}</div></div></div>
+    <div class="stat"><span class="stat-ic bad">${icon('info')}</span><div><div class="stat-label">需要处理</div><div class="stat-value${stats.bad?' has-failures':''}" data-health-bad>${stats.bad}</div></div></div>
+    <div class="stat"><span class="stat-ic neutral">${icon('gateway')}</span><div><div class="stat-label">启用的组</div><div class="stat-value">${config.groups.filter(g=>g.enabled).length}<small>组</small></div></div></div>
+    <div class="stat stat-check">
       <div class="check-text">
-        <div class="check-line">${last?sinceLabel(last)+'检查过':'等待首次检查'} · 每 ${Number(interval)} 秒</div>
-        <div class="check-note${stats.bad?'':' calm'}"${stats.bad?' title="'+esc(names)+'"':''}>${stats.bad?(stats.bad>2?stats.bad+' 个服务未响应':esc(names)+' 未响应'):stats.waiting?'等待首次检查结果':'全部服务响应正常'}</div>
+        <div class="check-line">${esc(check.line)}</div>
+        <div class="check-note${stats.bad?'':' calm'}" role="status"${check.names?' title="'+esc(check.names)+'"':''}>${esc(check.note)}</div>
       </div>
       <button class="text-button" data-action="configure-service-health">设置</button>
-      <button class="recheck" data-action="refresh-service-health" aria-label="重新检查服务健康">${icon('refresh')}<span class="recheck-text">重新检查</span></button>
+      <button class="recheck" data-action="refresh-service-health" aria-label="刷新服务健康状态"${stats.options.enabled?'':' disabled'}>${icon('refresh')}<span class="recheck-text">刷新状态</span></button>
     </div>
   </div>`;
+}
+function routeHealthCheckText(stats) {
+  if(!stats.options.enabled) return {line:'健康检查已暂停',note:'可在设置中重新启用',names:''};
+  const names=stats.failing.map(r=>r.name||r.host).join('、');
+  const line=(stats.last?sinceLabel(stats.last)+'检查过':'尚未检查')+' · 每 '+Number(stats.options.interval)+' 秒';
+  const note=stats.bad?(stats.bad>2?stats.bad+' 个服务异常':names+' 检查异常'):
+    stats.waiting?stats.waiting+' 个服务等待检测':stats.ok?'所有启用服务响应正常':'暂无启用的服务';
+  return {line,note,names};
+}
+function updateRouteStatusBand(band) {
+  const stats=routeHealthStats(),check=routeHealthCheckText(stats);
+  const bad=$('[data-health-bad]',band),note=$('.check-note',band);
+  bad.classList.toggle('has-failures',stats.bad>0);
+  note.classList.toggle('calm',stats.bad===0);
+  if(check.names) note.title=check.names;else note.removeAttribute('title');
+  for(const [node,value] of [[$('[data-health-ok]',band),stats.ok],[bad,stats.bad],[$('.check-line',band),check.line],[note,check.note]]) {
+    if(node.textContent!==String(value)) node.textContent=String(value);
+  }
 }
 function routeFilterChipsHTML() {
   const total=config.routes.length,filter=activeRouteFilter();
@@ -302,18 +327,17 @@ function filterRoutes(button) {
   if (next===routeFilter) return;
   routeFilter=next;
   render();
-  const cards=$('#content .cards');
-  if (cards&&!reducedMotion.matches) {cards.classList.add('is-swapping');setTimeout(()=>cards.classList.remove('is-swapping'),420);}
+  if(!reducedMotion.matches) document.querySelectorAll('#content .cards').forEach(cards=>cards.classList.add('is-swapping'));
 }
 function routeCards(groupID = '') {
   const filter=activeRouteFilter(),rows=config.routes.map((r,i)=>({r,i})).filter(({r})=>groupID?r.group_id===groupID:(!filter||r.group_id===filter));
   if (!rows.length) return empty('还没有代理服务','添加一个子域名，将它连接到你的 NAS、相册或其他内网服务。',addRouteButton(groupID));
-  return `<div class="cards">${rows.map(({r,i},index)=>{
+  return `<div class="cards">${rows.map(({r,i})=>{
     const f=config.firewalls.find(x=>x.id===r.firewall_id),waiting=f&&firewallWaiting(f),key=r.group_id+'/'+r.host;
-    const result=serviceHealthData.routes[r.id],failing=!!result&&!result.healthy;
+    const failing=routeActive(r)&&serviceHealthSample(r.id)?.healthy===false;
     const image=routeImageHTML(r.image),initial=[...(r.name||r.host||'?')][0].toUpperCase();
     const menu=objectMenu(r.name||r.host,`<button class="text-button" data-action="edit-route" data-index="${i}">编辑服务</button><button class="text-button" data-action="toggle-route" data-index="${i}">${r.enabled?'停用服务':'启用服务'}</button><button class="text-button" data-action="service-health-details" data-route-id="${esc(r.id)}">健康诊断</button><button class="text-button danger" data-action="delete-route" data-index="${i}">删除服务</button>`);
-    return `<article class="route-card${failing?' is-failing':''}" style="--i:${index}" data-route-key="${esc(key)}" data-route-id="${esc(r.id)}">
+    return `<article class="route-card${failing?' is-failing':''}" data-route-key="${esc(key)}" data-route-id="${esc(r.id)}">
       <div class="rc-head"><span class="rc-tile">${image||esc(initial)}</span><span class="rc-who"><b class="rc-name">${esc(r.name||r.host)}</b><small class="rc-host">${esc(r.host)}</small></span>${menu}</div>
       <div class="rc-addr">${serviceAddressHTML(r)}</div>
       <div class="rc-tags"><span class="rc-tag">${r.tls?'HTTPS':'HTTP'}</span><span class="rc-tag">${r.auth?.enabled?'独立账号':'公开访问'}</span><span class="rc-tag${waiting?' warn':''}">${f?esc(f.name):'不限制来源'}</span></div>
@@ -323,7 +347,8 @@ function routeCards(groupID = '') {
 }
 function groupsHTML() {
   const action=discoveryButton()+'<button class="primary" data-action="add-group"><span data-icon="plus"></span>添加反代组</button>';
-  const filter=activeRouteFilter(),groups=config.groups.filter(g=>!filter||g.id===filter).map((g,i)=>{
+  const filter=activeRouteFilter(),groups=config.groups.map((g,i)=>{
+    if(filter&&g.id!==filter) return '';
     const dns=config.ddns.groups.find(d=>d.id===g.ddns_group_id),count=config.routes.filter(r=>r.group_id===g.id).length;
     const summary=`${count} 个服务 · ${esc(portsText(g))}${g.domain_suffix?' · '+esc(g.domain_suffix):''}${dns?' · DDNS：'+esc(dns.name):''}`;
     const actions=addRouteButton(g.id)+objectMenu(g.name,`<button class="text-button" data-action="discover-services" data-group="${esc(g.id)}">${icon('activity')}发现内网服务</button><button class="text-button" data-action="edit-group" data-index="${i}">编辑组</button><button class="text-button" data-action="toggle-group" data-index="${i}">${g.enabled?'停用组':'启用组'}</button><button class="text-button danger" data-action="delete-group" data-index="${i}">删除组</button>`);
@@ -906,11 +931,17 @@ async function refreshStatus() {
     if(status.version&&next.version&&status.version!==next.version) {location.reload();throw new Error('版本已更新，正在重新加载界面…');}
     status=next;
     if(page==='routes'||page==='overview') refreshServiceHealth().catch(()=>{});
-    $('#connection-label').textContent='已连接';
-    $('.connection').classList.remove('offline');
+    setConnectionStatus(true);
     $('#restart-banner').hidden=!status.restart_required;
     $('#uptime').textContent='v'+(status.version||'—')+' · 已运行 '+Math.floor(status.uptime_seconds/60)+' 分钟';
-  } catch(error) { $('#connection-label').textContent='连接中断'; $('.connection').classList.add('offline'); throw error; }
+  } catch(error) { setConnectionStatus(false); throw error; }
+}
+function setConnectionStatus(connected) {
+  for(const label of [$('#connection-label'),$('#mobile-connection-label')]) {
+    const text=connected?'已连接':'连接中断';
+    if(label.textContent!==text) label.textContent=text;
+    label.parentElement?.classList.toggle('offline',!connected);
+  }
 }
 async function load() {
   applyConfig(await api('config'));
@@ -1321,9 +1352,15 @@ document.addEventListener('submit',event=>{
 });
 document.addEventListener('click',async event=>{
   const button=event.target.closest('button'); if(!button||button.dataset.hpAction) return;
-  if(button.id==='nav-toggle'||button.id==='mobile-more') {setNavigation(!document.body.classList.contains('nav-open'));return;}
+  if(button.id==='nav-toggle') {setNavigation(!document.body.classList.contains('nav-open'));return;}
   if(button.id==='nav-close'||button.id==='nav-scrim') {setNavigation(false);return;}
-  if(button.dataset.page) {if(!leaveRouteEditor()) return;setNavigation(false,false);location.hash=button.dataset.page;return;}
+  if(button.dataset.page) {
+    if(!leaveRouteEditor()) return;
+    const samePage=page===button.dataset.page;
+    setNavigation(false,samePage);
+    if(!samePage) location.hash=button.dataset.page;
+    return;
+  }
   const action=button.dataset.action||'';
   if(!action&&!button.dataset.job&&button.id!=='logout') return;
   if(action==='close-dialog') { closeDialog(button.closest('dialog')); return; }
@@ -1334,7 +1371,12 @@ document.addEventListener('click',async event=>{
   if(['refresh-remote-backups','list-webdav-backups','test-webdav-backup','run-webdav-backup','download-webdav-backup','inspect-webdav-backup'].includes(action)) return remoteBackupAction(button);
   if(action==='configure-service-health') {const form=$('#service-health-form'),options=config.service_health||{enabled:true,interval:60};form.elements.enabled.checked=options.enabled;form.elements.interval.value=options.interval;$('.error',form).textContent='';openDialog($('#service-health-settings-dialog'));return;}
   if(action==='service-health-details') {openServiceHealthDetails(button.dataset.routeId);return;}
-  if(action==='refresh-service-health') {button.disabled=true;try{await refreshServiceHealth(true);}catch(e){toast(e.message);}finally{button.disabled=false;}return;}
+  if(action==='refresh-service-health') {
+    if(button.getAttribute('aria-disabled')==='true') return;
+    button.setAttribute('aria-disabled','true');
+    try{await refreshServiceHealth();}catch(e){toast(e.message);}finally{button.removeAttribute('aria-disabled');}
+    return;
+  }
   if(action==='refresh-mcp'||action.startsWith('mcp-')) return mcpSettingsAction(button);
   if(action==='move-widget') return moveDashboardWidget(button.dataset.widget,Number(button.dataset.direction));
   if(action==='toggle-group-panel') return toggleGroupPanel(button);
@@ -1496,17 +1538,24 @@ document.querySelectorAll('dialog').forEach(dialog=>{
     if(dialog.id==='discovery-dialog') abandonDiscovery();
     if(dialog.id==='route-dialog') {++routeImageRequest;routeImagePending=false;}
     dialogMotions.get(dialog)?.cancel();dialogMotions.delete(dialog);
-    const opener=dialogOpeners.get(dialog);if(opener) $(opener)?.focus({preventScroll:true});
+    const selector=dialogOpeners.get(dialog),opener=selector?$(selector):null;
+    (opener?.closest('details:not([open])')?.querySelector('summary')||opener)?.focus({preventScroll:true});
   });
 });
-$('#sidebar .brand').addEventListener('click',()=>setNavigation(false,false));
+$('#sidebar .brand').addEventListener('click',()=>setNavigation(false,page==='overview'));
 $('.skip-link').addEventListener('click',event=>{event.preventDefault();$('#content').focus();});
 document.addEventListener('keydown',event=>{
   if(trapDialogFocus(event)) return;
+  if($('dialog[open]')) return;
+  if(event.key==='Escape') {
+    const menu=$('.object-menu[open]');
+    if(menu) {menu.open=false;menu.querySelector('summary').focus();event.preventDefault();return;}
+  }
   if(!document.body.classList.contains('nav-open')) return;
   if(event.key==='Escape') {event.preventDefault();setNavigation(false);return;}
   if(event.key==='Tab') {
-    const targets=[...$('#sidebar').querySelectorAll('a,button')].filter(el=>!el.disabled&&el.getClientRects().length);
+    const targets=[...$('#sidebar').querySelectorAll('a,button,summary')].filter(el=>
+      !el.disabled&&el.getClientRects().length&&(!el.closest('details:not([open])')||el.matches('summary')));
     const index=targets.indexOf(document.activeElement);
     if(event.shiftKey&&index<=0) {event.preventDefault();targets.at(-1)?.focus();}
     else if(!event.shiftKey&&(index===targets.length-1||index===-1)) {event.preventDefault();targets[0]?.focus();}
@@ -1518,10 +1567,6 @@ document.addEventListener('toggle',event=>{if(event.target.matches('.object-menu
 compactCharts.addEventListener('change',()=>{setNavigation(false,false);document.querySelectorAll('.filter-sheet').forEach(sheet=>{sheet.open=!compactCharts.matches;});preparePageActions($('#content'));if(page==='statistics'&&config) render();});
 document.addEventListener('focusin',event=>{const menu=$('#account-menu');if(menu.open&&!menu.contains(event.target)) menu.open=false;});
 document.addEventListener('click',event=>document.querySelectorAll('.object-menu[open]').forEach(menu=>{if(!menu.contains(event.target)) menu.open=false;}));
-document.addEventListener('keydown',event=>{
-  if(event.key!=='Escape') return;
-  const menu=document.querySelector('.object-menu[open]');if(menu) {menu.open=false;menu.querySelector('summary').focus();event.preventDefault();return;}
-});
 reducedMotion.addEventListener('change',()=>{
   if(!reducedMotion.matches) return;
   pageMotion?.cancel();
@@ -1549,35 +1594,18 @@ setInterval(async()=>{
 
 
 function serviceHealthBadgeHTML(id) {
- const result=serviceHealthData.routes[id];
- if(!result) return badge('等待检测','gray');
- const state=result.healthy?'':result.state==='disabled'?'gray':'red';
- return `<button type="button" id="service-health-route-${esc(id)}" class="text-button service-health-result ${state}" data-action="service-health-details" data-route-id="${esc(id)}" aria-label="查看服务健康诊断"><span class="health-label">${icon(result.healthy?'check':'info')}${esc(result.label)}</span>${result.checked_at?`<span class="mono">${Number(result.duration_ms)} ms${result.status?' · HTTP '+Number(result.status):''}</span>`:''}</button>`;
-}
-function serviceHealthSummaryHTML() {
- const options=config.service_health||{enabled:true,interval:60};
- if(!options.enabled) return '<span class="health-count muted">已暂停检查</span>';
- let healthy=0,unhealthy=0,pending=0;
- for(const route of config.routes.filter(routeActive)) {
-  const result=serviceHealthData.routes[route.id];
-  if(!result?.checked_at||result.checked_at.startsWith('0001')||result.state==='disabled') pending++;
-  else if(result.healthy) healthy++;
-  else unhealthy++;
- }
- return `<span class="health-count is-healthy">${icon('check')}正常 <b>${healthy}</b></span><span class="health-count is-unhealthy">${icon('info')}异常 <b>${unhealthy}</b></span>${pending?`<span class="health-count muted">等待检测 ${pending}</span>`:''}<span class="health-frequency">每 ${Number(options.interval)} 秒检查</span>`;
+ const result=serviceHealthSample(id);
+ if(!result) return badge(config.service_health?.enabled===false?'已暂停检查':serviceHealthData.routes[id]?.state==='disabled'?'未检测':'等待检测','gray');
+ return `<button type="button" id="service-health-route-${esc(id)}" class="text-button service-health-result ${result.healthy?'':'red'}" data-action="service-health-details" data-route-id="${esc(id)}" aria-label="查看服务健康诊断"><span class="health-label">${icon(result.healthy?'check':'info')}${esc(result.label)}</span><span class="mono">${Number(result.duration_ms)} ms${result.status?' · HTTP '+Number(result.status):''}</span></button>`;
 }
 function serviceHealthNoticesHTML() {
  return (serviceHealthData.notices||[]).slice(-3).reverse().map(n=>{const route=config.routes.find(r=>r.id===n.route_id);return `<p>${esc(route?.name||route?.host||'服务')}：${esc(n.message)} · ${date(n.time)}</p>`;}).join('');
 }
-function serviceHealthPanelHTML() {
- return `<section class="panel service-health-toolbar"><div class="panel-heading"><div><h2>服务健康检查</h2><p>由服务器检查已启用反代的上游，验证 TLS 证书且不跟随重定向；与浏览器内网连通性检测分别显示。</p></div></div><div id="service-health-summary" class="health-summary" role="status">${serviceHealthSummaryHTML()}</div><div class="health-actions"><button class="secondary" type="button" data-action="refresh-service-health">${icon('refresh')}刷新</button><button class="secondary" type="button" data-action="configure-service-health">${icon('settings')}设置</button></div></section>`;
-}
-async function refreshServiceHealth(animate=false) {
- if(!config||serviceHealthLoading) return;
- serviceHealthLoading=true;const request=++serviceHealthRequest;
- if(animate) document.body?.classList.add('is-checking');
- try {
-  const data=await api('service-health');
+async function refreshServiceHealth() {
+ if(!config) return;
+ if(serviceHealthPending) return serviceHealthPending;
+ const request=++serviceHealthRequest;
+ const pending=api('service-health').then(data=>{
   if(request!==serviceHealthRequest||!config) return;
   const messages=[];
   if(serviceHealthData.notices) {
@@ -1587,27 +1615,36 @@ async function refreshServiceHealth(animate=false) {
    }
   }
   serviceHealthData=data;
-  document.querySelectorAll('[data-service-health]').forEach(el=>{const html=serviceHealthBadgeHTML(el.dataset.serviceHealth);if(el.innerHTML!==html) {const focused=el.contains(document.activeElement);el.innerHTML=html;if(focused) $('button',el)?.focus({preventScroll:true});}});
-  const summary=$('#service-health-summary'),summaryHTML=serviceHealthSummaryHTML();
-  if(summary&&summary.innerHTML!==summaryHTML) summary.innerHTML=summaryHTML;
+  document.querySelectorAll('[data-service-health]').forEach(el=>{
+   const id=el.dataset.serviceHealth,html=serviceHealthBadgeHTML(id),card=el.closest('.route-card');
+   card?.classList.toggle('is-failing',serviceHealthSample(id)?.healthy===false);
+   if(el.innerHTML!==html) {
+    const focused=el.contains(document.activeElement);
+    el.innerHTML=html;
+    if(focused) ($('button',el)||card?.querySelector('summary'))?.focus({preventScroll:true});
+   }
+  });
   const band=$('#route-status-band');
-  if(band) {
-    const html=routeStatusBandHTML(),stripTime=v=>v.replace(/<div class="check-line">[\s\S]*?<\/div>/,'<div class="check-line"></div>');
-    if(stripTime(band.innerHTML)!==stripTime(html)) band.innerHTML=html;
-    else {const line=band.querySelector('.check-line'),fresh=html.match(/<div class="check-line">([\s\S]*?)<\/div>/);
-      if(line&&fresh&&line.textContent!==fresh[1]) line.textContent=fresh[1];}
-    band.querySelector('.status-band')?.classList.add('settled');
-  }
+  if(band) updateRouteStatusBand(band);
   const notices=$('#service-health-notices');
   if(notices) {const html=serviceHealthNoticesHTML();if(notices.innerHTML!==html) notices.innerHTML=html;}
   if(messages.length&&page==='routes') toast(messages.join('；'));
- } finally {serviceHealthLoading=false;if(animate) document.body?.classList.remove('is-checking');}
+ });
+ serviceHealthPending=pending;
+ try {await pending;} finally {if(serviceHealthPending===pending) serviceHealthPending=null;}
 }
 
 function openServiceHealthDetails(id) {
- const route=config.routes.find(r=>r.id===id),result=serviceHealthData.routes[id];
- if(!route||!result) return;
+ const route=config.routes.find(r=>r.id===id);
+ if(!route) return;
+ const result=routeActive(route)?serviceHealthSample(id):null;
  $('#service-health-detail-title').textContent=(route.name||route.host)+' · 健康诊断';
+ if(!result) {
+  const message=!routeActive(route)?'服务或反代组已停用。':config.service_health?.enabled===false?'健康检查已暂停。':'等待首次检查结果。';
+  $('#service-health-detail').textContent=message;
+  openDialog($('#service-health-dialog'));
+  return;
+ }
  $('#service-health-detail').innerHTML=`<ul class="info-list"><li><span>服务器检查状态</span><b>${esc(result.label)}</b></li><li><span>响应时间</span><b>${Number(result.duration_ms)} ms</b></li><li><span>HTTP 状态</span><b>${result.status?Number(result.status):'未收到 HTTP 响应'}</b></li><li><span>最近检测</span><b>${result.checked_at?date(result.checked_at):'尚未检测'}</b></li>${result.tls_expires_at?`<li><span>证书到期</span><b>${date(result.tls_expires_at)}</b></li>`:''}</ul><p class="form-note" data-visible-note>${esc(result.message||'健康检查未启用')}</p><p class="form-note">此结果由服务器直连上游得到；Sun-Panel 自动内网选择仍由当前浏览器判断。</p>`;
  openDialog($('#service-health-dialog'));
 }

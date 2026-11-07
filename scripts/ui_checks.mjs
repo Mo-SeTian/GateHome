@@ -3,23 +3,6 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
 const source=readFileSync(new URL('../internal/gateway/web/app.js',import.meta.url),'utf8');
-const health=vm.createContext({
-  icon:()=>'',
-  config:{service_health:{enabled:true,interval:60},groups:[{id:'home',enabled:true},{id:'off',enabled:false}],routes:[{id:'ok',group_id:'home',enabled:true},{id:'bad',group_id:'home',enabled:true},{id:'waiting',group_id:'home',enabled:true},{id:'off',group_id:'off',enabled:true},{id:'paused',group_id:'home',enabled:false}]},
-  serviceHealthData:{routes:{ok:{healthy:true,checked_at:'2026-11-07T06:32:00Z'},bad:{healthy:false,checked_at:'2026-11-07T06:32:00Z'},off:{healthy:false,checked_at:'2026-11-07T06:32:00Z'}}}
-});
-vm.runInContext(source.match(/^function routeActive\(.*$/m)[0]+source.slice(source.indexOf('function serviceHealthSummaryHTML('),source.indexOf('function serviceHealthPanelHTML(')),health);
-const summary=()=>vm.runInContext('serviceHealthSummaryHTML()',health);
-assert.match(summary(),/正常 <b>1<\/b>/);
-assert.match(summary(),/异常 <b>1<\/b>/);
-assert.match(summary(),/等待检测 1/);
-health.serviceHealthData.routes.waiting={state:'pending',healthy:false,checked_at:'0001-01-01T00:00:00Z'};
-assert.match(summary(),/等待检测 1/,'a missing sample was reported as a failed service');
-health.config.service_health.enabled=false;
-assert.match(summary(),/已暂停检查/);
-assert.doesNotMatch(summary(),/正常|异常/,'paused checks still announced current health');
-console.log('Health toolbar: real samples, pending results, disabled groups/routes and paused checks PASS');
-
 let Loader,preference,intersection,destroyed=0,observed=0,removed=0;
 const updates=[],media={matches:false,addEventListener:(_,fn)=>{preference=fn;},removeEventListener:(_,fn)=>{assert.equal(fn,preference);removed++;}};
 const component=vm.createContext({
@@ -71,22 +54,37 @@ anchor={right:300,top:690,bottom:734};menuClasses.clear();
 vm.runInContext('positionObjectMenu(menu)',menuContext);assert.equal(menuClasses.has('opens-up'),true,'phone menu ran past the viewport edge');
 console.log('Action menus: narrow left edge, lower viewport edge and repositioning PASS');
 
-let healthWrites=0,healthFocus=0,checkingAdds=0;
-const healthCell={dataset:{serviceHealth:'route'},value:'current',contains:()=>true,get innerHTML(){return this.value;},set innerHTML(value){this.value=value;healthWrites++;}};
+let healthWrites=0,healthFocus=0;
+let failingCard=false;
+const card={classList:{toggle:(_,value)=>{failingCard=value;}}};
+const healthCell={dataset:{serviceHealth:'route'},value:'current',contains:()=>true,closest:()=>card,get innerHTML(){return this.value;},set innerHTML(value){this.value=value;healthWrites++;}};
 const healthRefresh=vm.createContext({
-  document:{activeElement:{},querySelectorAll:()=>[healthCell],body:{classList:{add:name=>{if(name==='is-checking')checkingAdds++;},remove:()=>{}}}},
+  document:{activeElement:{},querySelectorAll:()=>[healthCell]},
   $:selector=>selector==='button'?{focus:()=>{healthFocus++;}}:null,
   api:async()=>({routes:{},notices:[]}),
-  serviceHealthBadgeHTML:()=> 'current',serviceHealthSummaryHTML:()=>'',serviceHealthNoticesHTML:()=>'',toast:()=>{}
+  serviceHealthBadgeHTML:()=> 'current',serviceHealthSample:()=>({healthy:true}),serviceHealthNoticesHTML:()=>'',toast:()=>{}
 });
-vm.runInContext("let config={},serviceHealthLoading=false,serviceHealthRequest=0,serviceHealthData={routes:{}},page='routes';"+source.slice(source.indexOf('async function refreshServiceHealth('),source.indexOf('function openServiceHealthDetails(')),healthRefresh);
+vm.runInContext("let config={},serviceHealthPending=null,serviceHealthRequest=0,serviceHealthData={routes:{}},page='routes';"+source.slice(source.indexOf('async function refreshServiceHealth('),source.indexOf('function openServiceHealthDetails(')),healthRefresh);
 await vm.runInContext('refreshServiceHealth()',healthRefresh);assert.equal(healthWrites,0,'unchanged health polling replaced a focused button');
 healthCell.value='older';await vm.runInContext('refreshServiceHealth()',healthRefresh);assert.equal(healthWrites,1);assert.equal(healthFocus,1,'changed health results discarded keyboard focus');
-assert.equal(checkingAdds,0,'the five-second poll started the checking sweep on every card');
-await vm.runInContext('refreshServiceHealth(true)',healthRefresh);assert.equal(checkingAdds,1,'an explicit recheck did not start the checking sweep');
-console.log('Health refresh: unchanged DOM continuity, changed-result focus restoration and quiet polling PASS');
+healthRefresh.serviceHealthSample=()=>({healthy:false});
+await vm.runInContext('refreshServiceHealth()',healthRefresh);assert.equal(failingCard,true,'a failed poll did not mark the service card');
+healthRefresh.serviceHealthSample=()=>({healthy:true});
+await vm.runInContext('refreshServiceHealth()',healthRefresh);assert.equal(failingCard,false,'the service card still showed a failure after recovery');
+let finishHealthRequest,healthRequests=0;
+healthRefresh.api=()=>new Promise(resolve=>{healthRequests++;finishHealthRequest=resolve;});
+const backgroundRefresh=vm.runInContext('refreshServiceHealth()',healthRefresh);
+const manualRefresh=vm.runInContext('refreshServiceHealth()',healthRefresh);
+let manualDone=false;
+manualRefresh.then(()=>{manualDone=true;});
+await new Promise(resolve=>setImmediate(resolve));
+assert.equal(healthRequests,1,'a manual refresh duplicated an active poll');
+assert.equal(manualDone,false,'a manual refresh completed before the shared request');
+finishHealthRequest({routes:{},notices:[]});
+await Promise.all([backgroundRefresh,manualRefresh]);
+console.log('Health refresh: stable focus, recovery and request deduplication PASS');
 
-const routeSlice = source.slice(source.indexOf("let routeFilter = '';"), source.indexOf('function groupsHTML()'));
+const routeSlice = source.slice(source.indexOf("let routeFilter = '';"), source.indexOf('function prepareTables('));
 const routeContext = vm.createContext({
   config: {
     routes: [
@@ -94,17 +92,18 @@ const routeContext = vm.createContext({
       { id: 'media', group_id: 'g2', host: 'media.example.com', name: '媒体中心', upstream: 'http://192.168.1.30:8096', enabled: true, tls: true, auth: { enabled: false }, firewall_id: '' }
     ],
     groups: [{ id: 'g1', name: '家庭服务', enabled: true }, { id: 'g2', name: '影音与下载', enabled: true }],
-    firewalls: []
+    firewalls: [], ddns: {groups:[]}, service_health:{enabled:true,interval:60}
   },
   serviceHealthData: { routes: { nas: { healthy: true, label: '正常', duration_ms: 12, status: 200, checked_at: new Date().toISOString() }, media: { healthy: false, label: '连接超时', duration_ms: 2500, status: 0, checked_at: new Date().toISOString() } }, options: { interval: 60 } },
   icon: () => '<svg class="icon"></svg>', esc: value => String(value ?? ''),
-  objectMenu: () => '<details class="object-menu"></details>', badge: () => '<span class="badge"></span>',
-  routeActive: route => route.enabled, routeImageHTML: () => '', firewallWaiting: () => false,
+  objectMenu: (_,actions) => '<details class="object-menu">'+actions+'</details>', badge: text => '<span class="badge">'+text+'</span>',
+  routeImageHTML: () => '', firewallWaiting: () => false,
   serviceAddressHTML: route => '<a class="service-address-link" href="#">' + route.upstream + '</a>',
   serviceHealthBadgeHTML: () => '<button class="service-health-result"><span class="health-label">正常</span><span class="mono">12 ms</span></button>',
-  empty: () => '', addRouteButton: () => '', reducedMotion: { matches: true }, render: () => { routeContext.rendered = (routeContext.rendered || 0) + 1; }, $: () => null
+  empty: () => '', addRouteButton: () => '', discoveryButton:()=>'', portsText:()=>'', groupBadge:()=>'', heading:()=>'', serviceHealthNoticesHTML:()=>'', groupPanel:(_,id,title,description,body,actions)=>title+body+actions,
+  reducedMotion: { matches: true }, render: () => { routeContext.rendered = (routeContext.rendered || 0) + 1; }, $: () => null
 });
-vm.runInContext(routeSlice, routeContext);
+vm.runInContext(source.match(/^function routeActive\(.*$/m)[0]+'\n'+routeSlice, routeContext);
 const cards = vm.runInContext('routeCards("g1")', routeContext);
 assert.match(cards, /class="cards"/, 'proxy services did not render as a card grid');
 assert.match(cards, /class="route-card"/);
@@ -122,7 +121,7 @@ assert.match(failingCards, /公开访问/, 'public access tag missing');
 const band = vm.runInContext('routeStatusBandHTML()', routeContext);
 assert.match(band, /class="status-band"/);
 assert.match(band, /服务总数/);
-assert.match(band, /媒体中心 未响应/, 'failing service was not named in the status band');
+assert.match(band, /媒体中心 检查异常/, 'failing service was not named in the status band');
 assert.match(band, />1</, 'failing count missing from the band');
 
 const chips = vm.runInContext('routeFilterChipsHTML()', routeContext);
@@ -136,6 +135,24 @@ assert.equal(routeContext.rendered, 1, 'filtering did not re-render the page');
 assert.equal(vm.runInContext('routeFilter', routeContext), 'g2');
 const filteredChips = vm.runInContext('routeFilterChipsHTML()', routeContext);
 assert.match(filteredChips, /chip active"[^>]*data-group="g2"/, 'active filter chip not reflected');
+const filteredGroups=vm.runInContext('groupsHTML()',routeContext);
+for(const action of ['edit-group','toggle-group','delete-group']) {
+  assert.match(filteredGroups,new RegExp('data-action="'+action+'" data-index="1"'),'filtering changed the saved group index');
+}
+assert.doesNotMatch(filteredGroups,/data-action="(?:edit|toggle|delete)-group" data-index="0"/);
 vm.runInContext('filterRoutes({dataset:{group:"g2"}})', routeContext);
 assert.equal(routeContext.rendered, 1, 're-selecting the same group re-rendered needlessly');
 console.log('Proxy cards: card grid, group filter, failing bar and status band PASS');
+
+routeContext.serviceHealthData.routes.media={state:'pending',healthy:false,checked_at:'0001-01-01T00:00:00Z'};
+assert.match(vm.runInContext('routeStatusBandHTML()',routeContext),/1 个服务等待检测/);
+assert.doesNotMatch(vm.runInContext('routeCards("g2")',routeContext),/is-failing/);
+routeContext.config.service_health.enabled=false;
+assert.match(vm.runInContext('routeStatusBandHTML()',routeContext),/健康检查已暂停/);
+assert.match(vm.runInContext('routeStatusBandHTML()',routeContext),/data-health-bad>0</);
+assert.doesNotMatch(vm.runInContext('routeCards("g1")',routeContext),/is-failing/);
+routeContext.config.service_health.enabled=true;
+routeContext.config.routes[1].enabled=false;
+routeContext.serviceHealthData.routes.media={state:'timeout',healthy:false,checked_at:new Date().toISOString()};
+assert.doesNotMatch(vm.runInContext('routeCards("g2")',routeContext),/is-failing/);
+console.log('Health status: waiting, paused, and disabled services are not failures PASS');
