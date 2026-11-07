@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="color-scheme" content="light">
   <meta name="theme-color" content="#4256d5">
   <title>GateHome · 家庭网络入口</title>
@@ -25,8 +25,8 @@
   <div id="app" class="app-shell" hidden>
     <button id="nav-scrim" class="nav-scrim" aria-label="关闭导航" tabindex="-1" hidden></button>
     <aside id="sidebar" class="sidebar" aria-label="工作空间导航">
-      <div class="sidebar-brand"><a class="brand" href="#overview"><span class="brand-mark" data-icon="gateway"></span><span>GateHome<small>家庭网络控制台</small></span></a><button id="nav-close" class="icon-button" aria-label="关闭导航"><span data-icon="close"></span></button></div>
-      <div class="nav-label">工作空间 <span>WORKSPACE</span></div>
+      <div class="sidebar-brand"><span class="brand-mark" data-icon="gateway"></span><a class="brand" href="#overview">GateHome<small>家庭网关</small></a><button id="nav-close" class="icon-button sidebar-close" aria-label="关闭导航"><span data-icon="close"></span></button></div>
+      <div class="nav-label">工作空间</div>
       <nav aria-label="主导航">
         <span class="nav-indicator" aria-hidden="true" hidden></span>
         <button data-page="overview"><span class="nav-icon" data-icon="overview"></span>概览</button>
@@ -45,14 +45,15 @@
         <button data-page="backups"><span class="nav-icon" data-icon="download"></span>备份与恢复</button>
         <button data-page="settings"><span class="nav-icon" data-icon="settings"></span>设置</button>
       </nav>
-      <div class="sidebar-foot"><span class="sidebar-server" data-icon="server"></span><span>本地网关<small>Cloudflare · Let's Encrypt</small></span><span class="status-dot"></span></div>
+      <div class="sidebar-foot"><span class="connection" role="status"><i class="status-dot"></i><span id="connection-label">已连接</span></span><span id="uptime">已运行 —</span></div>
+      <details id="account-menu" class="object-menu account-menu"><summary id="account-button" class="account-button" aria-label="管理员菜单" aria-controls="account-menu-items"><span class="avatar" id="account-avatar" aria-hidden="true">G</span><span id="account-name">管理员</span><span data-icon="chevron-down"></span></summary><div id="account-menu-items" class="object-menu-items account-menu-items"><button type="button" class="text-button" data-action="edit-admin-account"><span data-icon="edit"></span>修改密码</button><button type="button" class="text-button danger" data-action="logout"><span data-icon="logout"></span>退出登录</button></div></details>
       <button id="logout" class="logout"><span data-icon="logout"></span>退出登录</button>
     </aside>
     <main id="main">
-      <header class="topbar"><div class="topbar-location"><button id="nav-toggle" class="icon-button" aria-label="打开导航" aria-controls="sidebar" aria-expanded="false"><span data-icon="menu"></span></button><span class="workspace-icon" data-icon="layers"></span><span id="breadcrumb">工作空间 / 概览</span></div><div><span class="connection" role="status"><i class="status-dot"></i><span id="connection-label">已连接</span></span><span class="topbar-divider"></span><details id="account-menu" class="object-menu account-menu"><summary id="account-button" class="account-button" aria-label="管理员菜单" aria-controls="account-menu-items"><span class="avatar" id="account-avatar" aria-hidden="true">G</span><span id="account-name">管理员</span><span data-icon="chevron-down"></span></summary><div id="account-menu-items" class="object-menu-items account-menu-items"><button type="button" class="text-button" data-action="edit-admin-account"><span data-icon="edit"></span>修改密码</button><button type="button" class="text-button danger" data-action="logout"><span data-icon="logout"></span>退出登录</button></div></details></div></header>
+      <span id="breadcrumb" class="sr-only">工作空间 / 概览</span>
+      <header class="mobile-bar"><button id="nav-toggle" class="icon-button" aria-label="打开导航" aria-controls="sidebar" aria-expanded="false"><span data-icon="menu"></span></button><span class="mark">G</span><b>GateHome</b><span class="mobile-state"><i class="status-dot"></i>已连接</span></header>
       <div id="restart-banner" class="restart-banner" hidden>监听端口已修改，在设置页重启服务后生效。Docker bridge 模式还需同步修改端口映射。</div>
       <div id="content" class="content" tabindex="-1"></div>
-      <footer><span class="footer-brand">GATEHOME</span><span>让连接井然有序</span><span id="uptime"></span></footer>
     </main>
   </div>
   <dialog id="webdav-restore-dialog"><form id="webdav-restore-form"><div class="dialog-heading"><div><span class="eyebrow">RESTORE BACKUP</span><h2 id="webdav-restore-title">检查远程备份</h2></div><button type="button" class="icon-button" data-action="close-dialog" aria-label="关闭远程备份检查"><span data-icon="close"></span></button></div><input name="name" type="hidden"><p id="webdav-restore-file" class="mono remote-backup-name"></p><label>备份解密密码<input name="password" type="password" autocomplete="off"><small>留空时使用已保存的加密密码；旧备份可填写当时的密码。</small></label><p class="error" role="alert"></p><div class="dialog-actions"><button type="button" class="secondary" data-action="close-dialog">取消</button><button type="submit" class="primary">检查备份</button></div></form></dialog>

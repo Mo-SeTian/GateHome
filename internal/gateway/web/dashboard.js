@@ -26,7 +26,7 @@ function publicServiceURL(route,current=config) {
 }
 function serviceAddressHTML(route) {
   const internal=safeServiceURL(route.upstream),external=publicServiceURL(route);
-  const line=(url,label,kind)=>url?`<a class="service-address-link mono" href="${esc(url)}" target="_blank" rel="noopener noreferrer" aria-label="${esc(kind+'：'+label+'，在新标签页打开')}">${icon('external-link')}<span>${esc(label)}</span></a>`:`<span class="form-note">${esc(label)}</span>`;
+  const line=(url,label,kind)=>url?`<a class="service-address-link mono" href="${esc(url)}" target="_blank" rel="noopener noreferrer" aria-label="${esc(kind+'：'+label+'，在新标签页打开')}">${icon('external-link')}<span>${esc(label).replace(/:(\d+)$/,'<wbr><span class="service-port">:$1</span>')}</span></a>`:`<span class="form-note">${esc(label)}</span>`;
   return line(internal,route.upstream,'内网服务地址')+line(external,external?new URL(external).host:route.host+'（监听端口已关闭）','域名访问地址');
 }
 function metricHTML(value,note='',unit='') {return `<div class="widget-metric">${esc(value)}${unit?`<small>${esc(unit)}</small>`:''}</div><p class="widget-note">${esc(note)}</p>`;}

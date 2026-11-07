@@ -16,7 +16,7 @@ function hydrateIcons(scope=document) {
   scope.querySelectorAll('.field-help>summary,.ip-monitor-settings>summary').forEach(el=>{if(!el.querySelector('svg')) el.insertAdjacentHTML('beforeend',icon('chevron-down'));});
   const actions={'add-ip-block':'shield','remove-firewall-group':'trash','move-firewall-group-up':'chevron-up','move-firewall-group-down':'chevron-down','configure-certificates':'settings','filter-ip-blocks':'filter','apply-log-filters':'filter','reset-log-filters':'refresh','release-ip-block':'unlock','export-statistics':'download','preset-subscription':'download','restart-service':'refresh','run-ddns':'refresh','go-firewalls':'shield','apply-maintenance':'upload','check-online-update':'refresh','install-online-update':'download'};
   scope.querySelectorAll('button[data-action],button[data-job],button[type="submit"]').forEach(el=>{
-    if(el.querySelector('svg')) return;
+    if(el.querySelector('svg')||el.hasAttribute('data-no-icon')) return;
     const action=el.dataset.action||'',name=actions[action]||(action.startsWith('refresh-')||el.dataset.job?'refresh':action.startsWith('add-')?'plus':action.startsWith('edit-')?'edit':action.startsWith('delete-')?'trash':action.startsWith('toggle-')?(el.textContent.trim().startsWith('启用')?'play':'pause'):el.type==='submit'?({'backup-form':'download','restore-form':'upload','update-form':'upload','ip-block-form':'shield'}[el.form?.id]||'save'):'');
     if(name) el.insertAdjacentHTML('afterbegin',icon(name));
   });
@@ -168,12 +168,12 @@ async function save(next, dnsTokens, proxyPassword, certificateTokens, routePass
 function badge(text, kind = '') { return `<span class="badge ${kind}">${esc(text)}</span>`; }
 function empty(title, message, action = '') { return `<div class="empty"><div class="empty-icon">${/^(正在|加载中)/.test(title)?'<gatehome-loader></gatehome-loader>':icon('layers')}</div><h3>${esc(title)}</h3><p>${esc(message)}</p>${action}</div>`; }
 function heading(kicker, title, description, actions = '') { return `<div class="page-heading"><div><span class="eyebrow">${kicker}</span><h1 tabindex="-1">${title}</h1><p>${description}</p></div><div class="heading-actions">${actions}</div></div>`; }
-function discoveryButton(groupID='') {return `<button class="secondary" data-action="discover-services" data-group="${esc(groupID)}" ${!config.groups.length?'disabled':''}>${icon('activity')}发现内网服务</button>`;}
-function addRouteButton(groupID = '') { return `<button class="primary" data-action="add-route" data-group="${esc(groupID)}"><span data-icon="plus"></span>添加代理服务</button>`; }
+function discoveryButton(groupID='') {return `<button class="secondary" data-action="discover-services" data-group="${esc(groupID)}" aria-label="发现内网服务" title="发现内网服务" ${!config.groups.length?'disabled':''}>${icon('activity')}<span>发现内网服务</span></button>`;}
+function addRouteButton(groupID = '') { return `<button class="primary" data-action="add-route" data-group="${esc(groupID)}" aria-label="添加代理服务" title="添加代理服务"><span data-icon="plus"></span><span>添加代理服务</span></button>`; }
 function panel(title, description, body, action = '') { return `<section class="panel"><div class="panel-heading"><div><h2>${title}</h2>${description ? `<p>${description}</p>` : ''}</div>${action}</div>${body}</section>`; }
 function groupPanel(kind, id, title, description, body, actions, state) {
   const key=kind+':'+id,bodyID='group-panel-'+kind+'-'+id,collapsed=collapsedGroups.has(key);
-  return `<section class="panel group-panel ${collapsed?'is-collapsed':''}"><div class="panel-heading"><div class="group-heading"><h2 class="title-status"><span class="group-kind-icon">${icon({proxy:'router',ddns:'globe',firewall:'shield',certificate:'certificate'}[kind])}</span><button class="group-disclosure" data-action="toggle-group-panel" data-panel="${esc(key)}" aria-expanded="${!collapsed}" aria-controls="${esc(bodyID)}" aria-label="${collapsed?'展开':'收起'}${esc(title)}"><span>${esc(title)}</span>${icon('chevron-down')}</button>${state}</h2><p>${description}</p></div><div class="group-actions">${actions}</div></div><div id="${esc(bodyID)}" class="group-panel-body" ${collapsed?'hidden':''}>${body}</div></section>`;
+  return `<section class="panel group-panel ${collapsed?'is-collapsed':''}" data-group-kind="${kind}"><div class="panel-heading"><div class="group-heading"><h2 class="title-status"><span class="group-kind-icon">${icon({proxy:'router',ddns:'globe',firewall:'shield',certificate:'certificate'}[kind])}</span><button class="group-disclosure" data-action="toggle-group-panel" data-panel="${esc(key)}" aria-expanded="${!collapsed}" aria-controls="${esc(bodyID)}" aria-label="${collapsed?'展开':'收起'}${esc(title)}"><span>${esc(title)}</span>${icon('chevron-down')}</button>${state}</h2><p>${description}</p></div><div class="group-actions">${actions}</div></div><div id="${esc(bodyID)}" class="group-panel-body" ${collapsed?'hidden':''}>${body}</div></section>`;
 }
 function toggleGroupPanel(button) {
   const key=button.dataset.panel,body=document.getElementById(button.getAttribute('aria-controls')),collapsed=button.getAttribute('aria-expanded')==='true';
@@ -214,19 +214,20 @@ function positionObjectMenu(menu) {
   menu.classList.remove('align-start','opens-up');
   const popup=menu.querySelector('.object-menu-items'),anchor=menu.querySelector('summary').getBoundingClientRect(),bounds=popup.getBoundingClientRect();
   menu.classList.toggle('align-start',anchor.right-bounds.width<12);
-  menu.classList.toggle('opens-up',anchor.bottom+6+bounds.height>window.innerHeight-12&&anchor.top-bounds.height-6>=12);
+  const bottom=window.innerHeight-12;
+  menu.classList.toggle('opens-up',anchor.bottom+6+bounds.height>bottom&&anchor.top-bounds.height-6>=12);
 }
 function routeTable(accessOnly = false, overview = false, groupID = '') {
   const rows=config.routes.map((r,i)=>({r,i})).filter(({r})=>!groupID||r.group_id===groupID).slice(0,overview?4:100);
   if (!rows.length) return empty('还没有代理服务', '添加一个子域名，将它连接到你的 NAS、相册或其他内网服务。', addRouteButton(groupID));
   const workspace=page==='routes',headers=accessOnly?['服务 / 域名','防火墙','策略状态','运行状态','操作']:['服务 / 域名','服务地址','协议','防火墙','访问账号','运行状态','操作'];
-  return `<div class="table-wrap ${workspace?'proxy-table':'service-table'}"><table><thead><tr>${headers.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.map(({r,i}) => {
+  return `<div class="table-wrap route-list-table ${workspace?'proxy-table':'service-table'}"><table><thead><tr>${headers.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.map(({r,i}) => {
     const f=config.firewalls.find(f=>f.id===r.firewall_id),waiting=f&&firewallWaiting(f),key=r.group_id+'/'+r.host;
     const edit=`<button class="text-button" data-action="edit-route" data-index="${i}">编辑</button>`;
     const identity=`<div class="service-cell"><span class="service-icon">${icon('server')}${routeImageHTML(r.image)}</span><div><b>${esc(r.name||r.host)}</b><small class="mono">${esc(r.host)}</small>${groupID?'':`<small>${esc(groupName(r.group_id))}</small>`}</div></div>`;
     const status=badge(routeActive(r)?'已启用':r.enabled?'组已停用':'已停用',routeActive(r)?'':'gray');
     const controls=`<div class="table-actions">${edit}${overview?'':objectMenu(r.name||r.host,`<button class="text-button" data-action="toggle-route" data-index="${i}">${r.enabled?'停用':'启用'}</button><button class="text-button danger" data-action="delete-route" data-index="${i}">删除服务</button>`)}</div>`;
-    return `<tr data-route-key="${esc(key)}"><td>${identity}</td>${accessOnly?`<td>${esc(f?.name||'未配置')}</td><td>${f?badge(waiting?'等待订阅，暂拒访问':'规则可用',waiting?'amber':'')+`<small>未命中${actionLabel(f.default_action)}</small>`:'不限制来源 IP'}</td>`:`<td class="service-address">${serviceAddressHTML(r)}</td><td><span class="protocol">${r.tls?'HTTPS':'HTTP'}</span></td><td>${esc(f?.name||'未配置')}</td><td>${r.auth?.enabled?'独立账号':'公开访问'}</td>`}<td>${routeActive(r)?'':status}<div data-service-health="${esc(r.id)}">${serviceHealthBadgeHTML(r.id)}</div></td><td>${controls}</td></tr>`;
+    return `<tr data-route-key="${esc(key)}"><td class="route-identity">${identity}</td>${accessOnly?`<td class="route-meta route-firewall" title="防火墙">${esc(f?.name||'未配置')}</td><td class="route-policy">${f?badge(waiting?'等待订阅，暂拒访问':'规则可用',waiting?'amber':'')+`<small>未命中${actionLabel(f.default_action)}</small>`:'不限制来源 IP'}</td>`:`<td class="service-address route-address">${serviceAddressHTML(r)}</td><td class="route-meta route-protocol" title="访问协议"><span class="protocol">${r.tls?'HTTPS':'HTTP'}</span></td><td class="route-meta route-firewall" title="防火墙"><span class="mobile-inline-icon">${icon('shield')}</span>${esc(f?.name||'未配置')}</td><td class="route-meta route-auth" title="访问账号"><span class="mobile-inline-icon">${icon(r.auth?.enabled?'unlock':'globe')}</span>${r.auth?.enabled?'独立账号':'公开访问'}</td>`}<td class="route-status">${routeActive(r)?'':status}<div data-service-health="${esc(r.id)}">${serviceHealthBadgeHTML(r.id)}</div></td><td class="route-actions">${controls}</td></tr>`;
   }).join('')}</tbody></table></div>`;
 }
 function firewallsHTML() {
@@ -250,21 +251,122 @@ function groupBadge(g) {
   const running=(status.listeners||[]).find(r=>r.id===g.id&&r.enabled);
   return running&&running.http_port===g.http_port&&running.https_port===g.https_port ? badge('监听中') : badge('重启后生效','amber');
 }
+
+let routeFilter = '';
+function activeRouteFilter() {return config.groups.some(g=>g.id===routeFilter)?routeFilter:'';}
+function routeHealthStats() {
+  const enabled=config.routes.filter(routeActive);
+  let ok=0,bad=0,waiting=0;const failing=[];
+  for (const route of enabled) {
+    const result=serviceHealthData.routes[route.id];
+    if (!result) {waiting++;continue;}
+    if (result.healthy) ok++; else {bad++;failing.push(route);}
+  }
+  return {total:config.routes.length,ok,bad,waiting,failing};
+}
+function sinceLabel(iso) {
+  const time=iso?new Date(iso).getTime():0;
+  if (!time||Number.isNaN(time)) return '';
+  const seconds=Math.max(0,Math.round((Date.now()-time)/1000));
+  if (seconds<60) return seconds+' 秒前';
+  if (seconds<3600) return Math.round(seconds/60)+' 分钟前';
+  if (seconds<86400) return Math.round(seconds/3600)+' 小时前';
+  return Math.round(seconds/86400)+' 天前';
+}
+function routeStatusBandHTML() {
+  const stats=routeHealthStats(),interval=serviceHealthData.options?.interval||60;
+  const last=Object.values(serviceHealthData.routes).map(r=>r.checked_at).filter(Boolean).sort().at(-1);
+  const names=stats.failing.map(r=>r.name||r.host).join('、');
+  return `<div class="status-band" role="status" aria-label="服务健康汇总">
+    <div class="stat" style="--i:0"><span class="stat-ic brand">${icon('routes')}</span><div><div class="stat-label">服务总数</div><div class="stat-value">${stats.total}<small>个</small></div></div></div>
+    <div class="stat" style="--i:1"><span class="stat-ic ok">${icon('check')}</span><div><div class="stat-label">正在正常</div><div class="stat-value" style="color:var(--success)">${stats.ok}</div></div></div>
+    <div class="stat" style="--i:2"><span class="stat-ic bad">${icon('info')}</span><div><div class="stat-label">需要处理</div><div class="stat-value"${stats.bad?' style="color:var(--danger)"':''}>${stats.bad}</div></div></div>
+    <div class="stat" style="--i:3"><span class="stat-ic neutral">${icon('gateway')}</span><div><div class="stat-label">监听组</div><div class="stat-value">${config.groups.filter(g=>g.enabled).length}<small>组</small></div></div></div>
+    <div class="stat stat-check" style="--i:4">
+      <div class="check-text">
+        <div class="check-line">${last?sinceLabel(last)+'检查过':'等待首次检查'} · 每 ${Number(interval)} 秒</div>
+        <div class="check-note${stats.bad?'':' calm'}"${stats.bad?' title="'+esc(names)+'"':''}>${stats.bad?(stats.bad>2?stats.bad+' 个服务未响应':esc(names)+' 未响应'):stats.waiting?'等待首次检查结果':'全部服务响应正常'}</div>
+      </div>
+      <button class="text-button" data-action="configure-service-health">设置</button>
+      <button class="recheck" data-action="refresh-service-health" aria-label="重新检查服务健康">${icon('refresh')}<span class="recheck-text">重新检查</span></button>
+    </div>
+  </div>`;
+}
+function routeFilterChipsHTML() {
+  const total=config.routes.length,filter=activeRouteFilter();
+  const chip=(id,label,count)=>`<button class="chip${filter===id?' active':''}" data-action="filter-routes" data-no-icon data-group="${esc(id)}" aria-pressed="${filter===id}">${esc(label)}<span class="chip-count">${count}</span></button>`;
+  return `<div class="chips" role="group" aria-label="按反代组筛选">${chip('','全部',total)}${config.groups.map(g=>chip(g.id,g.name,config.routes.filter(r=>r.group_id===g.id).length)).join('')}<span class="chips-note">${filter?'仅显示所选组':'点组名可收起'}</span></div>`;
+}
+function filterRoutes(button) {
+  const next=button.dataset.group||'';
+  if (next===routeFilter) return;
+  routeFilter=next;
+  render();
+  const cards=$('#content .cards');
+  if (cards&&!reducedMotion.matches) {cards.classList.add('is-swapping');setTimeout(()=>cards.classList.remove('is-swapping'),420);}
+}
+function routeCards(groupID = '') {
+  const filter=activeRouteFilter(),rows=config.routes.map((r,i)=>({r,i})).filter(({r})=>groupID?r.group_id===groupID:(!filter||r.group_id===filter));
+  if (!rows.length) return empty('还没有代理服务','添加一个子域名，将它连接到你的 NAS、相册或其他内网服务。',addRouteButton(groupID));
+  return `<div class="cards">${rows.map(({r,i},index)=>{
+    const f=config.firewalls.find(x=>x.id===r.firewall_id),waiting=f&&firewallWaiting(f),key=r.group_id+'/'+r.host;
+    const result=serviceHealthData.routes[r.id],failing=!!result&&!result.healthy;
+    const image=routeImageHTML(r.image),initial=[...(r.name||r.host||'?')][0].toUpperCase();
+    const menu=objectMenu(r.name||r.host,`<button class="text-button" data-action="edit-route" data-index="${i}">编辑服务</button><button class="text-button" data-action="toggle-route" data-index="${i}">${r.enabled?'停用服务':'启用服务'}</button><button class="text-button" data-action="service-health-details" data-route-id="${esc(r.id)}">健康诊断</button><button class="text-button danger" data-action="delete-route" data-index="${i}">删除服务</button>`);
+    return `<article class="route-card${failing?' is-failing':''}" style="--i:${index}" data-route-key="${esc(key)}" data-route-id="${esc(r.id)}">
+      <div class="rc-head"><span class="rc-tile">${image||esc(initial)}</span><span class="rc-who"><b class="rc-name">${esc(r.name||r.host)}</b><small class="rc-host">${esc(r.host)}</small></span>${menu}</div>
+      <div class="rc-addr">${serviceAddressHTML(r)}</div>
+      <div class="rc-tags"><span class="rc-tag">${r.tls?'HTTPS':'HTTP'}</span><span class="rc-tag">${r.auth?.enabled?'独立账号':'公开访问'}</span><span class="rc-tag${waiting?' warn':''}">${f?esc(f.name):'不限制来源'}</span></div>
+      <div class="rc-foot">${routeActive(r)?`<span data-service-health="${esc(r.id)}">${serviceHealthBadgeHTML(r.id)}</span>`:badge(r.enabled?'组已停用':'已停用','gray')}<span class="table-actions"><button class="text-button" data-action="edit-route" data-index="${i}">编辑</button></span></div>
+    </article>`;
+  }).join('')}</div>`;
+}
 function groupsHTML() {
   const action=discoveryButton()+'<button class="primary" data-action="add-group"><span data-icon="plus"></span>添加反代组</button>';
-  const groups=config.groups.map((g,i)=>{
+  const filter=activeRouteFilter(),groups=config.groups.filter(g=>!filter||g.id===filter).map((g,i)=>{
     const dns=config.ddns.groups.find(d=>d.id===g.ddns_group_id),count=config.routes.filter(r=>r.group_id===g.id).length;
     const summary=`${count} 个服务 · ${esc(portsText(g))}${g.domain_suffix?' · '+esc(g.domain_suffix):''}${dns?' · DDNS：'+esc(dns.name):''}`;
     const actions=addRouteButton(g.id)+objectMenu(g.name,`<button class="text-button" data-action="discover-services" data-group="${esc(g.id)}">${icon('activity')}发现内网服务</button><button class="text-button" data-action="edit-group" data-index="${i}">编辑组</button><button class="text-button" data-action="toggle-group" data-index="${i}">${g.enabled?'停用组':'启用组'}</button><button class="text-button danger" data-action="delete-group" data-index="${i}">删除组</button>`);
-    return groupPanel('proxy',g.id,g.name,summary,routeTable(false,false,g.id),actions,groupBadge(g));
+    return groupPanel('proxy',g.id,g.name,summary,routeCards(g.id),actions,groupBadge(g));
   }).join('');
-  return heading('PROXY GROUPS','反向代理','按组管理服务；点击组名展开或收起，编辑配置使用弹窗。',action)+serviceHealthPanelHTML()+(groups||empty('还没有反代组','先创建一个监听入口。',action))+`<div id="service-health-notices" class="health-notices" role="status" aria-live="polite">${serviceHealthNoticesHTML()}</div><p class="proxy-note">组内按域名分流。监听端口修改后需重启；访问账号和防火墙保存后生效。</p>`;
+  return heading('PROXY GROUPS','反向代理',`${config.routes.length} 个服务 · ${config.groups.length} 个监听组 · 按组管理，点组名收起`,action)
+    + `<div id="route-status-band">${routeStatusBandHTML()}</div>`
+    + routeFilterChipsHTML()
+    + (groups||empty('还没有反代组','先创建一个监听入口。',action))
+    + `<div id="service-health-notices" class="health-notices" role="status" aria-live="polite">${serviceHealthNoticesHTML()}</div>`
+    + `<p class="proxy-note">组内按域名分流。监听端口修改后需重启；访问账号和防火墙保存后生效。</p>`;
 }
 function prepareTables(scope) {
+  prepareFilterSheets(scope);
+  preparePageActions(scope);
   scope.querySelectorAll('.table-wrap').forEach(el=>{
     el.tabIndex=0;el.setAttribute('role','region');el.setAttribute('aria-label',(el.closest('.panel')?.querySelector('h2')?.textContent||'数据')+'列表');
     const labels=[...el.querySelectorAll('thead th')].map(th=>th.textContent);
     el.querySelectorAll('tbody tr').forEach(row=>[...row.cells].forEach((cell,i)=>{cell.dataset.label=labels[i]||'';}));
+  });
+}
+function preparePageActions(scope) {
+  scope.querySelectorAll('.heading-actions').forEach(actions=>{
+    const menu=actions.querySelector('.page-utilities');
+    if(!compactCharts.matches) {
+      if(menu) {menu.querySelectorAll('button').forEach(button=>{button.classList.replace('text-button','secondary');menu.before(button);});menu.remove();}
+      return;
+    }
+    const buttons=[...actions.querySelectorAll(':scope > button.secondary')];
+    if(menu||buttons.length<2) return;
+    const details=document.createElement('details');details.className='object-menu page-utilities';
+    details.innerHTML='<summary class="icon-button" aria-label="其他页面操作">'+icon('more')+'</summary><div class="object-menu-items"></div>';
+    buttons[0].before(details);
+    buttons.forEach(button=>{button.classList.replace('secondary','text-button');details.lastElementChild.append(button);});
+  });
+}
+function prepareFilterSheets(scope) {
+  scope.querySelectorAll('.log-filters,.event-filters').forEach(filters=>{
+    if(filters.parentElement.classList.contains('filter-sheet')) return;
+    const sheet=document.createElement('details'),summary=document.createElement('summary');
+    sheet.className='filter-sheet';sheet.open=!compactCharts.matches;
+    summary.innerHTML=icon('filter')+'<span>筛选条件</span><span class="filter-caption">时间、规则与结果</span>'+icon('chevron-down');
+    filters.before(sheet);sheet.append(summary,filters);
   });
 }
 function leaveRouteEditor() {
@@ -800,12 +902,14 @@ function render() {
 }
 async function refreshStatus() {
   try {
-    status=await api('status');
+    const next=await api('status');
+    if(status.version&&next.version&&status.version!==next.version) {location.reload();throw new Error('版本已更新，正在重新加载界面…');}
+    status=next;
     if(page==='routes'||page==='overview') refreshServiceHealth().catch(()=>{});
     $('#connection-label').textContent='已连接';
     $('.connection').classList.remove('offline');
     $('#restart-banner').hidden=!status.restart_required;
-    $('#uptime').textContent='已运行 '+Math.floor(status.uptime_seconds/60)+' 分钟';
+    $('#uptime').textContent='v'+(status.version||'—')+' · 已运行 '+Math.floor(status.uptime_seconds/60)+' 分钟';
   } catch(error) { $('#connection-label').textContent='连接中断'; $('.connection').classList.add('offline'); throw error; }
 }
 async function load() {
@@ -1217,7 +1321,7 @@ document.addEventListener('submit',event=>{
 });
 document.addEventListener('click',async event=>{
   const button=event.target.closest('button'); if(!button||button.dataset.hpAction) return;
-  if(button.id==='nav-toggle') {setNavigation(!document.body.classList.contains('nav-open'));return;}
+  if(button.id==='nav-toggle'||button.id==='mobile-more') {setNavigation(!document.body.classList.contains('nav-open'));return;}
   if(button.id==='nav-close'||button.id==='nav-scrim') {setNavigation(false);return;}
   if(button.dataset.page) {if(!leaveRouteEditor()) return;setNavigation(false,false);location.hash=button.dataset.page;return;}
   const action=button.dataset.action||'';
@@ -1230,10 +1334,11 @@ document.addEventListener('click',async event=>{
   if(['refresh-remote-backups','list-webdav-backups','test-webdav-backup','run-webdav-backup','download-webdav-backup','inspect-webdav-backup'].includes(action)) return remoteBackupAction(button);
   if(action==='configure-service-health') {const form=$('#service-health-form'),options=config.service_health||{enabled:true,interval:60};form.elements.enabled.checked=options.enabled;form.elements.interval.value=options.interval;$('.error',form).textContent='';openDialog($('#service-health-settings-dialog'));return;}
   if(action==='service-health-details') {openServiceHealthDetails(button.dataset.routeId);return;}
-  if(action==='refresh-service-health') {button.disabled=true;try{await refreshServiceHealth();}catch(e){toast(e.message);}finally{button.disabled=false;}return;}
+  if(action==='refresh-service-health') {button.disabled=true;try{await refreshServiceHealth(true);}catch(e){toast(e.message);}finally{button.disabled=false;}return;}
   if(action==='refresh-mcp'||action.startsWith('mcp-')) return mcpSettingsAction(button);
   if(action==='move-widget') return moveDashboardWidget(button.dataset.widget,Number(button.dataset.direction));
   if(action==='toggle-group-panel') return toggleGroupPanel(button);
+  if(action==='filter-routes') return filterRoutes(button);
   if(action==='discover-services') return openDiscovery(button.dataset.group);
   if(action==='start-discovery') return startDiscovery();
   if(action==='stop-discovery') return stopDiscovery();
@@ -1410,7 +1515,7 @@ document.addEventListener('keydown',event=>{
 mobileNavigation.addEventListener('change',()=>setNavigation(false,false));
 window.addEventListener('resize',()=>{updateNavigationIndicator(false);document.querySelectorAll('.object-menu[open]').forEach(positionObjectMenu);});
 document.addEventListener('toggle',event=>{if(event.target.matches('.object-menu')&&event.target.open) positionObjectMenu(event.target);},true);
-compactCharts.addEventListener('change',()=>{if(page==='statistics'&&config) render();});
+compactCharts.addEventListener('change',()=>{setNavigation(false,false);document.querySelectorAll('.filter-sheet').forEach(sheet=>{sheet.open=!compactCharts.matches;});preparePageActions($('#content'));if(page==='statistics'&&config) render();});
 document.addEventListener('focusin',event=>{const menu=$('#account-menu');if(menu.open&&!menu.contains(event.target)) menu.open=false;});
 document.addEventListener('click',event=>document.querySelectorAll('.object-menu[open]').forEach(menu=>{if(!menu.contains(event.target)) menu.open=false;}));
 document.addEventListener('keydown',event=>{
@@ -1467,9 +1572,10 @@ function serviceHealthNoticesHTML() {
 function serviceHealthPanelHTML() {
  return `<section class="panel service-health-toolbar"><div class="panel-heading"><div><h2>服务健康检查</h2><p>由服务器检查已启用反代的上游，验证 TLS 证书且不跟随重定向；与浏览器内网连通性检测分别显示。</p></div></div><div id="service-health-summary" class="health-summary" role="status">${serviceHealthSummaryHTML()}</div><div class="health-actions"><button class="secondary" type="button" data-action="refresh-service-health">${icon('refresh')}刷新</button><button class="secondary" type="button" data-action="configure-service-health">${icon('settings')}设置</button></div></section>`;
 }
-async function refreshServiceHealth() {
+async function refreshServiceHealth(animate=false) {
  if(!config||serviceHealthLoading) return;
  serviceHealthLoading=true;const request=++serviceHealthRequest;
+ if(animate) document.body?.classList.add('is-checking');
  try {
   const data=await api('service-health');
   if(request!==serviceHealthRequest||!config) return;
@@ -1484,10 +1590,18 @@ async function refreshServiceHealth() {
   document.querySelectorAll('[data-service-health]').forEach(el=>{const html=serviceHealthBadgeHTML(el.dataset.serviceHealth);if(el.innerHTML!==html) {const focused=el.contains(document.activeElement);el.innerHTML=html;if(focused) $('button',el)?.focus({preventScroll:true});}});
   const summary=$('#service-health-summary'),summaryHTML=serviceHealthSummaryHTML();
   if(summary&&summary.innerHTML!==summaryHTML) summary.innerHTML=summaryHTML;
+  const band=$('#route-status-band');
+  if(band) {
+    const html=routeStatusBandHTML(),stripTime=v=>v.replace(/<div class="check-line">[\s\S]*?<\/div>/,'<div class="check-line"></div>');
+    if(stripTime(band.innerHTML)!==stripTime(html)) band.innerHTML=html;
+    else {const line=band.querySelector('.check-line'),fresh=html.match(/<div class="check-line">([\s\S]*?)<\/div>/);
+      if(line&&fresh&&line.textContent!==fresh[1]) line.textContent=fresh[1];}
+    band.querySelector('.status-band')?.classList.add('settled');
+  }
   const notices=$('#service-health-notices');
   if(notices) {const html=serviceHealthNoticesHTML();if(notices.innerHTML!==html) notices.innerHTML=html;}
   if(messages.length&&page==='routes') toast(messages.join('；'));
- } finally {serviceHealthLoading=false;}
+ } finally {serviceHealthLoading=false;if(animate) document.body?.classList.remove('is-checking');}
 }
 
 function openServiceHealthDetails(id) {

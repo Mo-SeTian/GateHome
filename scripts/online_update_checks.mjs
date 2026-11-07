@@ -99,3 +99,20 @@ assert.ok(!root.innerHTML.includes('<script>'));
 assert.match(root.innerHTML,/&lt;script&gt;/);
 assert.match(root.innerHTML,/data-action="install-online-update" disabled/);
 console.log('Online update: duplicate prevention, proxy label, restart confirmation, failure preservation, background progress, reload recovery and error escaping: PASS');
+
+let reloads=0;
+const versionContext=vm.createContext({
+  status:{version:'0.0.60'},page:'settings',
+  api:async()=>({version:'0.0.61',uptime_seconds:0,restart_required:false}),
+  location:{reload(){reloads++;}},
+  $:()=>({classList:{add(){},remove(){}}})
+});
+vm.runInContext(source.slice(source.indexOf('async function refreshStatus('),source.indexOf('async function load()')),versionContext);
+await assert.rejects(vm.runInContext('refreshStatus()',versionContext),/正在重新加载界面/);
+assert.equal(reloads,1,'a new server version retained the old page assets');
+versionContext.status={version:'0.0.61'};
+await vm.runInContext('refreshStatus()',versionContext);
+versionContext.status={};
+await vm.runInContext('refreshStatus()',versionContext);
+assert.equal(reloads,1,'initial load or unchanged server version caused a reload loop');
+console.log('Version change: reload old page assets; initial and unchanged versions do not loop PASS');

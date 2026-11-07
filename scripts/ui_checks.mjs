@@ -65,12 +65,16 @@ const menuContext=vm.createContext({window:{innerHeight:740},menu});
 vm.runInContext(source.slice(source.indexOf('function positionObjectMenu('),source.indexOf('function routeTable(')),menuContext);
 vm.runInContext('positionObjectMenu(menu)',menuContext);assert.equal(menuClasses.has('align-start'),true);assert.equal(menuClasses.has('opens-up'),true);
 anchor={right:300,top:100,bottom:144};vm.runInContext('positionObjectMenu(menu)',menuContext);assert.equal(menuClasses.size,0,'old menu geometry survived a new position');
+menuContext.window.innerWidth=390;menuContext.window.innerHeight=844;anchor={right:300,top:576,bottom:620};
+vm.runInContext('positionObjectMenu(menu)',menuContext);assert.equal(menuClasses.has('opens-up'),false,'phone menu flipped up although the bottom navigation is gone');
+anchor={right:300,top:690,bottom:734};menuClasses.clear();
+vm.runInContext('positionObjectMenu(menu)',menuContext);assert.equal(menuClasses.has('opens-up'),true,'phone menu ran past the viewport edge');
 console.log('Action menus: narrow left edge, lower viewport edge and repositioning PASS');
 
-let healthWrites=0,healthFocus=0;
+let healthWrites=0,healthFocus=0,checkingAdds=0;
 const healthCell={dataset:{serviceHealth:'route'},value:'current',contains:()=>true,get innerHTML(){return this.value;},set innerHTML(value){this.value=value;healthWrites++;}};
 const healthRefresh=vm.createContext({
-  document:{activeElement:{},querySelectorAll:()=>[healthCell]},
+  document:{activeElement:{},querySelectorAll:()=>[healthCell],body:{classList:{add:name=>{if(name==='is-checking')checkingAdds++;},remove:()=>{}}}},
   $:selector=>selector==='button'?{focus:()=>{healthFocus++;}}:null,
   api:async()=>({routes:{},notices:[]}),
   serviceHealthBadgeHTML:()=> 'current',serviceHealthSummaryHTML:()=>'',serviceHealthNoticesHTML:()=>'',toast:()=>{}
@@ -78,4 +82,60 @@ const healthRefresh=vm.createContext({
 vm.runInContext("let config={},serviceHealthLoading=false,serviceHealthRequest=0,serviceHealthData={routes:{}},page='routes';"+source.slice(source.indexOf('async function refreshServiceHealth('),source.indexOf('function openServiceHealthDetails(')),healthRefresh);
 await vm.runInContext('refreshServiceHealth()',healthRefresh);assert.equal(healthWrites,0,'unchanged health polling replaced a focused button');
 healthCell.value='older';await vm.runInContext('refreshServiceHealth()',healthRefresh);assert.equal(healthWrites,1);assert.equal(healthFocus,1,'changed health results discarded keyboard focus');
-console.log('Health refresh: unchanged DOM continuity and changed-result focus restoration PASS');
+assert.equal(checkingAdds,0,'the five-second poll started the checking sweep on every card');
+await vm.runInContext('refreshServiceHealth(true)',healthRefresh);assert.equal(checkingAdds,1,'an explicit recheck did not start the checking sweep');
+console.log('Health refresh: unchanged DOM continuity, changed-result focus restoration and quiet polling PASS');
+
+const routeSlice = source.slice(source.indexOf("let routeFilter = '';"), source.indexOf('function groupsHTML()'));
+const routeContext = vm.createContext({
+  config: {
+    routes: [
+      { id: 'nas', group_id: 'g1', host: 'nas.example.com', name: '家庭存储', upstream: 'http://192.168.1.10:5000', enabled: true, tls: true, auth: { enabled: true }, firewall_id: '' },
+      { id: 'media', group_id: 'g2', host: 'media.example.com', name: '媒体中心', upstream: 'http://192.168.1.30:8096', enabled: true, tls: true, auth: { enabled: false }, firewall_id: '' }
+    ],
+    groups: [{ id: 'g1', name: '家庭服务', enabled: true }, { id: 'g2', name: '影音与下载', enabled: true }],
+    firewalls: []
+  },
+  serviceHealthData: { routes: { nas: { healthy: true, label: '正常', duration_ms: 12, status: 200, checked_at: new Date().toISOString() }, media: { healthy: false, label: '连接超时', duration_ms: 2500, status: 0, checked_at: new Date().toISOString() } }, options: { interval: 60 } },
+  icon: () => '<svg class="icon"></svg>', esc: value => String(value ?? ''),
+  objectMenu: () => '<details class="object-menu"></details>', badge: () => '<span class="badge"></span>',
+  routeActive: route => route.enabled, routeImageHTML: () => '', firewallWaiting: () => false,
+  serviceAddressHTML: route => '<a class="service-address-link" href="#">' + route.upstream + '</a>',
+  serviceHealthBadgeHTML: () => '<button class="service-health-result"><span class="health-label">正常</span><span class="mono">12 ms</span></button>',
+  empty: () => '', addRouteButton: () => '', reducedMotion: { matches: true }, render: () => { routeContext.rendered = (routeContext.rendered || 0) + 1; }, $: () => null
+});
+vm.runInContext(routeSlice, routeContext);
+const cards = vm.runInContext('routeCards("g1")', routeContext);
+assert.match(cards, /class="cards"/, 'proxy services did not render as a card grid');
+assert.match(cards, /class="route-card"/);
+assert.match(cards, /class="rc-name">家庭存储</, 'card identity missing');
+assert.match(cards, /data-route-key="g1\/nas.example.com"/, 'card lost its route key');
+assert.match(cards, /rc-host">nas.example.com</);
+assert.equal((cards.match(/class="route-card/g) || []).length, 1, 'group filter leaked other groups into the card grid');
+assert.match(cards, /rc-tag">HTTPS</, 'protocol tag missing');
+assert.match(cards, /独立账号/, 'access tag missing');
+
+const failingCards = vm.runInContext('routeCards("g2")', routeContext);
+assert.match(failingCards, /route-card is-failing/, 'failing service did not get the alert bar');
+assert.match(failingCards, /公开访问/, 'public access tag missing');
+
+const band = vm.runInContext('routeStatusBandHTML()', routeContext);
+assert.match(band, /class="status-band"/);
+assert.match(band, /服务总数/);
+assert.match(band, /媒体中心 未响应/, 'failing service was not named in the status band');
+assert.match(band, />1</, 'failing count missing from the band');
+
+const chips = vm.runInContext('routeFilterChipsHTML()', routeContext);
+assert.match(chips, /class="chip active"[^>]*data-group=""/, 'all-groups chip was not the default selection');
+assert.match(chips, /家庭服务<span class="chip-count">1</);
+assert.match(chips, /影音与下载<span class="chip-count">1</);
+assert.match(chips, /data-no-icon/, 'chips must opt out of the automatic button icon');
+
+vm.runInContext('filterRoutes({dataset:{group:"g2"}})', routeContext);
+assert.equal(routeContext.rendered, 1, 'filtering did not re-render the page');
+assert.equal(vm.runInContext('routeFilter', routeContext), 'g2');
+const filteredChips = vm.runInContext('routeFilterChipsHTML()', routeContext);
+assert.match(filteredChips, /chip active"[^>]*data-group="g2"/, 'active filter chip not reflected');
+vm.runInContext('filterRoutes({dataset:{group:"g2"}})', routeContext);
+assert.equal(routeContext.rendered, 1, 're-selecting the same group re-rendered needlessly');
+console.log('Proxy cards: card grid, group filter, failing bar and status band PASS');
