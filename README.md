@@ -2,17 +2,16 @@
 
 一个自托管的反向代理与 DDNS 综合管理工具。Go 主程序内嵌中文管理界面与 Sun-Panel 前后端；启用首页时由主程序管理独立的 Sun-Panel 子进程。运行无需 Node.js、外部数据库或额外 Web 服务器，Sun-Panel 使用内置 SQLite。
 
-当前版本为 **0.0.61**，安装包见 [v0.0.61 Release](https://github.com/Mo-SeTian/GateHome/releases/tag/v0.0.61)。程序和 systemd 服务名为 `gatehouse`。
+当前版本为 **0.0.62**，安装包见 [v0.0.62 Release](https://github.com/Mo-SeTian/GateHome/releases/tag/v0.0.62)。程序和 systemd 服务名为 `gatehouse`。
 
-## v0.0.61 更新
+## v0.0.62 更新
 
-- **GateHome 全局界面重构**：14 个管理页面、登录、账户及编辑弹窗统一采用紧凑的浅色分组布局，保留完整配置能力。
-- **交互与动效**：统一导航、分组折叠、菜单、说明、错误和任务反馈；接入 LeiBox 点阵加载，支持系统减少动态效果，等待动画不表示真实完成百分比。
-- **反代与健康检查**：检查状态集中在工具栏，周期设置移入弹窗，保留最近事件和诊断入口；后台刷新保持未变化的按钮及键盘焦点。
-- **手机与键盘操作**：优化表格、筛选和表单密度；修复窄屏菜单越界、弹窗焦点循环、重复正文滚动及普通提交按钮的事件错误。
-- **Sun-Panel 保持现状**：自身桌面、设置、弹窗、图标尺寸及网格间距均未调整，已有配置与运行数据保留。
+- 桌面端采用分组侧栏，手机端改用顶栏与抽屉导航，优化窄屏菜单与点击区域。
+- 反代页通过状态栏、组筛选和服务卡片展示地址、协议、访问保护及健康状态。
+- 修复筛选后服务操作可能作用于其他分组的问题。健康状态区分等待检查、暂停和关闭，后台刷新保留按钮和键盘焦点。
+- 升级重启后自动重新加载管理界面资源，支持系统减少动态效果。
 
-网页检查更新或上传本版更新 ZIP 即可升级。界面修改无需重新配置服务；监听端口等既有配置的生效方式保持原有规则。
+在 **设置 → 维护与更新** 检查在线更新，或上传本版更新 ZIP。已有配置及 Sun-Panel 运行数据保留。
 
 ## 主要功能
 
@@ -142,7 +141,7 @@ sudo bash /tmp/gatehome-install.sh install --proxy "$GATEHOME_INSTALL_PROXY"
 
 下载使用 HTTP/1.1；TLS 连接中断等下载错误会清除残缺文件并重试，最多尝试 4 次。下载和校验成功后才修改安装。如果出现 `curl: (56)` / `unexpected eof while reading`，说明下载连接提前断开；请检查服务器的网络或代理规则。使用 MSM 等分流工具时，安装需要访问 `raw.githubusercontent.com`、`github.com` 和 `release-assets.githubusercontent.com`。仍无法下载时，可在其他能访问 GitHub 的设备下载下面的安装包，复制到服务器离线安装。
 
-离线安装可使用 `make release` 生成的 **`版本/0.0.61/`** 完整目录，或解压 Release 中对应架构的 `gatehome-linux-*.tar.gz`，然后运行：
+离线安装可使用 `make release` 生成的 **`版本/0.0.62/`** 完整目录，或解压 Release 中对应架构的 `gatehome-linux-*.tar.gz`，然后运行：
 
 ```sh
 sudo bash install.sh
