@@ -2,7 +2,17 @@
 
 一个自托管的反向代理与 DDNS 综合管理工具。Go 主程序内嵌中文管理界面与 Sun-Panel 前后端；启用首页时由主程序管理独立的 Sun-Panel 子进程。运行无需 Node.js、外部数据库或额外 Web 服务器，Sun-Panel 使用内置 SQLite。
 
-当前版本为 **0.0.60**，安装包见 [v0.0.60 Release](https://github.com/Mo-SeTian/GateHome/releases/tag/v0.0.60)。程序和 systemd 服务名为 `gatehouse`。
+当前版本为 **0.0.61**，安装包见 [v0.0.61 Release](https://github.com/Mo-SeTian/GateHome/releases/tag/v0.0.61)。程序和 systemd 服务名为 `gatehouse`。
+
+## v0.0.61 更新
+
+- **GateHome 全局界面重构**：14 个管理页面、登录、账户及编辑弹窗统一采用紧凑的浅色分组布局，保留完整配置能力。
+- **交互与动效**：统一导航、分组折叠、菜单、说明、错误和任务反馈；接入 LeiBox 点阵加载，支持系统减少动态效果，等待动画不表示真实完成百分比。
+- **反代与健康检查**：检查状态集中在工具栏，周期设置移入弹窗，保留最近事件和诊断入口；后台刷新保持未变化的按钮及键盘焦点。
+- **手机与键盘操作**：优化表格、筛选和表单密度；修复窄屏菜单越界、弹窗焦点循环、重复正文滚动及普通提交按钮的事件错误。
+- **Sun-Panel 保持现状**：自身桌面、设置、弹窗、图标尺寸及网格间距均未调整，已有配置与运行数据保留。
+
+网页检查更新或上传本版更新 ZIP 即可升级。界面修改无需重新配置服务；监听端口等既有配置的生效方式保持原有规则。
 
 ## 主要功能
 
@@ -132,7 +142,7 @@ sudo bash /tmp/gatehome-install.sh install --proxy "$GATEHOME_INSTALL_PROXY"
 
 下载使用 HTTP/1.1；TLS 连接中断等下载错误会清除残缺文件并重试，最多尝试 4 次。下载和校验成功后才修改安装。如果出现 `curl: (56)` / `unexpected eof while reading`，说明下载连接提前断开；请检查服务器的网络或代理规则。使用 MSM 等分流工具时，安装需要访问 `raw.githubusercontent.com`、`github.com` 和 `release-assets.githubusercontent.com`。仍无法下载时，可在其他能访问 GitHub 的设备下载下面的安装包，复制到服务器离线安装。
 
-离线安装可使用 `make release` 生成的 **`版本/0.0.60/`** 完整目录，或解压 Release 中对应架构的 `gatehome-linux-*.tar.gz`，然后运行：
+离线安装可使用 `make release` 生成的 **`版本/0.0.61/`** 完整目录，或解压 Release 中对应架构的 `gatehome-linux-*.tar.gz`，然后运行：
 
 ```sh
 sudo bash install.sh
@@ -171,7 +181,7 @@ git clone https://github.com/Mo-SeTian/GateHome.git
 cd GateHome
 ```
 
-开发机器需 Go 1.27.1 或更高版本、Node.js 与 npm（构建 Sun-Panel 前端），以及 Python 3（打包与安装检查使用）。在项目根目录运行：
+开发机器需 Go 1.27.1 或更高版本、Node.js 22.13 或更高版本与 npm（构建 Sun-Panel 前端），以及 Python 3（打包与安装检查使用）。在项目根目录运行：
 
 ```sh
 make build
@@ -461,6 +471,14 @@ Sun-Panel 首页卡片不显示服务状态标识。登录后通过右下角 **�
 - 管理 API 的状态轮询、日志查询、统计查询和健康检查不写入调用日志。日志写盘失败时页面显示提示，当前记录仍保留在内存。
 - 旧 DDNS 记录会按 IPv4、IPv6、双栈迁移到对应任务组，保留启停状态、查询地址和间隔。旧全局根域名及 Token 会自动移入相关组；仅供证书使用的旧账户迁移为停用 DDNS 同步的 DNS 组。凭据在正常 API 中只返回“已配置”标志，不回显内容。重复同步同一 A / AAAA 记录的组会被拒绝，避免任务互相覆盖；不同组可分别同步同一域名的 A 与 AAAA。
 
+## 界面与交互
+
+GateHome 管理台统一采用紧凑的浅色分组布局，覆盖概览、反代、DDNS、证书、防火墙、记录、AI 管理、备份、设置、登录及编辑弹窗。健康检查状态集中在反代页工具栏，检查设置通过弹窗修改；补充说明支持悬停、键盘聚焦和手机点按，状态与错误始终直接显示。
+
+[LeiBox 点阵加载](https://leibox.pantoria.cn/docs/animations/ai-generating) 用于实际任务的等待反馈，源码与来源说明位于 `internal/gateway/ui/leibox/`。导航、弹窗、分组和菜单使用原生动画，支持减少动态效果；小屏操作菜单自动避开视口边界。样式限定于 GateHome，Sun-Panel 自身界面保持不变。
+
+组件构建需要 Node.js 22.13 或以上，`make build` 会先运行 `node scripts/build_leibox.mjs`。界面专项验证为 `node scripts/ui_checks.mjs`，公共组件与交互规范见 [界面设计规范](design-system/gatehouse/MASTER.md)。
+
 ## 本地开发与验证
 
 ```sh
@@ -468,6 +486,7 @@ make test
 node scripts/frontend_checks.mjs
 node scripts/motion_checks.mjs
 node scripts/security_checks.mjs
+node scripts/ui_checks.mjs
 ./dist/gatehouse -config ./.local/runtime/config -log ./.local/runtime/log -data ./.local/runtime/data init
 ./dist/gatehouse -config ./.local/runtime/config -log ./.local/runtime/log -data ./.local/runtime/data
 ```

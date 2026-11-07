@@ -4,6 +4,10 @@ COPY sunpanel/package.json sunpanel/pnpm-lock.yaml ./
 RUN npx --yes pnpm@8.15.9 install --frozen-lockfile
 COPY sunpanel ./
 RUN npx --yes pnpm@8.15.9 run build-only
+WORKDIR /src
+COPY scripts/build_leibox.mjs ./scripts/
+COPY internal/gateway/ui/leibox ./internal/gateway/ui/leibox
+RUN mkdir -p internal/gateway/web && node scripts/build_leibox.mjs
 
 FROM golang:1.27.1-alpine AS builder
 WORKDIR /src
@@ -14,6 +18,7 @@ COPY sunpanel/service ./sunpanel/service
 COPY --from=frontend /src/sunpanel/dist ./sunpanel/service/integration/web
 COPY cmd ./cmd
 COPY internal ./internal
+COPY --from=frontend /src/internal/gateway/web/leibox-ui.js /src/internal/gateway/web/leibox-loader.css ./internal/gateway/web/
 COPY VERSION ./VERSION
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X gatehouse/internal/gateway.Version=$(cat VERSION)" -o /out/gatehouse ./cmd/gatehouse
 

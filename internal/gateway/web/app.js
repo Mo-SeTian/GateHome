@@ -8,7 +8,7 @@ function newID() {
   const hex=[...bytes].map(b=>b.toString(16).padStart(2,'0')).join('');return hex.slice(0,8)+'-'+hex.slice(8,12)+'-'+hex.slice(12,16)+'-'+hex.slice(16,20)+'-'+hex.slice(20);
 }
 const pages = {sunpanel:'浏览器首页',overview:'概览',routes:'反向代理',ddns:'动态域名',certificates:'SSL 证书',access:'防火墙管理',subscriptions:'订阅管理',mcp:'AI 管理',backups:'备份与恢复',settings:'设置',logs:'日志',statistics:'统计','firewall-logs':'防火墙拦截记录','ip-blocks':'IP 拦截名单'};
-const iconNames = new Set(['overview','routes','globe','certificate','shield','download','logs','chart','settings','server','gateway','router','layers','activity','refresh','plus','close','logout','menu','more','back','edit','chevron-down','chevron-up','chevron-left','chevron-right','external-link','trash','play','pause','login','filter','unlock','save','upload','info']);
+const iconNames = new Set(['overview','routes','globe','certificate','shield','download','logs','chart','settings','server','gateway','router','layers','activity','refresh','plus','close','logout','menu','more','back','edit','chevron-down','chevron-up','chevron-left','chevron-right','external-link','trash','play','pause','login','filter','unlock','save','upload','info','check']);
 function icon(name) { return `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="/icons.svg#${iconNames.has(name)?name:'layers'}"></use></svg>`; }
 function hydrateIcons(scope=document) {
   prepareContextHelp(scope);
@@ -33,6 +33,19 @@ function focusSelector(el) {
   if(el.id) return '#'+CSS.escape(el.id);
   if(el.dataset.action||el.dataset.page) return 'button'+['action','page','index','group','panel','kind','pageNumber'].filter(k=>el.dataset[k]!==undefined).map(k=>`[data-${k.replace(/[A-Z]/g,c=>'-'+c.toLowerCase())}="${CSS.escape(el.dataset[k])}"]`).join('');
   return '';
+}
+function trapDialogFocus(event) {
+  if(event.key!=='Tab') return false;
+  const dialog=$('dialog[open]');if(!dialog) return false;
+  const targets=[...dialog.querySelectorAll('button,input,select,textarea,a[href],summary,[tabindex]')].filter(el=>{
+    const closed=el.closest('details:not([open])');
+    return !el.disabled&&el.tabIndex>=0&&el.getClientRects().length&&(!closed||closed.querySelector(':scope>summary')?.contains(el));
+  });
+  if(!targets.length) return false;
+  const first=targets[0],last=targets.at(-1),active=document.activeElement;
+  if(event.shiftKey&&(active===first||!dialog.contains(active))) {event.preventDefault();last.focus();return true;}
+  if(!event.shiftKey&&(active===last||!dialog.contains(active))) {event.preventDefault();first.focus();return true;}
+  return false;
 }
 function openDialog(dialog) {
   closeContextHelp();prepareContextHelp(dialog);
@@ -153,7 +166,7 @@ async function save(next, dnsTokens, proxyPassword, certificateTokens, routePass
   toast('配置已保存' + (status.restart_required ? '，监听端口重启后生效' : ''));
 }
 function badge(text, kind = '') { return `<span class="badge ${kind}">${esc(text)}</span>`; }
-function empty(title, message, action = '') { return `<div class="empty"><div class="empty-icon">${icon('layers')}</div><h3>${esc(title)}</h3><p>${esc(message)}</p>${action}</div>`; }
+function empty(title, message, action = '') { return `<div class="empty"><div class="empty-icon">${/^(正在|加载中)/.test(title)?'<gatehome-loader></gatehome-loader>':icon('layers')}</div><h3>${esc(title)}</h3><p>${esc(message)}</p>${action}</div>`; }
 function heading(kicker, title, description, actions = '') { return `<div class="page-heading"><div><span class="eyebrow">${kicker}</span><h1 tabindex="-1">${title}</h1><p>${description}</p></div><div class="heading-actions">${actions}</div></div>`; }
 function discoveryButton(groupID='') {return `<button class="secondary" data-action="discover-services" data-group="${esc(groupID)}" ${!config.groups.length?'disabled':''}>${icon('activity')}发现内网服务</button>`;}
 function addRouteButton(groupID = '') { return `<button class="primary" data-action="add-route" data-group="${esc(groupID)}"><span data-icon="plus"></span>添加代理服务</button>`; }
@@ -197,6 +210,12 @@ function subscriptionStatus(id) { return (status.subscriptions || []).find(s=>s.
 function objectMenu(label, buttons) {
   return `<details class="object-menu"><summary class="icon-button" aria-label="${esc(label)}操作">${icon('more')}</summary><div class="object-menu-items">${buttons}</div></details>`;
 }
+function positionObjectMenu(menu) {
+  menu.classList.remove('align-start','opens-up');
+  const popup=menu.querySelector('.object-menu-items'),anchor=menu.querySelector('summary').getBoundingClientRect(),bounds=popup.getBoundingClientRect();
+  menu.classList.toggle('align-start',anchor.right-bounds.width<12);
+  menu.classList.toggle('opens-up',anchor.bottom+6+bounds.height>window.innerHeight-12&&anchor.top-bounds.height-6>=12);
+}
 function routeTable(accessOnly = false, overview = false, groupID = '') {
   const rows=config.routes.map((r,i)=>({r,i})).filter(({r})=>!groupID||r.group_id===groupID).slice(0,overview?4:100);
   if (!rows.length) return empty('还没有代理服务', '添加一个子域名，将它连接到你的 NAS、相册或其他内网服务。', addRouteButton(groupID));
@@ -207,7 +226,7 @@ function routeTable(accessOnly = false, overview = false, groupID = '') {
     const identity=`<div class="service-cell"><span class="service-icon">${icon('server')}${routeImageHTML(r.image)}</span><div><b>${esc(r.name||r.host)}</b><small class="mono">${esc(r.host)}</small>${groupID?'':`<small>${esc(groupName(r.group_id))}</small>`}</div></div>`;
     const status=badge(routeActive(r)?'已启用':r.enabled?'组已停用':'已停用',routeActive(r)?'':'gray');
     const controls=`<div class="table-actions">${edit}${overview?'':objectMenu(r.name||r.host,`<button class="text-button" data-action="toggle-route" data-index="${i}">${r.enabled?'停用':'启用'}</button><button class="text-button danger" data-action="delete-route" data-index="${i}">删除服务</button>`)}</div>`;
-    return `<tr data-route-key="${esc(key)}"><td>${identity}</td>${accessOnly?`<td>${esc(f?.name||'未配置')}</td><td>${f?badge(waiting?'等待订阅，暂拒访问':'规则可用',waiting?'amber':'')+`<small>未命中${actionLabel(f.default_action)}</small>`:'不限制来源 IP'}</td>`:`<td class="service-address">${serviceAddressHTML(r)}</td><td><span class="protocol">${r.tls?'HTTPS':'HTTP'}</span></td><td>${esc(f?.name||'未配置')}</td><td>${r.auth?.enabled?'独立账号':'公开访问'}</td>`}<td>${status}<div data-service-health="${esc(r.id)}">${serviceHealthBadgeHTML(r.id)}</div></td><td>${controls}</td></tr>`;
+    return `<tr data-route-key="${esc(key)}"><td>${identity}</td>${accessOnly?`<td>${esc(f?.name||'未配置')}</td><td>${f?badge(waiting?'等待订阅，暂拒访问':'规则可用',waiting?'amber':'')+`<small>未命中${actionLabel(f.default_action)}</small>`:'不限制来源 IP'}</td>`:`<td class="service-address">${serviceAddressHTML(r)}</td><td><span class="protocol">${r.tls?'HTTPS':'HTTP'}</span></td><td>${esc(f?.name||'未配置')}</td><td>${r.auth?.enabled?'独立账号':'公开访问'}</td>`}<td>${routeActive(r)?'':status}<div data-service-health="${esc(r.id)}">${serviceHealthBadgeHTML(r.id)}</div></td><td>${controls}</td></tr>`;
   }).join('')}</tbody></table></div>`;
 }
 function firewallsHTML() {
@@ -236,10 +255,10 @@ function groupsHTML() {
   const groups=config.groups.map((g,i)=>{
     const dns=config.ddns.groups.find(d=>d.id===g.ddns_group_id),count=config.routes.filter(r=>r.group_id===g.id).length;
     const summary=`${count} 个服务 · ${esc(portsText(g))}${g.domain_suffix?' · '+esc(g.domain_suffix):''}${dns?' · DDNS：'+esc(dns.name):''}`;
-    const actions=discoveryButton(g.id)+addRouteButton(g.id)+objectMenu(g.name,`<button class="text-button" data-action="edit-group" data-index="${i}">编辑组</button><button class="text-button" data-action="toggle-group" data-index="${i}">${g.enabled?'停用组':'启用组'}</button><button class="text-button danger" data-action="delete-group" data-index="${i}">删除组</button>`);
+    const actions=addRouteButton(g.id)+objectMenu(g.name,`<button class="text-button" data-action="discover-services" data-group="${esc(g.id)}">${icon('activity')}发现内网服务</button><button class="text-button" data-action="edit-group" data-index="${i}">编辑组</button><button class="text-button" data-action="toggle-group" data-index="${i}">${g.enabled?'停用组':'启用组'}</button><button class="text-button danger" data-action="delete-group" data-index="${i}">删除组</button>`);
     return groupPanel('proxy',g.id,g.name,summary,routeTable(false,false,g.id),actions,groupBadge(g));
   }).join('');
-  return heading('PROXY GROUPS','反向代理','按组管理服务；点击组名展开或收起，编辑配置使用弹窗。',action)+serviceHealthPanelHTML()+(groups||empty('还没有反代组','先创建一个监听入口。',action))+'<p class="proxy-note">组内按域名分流。监听端口修改后需重启；访问账号和防火墙保存后生效。</p>';
+  return heading('PROXY GROUPS','反向代理','按组管理服务；点击组名展开或收起，编辑配置使用弹窗。',action)+serviceHealthPanelHTML()+(groups||empty('还没有反代组','先创建一个监听入口。',action))+`<div id="service-health-notices" class="health-notices" role="status" aria-live="polite">${serviceHealthNoticesHTML()}</div><p class="proxy-note">组内按域名分流。监听端口修改后需重启；访问账号和防火墙保存后生效。</p>`;
 }
 function prepareTables(scope) {
   scope.querySelectorAll('.table-wrap').forEach(el=>{
@@ -502,7 +521,7 @@ function maintenanceHTML() {
   return {
     updates:'<h2 class="settings-section-heading">维护与更新</h2><div id="online-update">'+onlineUpdateHTML()+'</div>'+githubTokenHTML()+upload,
     backups:backup+'<div id="backup-capacity">'+backupCapacityHTML()+'</div>',
-    version:`<div class="app-version"><b>Gatehouse</b><button class="secondary" data-action="restart-service" ${!supported?'disabled':''}>重启服务</button><span>版本 ${esc(status.version||'加载中')}</span></div>`
+    version:`<div class="app-version"><b>GateHome</b><button class="secondary" data-action="restart-service" ${!supported?'disabled':''}>重启服务</button><span>版本 ${esc(status.version||'加载中')}</span></div>`
   };
 }
 async function inspectMaintenance(form,kind) {
@@ -519,7 +538,7 @@ async function downloadBackup(password) {
 }
 function adminAccessHTML() {
   const access=config.admin_access||{enabled:false,origins:[]};
-  return panel('管理界面反代访问','通过自己的公网域名登录和管理 Gatehouse。',`<form id="admin-access-form" class="panel-body"><div class="toggle-row"><div><b>允许指定公网地址反代访问</b><p>兼容公网 HTTPS 接入内部 HTTP 管理端口，保存后立即生效。</p></div><label class="switch"><input name="enabled" type="checkbox" ${access.enabled?'checked':''}><span></span><span class="sr-only">允许指定公网地址反代访问</span></label></div><label>公网访问地址<textarea name="origins" rows="3" spellcheck="false" placeholder="https://gate.example.com:18443">${esc((access.origins||[]).join('\n'))}</textarea><small>每行一个实际访问地址，包含 http:// 或 https:// 和非默认端口，不填写路径。最多 20 个地址。</small></label><p class="form-note">在反向代理中添加对应域名，内网服务选 HTTP，地址填写 127.0.0.1:16666（管理端口）。仍须使用管理密码登录；只允许填写的地址，不开放其他网站的跨站 API 调用。</p><p class="error" role="alert"></p><div class="form-actions"><button type="submit" class="primary">保存访问设置</button></div></form>`);
+  return panel('管理界面反代访问','通过自己的公网域名登录和管理 GateHome。',`<form id="admin-access-form" class="panel-body"><div class="toggle-row"><div><b>允许指定公网地址反代访问</b><p>兼容公网 HTTPS 接入内部 HTTP 管理端口，保存后立即生效。</p></div><label class="switch"><input name="enabled" type="checkbox" ${access.enabled?'checked':''}><span></span><span class="sr-only">允许指定公网地址反代访问</span></label></div><label>公网访问地址<textarea name="origins" rows="3" spellcheck="false" placeholder="https://gate.example.com:18443">${esc((access.origins||[]).join('\n'))}</textarea><small>每行一个实际访问地址，包含 http:// 或 https:// 和非默认端口，不填写路径。最多 20 个地址。</small></label><p class="form-note">在反向代理中添加对应域名，内网服务选 HTTP，地址填写 127.0.0.1:16666（管理端口）。仍须使用管理密码登录；只允许填写的地址，不开放其他网站的跨站 API 调用。</p><p class="error" role="alert"></p><div class="form-actions"><button type="submit" class="primary">保存访问设置</button></div></form>`);
 }
 function logRetentionHTML() {
   const c=config.log_retention?.max_size_mb?config.log_retention:{max_size_mb:16,keep_days:30},s=status.log_storage||{};
@@ -662,7 +681,7 @@ async function loadSecurityEvents(kind,targetPage=1,keepSnapshot=false) {
 function securityStatisticsHTML(d) {
   const metrics=[['WAF 命中请求',d.waf_matched||0,'一次请求只计一次'],['WAF 拦截',d.waf_blocked||0,'实际被 WAF 拦截'],['访问限速拦截',d.rate_blocked||0,'超出窗口允许次数'],['HTTP 规则拦截',d.custom_blocked||0,'自定义规则'],['验证成功',d.auth_success||0,'独立服务账号'],['验证失败',d.auth_failed||0,'错误账号或密码'],['未验证请求',d.auth_required||0,'尚无有效服务会话'],['验证速率限制',d.auth_limited||0,'短时过多验证尝试'],['防火墙拦截',d.firewall_blocked||0,'IP / WAF / HTTP 规则 / 限速'],['冻结 IP 拦截',d.frozen_blocked||0,'包含触发冻结的请求'],['新增自动冻结',d.freeze_created||0,'所选时间内的触发次数'],['当前冻结 IP',d.active_freezes||0,'实时值，不受时间范围限制']];
   return (d.freeze_write_error?'<div class="hint amber" role="alert">冻结记录保存失败，最新变更可能无法在重启后恢复。请检查磁盘与数据目录权限。</div>':'')+
-    panel('账号验证与安全防护','验证指标仅计算 Gatehouse 独立服务账号；后端返回 401 不会算作账号验证失败。',`<div class="security-metrics panel-body">${metrics.map(([label,value,note])=>`<div class="stat"><span class="stat-label">${label}</span><div class="stat-value">${value.toLocaleString()}<small>${label==='当前冻结 IP'?'个':'次'}</small></div><span class="stat-foot">${note}</span></div>`).join('')}</div>`,`<a class="text-button" href="#ip-blocks">${icon('shield')}管理冻结 IP</a>`)+
+    panel('账号验证与安全防护','验证指标仅计算 GateHome 独立服务账号；后端返回 401 不会算作账号验证失败。',`<div class="security-metrics panel-body">${metrics.map(([label,value,note])=>`<div class="stat"><span class="stat-label">${label}</span><div class="stat-value">${value.toLocaleString()}<small>${label==='当前冻结 IP'?'个':'次'}</small></div><span class="stat-foot">${note}</span></div>`).join('')}</div>`,`<a class="text-button" href="#ip-blocks">${icon('shield')}管理冻结 IP</a>`)+
     securityEventsHTML('security');
 }
 
@@ -718,7 +737,7 @@ async function loadStatistics() {
 function downloadStatistics() {
   if(!statisticsView) return;
   const d=statisticsView,legend=[['正常访问',statisticsColors.normal],['安全拦截',statisticsColors.blocked],['其他失败',statisticsColors.failed]].map(([name,color],i)=>`<rect x="${40+i*180}" y="125" width="12" height="12" fill="${color}"/><text x="${60+i*180}" y="136" font-size="13" fill="#53617e">${name}</text>`).join('');
-  const data=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1210"><rect width="1000" height="1210" fill="white"/><g font-family="sans-serif"><text x="40" y="40" font-size="24" fill="#1a283c">Gatehouse 访问统计</text><text x="40" y="68" font-size="13" fill="#667085">${esc(date(d.from)+' — '+date(d.to))} · ${esc(statisticsRule?statisticsRuleName(statisticsRule):'全部反代规则')}</text><text x="40" y="96" font-size="14" fill="#53617e">总请求 ${d.total} · 正常 ${d.normal} · 拦截 ${d.blocked} · 其他失败 ${d.failed}</text>${legend}<text x="40" y="176" font-size="16" fill="#1a283c">访问趋势</text><svg x="40" y="185" width="920" height="276">${trendChart(d)}</svg><text x="40" y="495" font-size="16" fill="#1a283c">HTTP 状态码分布</text><svg x="40" y="508" width="920" height="265">${statusChart(d)}</svg><text x="40" y="808" font-size="16" fill="#1a283c">反代规则排行（前 8 条）</text><svg x="40" y="820" width="920" height="250">${rulesChart(d)}</svg><text x="40" y="1100" font-size="12" fill="#667085">统计仅包含当前保留的日志；TLS 握手失败不计入 HTTP 请求。</text><text x="40" y="1132" font-size="13" fill="#53617e">独立验证：成功 ${d.auth_success||0} · 失败 ${d.auth_failed||0} · 未验证 ${d.auth_required||0} · 速率限制 ${d.auth_limited||0}</text><text x="40" y="1160" font-size="13" fill="#53617e">安全防护：防火墙 ${d.firewall_blocked||0} · 冻结拒绝 ${d.frozen_blocked||0} · 自动冻结 ${d.freeze_created||0} · 当前冻结 IP ${d.active_freezes||0}</text></g></svg>`;
+  const data=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1210"><rect width="1000" height="1210" fill="white"/><g font-family="sans-serif"><text x="40" y="40" font-size="24" fill="#1a283c">GateHome 访问统计</text><text x="40" y="68" font-size="13" fill="#667085">${esc(date(d.from)+' — '+date(d.to))} · ${esc(statisticsRule?statisticsRuleName(statisticsRule):'全部反代规则')}</text><text x="40" y="96" font-size="14" fill="#53617e">总请求 ${d.total} · 正常 ${d.normal} · 拦截 ${d.blocked} · 其他失败 ${d.failed}</text>${legend}<text x="40" y="176" font-size="16" fill="#1a283c">访问趋势</text><svg x="40" y="185" width="920" height="276">${trendChart(d)}</svg><text x="40" y="495" font-size="16" fill="#1a283c">HTTP 状态码分布</text><svg x="40" y="508" width="920" height="265">${statusChart(d)}</svg><text x="40" y="808" font-size="16" fill="#1a283c">反代规则排行（前 8 条）</text><svg x="40" y="820" width="920" height="250">${rulesChart(d)}</svg><text x="40" y="1100" font-size="12" fill="#667085">统计仅包含当前保留的日志；TLS 握手失败不计入 HTTP 请求。</text><text x="40" y="1132" font-size="13" fill="#53617e">独立验证：成功 ${d.auth_success||0} · 失败 ${d.auth_failed||0} · 未验证 ${d.auth_required||0} · 速率限制 ${d.auth_limited||0}</text><text x="40" y="1160" font-size="13" fill="#53617e">安全防护：防火墙 ${d.firewall_blocked||0} · 冻结拒绝 ${d.frozen_blocked||0} · 自动冻结 ${d.freeze_created||0} · 当前冻结 IP ${d.active_freezes||0}</text></g></svg>`;
   const url=URL.createObjectURL(new Blob([data],{type:'image/svg+xml;charset=utf-8'}));
   const link=document.createElement('a');link.href=url;link.download='gatehouse-statistics-'+new Date().toLocaleDateString('sv-SE')+'.svg';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
 }
@@ -1115,7 +1134,7 @@ document.addEventListener('submit',event=>{
   if(form.id==='webdav-backup-form') return submitForm(form,()=>saveWebDAVSettings(form));
   if(form.id==='webdav-restore-form') return submitForm(form,()=>inspectWebDAVBackup(form));
   if(form.classList.contains('mcp-client-form')) return submitForm(form,()=>saveMCPClient(form));
-  if(form.id==='service-health-form') return submitForm(form,async()=>{const next=clone(config);next.service_health={enabled:form.elements.enabled.checked,interval:Number(form.elements.interval.value)};await save(next);await refreshServiceHealth();toast('服务健康检查设置已保存');});
+  if(form.id==='service-health-form') return submitForm(form,async()=>{const next=clone(config);next.service_health={enabled:form.elements.enabled.checked,interval:Number(form.elements.interval.value)};await save(next);await refreshServiceHealth();closeDialog($('#service-health-settings-dialog'));render();toast('服务健康检查设置已保存');});
   if(form.id==='mcp-form') return submitForm(form,()=>saveMCPSettings(form));
   if(form.dataset.eventFilters) {
     const kind=form.dataset.eventFilters;securityEvents[kind].filters={...emptyEventFilters(),...Object.fromEntries(new FormData(form))};
@@ -1201,13 +1220,15 @@ document.addEventListener('click',async event=>{
   if(button.id==='nav-toggle') {setNavigation(!document.body.classList.contains('nav-open'));return;}
   if(button.id==='nav-close'||button.id==='nav-scrim') {setNavigation(false);return;}
   if(button.dataset.page) {if(!leaveRouteEditor()) return;setNavigation(false,false);location.hash=button.dataset.page;return;}
-  const action=button.dataset.action;
+  const action=button.dataset.action||'';
+  if(!action&&!button.dataset.job&&button.id!=='logout') return;
   if(action==='close-dialog') { closeDialog(button.closest('dialog')); return; }
   if(!config||busy) return;
   if(action==='edit-admin-account') return openAdminAccount();
   if(action==='edit-dashboard') return toggleDashboardEditing();
   if(action==='configure-dashboard') return openDashboardSettings();
   if(['refresh-remote-backups','list-webdav-backups','test-webdav-backup','run-webdav-backup','download-webdav-backup','inspect-webdav-backup'].includes(action)) return remoteBackupAction(button);
+  if(action==='configure-service-health') {const form=$('#service-health-form'),options=config.service_health||{enabled:true,interval:60};form.elements.enabled.checked=options.enabled;form.elements.interval.value=options.interval;$('.error',form).textContent='';openDialog($('#service-health-settings-dialog'));return;}
   if(action==='service-health-details') {openServiceHealthDetails(button.dataset.routeId);return;}
   if(action==='refresh-service-health') {button.disabled=true;try{await refreshServiceHealth();}catch(e){toast(e.message);}finally{button.disabled=false;}return;}
   if(action==='refresh-mcp'||action.startsWith('mcp-')) return mcpSettingsAction(button);
@@ -1358,9 +1379,12 @@ document.addEventListener('change',async event=>{
   if(['log-category','log-result','log-rule','log-method'].includes(event.target.id)) {readLogFilters();loadLogs().catch(e=>toast(e.message));}});
 document.querySelectorAll('dialog').forEach(dialog=>{
   dialog.setAttribute('aria-labelledby',dialog.querySelector('h2').id);
-  const form=dialog.querySelector('form'),heading=form.querySelector('.dialog-heading'),actions=form.querySelector('.dialog-actions'),body=document.createElement('div');body.className='dialog-body';
-  while(heading.nextSibling&&heading.nextSibling!==actions) body.append(heading.nextSibling);
-  form.insertBefore(body,actions);
+  const form=dialog.querySelector('form'),heading=form.querySelector('.dialog-heading'),actions=form.querySelector('.dialog-actions');
+  if(!form.querySelector(':scope>.dialog-body')) {
+    const body=document.createElement('div');body.className='dialog-body';
+    while(heading.nextSibling&&heading.nextSibling!==actions) body.append(heading.nextSibling);
+    form.insertBefore(body,actions);
+  }
   dialog.querySelector('[data-action="close-dialog"]').innerHTML=icon('close');
   dialog.addEventListener('cancel',event=>{event.preventDefault();closeDialog(dialog);});
   dialog.addEventListener('close',()=>{
@@ -1373,6 +1397,7 @@ document.querySelectorAll('dialog').forEach(dialog=>{
 $('#sidebar .brand').addEventListener('click',()=>setNavigation(false,false));
 $('.skip-link').addEventListener('click',event=>{event.preventDefault();$('#content').focus();});
 document.addEventListener('keydown',event=>{
+  if(trapDialogFocus(event)) return;
   if(!document.body.classList.contains('nav-open')) return;
   if(event.key==='Escape') {event.preventDefault();setNavigation(false);return;}
   if(event.key==='Tab') {
@@ -1383,7 +1408,8 @@ document.addEventListener('keydown',event=>{
   }
 });
 mobileNavigation.addEventListener('change',()=>setNavigation(false,false));
-window.addEventListener('resize',()=>updateNavigationIndicator(false));
+window.addEventListener('resize',()=>{updateNavigationIndicator(false);document.querySelectorAll('.object-menu[open]').forEach(positionObjectMenu);});
+document.addEventListener('toggle',event=>{if(event.target.matches('.object-menu')&&event.target.open) positionObjectMenu(event.target);},true);
 compactCharts.addEventListener('change',()=>{if(page==='statistics'&&config) render();});
 document.addEventListener('focusin',event=>{const menu=$('#account-menu');if(menu.open&&!menu.contains(event.target)) menu.open=false;});
 document.addEventListener('click',event=>document.querySelectorAll('.object-menu[open]').forEach(menu=>{if(!menu.contains(event.target)) menu.open=false;}));
@@ -1421,11 +1447,25 @@ function serviceHealthBadgeHTML(id) {
  const result=serviceHealthData.routes[id];
  if(!result) return badge('等待检测','gray');
  const state=result.healthy?'':result.state==='disabled'?'gray':'red';
- return `<button type="button" id="service-health-route-${esc(id)}" class="text-button service-health-result ${state}" data-action="service-health-details" data-route-id="${esc(id)}" aria-label="查看服务健康诊断">${badge(result.label,state)}${result.checked_at?`<span class="mono">${Number(result.duration_ms)} ms${result.status?' · HTTP '+Number(result.status):''}</span>`:''}</button>`;
+ return `<button type="button" id="service-health-route-${esc(id)}" class="text-button service-health-result ${state}" data-action="service-health-details" data-route-id="${esc(id)}" aria-label="查看服务健康诊断"><span class="health-label">${icon(result.healthy?'check':'info')}${esc(result.label)}</span>${result.checked_at?`<span class="mono">${Number(result.duration_ms)} ms${result.status?' · HTTP '+Number(result.status):''}</span>`:''}</button>`;
+}
+function serviceHealthSummaryHTML() {
+ const options=config.service_health||{enabled:true,interval:60};
+ if(!options.enabled) return '<span class="health-count muted">已暂停检查</span>';
+ let healthy=0,unhealthy=0,pending=0;
+ for(const route of config.routes.filter(routeActive)) {
+  const result=serviceHealthData.routes[route.id];
+  if(!result?.checked_at||result.checked_at.startsWith('0001')||result.state==='disabled') pending++;
+  else if(result.healthy) healthy++;
+  else unhealthy++;
+ }
+ return `<span class="health-count is-healthy">${icon('check')}正常 <b>${healthy}</b></span><span class="health-count is-unhealthy">${icon('info')}异常 <b>${unhealthy}</b></span>${pending?`<span class="health-count muted">等待检测 ${pending}</span>`:''}<span class="health-frequency">每 ${Number(options.interval)} 秒检查</span>`;
+}
+function serviceHealthNoticesHTML() {
+ return (serviceHealthData.notices||[]).slice(-3).reverse().map(n=>{const route=config.routes.find(r=>r.id===n.route_id);return `<p>${esc(route?.name||route?.host||'服务')}：${esc(n.message)} · ${date(n.time)}</p>`;}).join('');
 }
 function serviceHealthPanelHTML() {
- const options=config.service_health?.interval?config.service_health:{enabled:true,interval:60};
- return panel('服务健康检查','由服务器检查已启用反代的上游，验证 TLS 证书且不跟随重定向；与浏览器内网连通性检测分别显示。',`<form id="service-health-form" class="panel-body"><div class="form-grid"><label class="check-label"><input type="checkbox" name="enabled" ${options.enabled?'checked':''}>定期检查反代上游</label><label>检查间隔（秒）<input name="interval" type="number" min="30" max="86400" value="${Number(options.interval)}" required></label></div><p class="form-note">连续两次失败记录故障，恢复后记录一次恢复事件。通知显示在本页和项目日志，不重复提醒；网站需要登录时显示“需要验证”。</p><p class="error" role="alert"></p><div class="form-actions"><button class="secondary" type="button" data-action="refresh-service-health">刷新检测结果</button><button class="primary" type="submit">保存检查设置</button></div></form><div class="panel-body" id="service-health-notices" role="status" aria-live="polite"></div>`);
+ return `<section class="panel service-health-toolbar"><div class="panel-heading"><div><h2>服务健康检查</h2><p>由服务器检查已启用反代的上游，验证 TLS 证书且不跟随重定向；与浏览器内网连通性检测分别显示。</p></div></div><div id="service-health-summary" class="health-summary" role="status">${serviceHealthSummaryHTML()}</div><div class="health-actions"><button class="secondary" type="button" data-action="refresh-service-health">${icon('refresh')}刷新</button><button class="secondary" type="button" data-action="configure-service-health">${icon('settings')}设置</button></div></section>`;
 }
 async function refreshServiceHealth() {
  if(!config||serviceHealthLoading) return;
@@ -1441,9 +1481,11 @@ async function refreshServiceHealth() {
    }
   }
   serviceHealthData=data;
-  document.querySelectorAll('[data-service-health]').forEach(el=>{el.innerHTML=serviceHealthBadgeHTML(el.dataset.serviceHealth);});
+  document.querySelectorAll('[data-service-health]').forEach(el=>{const html=serviceHealthBadgeHTML(el.dataset.serviceHealth);if(el.innerHTML!==html) {const focused=el.contains(document.activeElement);el.innerHTML=html;if(focused) $('button',el)?.focus({preventScroll:true});}});
+  const summary=$('#service-health-summary'),summaryHTML=serviceHealthSummaryHTML();
+  if(summary&&summary.innerHTML!==summaryHTML) summary.innerHTML=summaryHTML;
   const notices=$('#service-health-notices');
-  if(notices) notices.innerHTML=(data.notices||[]).slice(-3).reverse().map(n=>{const route=config.routes.find(r=>r.id===n.route_id);return `<p>${esc(route?.name||route?.host||'服务')}：${esc(n.message)} · ${date(n.time)}</p>`;}).join('')||'检测结果会定期更新；故障与恢复记录可在项目日志中查看。';
+  if(notices) {const html=serviceHealthNoticesHTML();if(notices.innerHTML!==html) notices.innerHTML=html;}
   if(messages.length&&page==='routes') toast(messages.join('；'));
  } finally {serviceHealthLoading=false;}
 }

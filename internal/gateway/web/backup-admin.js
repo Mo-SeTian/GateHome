@@ -8,7 +8,7 @@ function backupsHTML() {
 }
 function webDAVSettingsHTML() {
  const data=remoteBackups.data,c=data?.config;
- if(!c) return panel('WebDAV 备份','配置远程存储、加密密码、保留份数与备份计划。',`<div class="panel-body"><p role="status">${esc(remoteBackups.error||'正在读取设置…')}</p><button class="secondary" data-action="refresh-remote-backups">重新读取</button></div>`);
+ if(!c) return panel('WebDAV 备份','配置远程存储、加密密码、保留份数与备份计划。',`<div class="panel-body"><div class="task-feedback">${remoteBackups.error?'':'<gatehome-loader></gatehome-loader>'}<p role="status">${esc(remoteBackups.error||'正在读取设置…')}</p></div><button class="secondary" data-action="refresh-remote-backups">重新读取</button></div>`);
  const weekdays=['星期日','星期一','星期二','星期三','星期四','星期五','星期六'];
  return panel('WebDAV 与定时备份','连接设置与加密密码保存在本机受限配置中，只有保存后才用于备份。',`<form id="webdav-backup-form" data-revision="${Number(data.revision)}" class="panel-body"><div class="form-grid">
   <label class="span-2">WebDAV 目录地址<input name="url" type="url" value="${esc(c.url)}" placeholder="https://storage.example.com/dav/GateHome/" spellcheck="false"><small>填写最终备份目录；支持内网 HTTP 和公网 HTTPS，不在地址中填写账号密码。</small></label>
@@ -25,7 +25,7 @@ function webDAVStatusHTML() {
  const data=remoteBackups.data,c=data?.config;
  if(!data) return '';
  const phase={snapshot:'正在生成一致快照',encrypt:'正在加密备份',upload:'正在上传、校验及清理',done:'备份完成',failed:'备份失败'}[data.job?.phase]||'等待备份';
- return `<ul class="info-list"><li><span>运行状态</span><b>${esc(phase)}</b></li><li><span>最近成功</span><b>${date(data.last_success)}</b></li><li><span>下次计划</span><b>${data.next_run?esc(new Date(data.next_run).toLocaleString('zh-CN',{timeZone:c.timezone,hour12:false}))+' · '+esc(c.timezone):'未启用定时备份'}</b></li></ul>${data.last_error?`<p class="error" role="alert">${esc(data.last_error)}</p>`:''}`;
+ return `${data.busy?'<div class="task-feedback"><gatehome-loader></gatehome-loader><span>备份任务进行中</span></div>':''}<ul class="info-list"><li><span>运行状态</span><b>${esc(phase)}</b></li><li><span>最近成功</span><b>${date(data.last_success)}</b></li><li><span>下次计划</span><b>${data.next_run?esc(new Date(data.next_run).toLocaleString('zh-CN',{timeZone:c.timezone,hour12:false}))+' · '+esc(c.timezone):'未启用定时备份'}</b></li></ul>${data.last_error?`<p class="error" role="alert">${esc(data.last_error)}</p>`:''}`;
 }
 function webDAVFilesHTML() {
  const rows=remoteBackups.files;

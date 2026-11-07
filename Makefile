@@ -3,6 +3,7 @@ VERSION := $(shell cat VERSION)
 LDFLAGS := -s -w -X gatehouse/internal/gateway.Version=$(VERSION)
 
 frontend:
+	node scripts/build_leibox.mjs
 	sh sunpanel/build.sh
 
 build: frontend

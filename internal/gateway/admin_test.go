@@ -158,7 +158,7 @@ func TestLoginRateLimit(t *testing.T) {
 
 func TestStaticAssetsAndSecurityHeaders(t *testing.T) {
 	_, h := testAdmin(t)
-	for _, path := range []string{"/", "/app.js", "/style.css"} {
+	for _, path := range []string{"/", "/app.js", "/style.css", "/ui.css", "/leibox-ui.js", "/leibox-loader.css"} {
 		w := adminRequest(h, "GET", path, nil, nil, "")
 		if w.Code != 200 || w.Header().Get("Content-Security-Policy") == "" {
 			t.Fatal("static asset or CSP missing")

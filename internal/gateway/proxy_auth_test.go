@@ -85,7 +85,7 @@ func TestRouteAuthBlocksBeforeUpstreamAndKeepsAdminSeparate(t *testing.T) {
 	if page.Header().Get("Referrer-Policy") != "same-origin" {
 		t.Fatal("native login form would suppress the Origin required for source validation")
 	}
-	if !strings.Contains(page.Body.String(), "不是 Gatehouse 管理员账号") || !strings.Contains(page.Body.String(), "访问账号") {
+	if !strings.Contains(page.Body.String(), "不是 GateHome 管理员账号") || !strings.Contains(page.Body.String(), "访问账号") {
 		t.Fatal("service login page did not distinguish accounts")
 	}
 	for _, credentials := range [][2]string{{"nas-user", "TEST_ONLY_ADMIN_PASSWORD"}, {"other-user", testRoutePassword}, {"' OR 1=1 --", testRoutePassword}} {

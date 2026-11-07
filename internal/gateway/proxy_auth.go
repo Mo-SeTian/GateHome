@@ -66,10 +66,10 @@ func frozenResponse(w http.ResponseWriter, b IPBlock) {
 	}{template.CSS(css), b.Until.Format("2006-01-02 15:04:05 -07:00")})
 }
 
-var frozenPage = template.Must(template.New("frozen-ip").Parse(`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>来源 IP 已冻结 · Gatehouse</title><style>{{.CSS}}</style></head><body><main class="auth-card"><div class="brand"><span class="brand-mark" aria-hidden="true">G</span><span>GATEHOUSE <small>服务访问保护</small></span></div><div class="service-label">ACCESS RESTRICTED</div><h1>此来源 IP 已被冻结</h1><p class="intro">当前来源已触发此服务的访问限制。请在解冻后重试，或联系管理员解除冻结。</p><div class="notice">预计解冻时间<br><b>{{.Until}}</b></div><a class="secondary" href="/"><svg class="auth-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path stroke="none" d="M0 0h24v24H0z" fill="none" />
+var frozenPage = template.Must(template.New("frozen-ip").Parse(`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>来源 IP 已冻结 · GateHome</title><style>{{.CSS}}</style></head><body><main class="auth-card"><div class="brand"><span class="brand-mark" aria-hidden="true">G</span><span>GateHome <small>服务访问保护</small></span></div><div class="service-label">ACCESS RESTRICTED</div><h1>此来源 IP 已被冻结</h1><p class="intro">当前来源已触发此服务的访问限制。请在解冻后重试，或联系管理员解除冻结。</p><div class="notice">预计解冻时间<br><b>{{.Until}}</b></div><a class="secondary" href="/"><svg class="auth-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path stroke="none" d="M0 0h24v24H0z" fill="none" />
   <path d="M20 11a8.1 8.1 0 0 0 -15.5 -2m-.5 -4v4h4" />
   <path d="M4 13a8.1 8.1 0 0 0 15.5 2m.5 4v-4h-4" />
-</svg>解冻后重试</a><p class="account-note">冻结期间所有访问均被拦截，已有服务会话也不能进入。</p><footer>由 Gatehouse 保护此服务的访问入口</footer></main></body></html>`))
+</svg>解冻后重试</a><p class="account-note">冻结期间所有访问均被拦截，已有服务会话也不能进入。</p><footer>由 GateHome 保护此服务的访问入口</footer></main></body></html>`))
 
 // The gate's cookies are reserved and must never reach an upstream or be set by it.
 func stripRouteCookies(r *http.Request) {
@@ -290,8 +290,8 @@ func (g *routeGate) login(w http.ResponseWriter, r *http.Request, route Route) {
 }
 
 var routeLoginPage = template.Must(template.New("route-login").Parse(`<!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>服务访问验证 · Gatehouse</title><link rel="stylesheet" href="/.gatehouse-auth/style.css"></head>
-<body><main class="auth-card"><div class="brand"><span class="brand-mark" aria-hidden="true">G</span><span>GATEHOUSE <small>服务访问验证</small></span></div><div class="service-label">PROTECTED SERVICE</div><h1>{{.Name}}</h1><p class="domain">{{.Host}}</p>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>服务访问验证 · GateHome</title><link rel="stylesheet" href="/.gatehouse-auth/style.css"></head>
+<body><main class="auth-card"><div class="brand"><span class="brand-mark" aria-hidden="true">G</span><span>GateHome <small>服务访问验证</small></span></div><div class="service-label">PROTECTED SERVICE</div><h1>{{.Name}}</h1><p class="domain">{{.Host}}</p>
 {{if .Authenticated}}<div class="notice">此服务已验证，可以继续访问。</div><a class="primary" href="{{.Return}}"><svg class="auth-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 6h-6a2 2 0 0 0 -2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2 -2v-6" />
   <path d="M11 13l9 -9" />
   <path d="M15 4h5v5" />
@@ -304,7 +304,7 @@ var routeLoginPage = template.Must(template.New("route-login").Parse(`<!doctype 
   <path d="M21 12h-13l3 -3" />
   <path d="M11 15l-3 -3" />
 </svg>验证并进入服务</button></form>{{end}}
-<p class="account-note">使用此反代服务的独立账号，不是 Gatehouse 管理员账号。</p><footer>由 Gatehouse 保护此服务的访问入口</footer></main></body></html>`))
+<p class="account-note">使用此反代服务的独立账号，不是 GateHome 管理员账号。</p><footer>由 GateHome 保护此服务的访问入口</footer></main></body></html>`))
 
 func (g *routeGate) page(w http.ResponseWriter, r *http.Request, route Route, code int, message, destination string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
