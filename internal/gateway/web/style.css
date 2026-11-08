@@ -336,6 +336,23 @@ body:has(dialog:modal), body.nav-open { overflow: hidden; }
 .online-update .form-actions a { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
 .online-update-progress { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 12px 0; font-size: 12px; color: var(--muted); }
 .online-update-progress progress { flex: 1; min-width: 100px; accent-color: var(--primary); }
+.update-channel { max-width:320px; }
+.update-channel-note { margin:10px 0 6px; }
+.update-backup-list { list-style:none; margin:0; padding:0; }
+.update-backup { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:16px 0; border-bottom:1px solid var(--border); }
+.update-backup:last-child { border-bottom:0; }
+.update-backup-description { display:grid; min-width:0; gap:5px; overflow-wrap:anywhere; }
+.update-backup-description strong { font-size:16px; }
+.update-backup-description span,.update-backup-description small { font-size:12px; color:var(--muted); }
+.update-backup button { flex-shrink:0; }
+.update-backup-empty { padding:16px 0; }
+.update-result { display:flex; align-items:flex-start; gap:8px; color:var(--primary); line-height:1.7; font-size:13px; }
+.update-result .icon { flex-shrink:0; margin-top:2px; }
+@media(max-width:680px) {
+  .update-channel { max-width:none; }
+  .update-backup { flex-direction:column; align-items:stretch; gap:12px; }
+  .update-backup button { align-self:flex-start; min-height:44px; }
+}
 .service-address-link { display: flex; align-items: flex-start; gap: 7px; padding: 7px 0; max-width: 350px; color: var(--primary); font-size: 12px; text-decoration: none; }
 .service-address-link span { overflow-wrap: anywhere; }
 .service-address-link .icon { flex-shrink: 0; width: 15px; height: 15px; margin-top: 2px; }

@@ -14,9 +14,11 @@ import (
 )
 
 type maintenanceOperation struct {
-	Kind    string `json:"kind"`
-	Version string `json:"version"`
-	Digest  string `json:"digest"`
+	Kind        string `json:"kind"`
+	Version     string `json:"version"`
+	Digest      string `json:"digest,omitempty"`
+	FromVersion string `json:"from_version,omitempty"`
+	BackupID    string `json:"backup_id,omitempty"`
 }
 type maintenanceStage struct {
 	ID, Kind, Version, Digest string
@@ -30,6 +32,7 @@ type Maintenance struct {
 	supervised    bool
 	backupFiles   bool
 	sunPanelFiles bool
+	updateHistory bool
 	stage         *maintenanceStage
 	busy          bool
 	restart       chan struct{}
@@ -44,11 +47,17 @@ func NewMaintenancePaths(paths StoragePaths, appDir string) (*Maintenance, error
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, err
 	}
-	return &Maintenance{dir: dir, appDir: appDir, paths: paths, supervised: os.Getenv("GATEHOUSE_SUPERVISED") == "1", backupFiles: os.Getenv("GATEHOUSE_BACKUP_FILES") == "1", sunPanelFiles: os.Getenv("GATEHOUSE_SUNPANEL_STORAGE") == "1", restart: make(chan struct{}, 1)}, nil
+	return &Maintenance{dir: dir, appDir: appDir, paths: paths, supervised: os.Getenv("GATEHOUSE_SUPERVISED") == "1", backupFiles: os.Getenv("GATEHOUSE_BACKUP_FILES") == "1", sunPanelFiles: os.Getenv("GATEHOUSE_SUNPANEL_STORAGE") == "1", updateHistory: os.Getenv("GATEHOUSE_UPDATE_HISTORY") == "1", restart: make(chan struct{}, 1)}, nil
 }
 
 func (m *Maintenance) Available() bool {
 	return m.appDir != "" && m.supervised && runtime.GOOS == "linux" && (runtime.GOARCH == "amd64" || runtime.GOARCH == "arm64")
+}
+
+const updateLauncherRequired = "请先使用新版安装包更新启动器，或重新部署新版 Docker 镜像"
+
+func (m *Maintenance) UpdateHistoryAvailable() bool {
+	return m != nil && m.Available() && m.sunPanelFiles && m.updateHistory
 }
 func (m *Maintenance) Busy() bool {
 	if m == nil {
@@ -95,7 +104,7 @@ func (m *Maintenance) inspectUpdateVersion(data []byte, expectedVersion string) 
 		return nil, err
 	}
 	if expectedVersion != "" && version != expectedVersion {
-		return nil, errors.New("更新包版本与 GitHub 正式版本不一致，请重新检查版本")
+		return nil, errors.New("更新包版本与 GitHub 发行版本不一致，请重新检查版本")
 	}
 	id, err := stageID()
 	if err != nil {
@@ -107,17 +116,17 @@ func (m *Maintenance) inspectUpdateVersion(data []byte, expectedVersion string) 
 	}
 	m.stage = &maintenanceStage{ID: id, Kind: "update", Version: version, Digest: hex.EncodeToString(sum[:]), Created: time.Now()}
 	comparison, _ := compareVersions(version, Version)
-	message := "校验通过，应用后将重启服务"
+	message := "校验通过，应用时会先创建回退备份，再安装更新"
 	if comparison <= 0 {
 		message = "更新包版本不高于当前版本，无需更新"
-	} else if !m.Available() {
-		message = "更新包校验通过；应用更新需使用 Linux 安装脚本或新版 Docker 启动方式"
+	} else if !m.UpdateHistoryAvailable() {
+		message = updateLauncherRequired
 	}
 	compatible := m.checkSunPanelFiles()
 	if compatible != nil && m.Available() {
 		message = compatible.Error()
 	}
-	return map[string]any{"id": id, "version": version, "can_apply": m.Available() && comparison > 0 && compatible == nil, "message": message}, nil
+	return map[string]any{"id": id, "version": version, "can_apply": m.UpdateHistoryAvailable() && comparison > 0 && compatible == nil, "message": message}, nil
 }
 
 func (m *Maintenance) inspectBackup(data []byte, password string, adminPort int) (map[string]any, error) {
@@ -175,6 +184,9 @@ func (m *Maintenance) schedule(id, kind string) error {
 		return errors.New("暂存包不存在或已过期，请重新上传并检查")
 	}
 	if kind == "update" {
+		if !m.UpdateHistoryAvailable() {
+			return errors.New(updateLauncherRequired)
+		}
 		cmp, err := compareVersions(m.stage.Version, Version)
 		if err != nil || cmp <= 0 {
 			return errors.New("只可更新到更高版本")
@@ -208,6 +220,9 @@ func (m *Maintenance) schedule(id, kind string) error {
 		return err
 	}
 	op := maintenanceOperation{Kind: kind, Version: m.stage.Version, Digest: m.stage.Digest}
+	if kind == "update" {
+		op.FromVersion = Version
+	}
 	if err := writeJSON(filepath.Join(m.dir, "operation.json"), op); err != nil {
 		return errors.New("维护操作写入失败")
 	}
@@ -253,10 +268,17 @@ func copyProgram(source, destination string) error {
 	if err != nil {
 		return err
 	}
+	return writeProgram(destination, b)
+}
+
+func writeProgram(destination string, b []byte) error {
 	if err := atomicWrite(destination, b); err != nil {
 		return err
 	}
-	return os.Chmod(destination, 0750)
+	if err := os.Chmod(destination, 0750); err != nil {
+		return err
+	}
+	return syncUpdateDir(filepath.Dir(destination))
 }
 
 func (m *Maintenance) beginTransition() (bool, error) {
@@ -269,47 +291,64 @@ func (m *Maintenance) beginTransition() (bool, error) {
 		return false, err
 	}
 	var op maintenanceOperation
-	if json.Unmarshal(b, &op) != nil || (op.Kind != "update" && op.Kind != "restore") {
+	if json.Unmarshal(b, &op) != nil || (op.Kind != "update" && op.Kind != "restore" && op.Kind != "rollback") {
 		return false, errors.New("维护请求无效")
+	}
+	var program []byte
+	var restored diskBackup
+	switch op.Kind {
+	case "update":
+		program, err = readUpdateFile(filepath.Join(m.dir, "update-staged"), maxUpdateExpandedBytes)
+		if err != nil || digestBytes(program) != op.Digest {
+			return false, errors.New("暂存程序校验失败")
+		}
+		if err := validateELF(program, releaseArch()); err != nil {
+			return false, err
+		}
+		if op.FromVersion != "" {
+			if comparison, err := compareVersions(op.Version, op.FromVersion); err != nil || comparison <= 0 {
+				return false, errors.New("更新版本无效")
+			}
+		}
+	case "rollback":
+		var backup updateBackup
+		backup, restored, program, err = m.loadUpdateBackup(op.BackupID)
+		if err != nil || backup.Version != op.Version {
+			return false, errors.New("更新回退备份无效")
+		}
+	case "restore":
+		b, err := os.ReadFile(filepath.Join(m.dir, "restore-staged.json"))
+		if err != nil || json.Unmarshal(b, &restored) != nil {
+			return false, errors.New("暂存备份无效")
+		}
 	}
 	previous, err := snapshotDiskPaths(m.paths)
 	if err != nil {
 		return false, err
 	}
-	if err := writeJSON(filepath.Join(m.dir, "rollback.json"), previous); err != nil {
+	snapshot, err := json.Marshal(previous)
+	if err != nil {
+		return false, err
+	}
+	if err := atomicWrite(filepath.Join(m.dir, "rollback.json"), snapshot); err != nil {
 		return false, err
 	}
 	if err := copyProgram(filepath.Join(m.appDir, "gatehouse"), filepath.Join(m.appDir, "gatehouse.previous")); err != nil {
 		return false, err
 	}
+	if op.Kind == "update" && op.FromVersion != "" {
+		if err := m.saveUpdateBackup(op.FromVersion, op.Version, snapshot); err != nil {
+			return false, errors.New("更新前自动备份失败，已取消更新")
+		}
+	}
 	// Persist the transaction before any mutation, so interrupted startups can roll back.
 	if err := writeJSON(filepath.Join(m.dir, "transition.json"), op); err != nil {
 		return false, err
 	}
-	if op.Kind == "update" {
-		binary, err := os.ReadFile(filepath.Join(m.dir, "update-staged"))
-		if err != nil {
-			return true, err
-		}
-		sum := sha256.Sum256(binary)
-		if hex.EncodeToString(sum[:]) != op.Digest {
-			return true, errors.New("暂存程序校验失败")
-		}
-		if err := validateELF(binary, releaseArch()); err != nil {
-			return true, err
-		}
-		if err := copyProgram(filepath.Join(m.dir, "update-staged"), filepath.Join(m.appDir, "gatehouse")); err != nil {
-			return true, err
-		}
-	} else {
-		b, err := os.ReadFile(filepath.Join(m.dir, "restore-staged.json"))
-		if err != nil {
-			return true, err
-		}
-		var restored diskBackup
-		if json.Unmarshal(b, &restored) != nil {
-			return true, errors.New("暂存备份无效")
-		}
+	if err := syncUpdateDir(m.dir); err != nil {
+		return true, err
+	}
+	if op.Kind != "update" {
 		var oldRevision struct {
 			Revision int `json:"revision"`
 		}
@@ -325,6 +364,9 @@ func (m *Maintenance) beginTransition() (bool, error) {
 		if err := restoreFilesPaths(m.paths, state, restored.Certificates, restored.Files); err != nil {
 			return true, err
 		}
+	}
+	if program != nil {
+		return true, writeProgram(filepath.Join(m.appDir, "gatehouse"), program)
 	}
 	return true, nil
 }
@@ -358,5 +400,5 @@ func (m *Maintenance) finishTransition() error {
 			return err
 		}
 	}
-	return nil
+	return syncUpdateDir(m.dir)
 }

@@ -7,14 +7,14 @@ function newID() {
   const bytes=new Uint8Array(16);crypto.getRandomValues(bytes);bytes[6]=(bytes[6]&15)|64;bytes[8]=(bytes[8]&63)|128;
   const hex=[...bytes].map(b=>b.toString(16).padStart(2,'0')).join('');return hex.slice(0,8)+'-'+hex.slice(8,12)+'-'+hex.slice(12,16)+'-'+hex.slice(16,20)+'-'+hex.slice(20);
 }
-const pages = {sunpanel:'浏览器首页',overview:'概览',routes:'反向代理',forwards:'端口转发',ddns:'动态域名',certificates:'SSL 证书',access:'防火墙管理',subscriptions:'订阅管理',mcp:'AI 管理',backups:'备份与恢复',settings:'设置',logs:'日志',statistics:'统计','firewall-logs':'防火墙拦截记录','ip-blocks':'IP 拦截名单'};
+const pages = {sunpanel:'浏览器首页',overview:'概览',routes:'反向代理',forwards:'端口转发',ddns:'动态域名',certificates:'SSL 证书',access:'防火墙管理',subscriptions:'订阅管理',mcp:'AI 管理',updates:'更新',backups:'备份与恢复',settings:'设置',logs:'日志',statistics:'统计','firewall-logs':'防火墙拦截记录','ip-blocks':'IP 拦截名单'};
 const iconNames = new Set(['overview','routes','globe','certificate','shield','download','logs','chart','settings','server','gateway','router','layers','activity','refresh','plus','close','logout','menu','more','back','edit','chevron-down','chevron-up','chevron-left','chevron-right','external-link','trash','play','pause','login','filter','unlock','save','upload','info','check','search']);
 function icon(name) { return `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="/icons.svg#${iconNames.has(name)?name:'layers'}"></use></svg>`; }
 function hydrateIcons(scope=document) {
   prepareContextHelp(scope);
   scope.querySelectorAll('[data-icon]').forEach(el=>{el.innerHTML=icon(el.dataset.icon);});
   scope.querySelectorAll('.field-help>summary,.ip-monitor-settings>summary').forEach(el=>{if(!el.querySelector('svg')) el.insertAdjacentHTML('beforeend',icon('chevron-down'));});
-  const actions={'add-ip-block':'shield','remove-firewall-group':'trash','move-firewall-group-up':'chevron-up','move-firewall-group-down':'chevron-down','configure-certificates':'settings','filter-ip-blocks':'filter','apply-log-filters':'filter','reset-log-filters':'refresh','release-ip-block':'unlock','export-statistics':'download','preset-subscription':'download','restart-service':'refresh','run-ddns':'refresh','go-firewalls':'shield','apply-maintenance':'upload','check-online-update':'refresh','install-online-update':'download'};
+  const actions={'add-ip-block':'shield','remove-firewall-group':'trash','move-firewall-group-up':'chevron-up','move-firewall-group-down':'chevron-down','configure-certificates':'settings','filter-ip-blocks':'filter','apply-log-filters':'filter','reset-log-filters':'refresh','release-ip-block':'unlock','export-statistics':'download','preset-subscription':'download','restart-service':'refresh','run-ddns':'refresh','go-firewalls':'shield','apply-maintenance':'upload','check-online-update':'refresh','install-online-update':'download','rollback-update':'back'};
   scope.querySelectorAll('button[data-action],button[data-job],button[type="submit"]').forEach(el=>{
     if(el.querySelector('svg')||el.hasAttribute('data-no-icon')) return;
     const action=el.dataset.action||'',name=actions[action]||(action.startsWith('refresh-')||el.dataset.job?'refresh':action.startsWith('add-')?'plus':action.startsWith('edit-')?'edit':action.startsWith('delete-')?'trash':action.startsWith('toggle-')?(el.textContent.trim().startsWith('启用')?'play':'pause'):el.type==='submit'?({'backup-form':'download','restore-form':'upload','update-form':'upload','ip-block-form':'shield'}[el.form?.id]||'save'):'');
@@ -96,7 +96,8 @@ function updateNavigationIndicator(animate=true) {
 let ipBlockView={entries:[]},ipBlockRule='',ipBlockSearch='',ipBlockPage=1,ipBlockRequest=0,ipBlockError='',ipBlockReceived=0;
 let maintenancePreview=null;
 let backupCapacity=null,backupCapacityError='',backupCapacityRequest=0;
-const onlineUpdate={release:null,phase:'',error:'',job:null,timer:null,request:0};
+const onlineUpdate={channel:'stable',release:null,phase:'',error:'',job:null,timer:null,request:0};
+const updateBackups={data:null,error:'',loading:false,request:0};
 let logRequest=0;
 const discovery={request:0,timer:null,scan:null,rows:new Map(),pending:false};
 let routeImageRequest=0,routeImagePending=false;
@@ -156,7 +157,7 @@ function toast(message) {
   $('#toast').textContent = message; $('#toast').hidden = false; if(!reducedMotion.matches) {$('#toast').getAnimations().forEach(a=>a.cancel());$('#toast').animate([{opacity:0,translate:'0 8px'},{opacity:1,translate:'0 0'}],{duration:180,easing:'ease-out'});}
   clearTimeout(toastTimer); toastTimer = setTimeout(() => { $('#toast').hidden = true; }, 4500);
 }
-function showLogin() { resetMCPSettings(); resetRemoteBackups(); $('#account-menu').open=false;clearAccountPasswords();adminUsername='';$('#account-name').textContent='管理员';$('#account-avatar').textContent='G';resetDashboard();setNavigation(false,false); $('#login').hidden = false; $('#app').hidden = true; clearTimeout(toastTimer);$('#toast').hidden=true; document.querySelectorAll('dialog').forEach(d=>d.close()); config = undefined;routeFilter='';routeSearch='';forwardProtocolFilter='';backupCapacity=null;backupCapacityError='';backupCapacityRequest++; renderedPage='';clearTimeout(onlineUpdate.timer);onlineUpdate.request++;onlineUpdate.phase='';onlineUpdate.job=null;onlineUpdate.release=null;onlineUpdate.error='';abandonDiscovery();for(const state of Object.values(securityEvents)) {state.request++;state.view=null;state.filters=emptyEventFilters();state.applied=emptyEventFilters();state.error='';} }
+function showLogin() { resetMCPSettings(); resetRemoteBackups(); $('#account-menu').open=false;clearAccountPasswords();adminUsername='';$('#account-name').textContent='管理员';$('#account-avatar').textContent='G';resetDashboard();setNavigation(false,false); $('#login').hidden = false; $('#app').hidden = true; clearTimeout(toastTimer);$('#toast').hidden=true; document.querySelectorAll('dialog').forEach(d=>d.close()); config = undefined;routeFilter='';routeSearch='';forwardProtocolFilter='';backupCapacity=null;backupCapacityError='';backupCapacityRequest++;updateBackups.request++;updateBackups.data=null;updateBackups.error='';updateBackups.loading=false; renderedPage='';clearTimeout(onlineUpdate.timer);onlineUpdate.request++;onlineUpdate.phase='';onlineUpdate.job=null;onlineUpdate.release=null;onlineUpdate.error='';abandonDiscovery();for(const state of Object.values(securityEvents)) {state.request++;state.view=null;state.filters=emptyEventFilters();state.applied=emptyEventFilters();state.error='';} }
 function applyConfig(data) { serviceHealthRequest++; serviceHealthPending=null; serviceHealthData={routes:{}}; config = data.config; revision = data.revision; dnsCredentialsConfigured=data.dns_credentials_configured||{}; certificateCredentialsConfigured=data.certificate_credentials_configured||{};routePasswordsConfigured=data.route_passwords_configured||{}; proxyPasswordConfigured=data.proxy_password_configured; githubTokenConfigured=!!data.github_token_configured; ipRequest++;dnsRecordsRequest++;dnsRecords={};dnsRecordsError=''; if(networkInfo) networkInfo.groups={}; }
 async function save(next, dnsTokens, proxyPassword, certificateTokens, routePasswords, githubToken) {
   const payload = {config:next, revision};
@@ -632,33 +633,51 @@ function certificatesHTML() {
     '<p class="form-note certificate-note">一项任务的多个域名申请为同一张证书。泛域名仅覆盖一级子域名；需要同时覆盖根域名时，请一并添加根域名。</p>'+`<div id="certificate-table">${certificateTable()}</div>`;
 }
 function onlineUpdateHTML() {
-  const release=onlineUpdate.release,pending=!!onlineUpdate.phase,supported=status.maintenance_available;
+  const release=onlineUpdate.release,pending=!!onlineUpdate.phase,supported=status.update_history_available;
   const available=release?.update_available&&release.version!==status.version;
-  const message=onlineUpdate.job?.phase==='checking'?'正在确认本次更新版本…':({checking:'正在通过服务器检查 GitHub 最新正式版…',downloading:'1 / 3 · 正在后台下载，当前服务继续运行…',applying:'2 / 3 · 正在校验更新包并安排重启…'}[onlineUpdate.phase]||'');
+  const beta=onlineUpdate.channel==='beta',channelName=beta?'Beta 测试版':'正式版';
+  const message=onlineUpdate.job?.phase==='checking'?'正在确认本次更新版本…':({checking:`正在检查 GitHub 最新${channelName}…`,downloading:'1 / 3 · 正在后台下载，当前服务继续运行…',applying:'2 / 3 · 正在校验更新包并安排备份、安装…'}[onlineUpdate.phase]||'');
+  const resultMessage=release?(release.version?(available?'有新版本可用。':'当前版本已达到或高于所选渠道的最新版本。'):'暂未发布 Beta 测试版。'):'';
   const progress=onlineUpdate.phase==='downloading'&&onlineUpdate.job?.total?`<div class="online-update-progress"><progress max="${onlineUpdate.job.total}" value="${onlineUpdate.job.downloaded}" aria-label="更新包下载进度"></progress><span>${Math.min(100,Math.floor(100*onlineUpdate.job.downloaded/onlineUpdate.job.total))}% · ${(onlineUpdate.job.downloaded/1048576).toFixed(1)} / ${(onlineUpdate.job.total/1048576).toFixed(1)} MiB</span></div>`:'';
-  return panel('在线更新','从 GateHome 的 GitHub 正式发布获取更新，使用设置中已保存的出站代理。',`<div class="panel-body online-update" aria-busy="${pending}"><ul class="info-list"><li><span>当前版本</span><b>v${esc(status.version||'加载中')}</b></li><li><span>更新连接</span><b>${config.outbound_proxy?.enabled?'使用已保存的出站代理':'直接连接 GitHub'}</b></li><li><span>GitHub API 认证</span><b>${githubTokenConfigured?'已配置 Token':'匿名访问'}</b></li><li><span>最新正式版</span><b>${release?'v'+esc(release.version):'尚未检查'}</b></li>${release?`<li><span>发布时间 / 更新包</span><b>${date(release.published_at)} · ${(release.size/1048576).toFixed(1)} MiB</b></li>`:''}${release?.checked_at?`<li><span>检查时间 / 下次联网检查</span><b>${date(release.checked_at)} / ${date(release.cache_until)}</b></li>`:''}${onlineUpdate.job?.version?`<li><span>本次更新版本</span><b>v${esc(onlineUpdate.job.version)}</b></li>`:''}</ul><p class="form-note">版本检查结果保留 5 分钟，重复检查共享结果；修改 GitHub Token 或出站代理后重新联网检查。限流时显示可重试时间。</p><p class="form-note">下载后检查 GitHub SHA-256、包内文件哈希、版本和主机架构。更新时短暂中断服务，新版本启动检查失败会回滚。下载任务在服务器后台执行，刷新页面可继续查看进度。</p>${!supported?'<p class="form-note">当前启动方式支持检查版本；在线安装及自动重启需要 Linux 安装脚本或新版 Docker。</p>':''}<p class="online-update-status" role="status" aria-live="polite">${esc(message||(release?(available?'有新版本可用。':'当前版本已是最新，或高于最新正式版。'):''))}</p>${progress}<p class="error" role="alert">${esc(onlineUpdate.error)}</p><div class="form-actions"><button type="button" class="secondary" data-action="check-online-update" ${pending?'disabled':''}>${onlineUpdate.phase==='checking'?'检查中…':'检查更新'}</button><button type="button" class="primary" data-action="install-online-update" ${pending||!available||!supported||status.maintenance_busy?'disabled':''}>${pending&&onlineUpdate.phase!=='checking'?'更新中…':'更新并重启'}</button>${release?`<a href="${esc(release.release_url)}" target="_blank" rel="noopener noreferrer">${icon('external-link')}发行说明</a>`:''}</div></div>`);
+  return panel('在线更新','选择发行渠道，检查并安装新版本。',`<div class="panel-body online-update" aria-busy="${pending}">
+    <label class="update-channel">更新渠道<select id="update-channel" ${pending?'disabled':''}><option value="stable" ${!beta?'selected':''}>正式版</option><option value="beta" ${beta?'selected':''}>Beta 测试版</option></select></label>
+    <p data-visible-note class="form-note update-channel-note">${beta?'Beta 提前提供新功能，可能存在未修复的问题。更新前会自动保存回退备份。':'正式版提供经过发布验证的版本。需要提前体验新功能时可切换 Beta。'}</p>
+    <ul class="info-list"><li><span>当前版本</span><b>v${esc(status.version||'加载中')}</b></li><li><span>更新连接</span><b>${config.outbound_proxy?.enabled?'使用已保存的出站代理':'直接连接 GitHub'}</b></li><li><span>GitHub API 认证</span><b>${githubTokenConfigured?'已配置 Token':'匿名访问'}</b></li><li><span>最新${channelName}</span><b>${release?(release.version?'v'+esc(release.version):'尚未发布'):'尚未检查'}</b></li>${release?.version?`<li><span>发布时间 / 更新包</span><b>${date(release.published_at)} · ${(release.size/1048576).toFixed(1)} MiB</b></li>`:''}${release?.checked_at?`<li><span>检查时间 / 下次联网检查</span><b>${date(release.checked_at)} / ${date(release.cache_until)}</b></li>`:''}${onlineUpdate.job?.version?`<li><span>本次更新版本</span><b>v${esc(onlineUpdate.job.version)}</b></li>`:''}</ul>
+    <p class="form-note">更新会依次校验安装包、停止服务、备份旧程序与全部数据，再安装并重启。备份失败会取消更新；新版本启动失败会自动恢复。下载任务在后台运行，刷新页面可继续查看进度。</p>
+    ${!supported?'<p class="error" role="alert">需要新版启动器才能自动备份和回退。请先使用新版完整安装包更新部署，或重建新版 Docker 镜像。</p>':''}
+    <p class="online-update-status" role="status" aria-live="polite">${esc(message||resultMessage)}</p>${progress}<p class="error" role="alert">${esc(onlineUpdate.error)}</p>
+    <div class="form-actions"><button type="button" class="secondary" data-action="check-online-update" ${pending?'disabled':''}>${onlineUpdate.phase==='checking'?'检查中…':'检查更新'}</button><button type="button" class="primary" data-action="install-online-update" ${pending||!available||!supported||status.maintenance_busy?'disabled':''}>${pending&&onlineUpdate.phase!=='checking'?'更新中…':'备份并更新'}</button>${release?.release_url?`<a href="${esc(release.release_url)}" target="_blank" rel="noopener noreferrer">${icon('external-link')}发行说明</a>`:''}</div></div>`);
+}
+function selectUpdateChannel(channel) {
+  if(onlineUpdate.phase||!['stable','beta'].includes(channel)) return;
+  onlineUpdate.channel=channel;onlineUpdate.release=null;onlineUpdate.job=null;onlineUpdate.error='';renderOnlineUpdate();
 }
 function renderOnlineUpdate() {
   const root=$('#online-update');if(!root||!config) return;
   root.innerHTML=onlineUpdateHTML();hydrateIcons(root);
+  const backups=$('#update-backups');
+  backups?.querySelectorAll('[data-action="rollback-update"]').forEach(button=>{button.disabled=!status.update_history_available||status.maintenance_busy||!!onlineUpdate.phase;});
 }
 async function checkOnlineUpdate() {
   if(onlineUpdate.phase) return;
-  clearTimeout(onlineUpdate.timer);onlineUpdate.request++;onlineUpdate.job=null;
+  clearTimeout(onlineUpdate.timer);const request=++onlineUpdate.request;onlineUpdate.job=null;
   onlineUpdate.phase='checking';onlineUpdate.error='';onlineUpdate.release=null;renderOnlineUpdate();
-  try {onlineUpdate.release=await api('maintenance/check-online-update','POST',{});}
-  catch(error) {onlineUpdate.error=error.message;}
-  finally {onlineUpdate.phase='';renderOnlineUpdate();}
+  try {const release=await api('maintenance/check-online-update','POST',{channel:onlineUpdate.channel});if(request===onlineUpdate.request&&config) onlineUpdate.release=release;}
+  catch(error) {if(request===onlineUpdate.request&&config) onlineUpdate.error=error.message;}
+  finally {if(request===onlineUpdate.request&&config) {onlineUpdate.phase='';renderOnlineUpdate();}}
 }
 async function installOnlineUpdate() {
   const release=onlineUpdate.release;
   if(onlineUpdate.phase||!release?.update_available||release.version===status.version) return;
-  if(!confirm('更新至 v'+release.version+' 并重启服务？下载和校验期间继续运行，重启会短暂中断连接。')) return;
+  if(!confirm('更新至 v'+release.version+'？服务停止后先保存当前程序和数据，备份完成再安装。备份失败会取消更新。')) return;
+  const request=++onlineUpdate.request;
   onlineUpdate.phase='downloading';onlineUpdate.error='';renderOnlineUpdate();
   try {
-    onlineUpdate.job=await api('maintenance/download-online-update','POST',{version:release.version});
+    const job=await api('maintenance/download-online-update','POST',{version:release.version,channel:onlineUpdate.channel});
+    if(request!==onlineUpdate.request||!config) return;
+    onlineUpdate.job=job;
     maintenancePreview=null;await loadOnlineUpdateStatus();
-  } catch(error) {onlineUpdate.phase='';onlineUpdate.error=error.message;renderOnlineUpdate();}
+  } catch(error) {if(request===onlineUpdate.request&&config) {onlineUpdate.phase='';onlineUpdate.error=error.message;renderOnlineUpdate();}}
 }
 async function loadOnlineUpdateStatus() {
   clearTimeout(onlineUpdate.timer);
@@ -668,7 +687,8 @@ async function loadOnlineUpdateStatus() {
     const job=await api('maintenance/online-update-status');
     if(request!==onlineUpdate.request||!config) return;
     onlineUpdate.job=job.phase?job:null;onlineUpdate.error=(job.error||'')+(job.retry_at?`；可在 ${date(job.retry_at)} 后重试`:'');
-    if(job.phase==='restarting') {showLogin();toast('3 / 3 · 更新已安排，服务正在重启，稍候重新登录查看版本。');return;}
+    if(job.phase==='restarting') {showLogin();toast('3 / 3 · 服务正在备份并安装，完成后重新登录查看版本与维护结果。');return;}
+    if(job.phase&&job.phase!=='error'&&['stable','beta'].includes(job.channel)) onlineUpdate.channel=job.channel;
     onlineUpdate.phase=job.phase==='verifying'?'applying':['checking','downloading'].includes(job.phase)?'downloading':'';
     if(onlineUpdate.phase) onlineUpdate.timer=setTimeout(loadOnlineUpdateStatus,1500);
     renderOnlineUpdate();
@@ -699,12 +719,45 @@ function maintenanceHTML() {
   const detail=!preview?'':`<div class="maintenance-preview"><b>${preview.kind==='update'?'更新包 v'+esc(preview.version):'备份 v'+esc(preview.version)}</b>${preview.kind==='restore'?`<p>${preview.groups} 个反代组 · ${preview.routes} 个服务 · ${preview.forwards||0} 条端口转发 · ${preview.ddns_groups} 个 DDNS 组 · ${preview.firewalls} 个防火墙 · ${preview.subscriptions} 个订阅<br>${preview.sunpanel_files||0} 个 Sun-Panel 文件（${preview.sunpanel_images||0} 张图片） · ${preview.images||0} 张反代图片 · ${preview.certificates||0} 个证书文件 · ${preview.log_entries||0} 条日志 · ${preview.subscription_caches||0} 个订阅缓存<br>${preview.includes_files?'':'此旧备份未包含日志、缓存与图片；恢复时保留服务器现有文件。<br>'}备份时间：${date(preview.created_at)} · ${preview.token_configured?'含 Cloudflare Token':'未配置 Cloudflare Token'}</p>`:''}<p>${esc(preview.message)}</p><button class="primary" data-action="apply-maintenance" ${!preview.can_apply?'disabled':''}>${preview.kind==='update'?'应用更新并重启':'恢复数据并重启'}</button></div>`;
   const backupDetail=preview?.kind==='restore'?detail:'',updateDetail=preview?.kind==='update'?detail:'';
   const backup=panel('备份与恢复','备份配置与凭据、证书、服务图片、Sun-Panel 全部数据、日志和订阅缓存。',`<div class="panel-body two-col maintenance-forms"><form id="backup-form"><h3>下载加密备份</h3><label>备份密码<input name="password" type="password" autocomplete="new-password"></label><label>再次输入备份密码<input name="confirm_password" type="password" autocomplete="new-password"></label><p class="form-note">密码不限长度，可以留空；留空时恢复也无需填写密码。请保存设置的密码，恢复时需保持一致。ZIP 内的数据使用 AES-256-GCM 加密，含反代访问密码、IP 冻结名单与全部已保存的业务数据。登录会话、未保存的扫描结果和维护临时文件不备份。</p><p class="error" role="alert"></p><div class="form-actions"><button class="primary" type="submit">下载备份 ZIP</button></div></form><form id="restore-form"><h3>上传备份</h3><label>备份 ZIP<input name="file" type="file" accept=".zip,application/zip" required></label><label>导出时的备份密码<input name="password" type="password" autocomplete="off"></label><p class="form-note">密码不限长度；导出时留空，这里也留空。先检查备份再确认恢复。恢复后使用备份时的管理员账号和管理密码重新登录。</p><p class="error" role="alert"></p><div class="form-actions"><button class="secondary" type="submit">检查备份</button></div></form></div>${backupDetail}`);
-  const upload=panel('上传版本更新','使用本项目“更新版本”目录生成的 ZIP；只接受更高版本。',`<form id="update-form" class="panel-body"><label>更新 ZIP<input name="file" type="file" accept=".zip,application/zip" required></label><p class="form-note">检查版本、文件哈希和主机架构后再应用。只使用你信任的项目更新包；哈希校验用于检查文件完整性。</p><p data-visible-note class="form-note">${supported?'维护时短暂停止服务，新程序启动检查失败会回滚。':'此部署可导出备份及检查上传包。应用更新或恢复需要 Linux 安装脚本或新版 Docker 启动方式。'}</p><p class="error" role="alert"></p><div class="form-actions"><button type="submit" class="secondary">检查更新包</button></div></form>${updateDetail}`);
+  const upload=panel('上传版本更新','使用本项目“更新版本”目录生成的 ZIP；只接受更高版本。',`<form id="update-form" class="panel-body"><label>更新 ZIP<input name="file" type="file" accept=".zip,application/zip" required></label><p class="form-note">支持正式版与 Beta 的更高版本。校验通过后先自动备份旧程序和数据，备份成功后安装。请使用你信任的项目更新包。</p><p data-visible-note class="form-note">${supported?'维护时短暂停止服务，新程序启动检查失败会回滚。':'此部署可导出备份及检查上传包。应用更新或恢复需要 Linux 安装脚本或新版 Docker 启动方式。'}</p><p class="error" role="alert"></p><div class="form-actions"><button type="submit" class="secondary">检查更新包</button></div></form>${updateDetail}`);
   return {
-    updates:'<h2 class="settings-section-heading">维护与更新</h2><div id="online-update">'+onlineUpdateHTML()+'</div>'+githubTokenHTML()+upload,
+    updates:'<div id="online-update">'+onlineUpdateHTML()+'</div>',
+    upload,
     backups:backup+'<div id="backup-capacity">'+backupCapacityHTML()+'</div>',
     version:`<div class="app-version"><b>GateHome</b><button class="secondary" data-action="restart-service" ${!supported?'disabled':''}>重启服务</button><span>版本 ${esc(status.version||'加载中')}</span></div>`
   };
+}
+function updateBackupsHTML() {
+  const data=updateBackups.data,result=data?.last_result;
+  const rows=(data?.backups||[]).map(b=>`<li class="update-backup"><div class="update-backup-description"><strong>v${esc(b.version)}</strong><span>更新至 v${esc(b.target_version)} 前自动保存</span><small>${date(b.created_at)} · ${(b.bytes/1048576).toFixed(1)} MiB</small></div><button class="secondary" data-action="rollback-update" data-id="${esc(b.id)}" aria-label="恢复至 v${esc(b.version)}" ${!status.update_history_available||status.maintenance_busy||onlineUpdate.phase?'disabled':''}>恢复此版本</button></li>`).join('');
+  return panel('更新前自动备份',`保留最近 ${data?.retention||3} 份，包含程序和更新前的数据。`,`<div class="panel-body" aria-busy="${updateBackups.loading}">
+    ${result?`<p class="${result.ok?'update-result':'error'}" role="status">${result.ok?icon('check'):icon('info')}<span>${result.kind==='rollback'?'版本回退':'版本更新'} · v${esc(result.version)}<br>${esc(result.message)} · ${date(result.at)}</span></p>`:''}
+    <p class="error" role="alert">${esc(updateBackups.error)}</p>
+    ${rows?`<ul class="update-backup-list">${rows}</ul>`:`<p class="form-note update-backup-empty">${updateBackups.loading||(!data&&!updateBackups.error)?'正在读取自动备份…':updateBackups.error?'备份列表暂时无法读取，请刷新重试。':'尚无自动备份。下次从本页更新时会先保存当前版本。'}</p>`}
+    <p data-visible-note class="form-note">恢复会将程序、配置、管理员账户及全部业务数据还原到备份时的状态，并重启服务。更新后产生的数据会被覆盖，恢复后使用备份时的账号和密码登录。</p>
+    <div class="form-actions"><button class="secondary" data-action="refresh-update-backups" ${updateBackups.loading?'disabled':''}>刷新备份列表</button><a class="text-button" href="#backups">下载当前数据备份</a></div></div>`);
+}
+async function loadUpdateBackups() {
+  const request=++updateBackups.request;updateBackups.loading=true;updateBackups.error='';
+  try {const data=await api('maintenance/update-backups');if(request===updateBackups.request&&config) updateBackups.data=data;}
+  catch(error) {if(request===updateBackups.request&&config) updateBackups.error=error.message;}
+  finally {
+    if(request===updateBackups.request&&config) {
+      updateBackups.loading=false;
+      const root=$('#update-backups');if(root) {root.innerHTML=updateBackupsHTML();hydrateIcons(root);}
+    }
+  }
+}
+async function rollbackUpdate(id) {
+  const backup=updateBackups.data?.backups.find(b=>b.id===id);
+  if(!backup||!status.update_history_available||status.maintenance_busy||onlineUpdate.phase) throw new Error('当前无法恢复，请刷新备份列表后重试');
+  if(!confirm(`恢复到 v${backup.version}（${date(backup.created_at)}）？\n当前程序及数据会被覆盖，恢复后使用备份时的管理员账号和密码登录。请先下载当前数据备份。`)) return;
+  const result=await api('maintenance/rollback-update','POST',{id});maintenancePreview=null;showLogin();toast(result.message);
+}
+function updatesHTML() {
+  const maintenance=maintenanceHTML();
+  return heading('UPDATES','更新','选择正式版或 Beta，更新前自动备份，随时恢复历史版本。')+
+    '<div class="settings-columns updates-columns"><div class="settings-column">'+maintenance.updates+'<div id="update-backups">'+updateBackupsHTML()+'</div></div><div class="settings-column"><div id="backup-capacity">'+backupCapacityHTML()+'</div>'+maintenance.upload+githubTokenHTML()+'</div></div>';
 }
 async function inspectMaintenance(form,kind) {
   const data=new FormData(form);
@@ -733,7 +786,7 @@ function settingsHTML() {
   const listeners=panel('反代组监听','HTTP / HTTPS 填写 0 即关闭该协议。修改监听或组启停后需重启；爱快按组配置 TCP 映射，Docker bridge 同步发布非零端口。',(rows?`<div class="table-wrap"><table><thead><tr><th>反代组</th><th>HTTP</th><th>HTTPS</th><th>状态</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></div>`:empty('还没有反代组','到反向代理页面创建组和域名规则。')) + '<div class="context-note"><ul class="info-list"><li><span>管理入口</span><b>默认 0.0.0.0:16666，可通过服务器 IP 访问</b></li><li><span>Docker bridge</span><b>为各组非零端口添加 compose.bridge.yaml 映射</b></li><li><span>IP 黑白名单</span><b>Linux Docker 推荐 host 网络，保留来源 IP</b></li><li><span>订阅更新</span><b>立即应用规则，无需重启</b></li><li><span>爱快映射</span><b>按组映射业务端口；管理可使用 SSH 隧道</b></li></ul></div>');
   const maintenance=maintenanceHTML();
   return heading('SETTINGS','系统设置','按访问、运行和维护分类配置；标题旁的标识可查看说明。','<button class="primary" data-action="add-group"><span data-icon="plus"></span>添加反代组</button>')+
-    '<div class="settings-columns"><div class="settings-column"><h2 class="settings-section-heading">访问与网络</h2>'+adminAccessHTML()+outbound+maintenance.updates+'</div><div class="settings-column"><h2 class="settings-section-heading">运行与日志</h2>'+logRetentionHTML()+listeners+'</div></div>'+maintenance.version;
+    '<div class="settings-columns"><div class="settings-column"><h2 class="settings-section-heading">访问与网络</h2>'+adminAccessHTML()+outbound+'</div><div class="settings-column"><h2 class="settings-section-heading">运行与日志</h2>'+logRetentionHTML()+listeners+'</div></div>'+maintenance.version;
 }
 function readLogFilters() {logCategory=$('#log-category')?.value||'';logRule=$('#log-rule')?.value||'';logResult=$('#log-result').value;logMethod=$('#log-method')?.value||'';logStatus=$('#log-status')?.value||'';logSearch=$('#log-search').value.trim();logIP=$('#log-ip')?.value.trim()||'';logFrom=$('#log-from').value;logTo=$('#log-to').value;}
 function logCategoryName(category) { return {access:'反向代理',admin:'管理操作',ddns:'DDNS',subscriptions:'IP 订阅',certificates:'SSL 证书',forward:'端口转发'}[category]||category; }
@@ -951,6 +1004,7 @@ function render() {
   if (page==='subscriptions') html=subscriptionsHTML();
   if (page==='mcp') html=mcpHTML();
   if (page==='settings') html=settingsHTML();
+  if (page==='updates') html=updatesHTML();
   if (page==='backups') html=backupsHTML();
   if (page==='logs') html=logsHTML();
   if (page==='statistics') html=statisticsHTML();
@@ -979,7 +1033,7 @@ function render() {
   }
   renderedPage=page;
   if(changed&&page==='mcp') loadMCPSettings();
-  if(changed&&page==='settings') loadOnlineUpdateStatus();
+  if(changed&&page==='updates') {loadOnlineUpdateStatus();loadUpdateBackups();loadBackupCapacity();}
   if(changed&&page==='backups') {loadBackupCapacity();loadRemoteBackups();}
   if(changed&&page==='overview') loadDashboard();
   if(page==='ddns') {loadIPInfo().catch(e=>{if($('#ip-results')) $('#ip-results').textContent=e.message;});loadDNSRecords();}
@@ -1493,12 +1547,14 @@ document.addEventListener('click',async event=>{
     }
     if(action==='refresh-public-ip') {await loadIPInfo(true);toast('公网 IP 检测已安排，DNS 记录按组同步任务更新');}
     if(action==='refresh-backup-capacity') await loadBackupCapacity();
+    if(action==='refresh-update-backups') await loadUpdateBackups();
+    if(action==='rollback-update') await rollbackUpdate(button.dataset.id);
     if(action==='check-online-update') await checkOnlineUpdate();
     if(action==='install-online-update') await installOnlineUpdate();
     if(action==='restart-service') {if(!confirm('重启会短暂中断服务，监听端口变更将生效。确认重启？')) return;const result=await api('maintenance/restart','POST',{});toast(result.message);showLogin();}
     if(action==='apply-maintenance') {
       const preview=maintenancePreview;if(!preview?.can_apply) throw new Error('请先检查可用的维护包');
-      const message=preview.kind==='restore'?'恢复会覆盖当前全部配置、Token 和管理员账户数据，并重启服务。确认恢复？':'确认更新至 '+preview.version+' 并重启服务？';
+      const message=preview.kind==='restore'?'恢复会覆盖当前全部配置、Token 和管理员账户数据，并重启服务。确认恢复？':'确认更新至 '+preview.version+'？服务停止后先保存旧程序和数据，备份成功再安装。';
       if(!confirm(message)) return;
       const result=await api('maintenance/apply-'+preview.kind,'POST',{id:preview.id});maintenancePreview=null;toast(result.message);showLogin();
     }
@@ -1579,6 +1635,7 @@ document.addEventListener('input',event=>{
 document.addEventListener('error',event=>{if(event.target.matches?.('img[data-discovery-icon],img[data-route-image]')) event.target.hidden=true;},true);
 document.addEventListener('input',event=>{if(event.target.closest('#discovery-results')) updateDiscoveryInput(event.target);const form=event.target.closest('[data-event-filters]');if(form&&event.target.name) securityEvents[form.dataset.eventFilters].filters[event.target.name]=event.target.value;});
 document.addEventListener('change',async event=>{
+  if(event.target.id==='update-channel') {selectUpdateChannel(event.target.value);return;}
   if(event.target.form?.id==='forward-form'&&event.target.name==='protocol') {updateForwardProtocol(event.target.form);return;}
   if(event.target.closest('#discovery-results')) {updateDiscoveryInput(event.target);return;}
   if(event.target.id==='discovery-group') {updateDiscoveryGroup(true);return;}

@@ -314,7 +314,7 @@ func TestSupervisorPreparationFailureKeepsOriginalService(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Missing state.json makes the rollback snapshot fail before the program changes.
-	script := []byte("#!/bin/sh\nprintf '{\"pid\":%s,\"version\":\"" + Version + "\"}' \"$$\" > \"$2/maintenance/ready.json\"\ntrap 'exit 0' TERM INT\nwhile :; do sleep 0.1; done\n")
+	script := []byte("#!/bin/sh\nif [ \"$1\" = -version ]; then printf '%s\\n' '" + Version + "'; exit 0; fi\nprintf '{\"pid\":%s,\"version\":\"" + Version + "\"}' \"$$\" > \"$2/maintenance/ready.json\"\ntrap 'exit 0' TERM INT\nwhile :; do sleep 0.1; done\n")
 	if os.WriteFile(filepath.Join(app, "gatehouse"), script, 0750) != nil || writeJSON(filepath.Join(m.dir, "operation.json"), maintenanceOperation{Kind: "update", Version: "99.0.0"}) != nil {
 		t.Fatal("fixture setup failed")
 	}

@@ -172,7 +172,7 @@ func TestMaintenanceRestoreRollbackPreservesUnknownFields(t *testing.T) {
 	}
 }
 
-func TestSupervisorStartupFailureRollsBack(t *testing.T) {
+func TestSupervisorRestartStartupFailureRollsBack(t *testing.T) {
 	if os.PathSeparator != '/' {
 		t.Skip("Unix process test")
 	}
@@ -180,7 +180,7 @@ func TestSupervisorStartupFailureRollsBack(t *testing.T) {
 	dir := filepath.Dir(a.store.path)
 	app := t.TempDir()
 	// This local test child writes the same readiness marker as the real service.
-	script := "#!/bin/sh\ndata=\"$2\"\nprintf '{\"pid\":%s,\"version\":\"" + Version + "\"}' \"$$\" > \"$data/maintenance/ready.json\"\ntrap 'exit 0' TERM INT\nwhile :; do sleep 0.1; done\n"
+	script := "#!/bin/sh\nif [ \"$1\" = -version ]; then printf '%s\\n' '" + Version + "'; exit 0; fi\ndata=\"$2\"\nprintf '{\"pid\":%s,\"version\":\"" + Version + "\"}' \"$$\" > \"$data/maintenance/ready.json\"\ntrap 'exit 0' TERM INT\nwhile :; do sleep 0.1; done\n"
 	if err := os.WriteFile(filepath.Join(app, "gatehouse"), []byte(script), 0750); err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +191,7 @@ func TestSupervisorStartupFailureRollsBack(t *testing.T) {
 	binary := testELF(releaseArch())
 	sum := sha256.Sum256(binary)
 	atomicWrite(filepath.Join(m.dir, "update-staged"), binary)
-	writeJSON(filepath.Join(m.dir, "operation.json"), maintenanceOperation{Kind: "update", Version: "0.0.2", Digest: hex.EncodeToString(sum[:])})
+	writeJSON(filepath.Join(m.dir, "operation.json"), maintenanceOperation{Kind: "update", Version: Version, Digest: hex.EncodeToString(sum[:])})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan error, 1)

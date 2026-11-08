@@ -12,7 +12,7 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parent.parent
 version = (ROOT / "VERSION").read_text().strip()
-if not re.fullmatch(r"(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})", version):
+if not re.fullmatch(r"(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})(?:-beta\.[1-9][0-9]{0,5})?", version):
     raise SystemExit("Invalid VERSION")
 
 # Generated artifacts and private runtime data are never part of a release.

@@ -1,0 +1,100 @@
+name: Publish GateHome
+on:
+  push:
+    tags:
+      - 'v*'
+permissions:
+  contents: write
+concurrency:
+  group: gatehome-release
+  cancel-in-progress: false
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Validate release version
+        id: version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python3 - <<'PY'
+          import os, re
+          from pathlib import Path
+          version = Path('VERSION').read_text().strip()
+          pattern = r'(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})(?:-beta\.[1-9][0-9]{0,5})?'
+          assert re.fullmatch(pattern, version), 'Invalid release version'
+          assert os.environ['RELEASE_TAG'] == 'v' + version, 'Tag must match VERSION'
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('version=' + version + '\n')
+              output.write('prerelease=' + str('-beta.' in version).lower() + '\n')
+          PY
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build embedded frontends
+        run: make frontend
+      - name: Verify code and installer
+        run: |
+          go test -race ./...
+          go vet ./...
+          CGO_ENABLED=0 make -o frontend build
+          python3 scripts/install_checks.py
+          for check in frontend motion dashboard security discovery image online_update account backup_frontend mcp_frontend sunpanel ui; do
+            node "scripts/${check}_checks.mjs"
+          done
+      - name: Package release
+        run: |
+          make -o frontend release
+          cd 更新版本
+          sha256sum -c gatehome-SHA256SUMS
+      - name: Upload, verify and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          PRERELEASE: ${{ steps.version.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          assets=(
+            更新版本/gatehome-linux-amd64.tar.gz
+            更新版本/gatehome-linux-arm64.tar.gz
+            更新版本/gatehome-SHA256SUMS
+            "更新版本/gatehouse-$RELEASE_VERSION-update.zip"
+          )
+          args=(--verify-tag --draft --title "GateHome $RELEASE_TAG" --generate-notes)
+          if [ "$PRERELEASE" = true ]; then args+=(--prerelease); fi
+          if gh release view "$RELEASE_TAG" --json isDraft > "$RUNNER_TEMP/gatehome-release.json" 2>/dev/null; then
+            jq -e '.isDraft == true' "$RUNNER_TEMP/gatehome-release.json" > /dev/null
+            gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber
+          else
+            gh release create "$RELEASE_TAG" "${assets[@]}" "${args[@]}"
+          fi
+          metadata=$(gh api "repos/$GH_REPO/releases/tags/$RELEASE_TAG")
+          release_id=$(jq -er --arg tag "$RELEASE_TAG" --argjson beta "$PRERELEASE" '
+            select(.tag_name == $tag and .draft == true and .prerelease == $beta) | .id
+          ' <<< "$metadata")
+          gh release download "$RELEASE_TAG" --dir "$RUNNER_TEMP/gatehome-release-assets" --clobber
+          cd "$RUNNER_TEMP/gatehome-release-assets"
+          sha256sum -c gatehome-SHA256SUMS
+          for source in "${assets[@]}"; do
+            name=$(basename "$source")
+            digest="sha256:$(sha256sum "$name" | cut -d' ' -f1)"
+            jq -e --arg name "$name" --arg digest "$digest" --argjson size "$(stat -c%s "$name")" '
+              [.assets[] | select(.name == $name)] |
+              length == 1 and (.[0] | .state == "uploaded" and .digest == $digest and .size == $size)
+            ' <<< "$metadata" > /dev/null
+          done
+          latest=true
+          if [ "$PRERELEASE" = true ]; then latest=false; fi
+          gh api --method PATCH "repos/$GH_REPO/releases/$release_id" \
+            -F draft=false -F prerelease="$PRERELEASE" -f make_latest="$latest" --jq '.html_url'
+          gh api "repos/$GH_REPO/releases/tags/$RELEASE_TAG" |
+            jq -e --argjson beta "$PRERELEASE" '(.draft == false) and (.prerelease == $beta)' > /dev/null

@@ -7,12 +7,12 @@ const helpers=source.slice(source.indexOf('function onlineUpdateHTML('),source.i
 const root={innerHTML:''},calls=[];
 let approve=true,loggedOut=false;
 const context=vm.createContext({
-  githubTokenConfigured:false,config:{outbound_proxy:{enabled:true}},status:{version:'0.0.21',maintenance_available:true},
-  $:()=>root,hydrateIcons:()=>{},panel:(title,description,body)=>body,icon:()=>'',
+  githubTokenConfigured:false,config:{outbound_proxy:{enabled:true}},status:{version:'0.0.21',maintenance_available:true,update_history_available:true},
+  $:selector=>selector==='#online-update'?root:null,hydrateIcons:()=>{},panel:(title,description,body)=>body,icon:()=>'',
   esc:value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])),
   date:value=>String(value),confirm:()=>approve,showLogin:()=>{loggedOut=true;vm.runInContext('onlineUpdate.phase="";onlineUpdate.release=null;',context);},toast:()=>{},setTimeout:()=>1,clearTimeout:()=>{},
 });
-vm.runInContext('const onlineUpdate={release:null,phase:"",error:"",job:null,timer:null,request:0};let maintenancePreview=null;'+helpers,context);
+vm.runInContext('const onlineUpdate={channel:"stable",release:null,phase:"",error:"",job:null,timer:null,request:0};let maintenancePreview=null;'+helpers,context);
 const release={version:'0.0.22',update_available:true,size:1048576,published_at:'2026-10-09',release_url:'https://github.com/Mo-SeTian/GateHome/releases/tag/v0.0.22'};
 const snapshot=()=>JSON.parse(vm.runInContext('JSON.stringify(onlineUpdate)',context));
 
@@ -86,7 +86,7 @@ assert.equal(loggedOut,true);
 assert.equal(snapshot().release,null);
 assert.equal(snapshot().phase,'');
 
-// Reloading the settings page can recover an active server-side download.
+// Reloading the update page can recover an active server-side download.
 context.api=async()=>({phase:'downloading',version:release.version,total:100,downloaded:25});
 await vm.runInContext('loadOnlineUpdateStatus()',context);
 assert.equal(snapshot().phase,'downloading');
@@ -98,7 +98,34 @@ await vm.runInContext('checkOnlineUpdate()',context);
 assert.ok(!root.innerHTML.includes('<script>'));
 assert.match(root.innerHTML,/&lt;script&gt;/);
 assert.match(root.innerHTML,/data-action="install-online-update" disabled/);
+
+vm.runInContext('selectUpdateChannel("beta")',context);
+assert.equal(snapshot().channel,'beta');
+assert.equal(snapshot().release,null,'changing channel retained the previous release');
+let finishBeta;
+context.api=async(path,method,body)=>{
+  assert.equal(body.channel,'beta');
+  return new Promise(resolve=>{finishBeta=resolve;});
+};
+const betaCheck=vm.runInContext('checkOnlineUpdate()',context);
+vm.runInContext('selectUpdateChannel("stable")',context);
+assert.equal(snapshot().channel,'beta','channel changed during a version check');
+finishBeta({...release,channel:'beta',version:'0.0.23-beta.10'});await betaCheck;
+assert.equal(snapshot().release.version,'0.0.23-beta.10');
+context.api=async()=>({channel:'beta',version:'',update_available:false});
+await vm.runInContext('checkOnlineUpdate()',context);
+assert.match(root.innerHTML,/暂未发布 Beta/);
+assert.ok(!root.innerHTML.includes('href=""'),'empty beta channel rendered an empty release link');
+assert.match(root.innerHTML,/data-action="install-online-update" disabled/);
+// An old request must not restore authenticated page state after logout.
+context.api=async()=>new Promise(resolve=>{finishBeta=resolve;});
+const staleCheck=vm.runInContext('checkOnlineUpdate()',context);
+vm.runInContext('onlineUpdate.request++;onlineUpdate.phase="";config=undefined;',context);
+finishBeta(release);await staleCheck;
+assert.equal(snapshot().release,null,'a stale check resurrected release state after logout');
+context.config={outbound_proxy:{enabled:true}};
 console.log('Online update: duplicate prevention, proxy label, restart confirmation, failure preservation, background progress, reload recovery and error escaping: PASS');
+console.log('Update channels: independent selection, pending guard, empty Beta and stale login response: PASS');
 
 let reloads=0;
 const versionContext=vm.createContext({

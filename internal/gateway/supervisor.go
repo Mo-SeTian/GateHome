@@ -36,22 +36,24 @@ func SupervisePaths(ctx context.Context, paths StoragePaths, appDir, admin strin
 			return errors.New("程序初始化失败")
 		}
 	}
-	if os.Getenv("GATEHOUSE_CONTAINER") == "1" {
-		if err := syncContainerProgram(ctx, binary); err != nil {
-			return err
-		}
-	}
 	m, err := NewMaintenancePaths(paths, appDir)
 	if err != nil {
 		return err
 	}
 	if _, err := os.Stat(filepath.Join(m.dir, "transition.json")); err == nil {
+		m.recordUpdateResult(false, "维护中断，已恢复操作前的程序和数据")
 		if err := m.rollbackTransition(); err != nil {
 			return errors.New("中断维护的回滚失败，请检查数据目录")
 		}
 	}
-	transition, err := m.beginTransition()
+	if os.Getenv("GATEHOUSE_CONTAINER") == "1" {
+		if err := m.syncContainerImage(ctx, binary); err != nil {
+			return err
+		}
+	}
+	transition, err := m.beginSupervisedTransition(ctx, binary)
 	if err != nil {
+		m.recordUpdateResult(false, "维护准备或执行失败，已保留操作前的程序和数据")
 		if transition {
 			if err := m.rollbackTransition(); err != nil {
 				return errors.New("维护回滚失败")
@@ -83,7 +85,7 @@ func SupervisePaths(ctx context.Context, paths StoragePaths, appDir, admin strin
 			args = append(args, "-log", paths.Log)
 		}
 		cmd := exec.Command(binary, args...)
-		cmd.Env = append(os.Environ(), "GATEHOUSE_SUPERVISED=1", "GATEHOUSE_BACKUP_FILES=1", "GATEHOUSE_SUNPANEL_STORAGE=1")
+		cmd.Env = append(os.Environ(), "GATEHOUSE_SUPERVISED=1", "GATEHOUSE_BACKUP_FILES=1", "GATEHOUSE_SUNPANEL_STORAGE=1", "GATEHOUSE_UPDATE_HISTORY=1")
 		if err := os.Remove(filepath.Join(m.dir, "ready.json")); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return errors.New("旧启动检查状态清理失败")
 		}
@@ -92,6 +94,7 @@ func SupervisePaths(ctx context.Context, paths StoragePaths, appDir, admin strin
 		cmd.Stdin = nil
 		if err := cmd.Start(); err != nil {
 			if transition {
+				m.recordUpdateResult(false, "目标程序无法启动，已恢复操作前的程序和数据")
 				if err := m.rollbackTransition(); err != nil {
 					return errors.New("更新启动失败且回滚失败")
 				}
@@ -133,6 +136,7 @@ func SupervisePaths(ctx context.Context, paths StoragePaths, appDir, admin strin
 		ticker.Stop()
 		if !ready {
 			if transition {
+				m.recordUpdateResult(false, "目标版本启动检查失败，已恢复操作前的程序和数据")
 				if err := m.rollbackTransition(); err != nil {
 					return errors.New("新版本启动检查失败且回滚失败")
 				}
@@ -143,6 +147,7 @@ func SupervisePaths(ctx context.Context, paths StoragePaths, appDir, admin strin
 			return errors.New("服务启动检查失败，请检查配置或端口占用")
 		}
 		if transition {
+			m.recordUpdateResult(true, "维护完成，目标版本已启动")
 			if err := m.finishTransition(); err != nil {
 				stopChild(cmd, done)
 				return errors.New("维护完成状态保存失败")
@@ -156,8 +161,9 @@ func SupervisePaths(ctx context.Context, paths StoragePaths, appDir, admin strin
 			return nil
 		case <-done:
 		}
-		transition, err = m.beginTransition()
+		transition, err = m.beginSupervisedTransition(ctx, binary)
 		if err != nil {
+			m.recordUpdateResult(false, "维护准备或执行失败，已保留操作前的程序和数据")
 			if transition {
 				if err := m.rollbackTransition(); err != nil {
 					return errors.New("维护失败且回滚失败")
@@ -177,17 +183,72 @@ func SupervisePaths(ctx context.Context, paths StoragePaths, appDir, admin strin
 	}
 }
 
+// A worker restored from an older release does not specify its source version.
+func (m *Maintenance) beginSupervisedTransition(ctx context.Context, binary string) (bool, error) {
+	path := filepath.Join(m.dir, "operation.json")
+	data, err := os.ReadFile(path)
+	var op maintenanceOperation
+	if err == nil && json.Unmarshal(data, &op) == nil && op.Kind == "update" && op.FromVersion == "" {
+		current, err := installedProgramVersion(ctx, binary)
+		if err != nil {
+			return false, err
+		}
+		if current != op.Version {
+			op.FromVersion = current
+			if err := writeJSON(path, op); err != nil {
+				return false, err
+			}
+		}
+	}
+	return m.beginTransition()
+}
+
+// Reconcile once per image version so a later container restart preserves a rollback.
+func (m *Maintenance) syncContainerImage(ctx context.Context, binary string) error {
+	marker := filepath.Join(m.dir, "container-image-version")
+	data, err := os.ReadFile(marker)
+	if err == nil && string(data) == Version {
+		return nil
+	}
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if _, err := os.Stat(filepath.Join(m.dir, "operation.json")); errors.Is(err, os.ErrNotExist) {
+		if err := syncContainerProgram(ctx, binary); err != nil {
+			return err
+		}
+	} else if err != nil {
+		return err
+	}
+	if err := atomicWrite(marker, []byte(Version)); err != nil {
+		return err
+	}
+	return syncUpdateDir(m.dir)
+}
+
 // Retain newer Web updates, but replace an older persisted worker on image upgrade.
-func syncContainerProgram(ctx context.Context, binary string) error {
+func installedProgramVersion(ctx context.Context, binary string) (string, error) {
 	probe, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	output, err := exec.CommandContext(probe, binary, "-version").Output()
 	if err != nil {
-		return errors.New("持久化程序版本读取失败")
+		return "", errors.New("当前程序版本读取失败")
 	}
-	comparison, err := compareVersions(strings.TrimSpace(string(output)), Version)
+	version := strings.TrimSpace(string(output))
+	if !versionPattern.MatchString(version) {
+		return "", errors.New("当前程序版本无效")
+	}
+	return version, nil
+}
+
+func syncContainerProgram(ctx context.Context, binary string) error {
+	current, err := installedProgramVersion(ctx, binary)
 	if err != nil {
-		return errors.New("持久化程序版本无效")
+		return err
+	}
+	comparison, err := compareVersions(current, Version)
+	if err != nil {
+		return err
 	}
 	if comparison < 0 {
 		executable, err := os.Executable()

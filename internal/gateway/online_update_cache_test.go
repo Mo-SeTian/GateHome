@@ -28,17 +28,17 @@ func TestOnlineReleaseCacheExpiryAndSettings(t *testing.T) {
 		})}
 		cache := onlineReleaseCache{}
 		state := State{}
-		first, err := cache.latest(context.Background(), client, state)
+		first, err := cache.latest(context.Background(), client, state, stableChannel)
 		if err != nil || first.CheckedAt.IsZero() || first.CacheUntil.Sub(first.CheckedAt) != 5*time.Minute {
 			t.Fatal("successful check did not provide its freshness window")
 		}
 		state.Revision++
-		second, err := cache.latest(context.Background(), client, state)
+		second, err := cache.latest(context.Background(), client, state, stableChannel)
 		if err != nil || calls != 1 || second.CheckedAt != first.CheckedAt {
 			t.Fatal("repeated checks or unrelated config changes bypassed the cache")
 		}
 		time.Sleep(5*time.Minute + time.Second)
-		if _, err := cache.latest(context.Background(), client, state); err != nil || calls != 2 {
+		if _, err := cache.latest(context.Background(), client, state, stableChannel); err != nil || calls != 2 {
 			t.Fatal("expired version information was reused")
 		}
 		for i := 0; i < 5; i++ {
@@ -54,7 +54,7 @@ func TestOnlineReleaseCacheExpiryAndSettings(t *testing.T) {
 			case 4:
 				state.ProxyPassword = "TEST_ONLY_PROXY_PASSWORD"
 			}
-			release, err := cache.latest(context.Background(), client, state)
+			release, err := cache.latest(context.Background(), client, state, stableChannel)
 			encoded, _ := json.Marshal(release)
 			if err != nil || calls != i+3 || bytes.Contains(encoded, []byte("TEST_ONLY_")) {
 				t.Fatal("connection settings did not invalidate the cache or exposed credentials")
@@ -82,9 +82,9 @@ func TestOnlineReleaseCacheCoalescesAndSurvivesCallerCancellation(t *testing.T) 
 		cache := onlineReleaseCache{}
 		ctx, cancel := context.WithCancel(context.Background())
 		first, second := make(chan error, 1), make(chan error, 1)
-		go func() { _, err := cache.latest(ctx, client, State{}); first <- err }()
+		go func() { _, err := cache.latest(ctx, client, State{}, stableChannel); first <- err }()
 		<-started
-		go func() { _, err := cache.latest(context.Background(), client, State{}); second <- err }()
+		go func() { _, err := cache.latest(context.Background(), client, State{}, stableChannel); second <- err }()
 		synctest.Wait()
 		cancel()
 		if err := <-first; !errors.Is(err, context.Canceled) {
@@ -110,12 +110,12 @@ func TestOnlineReleaseCacheTransientFailureRecovery(t *testing.T) {
 		})}
 		cache := onlineReleaseCache{}
 		for i := 0; i < 2; i++ {
-			if _, err := cache.latest(context.Background(), client, State{}); err == nil || strings.Contains(err.Error(), "TEST_ONLY_") || calls != 1 {
+			if _, err := cache.latest(context.Background(), client, State{}, stableChannel); err == nil || strings.Contains(err.Error(), "TEST_ONLY_") || calls != 1 {
 				t.Fatal("a transient failure bypassed the cache or exposed transport details")
 			}
 		}
 		time.Sleep(11 * time.Second)
-		if _, err := cache.latest(context.Background(), client, State{}); err != nil || calls != 2 {
+		if _, err := cache.latest(context.Background(), client, State{}, stableChannel); err != nil || calls != 2 {
 			t.Fatal("checks did not recover after the short failure cache expired")
 		}
 	})
@@ -138,7 +138,7 @@ func TestOnlineReleaseCacheRateLimitCooldown(t *testing.T) {
 			return &http.Response{StatusCode: 403, Header: header, Body: io.NopCloser(strings.NewReader("TEST_ONLY_PRIVATE_RESPONSE")), Request: r}, nil
 		})}
 		cache := onlineReleaseCache{}
-		_, err := cache.latest(context.Background(), client, State{})
+		_, err := cache.latest(context.Background(), client, State{}, stableChannel)
 		var limited *githubRateLimitError
 		if !errors.As(err, &limited) || !limited.retryAt.Equal(reset.Add(time.Second)) {
 			t.Fatal("GitHub reset time was not respected")
@@ -151,11 +151,11 @@ func TestOnlineReleaseCacheRateLimitCooldown(t *testing.T) {
 			t.Fatal("rate limit recovery time was missing or exposed response contents")
 		}
 		time.Sleep(60 * time.Second)
-		if _, err := cache.latest(context.Background(), client, State{}); err == nil || calls != 1 {
+		if _, err := cache.latest(context.Background(), client, State{}, stableChannel); err == nil || calls != 1 {
 			t.Fatal("a check ignored the GitHub cooldown")
 		}
 		time.Sleep(32 * time.Second)
-		if _, err := cache.latest(context.Background(), client, State{}); err != nil || calls != 2 {
+		if _, err := cache.latest(context.Background(), client, State{}, stableChannel); err != nil || calls != 2 {
 			t.Fatal("checks did not recover after the rate limit reset")
 		}
 	})
@@ -176,17 +176,17 @@ func TestOnlineReleaseCacheDownloadLimitWinsOverInFlightCheck(t *testing.T) {
 		})}
 		cache := onlineReleaseCache{}
 		result := make(chan error, 1)
-		go func() { _, err := cache.latest(context.Background(), client, State{}); result <- err }()
+		go func() { _, err := cache.latest(context.Background(), client, State{}, stableChannel); result <- err }()
 		<-started
 		cache.noteLimit(State{}, &githubRateLimitError{retryAt: time.Now().Add(time.Minute)})
 		close(finish)
 		if err := <-result; err == nil {
 			t.Fatal("an earlier version request discarded a download rate limit")
 		}
-		if _, err := cache.latest(context.Background(), client, State{}); err == nil || calls != 1 {
+		if _, err := cache.latest(context.Background(), client, State{}, stableChannel); err == nil || calls != 1 {
 			t.Fatal("download cooldown was bypassed")
 		}
-		if _, err := cache.latest(context.Background(), client, State{GitHubToken: "TEST_ONLY_NEW_TOKEN"}); err != nil || calls != 2 {
+		if _, err := cache.latest(context.Background(), client, State{GitHubToken: "TEST_ONLY_NEW_TOKEN"}, stableChannel); err != nil || calls != 2 {
 			t.Fatal("new credentials could not recover from a cached rate limit")
 		}
 	})

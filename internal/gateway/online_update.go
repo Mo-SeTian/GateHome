@@ -15,18 +15,42 @@ import (
 	"time"
 )
 
-const onlineReleaseAPI = "https://api.github.com/repos/Mo-SeTian/GateHome/releases/latest"
+const onlineReleasesAPI = "https://api.github.com/repos/Mo-SeTian/GateHome/releases"
+const onlineReleaseAPI = onlineReleasesAPI + "/latest"
 const onlineReleaseBase = "https://github.com/Mo-SeTian/GateHome/releases/"
 const onlineReleaseAssetsAPI = "https://api.github.com/repos/Mo-SeTian/GateHome/releases/assets/"
 
+type updateChannel string
+
+const (
+	stableChannel updateChannel = "stable"
+	betaChannel   updateChannel = "beta"
+)
+
+func parseUpdateChannel(channel updateChannel) (updateChannel, error) {
+	switch channel {
+	case "", stableChannel:
+		return stableChannel, nil
+	case betaChannel:
+		return betaChannel, nil
+	default:
+		return "", errors.New("请选择正式版或 Beta 测试版渠道")
+	}
+}
+
+func (channel updateChannel) acceptsVersion(version string) bool {
+	return versionPattern.MatchString(version) && (channel == betaChannel) == strings.Contains(version, "-beta.")
+}
+
 type onlineRelease struct {
-	Version          string    `json:"version"`
-	PublishedAt      time.Time `json:"published_at"`
-	Size             int64     `json:"size"`
-	UpdateAvailable  bool      `json:"update_available"`
-	ReleaseURL       string    `json:"release_url"`
-	CheckedAt        time.Time `json:"checked_at"`
-	CacheUntil       time.Time `json:"cache_until"`
+	Channel          updateChannel `json:"channel"`
+	Version          string        `json:"version"`
+	PublishedAt      time.Time     `json:"published_at"`
+	Size             int64         `json:"size"`
+	UpdateAvailable  bool          `json:"update_available"`
+	ReleaseURL       string        `json:"release_url"`
+	CheckedAt        time.Time     `json:"checked_at"`
+	CacheUntil       time.Time     `json:"cache_until"`
 	assetURL, digest string
 	assetID          int64
 }
@@ -44,12 +68,13 @@ func validateGitHubToken(token string) error {
 }
 
 type onlineUpdateStatus struct {
-	Phase      string     `json:"phase"`
-	Version    string     `json:"version"`
-	Downloaded int64      `json:"downloaded"`
-	Total      int64      `json:"total"`
-	Error      string     `json:"error"`
-	RetryAt    *time.Time `json:"retry_at,omitempty"`
+	Channel    updateChannel `json:"channel"`
+	Phase      string        `json:"phase"`
+	Version    string        `json:"version"`
+	Downloaded int64         `json:"downloaded"`
+	Total      int64         `json:"total"`
+	Error      string        `json:"error"`
+	RetryAt    *time.Time    `json:"retry_at,omitempty"`
 }
 
 type onlineUpdateJob struct {
@@ -154,7 +179,7 @@ func fetchOnlineUpdateProgress(ctx context.Context, c *http.Client, address stri
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
 		if response.StatusCode == http.StatusUnauthorized && token != "" {
-			return nil, errors.New("GitHub Token 无效或已过期，请在设置中更换或清除后重试")
+			return nil, errors.New("GitHub Token 无效或已过期，请在更新页面更换或清除后重试")
 		}
 		if response.StatusCode == http.StatusTooManyRequests || (response.StatusCode == http.StatusForbidden && (response.Header.Get("X-RateLimit-Remaining") == "0" || response.Header.Get("Retry-After") != "")) {
 			return nil, &githubRateLimitError{retryAt: githubRetryTime(response.Header)}
@@ -178,36 +203,84 @@ func fetchOnlineUpdateProgress(ctx context.Context, c *http.Client, address stri
 	return data, nil
 }
 
+type githubRelease struct {
+	Tag         string    `json:"tag_name"`
+	Draft       bool      `json:"draft"`
+	Prerelease  bool      `json:"prerelease"`
+	PublishedAt time.Time `json:"published_at"`
+	Assets      []struct {
+		ID     int64  `json:"id"`
+		Name   string `json:"name"`
+		State  string `json:"state"`
+		URL    string `json:"browser_download_url"`
+		Digest string `json:"digest"`
+		Size   int64  `json:"size"`
+	} `json:"assets"`
+}
+
+func (r githubRelease) versionFor(channel updateChannel) string {
+	version := strings.TrimPrefix(r.Tag, "v")
+	if r.Draft || r.Prerelease != (channel == betaChannel) || version == r.Tag ||
+		r.PublishedAt.IsZero() || !channel.acceptsVersion(version) {
+		return ""
+	}
+	return version
+}
+
 func latestOnlineRelease(ctx context.Context, c *http.Client, token string) (onlineRelease, error) {
 	data, err := fetchOnlineUpdate(ctx, c, onlineReleaseAPI, 1<<20, token)
 	if err != nil {
 		return onlineRelease{}, err
 	}
-	var release struct {
-		Tag         string    `json:"tag_name"`
-		Draft       bool      `json:"draft"`
-		Prerelease  bool      `json:"prerelease"`
-		PublishedAt time.Time `json:"published_at"`
-		Assets      []struct {
-			ID     int64  `json:"id"`
-			Name   string `json:"name"`
-			State  string `json:"state"`
-			URL    string `json:"browser_download_url"`
-			Digest string `json:"digest"`
-			Size   int64  `json:"size"`
-		} `json:"assets"`
-	}
-	if json.Unmarshal(data, &release) != nil || release.Draft || release.Prerelease || !strings.HasPrefix(release.Tag, "v") {
+	var release githubRelease
+	if json.Unmarshal(data, &release) != nil || release.versionFor(stableChannel) == "" {
 		return onlineRelease{}, errors.New("GitHub 未返回有效的正式版本")
 	}
-	version := strings.TrimPrefix(release.Tag, "v")
+	return release.update(stableChannel)
+}
+
+func latestBetaRelease(ctx context.Context, c *http.Client, token string) (onlineRelease, error) {
+	const pageSize = 100
+	var latest githubRelease
+	var highest string
+	for page := 1; ; page++ {
+		address := fmt.Sprintf("%s?per_page=%d&page=%d", onlineReleasesAPI, pageSize, page)
+		data, err := fetchOnlineUpdate(ctx, c, address, 8<<20, token)
+		if err != nil {
+			return onlineRelease{}, err
+		}
+		var releases []githubRelease
+		if json.Unmarshal(data, &releases) != nil {
+			return onlineRelease{}, errors.New("GitHub 返回的测试版列表无效")
+		}
+		for _, release := range releases {
+			version := release.versionFor(betaChannel)
+			if version == "" {
+				continue
+			}
+			if comparison, _ := compareVersions(version, highest); highest == "" || comparison > 0 {
+				latest, highest = release, version
+			}
+		}
+		if len(releases) < pageSize {
+			break
+		}
+	}
+	if highest == "" {
+		return onlineRelease{Channel: betaChannel}, nil
+	}
+	return latest.update(betaChannel)
+}
+
+func (release githubRelease) update(channel updateChannel) (onlineRelease, error) {
+	version := release.versionFor(channel)
 	comparison, err := compareVersions(version, Version)
 	if err != nil {
-		return onlineRelease{}, errors.New("GitHub 正式版本号无效")
+		return onlineRelease{}, errors.New("GitHub 发行版本号无效")
 	}
 	name := "gatehouse-" + version + "-update.zip"
 	wantURL := onlineReleaseBase + "download/" + release.Tag + "/" + name
-	result := onlineRelease{Version: version, PublishedAt: release.PublishedAt, UpdateAvailable: comparison > 0, ReleaseURL: onlineReleaseBase + "tag/" + release.Tag}
+	result := onlineRelease{Channel: channel, Version: version, PublishedAt: release.PublishedAt, UpdateAvailable: comparison > 0, ReleaseURL: onlineReleaseBase + "tag/" + release.Tag}
 	for _, asset := range release.Assets {
 		if asset.Name != name {
 			continue
@@ -215,13 +288,13 @@ func latestOnlineRelease(ctx context.Context, c *http.Client, token string) (onl
 		digest := strings.TrimPrefix(asset.Digest, "sha256:")
 		decoded, err := hex.DecodeString(digest)
 		if result.assetURL != "" || asset.ID < 1 || asset.State != "uploaded" || asset.URL != wantURL || asset.Size < 1 || asset.Size > maxUpdateBytes || !strings.HasPrefix(asset.Digest, "sha256:") || err != nil || len(decoded) != sha256.Size {
-			return onlineRelease{}, errors.New("正式版本更新包的地址、大小或 SHA-256 校验信息无效")
+			return onlineRelease{}, errors.New("更新包的地址、大小或 SHA-256 校验信息无效")
 		}
 		result.assetURL, result.digest, result.Size = asset.URL, strings.ToLower(digest), asset.Size
 		result.assetID = asset.ID
 	}
 	if result.assetURL == "" {
-		return onlineRelease{}, errors.New("正式版本尚未提供完整的更新 ZIP，请稍后重试")
+		return onlineRelease{}, errors.New("该版本尚未提供完整的更新 ZIP，请稍后重试")
 	}
 	return result, nil
 }
@@ -251,7 +324,15 @@ func (a *Admin) onlineUpdateRoutes(mux *http.ServeMux) {
 		jsonResponse(w, 200, a.onlineUpdate.snapshot())
 	}))
 	mux.HandleFunc("POST /api/maintenance/check-online-update", a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
-		if !decodeBody(w, r, &struct{}{}) {
+		var input struct {
+			Channel updateChannel `json:"channel"`
+		}
+		if !decodeBody(w, r, &input) {
+			return
+		}
+		channel, err := parseUpdateChannel(input.Channel)
+		if err != nil {
+			apiError(w, 400, err.Error())
 			return
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
@@ -259,7 +340,7 @@ func (a *Admin) onlineUpdateRoutes(mux *http.ServeMux) {
 		state := a.store.Snapshot()
 		client := onlineUpdateClient(state)
 		defer closeClient(client)
-		release, err := a.releaseCache.latest(ctx, client, state)
+		release, err := a.releaseCache.latest(ctx, client, state, channel)
 		if err != nil {
 			onlineCheckError(w, err)
 			return
@@ -268,14 +349,20 @@ func (a *Admin) onlineUpdateRoutes(mux *http.ServeMux) {
 	}))
 	mux.HandleFunc("POST /api/maintenance/download-online-update", a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
 		var input struct {
-			Version string `json:"version"`
+			Version string        `json:"version"`
+			Channel updateChannel `json:"channel"`
 		}
 		if !decodeBody(w, r, &input) {
 			return
 		}
+		channel, err := parseUpdateChannel(input.Channel)
+		if err != nil {
+			apiError(w, 400, err.Error())
+			return
+		}
 		comparison, err := compareVersions(input.Version, Version)
-		if err != nil || comparison <= 0 {
-			apiError(w, 400, "请选择检查到的更高正式版本")
+		if err != nil || comparison <= 0 || !channel.acceptsVersion(input.Version) {
+			apiError(w, 400, "请选择当前渠道中检查到的更高版本")
 			return
 		}
 		// Return promptly even when another download or config write owns the lock.
@@ -283,9 +370,14 @@ func (a *Admin) onlineUpdateRoutes(mux *http.ServeMux) {
 			apiError(w, 409, "正在保存配置或执行维护操作，请稍后重试")
 			return
 		}
-		if a.maintenance == nil || !a.maintenance.Available() || a.maintenance.Busy() {
+		if !a.maintenance.UpdateHistoryAvailable() {
 			a.updateMu.Unlock()
-			apiError(w, 409, "当前无法更新，请使用 Linux 安装脚本或新版 Docker 启动方式，并等待维护结束")
+			apiError(w, 409, updateLauncherRequired)
+			return
+		}
+		if a.maintenance.Busy() {
+			a.updateMu.Unlock()
+			apiError(w, 409, "正在执行维护操作，请稍后重试")
 			return
 		}
 		state := a.store.Snapshot()
@@ -295,7 +387,7 @@ func (a *Admin) onlineUpdateRoutes(mux *http.ServeMux) {
 			return
 		}
 		a.onlineUpdate.mu.Lock()
-		a.onlineUpdate.status = onlineUpdateStatus{Phase: "checking", Version: input.Version}
+		a.onlineUpdate.status = onlineUpdateStatus{Channel: channel, Phase: "checking", Version: input.Version}
 		a.onlineUpdate.mu.Unlock()
 		jsonResponse(w, 202, a.onlineUpdate.snapshot())
 		if f, ok := w.(http.Flusher); ok {
@@ -303,7 +395,7 @@ func (a *Admin) onlineUpdateRoutes(mux *http.ServeMux) {
 		}
 		go func() {
 			defer a.updateMu.Unlock()
-			if err := a.runOnlineUpdate(state, input.Version); err != nil {
+			if err := a.runOnlineUpdate(state, input.Version, channel); err != nil {
 				a.releaseCache.noteLimit(state, err)
 				a.onlineUpdate.setFailure(err)
 				if a.logs != nil {
@@ -314,7 +406,7 @@ func (a *Admin) onlineUpdateRoutes(mux *http.ServeMux) {
 	}))
 }
 
-func (a *Admin) runOnlineUpdate(state State, version string) error {
+func (a *Admin) runOnlineUpdate(state State, version string, channel updateChannel) error {
 	if err := checkBackupCapacity(a.store.paths, state); err != nil {
 		return err
 	}
@@ -322,12 +414,12 @@ func (a *Admin) runOnlineUpdate(state State, version string) error {
 	defer cancel()
 	client := onlineUpdateClient(state)
 	defer closeClient(client)
-	release, err := a.releaseCache.latest(ctx, client, state)
+	release, err := a.releaseCache.latest(ctx, client, state, channel)
 	if err != nil {
 		return err
 	}
 	if release.Version != version || !release.UpdateAvailable {
-		return errors.New("最新正式版本已变化，请重新检查版本后更新")
+		return errors.New("所选渠道的最新版本已变化，请重新检查版本后更新")
 	}
 	id := a.onlineUpdate.preparedStage(a.maintenance, release)
 	if id == "" {

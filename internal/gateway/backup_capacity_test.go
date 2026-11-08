@@ -30,7 +30,7 @@ func TestCapacityIncludesEncodingAndBlocksBeforeBackupAndDownload(t *testing.T) 
 	if w.Code != 400 {
 		t.Fatal("over-capacity backup was accepted")
 	}
-	if err := a.runOnlineUpdate(state, "99.0.0"); err == nil {
+	if err := a.runOnlineUpdate(state, "99.0.0", stableChannel); err == nil {
 		t.Fatal("over-capacity download was not rejected before network access")
 	}
 	w = adminRequest(a.Handler(), "GET", "/api/maintenance/capacity", nil, cookie, "")

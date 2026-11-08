@@ -53,6 +53,47 @@ func (a *Admin) maintenanceRoutes(mux *http.ServeMux) {
 		available := a.maintenance != nil && a.maintenance.Available()
 		jsonResponse(w, 200, map[string]any{"version": Version, "platform": runtime.GOOS + "/" + runtime.GOARCH, "can_apply": available, "busy": a.maintenance.Busy(), "max_update_bytes": maxUpdateBytes, "max_backup_bytes": maxBackupBytes + (1 << 20)})
 	}))
+	mux.HandleFunc("GET /api/maintenance/update-backups", a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
+		if a.maintenance == nil {
+			apiError(w, 409, "维护功能未初始化")
+			return
+		}
+		backups, err := a.maintenance.listUpdateBackups()
+		if err != nil {
+			apiError(w, 500, err.Error())
+			return
+		}
+		jsonResponse(w, 200, map[string]any{"backups": backups, "retention": updateBackupRetention, "last_result": a.maintenance.lastUpdateResult()})
+	}))
+	mux.HandleFunc("POST /api/maintenance/rollback-update", a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
+		var input struct {
+			ID string `json:"id"`
+		}
+		if !decodeBody(w, r, &input) {
+			return
+		}
+		if !a.updateMu.TryLock() {
+			apiError(w, 409, "正在保存配置或执行维护操作，请稍后重试")
+			return
+		}
+		defer a.updateMu.Unlock()
+		if !a.maintenance.UpdateHistoryAvailable() {
+			apiError(w, 409, updateLauncherRequired)
+			return
+		}
+		state := a.store.Snapshot()
+		if err := checkBackupCapacity(a.store.paths, state); err != nil {
+			apiError(w, 400, err.Error())
+			return
+		}
+		if err := a.maintenance.scheduleUpdateRollback(input.ID, a.ports, a.adminPort); err != nil {
+			apiError(w, 400, err.Error())
+			return
+		}
+		jsonResponse(w, 202, map[string]string{"message": "回退已安排。服务将重启，请使用备份时的管理员账号和密码登录"})
+		_ = http.NewResponseController(w).Flush()
+		a.maintenance.requestRestart()
+	}))
 	mux.HandleFunc("POST /api/maintenance/backup", a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
 		var input struct {
 			Password string `json:"password"`
@@ -124,11 +165,21 @@ func (a *Admin) maintenanceRoutes(mux *http.ServeMux) {
 				apiError(w, 409, "维护功能未初始化")
 				return
 			}
+			if kind == "update" && a.maintenance.UpdateHistoryAvailable() {
+				if err := checkRestartPorts(a.ports, a.store.Snapshot().Config); err != nil {
+					apiError(w, 409, err.Error())
+					return
+				}
+			}
 			if err := a.maintenance.schedule(input.ID, kind); err != nil {
 				apiError(w, 400, err.Error())
 				return
 			}
-			jsonResponse(w, 202, map[string]string{"message": "维护操作已接受，服务即将重启；请稍后刷新并重新登录"})
+			message := "维护操作已接受，服务即将重启；请稍后刷新并重新登录"
+			if kind == "update" {
+				message = "更新已安排，服务会先备份再安装；请稍后刷新并重新登录"
+			}
+			jsonResponse(w, 202, map[string]string{"message": message})
 			if controller := http.NewResponseController(w); controller.Flush() != nil { /* The operation remains accepted if the client disconnects. */
 			}
 			a.maintenance.requestRestart()
