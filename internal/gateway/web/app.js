@@ -7,7 +7,7 @@ function newID() {
   const bytes=new Uint8Array(16);crypto.getRandomValues(bytes);bytes[6]=(bytes[6]&15)|64;bytes[8]=(bytes[8]&63)|128;
   const hex=[...bytes].map(b=>b.toString(16).padStart(2,'0')).join('');return hex.slice(0,8)+'-'+hex.slice(8,12)+'-'+hex.slice(12,16)+'-'+hex.slice(16,20)+'-'+hex.slice(20);
 }
-const pages = {sunpanel:'浏览器首页',overview:'概览',routes:'反向代理',ddns:'动态域名',certificates:'SSL 证书',access:'防火墙管理',subscriptions:'订阅管理',mcp:'AI 管理',backups:'备份与恢复',settings:'设置',logs:'日志',statistics:'统计','firewall-logs':'防火墙拦截记录','ip-blocks':'IP 拦截名单'};
+const pages = {sunpanel:'浏览器首页',overview:'概览',routes:'反向代理',forwards:'端口转发',ddns:'动态域名',certificates:'SSL 证书',access:'防火墙管理',subscriptions:'订阅管理',mcp:'AI 管理',backups:'备份与恢复',settings:'设置',logs:'日志',statistics:'统计','firewall-logs':'防火墙拦截记录','ip-blocks':'IP 拦截名单'};
 const iconNames = new Set(['overview','routes','globe','certificate','shield','download','logs','chart','settings','server','gateway','router','layers','activity','refresh','plus','close','logout','menu','more','back','edit','chevron-down','chevron-up','chevron-left','chevron-right','external-link','trash','play','pause','login','filter','unlock','save','upload','info','check']);
 function icon(name) { return `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="/icons.svg#${iconNames.has(name)?name:'layers'}"></use></svg>`; }
 function hydrateIcons(scope=document) {
@@ -166,7 +166,7 @@ async function save(next, dnsTokens, proxyPassword, certificateTokens, routePass
   if (githubToken !== undefined) payload.github_token=githubToken;
   applyConfig(await api('config', 'PUT', payload));
   await refreshStatus();
-  toast('配置已保存' + (status.restart_required ? '，监听端口重启后生效' : ''));
+  toast('配置已保存' + (status.restart_required ? '，监听或转发变更重启后生效' : ''));
 }
 function badge(text, kind = '') { return `<span class="badge ${kind}">${esc(text)}</span>`; }
 function empty(title, message, action = '') { return `<div class="empty"><div class="empty-icon">${/^(正在|加载中)/.test(title)?'<gatehome-loader></gatehome-loader>':icon('layers')}</div><h3>${esc(title)}</h3><p>${esc(message)}</p>${action}</div>`; }
@@ -236,7 +236,7 @@ function routeTable(accessOnly = false, overview = false, groupID = '') {
 function firewallsHTML() {
   const action='<button class="primary" data-action="add-firewall"><span data-icon="plus"></span>添加防火墙</button>';
   const list=config.firewalls.map((f,i)=>{
-    const used=config.routes.filter(r=>r.firewall_id===f.id).length, waiting=firewallWaiting(f);
+    const used=[...config.routes,...(config.forwards||[])].filter(r=>r.firewall_id===f.id).length, waiting=firewallWaiting(f);
     const groups=(f.groups||[]).map((g,j)=>{
       const sources=(g.subscriptions||[]).map(id=>config.subscriptions.find(d=>d.id===id)?.name||id).join('、');
       return `<tr><td>${j+1}</td><td><b>${esc(g.name)}</b></td><td>${badge(g.match==='exclude'?'排除（组外 IP）':'包含（组内 IP）','gray')}</td><td>${badge(actionLabel(g.action),g.action==='deny'?'red':'')}</td><td><span class="mono">${esc((g.cidrs||[]).slice(0,2).join(', '))||'无手动 IP'}${(g.cidrs||[]).length>2?' …':''}</span><small>${sources?'订阅：'+esc(sources):'无订阅'}</small></td></tr>`;
@@ -398,6 +398,42 @@ function leaveRouteEditor() {
   const dialog=$('#route-dialog');
   if(dialog.open&&$('#route-form').dataset.dirty==='true'&&!confirm('放弃尚未保存的服务修改？')) return false;
   dialogMotions.get(dialog)?.cancel();dialog.close();return true;
+}
+function forwardState(f) {
+  const running=(status.forward_listeners||[]).find(r=>r.id===f.id&&r.enabled);
+  if(!f.enabled) return running?badge('停用待重启','amber'):badge('已停用','gray');
+  if(!running) return badge('启用待重启','amber');
+  if(['protocol','listen_port','upstream','firewall_id'].some(key=>(f[key]||'')!==(running[key]||''))) return badge('修改待重启','amber');
+  if(f.protocol==='udp'&&(f.udp_idle_seconds||300)!==(running.udp_idle_seconds||300)) return badge('修改待重启','amber');
+  const firewall=config.firewalls.find(r=>r.id===f.firewall_id);
+  return firewall&&firewallWaiting(firewall)?badge('等待订阅，暂拒访问','amber'):badge('正在监听');
+}
+function forwardsHTML() {
+  const action='<button class="primary" data-action="add-forward"><span data-icon="plus"></span>添加转发规则</button>';
+  const rows=(config.forwards||[]).map((f,i)=>{
+    const menu=objectMenu(f.name,`<button class="text-button" data-action="toggle-forward" data-index="${i}">${f.enabled?'停用':'启用'}</button><button class="text-button danger" data-action="delete-forward" data-index="${i}">删除规则</button>`);
+    return `<article class="route-card"><div class="rc-head"><span class="rc-tile">${icon('router')}</span><span class="rc-who"><b class="rc-name">${esc(f.name)}</b><small class="rc-host">${esc(f.protocol.toUpperCase())} · ${f.listen_port}</small></span>${menu}</div><dl class="forward-addresses"><div><dt>监听端口</dt><dd class="mono">${f.listen_port}</dd></div><div><dt>转发目标</dt><dd class="mono">${esc(f.upstream)}</dd></div></dl><div class="rc-tags"><span class="rc-tag">${esc(f.protocol.toUpperCase())}</span><span class="rc-tag">${esc(firewallName(f.firewall_id))}</span></div><div class="rc-foot">${forwardState(f)}<span class="table-actions"><button class="text-button" data-action="edit-forward" data-index="${i}">编辑</button></span></div></article>`;
+  }).join('');
+  return heading('TCP / UDP','端口转发','将独立端口转发到指定主机，适用于 SSH、数据库、DNS 和其他 TCP / UDP 服务。',action)+
+    '<p class="hint amber" data-visible-note>规则保存后需在设置中重启服务。监听所有网卡，TCP 与 UDP 可共用同一端口。路由器与 Docker bridge 需发布对应协议的端口。</p>'+
+    (rows?`<div class="cards forward-cards">${rows}</div>`:empty('还没有转发规则','选择 TCP 或 UDP，填写监听端口和目标主机即可创建。',action));
+}
+function openForward(index=-1) {
+  const form=$('#forward-form');form.reset();
+  const f=index<0?{name:'',protocol:'tcp',listen_port:'',upstream:'',firewall_id:'',enabled:true}:config.forwards[index];
+  form.elements.index.value=index;
+  form.elements.firewall_id.innerHTML='<option value="">不限制来源 IP</option>'+config.firewalls.map(f=>`<option value="${esc(f.id)}">${esc(f.name)}</option>`).join('');
+  for(const key of ['name','protocol','listen_port','upstream','firewall_id']) form.elements[key].value=f[key]||'';
+  form.elements.udp_idle_seconds.value=f.udp_idle_seconds||300;
+  updateForwardProtocol(form);
+  form.elements.enabled.checked=f.enabled;$('.error',form).textContent='';
+  $('#forward-title').textContent=index<0?'添加转发规则':'编辑转发规则';
+  openDialog($('#forward-dialog'));
+}
+function updateForwardProtocol(form) {
+  const udp=form.elements.protocol.value==='udp';
+  form.elements.udp_idle_seconds.disabled=!udp;
+  form.elements.udp_idle_seconds.closest('label').hidden=!udp;
 }
 function subscriptionsHTML() {
   const actions='<button class="primary" data-action="add-subscription"><span data-icon="plus"></span>添加订阅</button>';
@@ -641,7 +677,7 @@ async function loadBackupCapacity() {
 function maintenanceHTML() {
   const supported=status.maintenance_available;
   const preview=maintenancePreview;
-  const detail=!preview?'':`<div class="maintenance-preview"><b>${preview.kind==='update'?'更新包 v'+esc(preview.version):'备份 v'+esc(preview.version)}</b>${preview.kind==='restore'?`<p>${preview.groups} 个反代组 · ${preview.routes} 个服务 · ${preview.ddns_groups} 个 DDNS 组 · ${preview.firewalls} 个防火墙 · ${preview.subscriptions} 个订阅<br>${preview.sunpanel_files||0} 个 Sun-Panel 文件（${preview.sunpanel_images||0} 张图片） · ${preview.images||0} 张反代图片 · ${preview.certificates||0} 个证书文件 · ${preview.log_entries||0} 条日志 · ${preview.subscription_caches||0} 个订阅缓存<br>${preview.includes_files?'':'此旧备份未包含日志、缓存与图片；恢复时保留服务器现有文件。<br>'}备份时间：${date(preview.created_at)} · ${preview.token_configured?'含 Cloudflare Token':'未配置 Cloudflare Token'}</p>`:''}<p>${esc(preview.message)}</p><button class="primary" data-action="apply-maintenance" ${!preview.can_apply?'disabled':''}>${preview.kind==='update'?'应用更新并重启':'恢复数据并重启'}</button></div>`;
+  const detail=!preview?'':`<div class="maintenance-preview"><b>${preview.kind==='update'?'更新包 v'+esc(preview.version):'备份 v'+esc(preview.version)}</b>${preview.kind==='restore'?`<p>${preview.groups} 个反代组 · ${preview.routes} 个服务 · ${preview.forwards||0} 条端口转发 · ${preview.ddns_groups} 个 DDNS 组 · ${preview.firewalls} 个防火墙 · ${preview.subscriptions} 个订阅<br>${preview.sunpanel_files||0} 个 Sun-Panel 文件（${preview.sunpanel_images||0} 张图片） · ${preview.images||0} 张反代图片 · ${preview.certificates||0} 个证书文件 · ${preview.log_entries||0} 条日志 · ${preview.subscription_caches||0} 个订阅缓存<br>${preview.includes_files?'':'此旧备份未包含日志、缓存与图片；恢复时保留服务器现有文件。<br>'}备份时间：${date(preview.created_at)} · ${preview.token_configured?'含 Cloudflare Token':'未配置 Cloudflare Token'}</p>`:''}<p>${esc(preview.message)}</p><button class="primary" data-action="apply-maintenance" ${!preview.can_apply?'disabled':''}>${preview.kind==='update'?'应用更新并重启':'恢复数据并重启'}</button></div>`;
   const backupDetail=preview?.kind==='restore'?detail:'',updateDetail=preview?.kind==='update'?detail:'';
   const backup=panel('备份与恢复','备份配置与凭据、证书、服务图片、Sun-Panel 全部数据、日志和订阅缓存。',`<div class="panel-body two-col maintenance-forms"><form id="backup-form"><h3>下载加密备份</h3><label>备份密码<input name="password" type="password" autocomplete="new-password"></label><label>再次输入备份密码<input name="confirm_password" type="password" autocomplete="new-password"></label><p class="form-note">密码不限长度，可以留空；留空时恢复也无需填写密码。请保存设置的密码，恢复时需保持一致。ZIP 内的数据使用 AES-256-GCM 加密，含反代访问密码、IP 冻结名单与全部已保存的业务数据。登录会话、未保存的扫描结果和维护临时文件不备份。</p><p class="error" role="alert"></p><div class="form-actions"><button class="primary" type="submit">下载备份 ZIP</button></div></form><form id="restore-form"><h3>上传备份</h3><label>备份 ZIP<input name="file" type="file" accept=".zip,application/zip" required></label><label>导出时的备份密码<input name="password" type="password" autocomplete="off"></label><p class="form-note">密码不限长度；导出时留空，这里也留空。先检查备份再确认恢复。恢复后使用备份时的管理员账号和管理密码重新登录。</p><p class="error" role="alert"></p><div class="form-actions"><button class="secondary" type="submit">检查备份</button></div></form></div>${backupDetail}`);
   const upload=panel('上传版本更新','使用本项目“更新版本”目录生成的 ZIP；只接受更高版本。',`<form id="update-form" class="panel-body"><label>更新 ZIP<input name="file" type="file" accept=".zip,application/zip" required></label><p class="form-note">检查版本、文件哈希和主机架构后再应用。只使用你信任的项目更新包；哈希校验用于检查文件完整性。</p><p data-visible-note class="form-note">${supported?'维护时短暂停止服务，新程序启动检查失败会回滚。':'此部署可导出备份及检查上传包。应用更新或恢复需要 Linux 安装脚本或新版 Docker 启动方式。'}</p><p class="error" role="alert"></p><div class="form-actions"><button type="submit" class="secondary">检查更新包</button></div></form>${updateDetail}`);
@@ -681,13 +717,13 @@ function settingsHTML() {
     '<div class="settings-columns"><div class="settings-column"><h2 class="settings-section-heading">访问与网络</h2>'+adminAccessHTML()+outbound+maintenance.updates+'</div><div class="settings-column"><h2 class="settings-section-heading">运行与日志</h2>'+logRetentionHTML()+listeners+'</div></div>'+maintenance.version;
 }
 function readLogFilters() {logCategory=$('#log-category')?.value||'';logRule=$('#log-rule')?.value||'';logResult=$('#log-result').value;logMethod=$('#log-method')?.value||'';logStatus=$('#log-status')?.value||'';logSearch=$('#log-search').value.trim();logIP=$('#log-ip')?.value.trim()||'';logFrom=$('#log-from').value;logTo=$('#log-to').value;}
-function logCategoryName(category) { return {access:'反向代理',admin:'管理操作',ddns:'DDNS',subscriptions:'IP 订阅',certificates:'SSL 证书'}[category]||category; }
+function logCategoryName(category) { return {access:'反向代理',admin:'管理操作',ddns:'DDNS',subscriptions:'IP 订阅',certificates:'SSL 证书',forward:'端口转发'}[category]||category; }
 function logsHTML() {
   const access=logScope==='access';
   const rows=logView.entries.map(e=>`<tr><td>${date(e.time)}<small>${esc(logCategoryName(e.category))} · #${e.id}</small></td><td><b>${esc(e.action)}</b><small class="mono">${esc(e.target)}${e.path?'<br>'+esc(e.path):''}</small><small>${esc(e.method)}${!access&&e.remote?' · 来源 '+esc(e.remote):''}</small></td>${access?'<td class="source-ip">'+sourceIPHTML(e)+'</td>':''}<td>${badge(e.ok?'成功':'失败',e.ok?'':'red')}<small>${e.status?'HTTP '+e.status:''} · ${e.duration_ms} ms</small></td><td class="log-message">${esc(e.message)}${securityHitsHTML(e)}</td></tr>`).join('');
   return heading('CALL LOGS',access?'反代日志':'项目日志',access?'按代理规则、访问结果筛选请求记录。':'查看订阅、DDNS、证书和管理操作的调用结果。','<button class="secondary" data-action="refresh-logs">刷新日志</button>') +
     '<div class="hint">日志持久化到本机日志目录，总空间与保留天数可在「设置 → 日志保留」修改，超限自动删除最早记录。忽略查询参数、请求正文及认证头，隐藏已配置凭据和敏感路径片段。WebSocket 记录在连接关闭后显示。</div>' +
-    `<div class="log-tabs"><button class="${access?'secondary':'primary'}" data-action="project-logs">项目日志</button><button class="${access?'primary':'secondary'}" data-action="access-logs">反代日志</button></div><div class="log-filters">${access?`<label>反代规则<select id="log-rule"><option value="">全部反代规则</option>${config.routes.map(r=>{const key=r.group_id+'/'+r.host;return `<option value="${esc(key)}" ${logRule===key?'selected':''}>${esc(groupName(r.group_id))} / ${esc(r.name||r.host)} · ${esc(r.host)}</option>`;}).join('')}</select></label>`:`<label>项目分类<select id="log-category"><option value="">全部项目分类</option>${['admin','ddns','subscriptions','certificates'].map(c=>`<option value="${c}" ${logCategory===c?'selected':''}>${logCategoryName(c)}</option>`).join('')}</select></label>`}<label>结果<select id="log-result"><option value="">全部结果</option><option value="success" ${logResult==='success'?'selected':''}>成功</option><option value="error" ${logResult==='error'?'selected':''}>失败</option></select></label>${access?`<label>来源 IP<input id="log-ip" value="${esc(logIP)}" maxlength="45" placeholder="精确 IPv4 / IPv6" spellcheck="false"></label><label>请求方法<select id="log-method"><option value="">全部方法</option>${['GET','POST','PUT','PATCH','DELETE','HEAD','OPTIONS','CONNECT'].map(m=>`<option ${logMethod===m?'selected':''}>${m}</option>`).join('')}</select></label><label>HTTP 状态码<input id="log-status" type="number" min="100" max="599" placeholder="例如 403" value="${esc(logStatus)}"></label>`:''}<label>开始时间<input id="log-from" type="datetime-local" value="${esc(logFrom)}"></label><label>结束时间<input id="log-to" type="datetime-local" value="${esc(logTo)}"></label><label class="log-search">关键词<input id="log-search" placeholder="域名、IP、路径或操作结果" maxlength="200" value="${esc(logSearch)}"></label><button class="secondary" data-action="apply-log-filters">筛选</button><button class="text-button" data-action="reset-log-filters">重置</button></div>` +
+    `<div class="log-tabs"><button class="${access?'secondary':'primary'}" data-action="project-logs">项目日志</button><button class="${access?'primary':'secondary'}" data-action="access-logs">反代日志</button></div><div class="log-filters">${access?`<label>反代规则<select id="log-rule"><option value="">全部反代规则</option>${config.routes.map(r=>{const key=r.group_id+'/'+r.host;return `<option value="${esc(key)}" ${logRule===key?'selected':''}>${esc(groupName(r.group_id))} / ${esc(r.name||r.host)} · ${esc(r.host)}</option>`;}).join('')}</select></label>`:`<label>项目分类<select id="log-category"><option value="">全部项目分类</option>${['admin','ddns','subscriptions','certificates','forward'].map(c=>`<option value="${c}" ${logCategory===c?'selected':''}>${logCategoryName(c)}</option>`).join('')}</select></label>`}<label>结果<select id="log-result"><option value="">全部结果</option><option value="success" ${logResult==='success'?'selected':''}>成功</option><option value="error" ${logResult==='error'?'selected':''}>失败</option></select></label>${access?`<label>来源 IP<input id="log-ip" value="${esc(logIP)}" maxlength="45" placeholder="精确 IPv4 / IPv6" spellcheck="false"></label><label>请求方法<select id="log-method"><option value="">全部方法</option>${['GET','POST','PUT','PATCH','DELETE','HEAD','OPTIONS','CONNECT'].map(m=>`<option ${logMethod===m?'selected':''}>${m}</option>`).join('')}</select></label><label>HTTP 状态码<input id="log-status" type="number" min="100" max="599" placeholder="例如 403" value="${esc(logStatus)}"></label>`:''}<label>开始时间<input id="log-from" type="datetime-local" value="${esc(logFrom)}"></label><label>结束时间<input id="log-to" type="datetime-local" value="${esc(logTo)}"></label><label class="log-search">关键词<input id="log-search" placeholder="域名、IP、路径或操作结果" maxlength="200" value="${esc(logSearch)}"></label><button class="secondary" data-action="apply-log-filters">筛选</button><button class="text-button" data-action="reset-log-filters">重置</button></div>` +
     (logView.write_error?'<div class="hint amber">日志写入失败，当前只显示内存记录，请检查数据目录权限与磁盘空间。</div>':'') +
     logPaginationHTML()+panel('调用明细','时间、操作、来源、状态、耗时及结果。',rows?`<div class="table-wrap"><table><thead><tr><th>时间 / 分类</th><th>调用 / 目标</th>${access?'<th>来源 IP / 归属地</th>':''}<th>结果 / 耗时</th><th>详细说明</th></tr></thead><tbody>${rows}</tbody></table></div>`:empty('暂无匹配日志','执行订阅更新、DDNS 同步或代理访问后可在此查看。')) +
     logPaginationHTML(true);
@@ -886,6 +922,7 @@ function render() {
   if (page==='sunpanel') html=sunPanelHTML();
   if (page==='overview') html=overviewHTML();
   if (page==='routes') html=groupsHTML();
+  if (page==='forwards') html=forwardsHTML();
   if (page==='ddns') html=ddnsHTML();
   if (page==='certificates') html=certificatesHTML();
   if (page==='access') html=firewallsHTML();
@@ -1343,6 +1380,11 @@ document.addEventListener('submit',event=>{
       const index=Number(e.index.value), g={id:index<0?newID():next.groups[index].id,name:e.name.value.trim(),http_port:Number(e.http_port.value),https_port:Number(e.https_port.value),enabled:e.enabled.checked,domain_suffix:e.domain_suffix.value.trim().toLowerCase(),ddns_group_id:e.ddns_group_id.value};
       if(index<0) next.groups.push(g); else next.groups[index]=g;
       await save(next); closeDialog($('#group-dialog')); render();
+    } else if(form.id==='forward-form') {
+      const index=Number(e.index.value),f={id:index<0?newID():next.forwards[index].id,name:e.name.value.trim(),protocol:e.protocol.value,listen_port:Number(e.listen_port.value),upstream:e.upstream.value.trim(),firewall_id:e.firewall_id.value,enabled:e.enabled.checked,udp_idle_seconds:e.protocol.value==='udp'?Number(e.udp_idle_seconds.value):0};
+      next.forwards=next.forwards||[];
+      if(index<0) next.forwards.push(f);else next.forwards[index]=f;
+      await save(next);closeDialog($('#forward-dialog'));render();
     } else if(form.id==='subscription-form') {
       const index=Number(e.index.value), d={id:index<0?newID():next.subscriptions[index].id,name:e.name.value.trim(),url:e.url.value.trim(),interval:Number(e.interval.value),enabled:e.enabled.checked};
       if(index<0) next.subscriptions.push(d); else next.subscriptions[index]=d;
@@ -1401,6 +1443,8 @@ document.addEventListener('click',async event=>{
   if(action==='edit-group') return openGroup(Number(button.dataset.index));
   if(action==='add-subscription') return openSubscription();
   if(action==='edit-subscription') return openSubscription(Number(button.dataset.index));
+  if(action==='add-forward') return openForward();
+  if(action==='edit-forward') return openForward(Number(button.dataset.index));
   if(action==='preset-subscription') return openSubscription(-1,button.dataset.family);
   if(action==='go-firewalls') { if(leaveRouteEditor()) location.hash='access'; return; }
   if(action==='add-ip-block') return openIPBlock();
@@ -1470,7 +1514,7 @@ document.addEventListener('click',async event=>{
     }
     if(action==='delete-firewall') {
       const next=clone(config), index=Number(button.dataset.index), firewall=next.firewalls[index];
-      if(next.routes.some(r=>r.firewall_id===firewall.id)) throw new Error('此防火墙正在被代理服务使用，请先更换或移除代理的防火墙选择。');
+      if([...next.routes,...(next.forwards||[])].some(r=>r.firewall_id===firewall.id)) throw new Error('此防火墙正在被代理服务或端口转发使用，请先移除引用。');
       if(!confirm('删除此防火墙及其中所有 IP 组？')) return;
       next.firewalls.splice(index,1); await save(next); render();
     }
@@ -1480,6 +1524,12 @@ document.addEventListener('click',async event=>{
       if(action==='delete-subscription') { if(!confirm('删除此订阅配置？')) return; next.subscriptions.splice(index,1); }
       else subscription.enabled=!subscription.enabled;
       await save(next); render();
+    }
+    if(action==='toggle-forward'||action==='delete-forward') {
+      const next=clone(config),index=Number(button.dataset.index);
+      if(action==='delete-forward') {if(!confirm('删除这条端口转发规则？重启服务后停止转发。')) return;next.forwards.splice(index,1);}
+      else next.forwards[index].enabled=!next.forwards[index].enabled;
+      await save(next);render();
     }
     if(action==='toggle-route'||action==='delete-route') {
       const next=clone(config), index=Number(button.dataset.index);
@@ -1506,6 +1556,7 @@ document.addEventListener('input',event=>{
 document.addEventListener('error',event=>{if(event.target.matches?.('img[data-discovery-icon],img[data-route-image]')) event.target.hidden=true;},true);
 document.addEventListener('input',event=>{if(event.target.closest('#discovery-results')) updateDiscoveryInput(event.target);const form=event.target.closest('[data-event-filters]');if(form&&event.target.name) securityEvents[form.dataset.eventFilters].filters[event.target.name]=event.target.value;});
 document.addEventListener('change',async event=>{
+  if(event.target.form?.id==='forward-form'&&event.target.name==='protocol') {updateForwardProtocol(event.target.form);return;}
   if(event.target.closest('#discovery-results')) {updateDiscoveryInput(event.target);return;}
   if(event.target.id==='discovery-group') {updateDiscoveryGroup(true);return;}
   if(event.target.id==='discovery-port-mode') {const custom=event.target.value==='custom';$('#discovery-custom-ports').hidden=!custom;$('#discovery-form').elements.ports.disabled=!custom;$('#discovery-form').elements.ports.required=custom;return;}

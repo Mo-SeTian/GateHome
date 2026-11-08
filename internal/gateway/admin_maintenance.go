@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"runtime"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -136,33 +137,44 @@ func (a *Admin) maintenanceRoutes(mux *http.ServeMux) {
 }
 
 func checkRestartPorts(current, next Config) error {
-	owned := map[int]bool{}
-	if current.SunPanel.Enabled {
-		owned[current.SunPanel.Port] = true
-	}
-	for _, g := range current.Groups {
-		if g.Enabled {
-			owned[g.HTTPPort], owned[g.HTTPSPort] = true, true
+	ports := func(c Config) map[string]bool {
+		result := map[string]bool{}
+		if c.SunPanel.Enabled {
+			result["tcp:"+strconv.Itoa(c.SunPanel.Port)] = true
 		}
+		for _, g := range c.Groups {
+			if g.Enabled {
+				for _, port := range []int{g.HTTPPort, g.HTTPSPort} {
+					if port != 0 {
+						result["tcp:"+strconv.Itoa(port)] = true
+					}
+				}
+			}
+		}
+		for _, f := range c.Forwards {
+			if f.Enabled {
+				result[f.Protocol+":"+strconv.Itoa(f.ListenPort)] = true
+			}
+		}
+		return result
 	}
-	groups := append([]ProxyGroup{}, next.Groups...)
-	if next.SunPanel.Enabled {
-		groups = append(groups, ProxyGroup{Enabled: true, HTTPPort: next.SunPanel.Port})
-	}
-	for _, g := range groups {
-		if !g.Enabled {
+	owned := ports(current)
+	for address := range ports(next) {
+		if owned[address] {
 			continue
 		}
-		for _, port := range []int{g.HTTPPort, g.HTTPSPort} {
-			if port == 0 || owned[port] {
-				continue
-			}
-			listener, err := net.Listen("tcp", ":"+strconv.Itoa(port))
-			if err != nil {
-				return fmt.Errorf("端口 %d 无法监听，请检查占用或权限；当前服务继续运行", port)
-			}
-			listener.Close()
+		protocol, port, _ := strings.Cut(address, ":")
+		var listener io.Closer
+		var err error
+		if protocol == "udp" {
+			listener, err = net.ListenPacket(protocol, ":"+port)
+		} else {
+			listener, err = net.Listen(protocol, ":"+port)
 		}
+		if err != nil {
+			return fmt.Errorf("%s 端口 %s 无法监听，请检查占用或权限；当前服务继续运行", strings.ToUpper(protocol), port)
+		}
+		listener.Close()
 	}
 	return nil
 }

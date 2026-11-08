@@ -171,7 +171,7 @@ func (a *Admin) mcpRoutes(mux *http.ServeMux) http.Handler {
 	})
 	for _, tool := range []struct{ name, description, path string }{
 		{"gatehome_get_service_health", "读取服务器侧的反代上游健康状态、HTTP 状态、响应时间和 TLS 检测结果；不代表客户端内网连通性。", "/api/service-health"},
-		{"gatehome_get_config", "读取反代组、反代项、DDNS、证书任务、防火墙、订阅、首页与系统配置，以及版本 revision；凭据只返回已配置状态。", "/api/config"},
+		{"gatehome_get_config", "读取反代组、反代项、TCP / UDP 转发、DDNS、证书任务、防火墙、订阅、首页与系统配置，以及版本 revision；凭据只返回已配置状态。", "/api/config"},
 		{"gatehome_get_status", "读取运行状态、监听端口、证书状态和任务结果。", "/api/status"},
 		{"gatehome_get_capacity", "读取备份与回滚容量估算及是否超过上限，不停服。", "/api/maintenance/capacity"},
 		{"gatehome_get_network", "读取网卡、公网 IP 检测和各 DDNS 组的网络信息。", "/api/ddns/network"},
@@ -215,12 +215,12 @@ func (a *Admin) mcpRoutes(mux *http.ServeMux) http.Handler {
 	})
 	type configArgs struct {
 		Revision int    `json:"revision"`
-		Section  string `json:"section" jsonschema:"groups routes ddns acme firewalls subscriptions sunpanel outbound_proxy admin_access log_retention dashboard service_health 之一"`
+		Section  string `json:"section" jsonschema:"groups routes forwards ddns acme firewalls subscriptions sunpanel outbound_proxy admin_access log_retention dashboard service_health 之一"`
 		Value    any    `json:"value" jsonschema:"该配置分区的完整 JSON 值；修改前先读取配置，保留其他字段"`
 	}
-	addMCPTool(a, server, "gatehome_update_config", "替换一个配置分区，保留其他分区和已保存凭据。须先读取配置并提供最新 revision；沿用网页校验和热加载，端口变更需单独重启。不接受密码或令牌字段。", mcpWrite, func(ctx context.Context, args configArgs) (any, error) {
+	addMCPTool(a, server, "gatehome_update_config", "替换一个配置分区，保留其他分区和已保存凭据。须先读取配置并提供最新 revision；沿用网页校验和热加载，监听或 TCP / UDP 转发变更需单独重启。不接受密码或令牌字段。", mcpWrite, func(ctx context.Context, args configArgs) (any, error) {
 		switch args.Section {
-		case "groups", "routes", "ddns", "acme", "firewalls", "subscriptions", "sunpanel", "outbound_proxy", "admin_access", "log_retention", "dashboard", "service_health":
+		case "groups", "routes", "forwards", "ddns", "acme", "firewalls", "subscriptions", "sunpanel", "outbound_proxy", "admin_access", "log_retention", "dashboard", "service_health":
 		default:
 			return nil, errors.New("不支持的配置分区")
 		}

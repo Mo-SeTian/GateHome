@@ -190,6 +190,11 @@ func run() error {
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
+	forwards, err := gateway.StartPortForwards(ctx, c, proxy)
+	if err != nil {
+		return err
+	}
+	defer forwards.Close()
 	servers := []*http.Server{}
 	errorsCh := make(chan error, len(listeners))
 	for i, listener := range listeners {
@@ -217,6 +222,8 @@ func run() error {
 	select {
 	case <-ctx.Done():
 	case <-maintenance.RestartSignal():
+	case err := <-forwards.Failures():
+		serveErr = err
 	case err := <-panel.Failures():
 		serveErr = err
 	case err := <-errorsCh:
@@ -264,13 +271,5 @@ func readAdminUsername(reader io.Reader, current string) (string, error) {
 }
 
 func validateConfigAdminPort(c gateway.Config, adminPort int) error {
-	if c.SunPanel.Enabled && c.SunPanel.Port == adminPort {
-		return errors.New("Sun-Panel 端口不能与管理端口相同")
-	}
-	for _, g := range c.Groups {
-		if g.HTTPPort == adminPort || g.HTTPSPort == adminPort {
-			return errors.New("管理端口不能与业务端口相同")
-		}
-	}
-	return nil
+	return gateway.ValidateAdminPort(c, adminPort)
 }

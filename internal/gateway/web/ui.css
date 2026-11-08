@@ -178,6 +178,10 @@ main { min-width: 0; margin: 0; display: flex; flex-direction: column; min-heigh
 .rc-addr .service-port { color: var(--faint); }
 .rc-addr .service-address-link .icon, .rc-addr .service-address-link svg { display: none; }
 .rc-addr .form-note { font-size: 11.5px; color: var(--faint); }
+.forward-addresses { display: grid; gap: 8px; margin: 0 0 14px; font-size: 12px; }
+.forward-addresses > div { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 8px; }
+.forward-addresses dt { color: var(--muted); }
+.forward-addresses dd { margin: 0; overflow-wrap: anywhere; }
 .rc-tags { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 11px; }
 .rc-tag { font-size: 10.5px; color: var(--muted); border: 1px solid var(--border-strong); border-radius: 5px; padding: 1px 6px; background: #fbfcfe; max-width: 100%; overflow-wrap: anywhere; }
 .rc-tag.warn { border-color: #f0dab0; background: var(--warning-soft); color: var(--warning); }

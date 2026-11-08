@@ -2,20 +2,22 @@
 
 一个自托管的反向代理与 DDNS 综合管理工具。Go 主程序内嵌中文管理界面与 Sun-Panel 前后端；启用首页时由主程序管理独立的 Sun-Panel 子进程。运行无需 Node.js、外部数据库或额外 Web 服务器，Sun-Panel 使用内置 SQLite。
 
-当前版本为 **0.0.62**，安装包见 [v0.0.62 Release](https://github.com/Mo-SeTian/GateHome/releases/tag/v0.0.62)。程序和 systemd 服务名为 `gatehouse`。
+当前版本为 **0.0.63**，安装包见 [v0.0.63 Release](https://github.com/Mo-SeTian/GateHome/releases/tag/v0.0.63)。程序和 systemd 服务名为 `gatehouse`。
 
-## v0.0.62 更新
+## v0.0.63 更新
 
-- 桌面端采用分组侧栏，手机端改用顶栏与抽屉导航，优化窄屏菜单与点击区域。
-- 反代页通过状态栏、组筛选和服务卡片展示地址、协议、访问保护及健康状态。
-- 修复筛选后服务操作可能作用于其他分组的问题。健康状态区分等待检查、暂停和关闭，后台刷新保留按钮和键盘焦点。
-- 升级重启后自动重新加载管理界面资源，支持系统减少动态效果。
+- 新增原生 TCP / UDP 端口转发，支持 IPv4、IPv6、目标主机名与现有 IP 防火墙。
+- 管理界面提供新增、编辑、启停与删除，区分当前监听和待重启状态，配置纳入加密备份与 MCP。
+- UDP 按客户端隔离会话，空闲超时可设为 30–86400 秒，默认 300 秒，支持游戏与代理服务的静默会话。
+- 拦截本机转发循环，取消运行时释放监听和连接，端口启动失败回滚已打开的监听，临时 TCP 接入错误退避重试。
+- TCP 保留双向传输、半关闭与 TLS 透传，UDP 队列设有全局内存上限。
 
 在 **设置 → 维护与更新** 检查在线更新，或上传本版更新 ZIP。已有配置及 Sun-Panel 运行数据保留。
 
 ## 主要功能
 
 - **反向代理**：多组独立监听端口、HTTP / HTTPS / WebSocket、域名分流、服务图片、内网 Web 服务发现与批量创建规则。
+- **原生端口转发**：独立 TCP / UDP 监听与目标主机配置，支持 IPv4、IPv6、主机名和来源 IP 防火墙。
 - **DDNS 与证书**：多组独立 Cloudflare 凭据、IPv4 / IPv6 同步、网卡或接口获取公网 IP、域名解析列表、Let's Encrypt DNS-01 与泛域名证书。
 - **访问保护**：独立服务账号、IP / CIDR 和订阅规则、Coraza WAF 与 OWASP CRS、自定义 HTTP 规则、限速和自动 IP 冻结。
 - **监控与日志**：反代上游健康检查、证书与连接诊断、站内故障/恢复事件，可配置概览组件、服务器资源与流量、访问地域分析、独立防火墙记录、分页筛选、日志空间与保留期限。
@@ -42,6 +44,33 @@ home.example.com:18443   ─┘                         └─ http://192.168.1.
 - Cloudflare 记录使用**仅 DNS（灰云）**。工具直接使用连接来源 IP，不信任客户端提供的 `X-Forwarded-For`、`X-Real-IP`、`CF-Connecting-IP` 等来源标记。
 - 使用 IP 白名单时，须确保路由器转发保留来源 IP。内网 NAT 回流可能表现为路由器地址。
 - AAAA 查询得到的是运行环境的 IPv6 出口地址。发布前确认该地址就是可入站的工具主机地址，并在路由器和主机 IPv6 防火墙放行对应端口。
+
+## 原生 TCP / UDP 端口转发
+
+在左侧 **端口转发 → 添加转发规则** 配置名称、协议、监听端口和转发目标。例如 TCP `20022 → 192.168.2.25:22` 可转发 SSH，UDP `10053 → 192.168.2.25:53` 可转发 DNS。目标填写 `主机:端口`，IPv6 使用 `[2001:db8::1]:端口`。
+
+监听所有网卡，监听端口范围为 1024–65535，目标端口范围为 1–65535。同一协议下的规则独占端口，TCP 与 UDP 可以使用同一端口。TCP 转发端口还需避开管理页、HTTP / HTTPS 反代和已启用的 Sun-Panel 端口。
+
+新增、编辑、启停或删除规则后，在 **设置 → 重启服务** 应用。页面会显示当前监听与等待重启的状态。规则随整站配置持久化并纳入加密备份，也可通过 MCP 的 `forwards` 配置分区管理。
+
+可选择现有防火墙的 IP / CIDR 与订阅规则，按真实客户端 IP 判断。目标服务负责上层协议的身份验证和加密，TCP 可透传 TLS。TCP 支持双向传输与半关闭，UDP 按客户端维护独立会话，空闲超时默认 300 秒，可按规则设为 30–86400 秒。双向收发都会延长会话。全部转发共用 1024 个连接或会话名额，达到上限时拒绝新增连接或丢弃新增 UDP 会话的数据报。
+
+路由器按对应协议映射端口。Docker host 网络直接使用主机端口，bridge 模式需在 `compose.bridge.yaml` 中添加 `"20022:20022/tcp"` 或 `"10053:10053/udp"` 等映射并重新创建容器。
+
+每条规则映射一个端口，多端口服务按协议逐条添加，最多 100 条规则。例如同一游戏同时使用 TCP 与 UDP 时，需要两条规则，并在路由器分别映射两个协议。已有 TCP 连接会在规则重启时断开。
+
+| 用途 | 配置示例 | 部署条件 |
+| --- | --- | --- |
+| NAS HTTPS / SSH / SFTP | TCP `25001 → NAS:5001`、`20022 → NAS:22` | 由 NAS 提供证书与账号验证，客户端使用外网域名及映射端口 |
+| Minecraft Java / 固定 TCP 游戏端口 | TCP `25565 → 游戏主机:25565` | 按服务端实际端口配置，额外的查询端口或管理端口分别建规则 |
+| Bedrock / 固定 UDP 游戏端口 | UDP `19132 → 游戏主机:19132` | 路由器放行 UDP，按游戏静默周期调整 UDP 空闲超时 |
+| HTTP CONNECT / SOCKS5 的 TCP 代理 | TCP `17890 → 代理主机:7890` | 目标代理开启认证或 GateHome 选择来源 IP 白名单 |
+| SOCKS5 UDP 中继 / 动态协商端口 | 为目标程序固定的 UDP 中继端口单独建规则 | 目标程序需返回客户端能访问的公网地址与端口，协商出的端口均需映射 |
+
+游戏默认端口应以当前服务端配置为准。[Paper 服务端配置](https://docs.papermc.io/paper/reference/server-properties/)、[Bedrock 服务端配置](https://learn.microsoft.com/en-us/minecraft/creator/documents/bedrockserver/server-properties?view=minecraft-bedrock-stable)。SOCKS5 UDP 客户端会使用服务端在 UDP ASSOCIATE 回复中给出的地址和端口，公网映射需要配合代理程序设置。[RFC 1928](https://www.rfc-editor.org/rfc/rfc1928)
+
+公网入口需要可入站的公网 IPv4 或 IPv6，路由器与主机防火墙放行相应协议。后端服务看到的是 GateHome 的地址，真实来源 IP 的限制应在 GateHome 的 IP 防火墙设置。目标协议中的公网地址、动态端口及账号验证由目标程序负责，游戏服务器列表注册、局域网广播发现和运营商 CGNAT 穿透需要单独配置。
+
 
 ## Docker 安装（推荐 Linux host 网络）
 
@@ -141,7 +170,7 @@ sudo bash /tmp/gatehome-install.sh install --proxy "$GATEHOME_INSTALL_PROXY"
 
 下载使用 HTTP/1.1；TLS 连接中断等下载错误会清除残缺文件并重试，最多尝试 4 次。下载和校验成功后才修改安装。如果出现 `curl: (56)` / `unexpected eof while reading`，说明下载连接提前断开；请检查服务器的网络或代理规则。使用 MSM 等分流工具时，安装需要访问 `raw.githubusercontent.com`、`github.com` 和 `release-assets.githubusercontent.com`。仍无法下载时，可在其他能访问 GitHub 的设备下载下面的安装包，复制到服务器离线安装。
 
-离线安装可使用 `make release` 生成的 **`版本/0.0.62/`** 完整目录，或解压 Release 中对应架构的 `gatehome-linux-*.tar.gz`，然后运行：
+离线安装可使用 `make release` 生成的 **`版本/0.0.63/`** 完整目录，或解压 Release 中对应架构的 `gatehome-linux-*.tar.gz`，然后运行：
 
 ```sh
 sudo bash install.sh
@@ -278,7 +307,7 @@ WebDAV 使用同一整站加密备份格式，覆盖 GateHome 全部配置、凭
 
 DDNS 组以域名列表分别显示解析到的 IPv4 / A 与 IPv6 / AAAA，可手动刷新。修改域名可使用组内“编辑域名”，不必重填凭据或其他同步设置。
 
-每组内域名与代理规则一对一，每个域名对应一个后端服务。当前不支持路径分流、泛域名路由、任意 TCP/UDP 转发或上游负载均衡。HTTPS 规则拒绝业务 HTTP 请求（426），不根据外部映射端口做跳转。HTTP 规则可关闭 HTTPS 选项后使用。
+每组内域名与代理规则一对一，每个域名对应一个后端服务。原生 TCP / UDP 服务在独立的「端口转发」页面管理。当前不支持路径分流、泛域名路由或上游负载均衡。HTTPS 规则拒绝业务 HTTP 请求（426），不根据外部映射端口做跳转。HTTP 规则可关闭 HTTPS 选项后使用。
 
 ## 管理员账户与公网访问
 

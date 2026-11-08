@@ -156,6 +156,7 @@ func (c Config) CertificateRequest(id string) (CertificateRequest, bool) {
 }
 
 type Config struct {
+	Forwards      []PortForward       `json:"forwards,omitempty"`
 	ServiceHealth ServiceHealthConfig `json:"service_health"`
 	SunPanel      SunPanelConfig      `json:"sunpanel"`
 	// Read-only compatibility fields for migrating the original on-disk format.
@@ -509,6 +510,15 @@ func (c Config) TLSHosts() []string {
 
 func listenerSignature(c Config) string {
 	parts := []string{}
+	for _, f := range c.Forwards {
+		if f.Enabled {
+			key := fmt.Sprintf("forward:%s:%s:%d:%s:%s", f.ID, f.Protocol, f.ListenPort, f.Upstream, f.FirewallID)
+			if f.Protocol == "udp" {
+				key += ":" + forwardUDPTimeout(f).String()
+			}
+			parts = append(parts, key)
+		}
+	}
 	if c.SunPanel.Enabled {
 		parts = append(parts, fmt.Sprintf("sunpanel:%d", c.SunPanel.Port))
 	}
@@ -530,8 +540,15 @@ func validateAdminPort(c Config, port int) error {
 			return errors.New("业务端口不能与管理端口相同")
 		}
 	}
+	for _, f := range c.Forwards {
+		if f.Protocol == "tcp" && f.ListenPort == port {
+			return errors.New("TCP 转发端口不能与管理端口相同")
+		}
+	}
 	return nil
 }
+
+func ValidateAdminPort(c Config, port int) error { return validateAdminPort(c, port) }
 
 // Snapshots are immutable after publication; callers must not modify slices.
 func (s *Store) Snapshot() State {
@@ -724,6 +741,9 @@ func validDomain(s string) bool {
 func inZone(host, zone string) bool { return host == zone || strings.HasSuffix(host, "."+zone) }
 
 func Validate(c Config) error {
+	if err := validatePortForwards(c); err != nil {
+		return err
+	}
 	if c.ServiceHealth.Interval != 0 && (c.ServiceHealth.Interval < 30 || c.ServiceHealth.Interval > 86400) {
 		return errors.New("健康检查间隔需为 30–86400 秒")
 	}

@@ -119,7 +119,7 @@ func (a *Admin) Handler() http.Handler {
 			apiError(w, 400, "无效的日志范围或规则")
 			return
 		}
-		if category != "" && category != "access" && category != "admin" && category != "ddns" && category != "subscriptions" && category != "certificates" {
+		if category != "" && category != "access" && category != "admin" && category != "ddns" && category != "subscriptions" && category != "certificates" && category != "forward" {
 			apiError(w, 400, "无效的日志分类")
 			return
 		}
@@ -540,11 +540,12 @@ func (a *Admin) status(w http.ResponseWriter, r *http.Request) {
 		"dns_providers":     []map[string]string{{"id": "cloudflare", "name": "Cloudflare"}},
 		"ip_query_defaults": map[string][]string{"ipv4": defaultIPEndpoints("A"), "ipv6": defaultIPEndpoints("AAAA")},
 		"uptime_seconds":    int(time.Since(a.started).Seconds()), "requests": a.proxy.Requests.Load(), "blocked": a.proxy.Blocked.Load(), "failures": a.proxy.Failures.Load(),
-		"listeners":        a.ports.Groups,
-		"restart_required": listenerSignature(c) != listenerSignature(a.ports),
-		"subscriptions":    subscriptions,
-		"log_storage":      a.logs.StorageStatus(),
-		"jobs":             jobs, "events": events, "certificates": a.certs.Status(),
+		"listeners":         a.ports.Groups,
+		"forward_listeners": a.ports.Forwards,
+		"restart_required":  listenerSignature(c) != listenerSignature(a.ports),
+		"subscriptions":     subscriptions,
+		"log_storage":       a.logs.StorageStatus(),
+		"jobs":              jobs, "events": events, "certificates": a.certs.Status(),
 	})
 }
 

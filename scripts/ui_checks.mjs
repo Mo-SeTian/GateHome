@@ -156,3 +156,53 @@ routeContext.config.routes[1].enabled=false;
 routeContext.serviceHealthData.routes.media={state:'timeout',healthy:false,checked_at:new Date().toISOString()};
 assert.doesNotMatch(vm.runInContext('routeCards("g2")',routeContext),/is-failing/);
 console.log('Health status: waiting, paused, and disabled services are not failures PASS');
+
+const forwarding=vm.createContext({
+  config:{forwards:[],firewalls:[]},status:{},
+  esc:value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])),
+  badge:(text,kind='')=>`<span class="${kind}">${text}</span>`,
+  icon:()=>'',heading:()=>'',empty:(title)=>title,objectMenu:(_name,body)=>body,
+  firewallName:()=> '不限制来源 IP',firewallWaiting:()=>false
+});
+vm.runInContext(source.slice(source.indexOf('function forwardState('),source.indexOf('function openForward(')),forwarding);
+assert.match(vm.runInContext('forwardsHTML()',forwarding),/还没有转发规则/);
+forwarding.rule={id:'native',name:'<script>test</script>',protocol:'tcp',listen_port:20022,upstream:'[::1]:22',firewall_id:'',enabled:true};
+forwarding.config.forwards=[forwarding.rule];
+assert.match(vm.runInContext('forwardState(rule)',forwarding),/启用待重启/);
+forwarding.status.forward_listeners=[structuredClone(forwarding.rule)];
+assert.match(vm.runInContext('forwardState(rule)',forwarding),/正在监听/);
+forwarding.rule.name='rename only';
+assert.match(vm.runInContext('forwardState(rule)',forwarding),/正在监听/);
+for(const [key,value] of [['upstream','[::1]:23'],['listen_port',20023],['protocol','udp'],['firewall_id','private']]) {
+  const previous=forwarding.rule[key];forwarding.rule[key]=value;
+  assert.match(vm.runInContext('forwardState(rule)',forwarding),/修改待重启/);
+  forwarding.rule[key]=previous;
+}
+forwarding.rule.protocol='udp';
+forwarding.status.forward_listeners[0].protocol='udp';
+forwarding.rule.udp_idle_seconds=300;
+assert.match(vm.runInContext('forwardState(rule)',forwarding),/正在监听/);
+forwarding.rule.udp_idle_seconds=600;
+assert.match(vm.runInContext('forwardState(rule)',forwarding),/修改待重启/);
+forwarding.rule.udp_idle_seconds=300;
+forwarding.rule.enabled=false;
+assert.match(vm.runInContext('forwardState(rule)',forwarding),/停用待重启/);
+forwarding.status.forward_listeners=[];
+assert.match(vm.runInContext('forwardState(rule)',forwarding),/已停用/);
+forwarding.rule.name='<script>test</script>';
+const forwardHTML=vm.runInContext('forwardsHTML()',forwarding);
+assert.ok(!forwardHTML.includes('<script>'));
+assert.match(forwardHTML,/&lt;script&gt;/);
+assert.match(forwardHTML,/\[::1\]:22/);
+for(const action of ['edit-forward','toggle-forward','delete-forward']) assert.match(forwardHTML,new RegExp('data-action="'+action+'" data-index="0"'));
+console.log('Port forwards: running versus pending changes, disabled rules, IPv6 and escaped names PASS');
+
+const udpInput={disabled:false,closest:()=>udpLabel},udpLabel={hidden:false},udpForm={elements:{protocol:{value:'tcp'},udp_idle_seconds:udpInput}};
+const protocolContext=vm.createContext({form:udpForm});
+vm.runInContext(source.match(/function updateForwardProtocol\(form\) \{[\s\S]*?\n\}/)[0],protocolContext);
+vm.runInContext('updateForwardProtocol(form)',protocolContext);
+assert.equal(udpInput.disabled,true);assert.equal(udpLabel.hidden,true);
+udpForm.elements.protocol.value='udp';
+vm.runInContext('updateForwardProtocol(form)',protocolContext);
+assert.equal(udpInput.disabled,false);assert.equal(udpLabel.hidden,false);
+console.log('Port forwards: protocol-specific UDP timeout validation PASS');
