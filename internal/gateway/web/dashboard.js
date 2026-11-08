@@ -82,7 +82,7 @@ function workspaceAttentionHTML() {
     rows.push(`<a id="workspace-certificate-${esc(cert.id)}" href="#certificates" class="workspace-alert">${icon('certificate')}<span><b>${days<=0?'证书已到期':'证书剩余 '+days+' 天'}</b><small>${esc(request.domains[0])}</small></span>${icon('chevron-right')}</a>`);
   }
   if(status.restart_required) rows.push(`<a id="workspace-restart" href="#settings" class="workspace-alert">${icon('refresh')}<span><b>监听配置待重启</b><small>到设置查看重启操作</small></span>${icon('chevron-right')}</a>`);
-  return `<div class="workspace-panel-heading"><h2 id="workspace-attention-title">需要关注</h2>${rows.length?badge(rows.length+' 项','amber'):''}</div>`
+  return `<div class="workspace-panel-heading"><h2 id="workspace-attention-title">需要关注</h2>${rows.length?badge(rows.length+' 项','amber'):''}${options.enabled?'<a class="workspace-link" href="#routes">查看服务</a>':'<button type="button" class="text-button workspace-link" data-action="configure-service-health">检查设置</button>'}</div>`
     +(rows.length?rows.slice(0,3).join('')+(rows.length>3?'<p class="workspace-secondary">仅显示前 3 项，完整状态可在对应管理页查看。</p>':'')
       :`<p class="workspace-secondary">${!options.enabled?'服务健康检查已暂停。':waiting?'部分服务仍在等待首次检查。':'暂无需要处理的事项。'}</p>`);
 }
@@ -132,7 +132,11 @@ function widgetBody(id) {
   if(id==='storage') return `<div class="storage-rows">${(resources.storage||[]).map(d=>`<div><b>${esc(d.name)}文件系统</b><span>${d.total?(100*d.used/d.total).toFixed(1)+'%':'—'}</span>${meterHTML(d.used,d.total)}<small>${esc(d.error||'已用 '+bytesLabel(d.used)+' · 可用 '+bytesLabel(d.available))}</small></div>`).join('')||'<p class="widget-note">正在读取存储空间…</p>'}</div>`;
   if(id==='traffic'||id==='transfer') {
     const rate=id==='traffic';
-    return `<div class="traffic-values"><div><span>${icon('upload')}上传</span><b>${bytesLabel(resources.network_error?null:(rate?resources.tx_rate:resources.tx_bytes))}${rate?'<small>/s</small>':''}</b></div><div><span>${icon('download')}下载</span><b>${bytesLabel(resources.network_error?null:(rate?resources.rx_rate:resources.rx_bytes))}${rate?'<small>/s</small>':''}</b></div></div><p class="widget-note">${esc(resources.network_error||'网卡 '+(resources.interface||'自动选择')+' · '+(rate?'每 5 秒采样，首次采样后显示。':'自网卡启动累计，包含此网卡全部流量。'))}</p>`;
+    const values=[['upload','上传',rate?resources.tx_rate:resources.tx_bytes],['download','下载',rate?resources.rx_rate:resources.rx_bytes]];
+    return `<div class="traffic-values">${values.map(([glyph,label,value])=>{
+      const [amount,unit]=bytesLabel(resources.network_error?null:value).split(' ');
+      return `<div><span>${icon(glyph)}${label}</span><b>${esc(amount)}${unit?`<small>${esc(unit)}${rate?'/s':''}</small>`:''}</b></div>`;
+    }).join('')}</div><p class="widget-note">${esc(resources.network_error||'网卡 '+(resources.interface||'自动选择')+' · '+(rate?'每 5 秒采样，首次采样后显示。':'自网卡启动累计，包含此网卡全部流量。'))}</p>`;
   }
   if(id==='requests') return metricHTML((status.requests||0).toLocaleString(),'本次启动后的业务请求','次')+`<p class="widget-note">最近 24 小时保留记录：${access.total||0} 次 · ${regions.unique_ips||0} 个来源 IP</p>`;
   if(id==='blocked') return metricHTML((status.blocked||0).toLocaleString(),'本次启动后的访问拦截','次')+`<p class="widget-note">保留记录：防火墙 ${access.firewall_blocked||0} · 冻结 ${access.frozen_blocked||0} · 账号失败 ${access.auth_failed||0}</p>`;
@@ -143,7 +147,7 @@ function widgetBody(id) {
   if(id==='listeners') {
     const groups=config.groups.map(g=>`<div><b>${esc(g.name)}</b>${groupBadge(g)}<small>${esc(portsText(g))}</small></div>`).join('');
     const forwards=['tcp','udp'].map(protocol=>{
-      const ports=(status.forward_listeners||[]).filter(rule=>rule.enabled&&rule.protocol===protocol).map(rule=>rule.listen_port);
+      const ports=(status.forward_listeners||[]).filter(rule=>rule.enabled&&(rule.protocol===protocol||rule.protocol==='tcp+udp')).map(rule=>rule.listen_port);
       return ports.length?`<div><b>${protocol.toUpperCase()} 转发</b><small>${esc(ports.join('、'))}</small></div>`:'';
     }).join('');
     return `<div class="listener-summary">${groups+forwards||'<p>暂无监听入口。</p>'}</div>`;

@@ -91,7 +91,7 @@
     <input type="hidden" name="index">
     <div class="form-grid">
       <label class="span-2">规则名称<input name="name" maxlength="100" placeholder="例如 SSH / DNS / 游戏服务器" required></label>
-      <label>协议<select name="protocol"><option value="tcp">TCP</option><option value="udp">UDP</option></select></label>
+      <label>协议<select name="protocol"><option value="tcp">TCP</option><option value="udp">UDP</option><option value="tcp+udp">TCP + UDP</option></select></label>
       <label>监听端口<input name="listen_port" type="number" min="1024" max="65535" required><small>1024–65535，同一协议下独占端口。</small></label>
       <label class="span-2">转发目标<input name="upstream" maxlength="300" placeholder="192.168.2.25:22" spellcheck="false" autocapitalize="none" required><small>填写 IP 或主机名及端口，IPv6 使用 [::1]:端口。</small></label>
       <label class="span-2" hidden>UDP 空闲超时（秒）<input name="udp_idle_seconds" type="number" min="30" max="86400" value="300" required disabled><small>30–86400 秒，默认 300 秒。游戏或代理会话较长时间静默时可适当增大，持续收发会延长会话。</small></label>

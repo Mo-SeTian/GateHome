@@ -199,6 +199,16 @@ forwarding.config.forwards.unshift({...forwarding.rule,id:'tcp',name:'TCP fixtur
 const udpOnly=vm.runInContext("forwardProtocolFilter='udp';forwardsHTML()",forwarding);
 assert.doesNotMatch(udpOnly,/TCP fixture/);
 assert.match(udpOnly,/data-action="edit-forward" data-index="1"/,'filter changed the original rule index');
+forwarding.rule.protocol='tcp+udp';
+forwarding.rule.enabled=true;
+forwarding.status.forward_listeners=[{...forwarding.rule,udp_idle_seconds:300}];
+forwarding.rule.udp_idle_seconds=600;
+assert.match(vm.runInContext('forwardState(rule)',forwarding),/修改待重启/,'dual-protocol timeout change looked active before restart');
+forwarding.config.forwards=[forwarding.rule];
+for(const protocol of ['tcp','udp','tcp+udp']) {
+  forwarding.protocol=protocol;
+  assert.match(vm.runInContext('forwardProtocolFilter=protocol;forwardsHTML()',forwarding),/TCP \+ UDP/,'dual-protocol rule missing from a matching filter');
+}
 console.log('Port forwards: running versus pending changes, disabled rules, IPv6 and escaped names PASS');
 
 const udpInput={disabled:false,closest:()=>udpLabel},udpLabel={hidden:false},udpForm={elements:{protocol:{value:'tcp'},udp_idle_seconds:udpInput}};
@@ -207,6 +217,9 @@ vm.runInContext(source.match(/function updateForwardProtocol\(form\) \{[\s\S]*?\
 vm.runInContext('updateForwardProtocol(form)',protocolContext);
 assert.equal(udpInput.disabled,true);assert.equal(udpLabel.hidden,true);
 udpForm.elements.protocol.value='udp';
+vm.runInContext('updateForwardProtocol(form)',protocolContext);
+assert.equal(udpInput.disabled,false);assert.equal(udpLabel.hidden,false);
+udpForm.elements.protocol.value='tcp+udp';
 vm.runInContext('updateForwardProtocol(form)',protocolContext);
 assert.equal(udpInput.disabled,false);assert.equal(udpLabel.hidden,false);
 console.log('Port forwards: protocol-specific UDP timeout validation PASS');

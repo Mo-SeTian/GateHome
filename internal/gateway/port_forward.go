@@ -27,6 +27,13 @@ type PortForward struct {
 	UDPIdleSeconds int    `json:"udp_idle_seconds,omitempty"`
 }
 
+func (f PortForward) protocols() []string {
+	if f.Protocol == "tcp+udp" {
+		return []string{"tcp", "udp"}
+	}
+	return []string{f.Protocol}
+}
+
 var errForwardLoop = errors.New("转发目标指向本机已启用的转发端口，请填写实际服务地址")
 
 func localForwardTarget(address string, local map[netip.Addr]bool) (int, bool) {
@@ -59,17 +66,22 @@ func validatePortForwards(c Config) error {
 			return errors.New("端口转发名称或 ID 无效，ID 不能重复")
 		}
 		ids[f.ID] = true
-		if f.Protocol != "tcp" && f.Protocol != "udp" {
-			return errors.New("端口转发协议须为 TCP 或 UDP")
+		if f.Protocol != "tcp" && f.Protocol != "udp" && f.Protocol != "tcp+udp" {
+			return errors.New("端口转发协议须为 TCP、UDP 或 TCP + UDP")
 		}
-		if f.UDPIdleSeconds != 0 && (f.Protocol != "udp" || f.UDPIdleSeconds < 30 || f.UDPIdleSeconds > 86400) {
+		if f.UDPIdleSeconds != 0 && (f.Protocol == "tcp" || f.UDPIdleSeconds < 30 || f.UDPIdleSeconds > 86400) {
 			return errors.New("UDP 空闲超时须为 30–86400 秒，0 使用默认 300 秒；TCP 规则请留空")
 		}
-		key := net.JoinHostPort(f.Protocol, strconv.Itoa(f.ListenPort))
-		if f.ListenPort < 1024 || f.ListenPort > 65535 || ports[key] {
+		if f.ListenPort < 1024 || f.ListenPort > 65535 {
 			return errors.New("转发监听端口须为 1024–65535，同一协议的端口不能重复")
 		}
-		ports[key] = true
+		for _, protocol := range f.protocols() {
+			key := net.JoinHostPort(protocol, strconv.Itoa(f.ListenPort))
+			if _, exists := ports[key]; exists {
+				return errors.New("同一协议的转发端口不能重复，TCP + UDP 规则同时占用两种协议")
+			}
+			ports[key] = f.Enabled
+		}
 		host, port, err := net.SplitHostPort(f.Upstream)
 		n, portErr := strconv.Atoi(port)
 		targetError := errors.New("转发目标应为 主机:端口 或 [IPv6]:端口，端口范围 1–65535")
@@ -93,7 +105,7 @@ func validatePortForwards(c Config) error {
 				return errors.New("端口转发引用了不存在的防火墙；删除前请移除引用")
 			}
 		}
-		if f.Protocol == "tcp" {
+		if f.Protocol != "udp" {
 			if c.SunPanel.Enabled && f.ListenPort == c.SunPanel.Port {
 				return errors.New("TCP 转发端口不能与 Sun-Panel 端口相同")
 			}
@@ -111,8 +123,8 @@ func validatePortForwards(c Config) error {
 			if !f.Enabled || !isLocal {
 				continue
 			}
-			for _, target := range c.Forwards {
-				if target.Enabled && target.Protocol == f.Protocol && target.ListenPort == port {
+			for _, protocol := range f.protocols() {
+				if ports[net.JoinHostPort(protocol, strconv.Itoa(port))] {
 					return errForwardLoop
 				}
 			}
@@ -161,19 +173,23 @@ func StartPortForwards(ctx context.Context, c Config, proxy *Proxy) (*PortForwar
 		if !rule.Enabled {
 			continue
 		}
-		b := &forwardBinding{rule: rule, sessions: map[netip.AddrPort]*forwardUDPSession{}}
-		address := ":" + strconv.Itoa(rule.ListenPort)
-		var err error
-		if rule.Protocol == "tcp" {
-			b.tcp, err = net.Listen("tcp", address)
-		} else {
-			b.udp, err = net.ListenUDP("udp", &net.UDPAddr{Port: rule.ListenPort})
+		for _, protocol := range rule.protocols() {
+			bindingRule := rule
+			bindingRule.Protocol = protocol
+			b := &forwardBinding{rule: bindingRule, sessions: map[netip.AddrPort]*forwardUDPSession{}}
+			address := ":" + strconv.Itoa(rule.ListenPort)
+			var err error
+			if protocol == "tcp" {
+				b.tcp, err = net.Listen("tcp", address)
+			} else {
+				b.udp, err = net.ListenUDP("udp", &net.UDPAddr{Port: rule.ListenPort})
+			}
+			if err != nil {
+				p.Close()
+				return nil, fmt.Errorf("无法监听 %s %d，请检查端口占用或权限", strings.ToUpper(protocol), rule.ListenPort)
+			}
+			p.bindings = append(p.bindings, b)
 		}
-		if err != nil {
-			p.Close()
-			return nil, fmt.Errorf("无法监听 %s %d，请检查端口占用或权限", strings.ToUpper(rule.Protocol), rule.ListenPort)
-		}
-		p.bindings = append(p.bindings, b)
 	}
 	for _, b := range p.bindings {
 		p.wg.Add(1)

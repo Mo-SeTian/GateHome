@@ -204,7 +204,9 @@ func checkRestartPorts(current, next Config) error {
 		}
 		for _, f := range c.Forwards {
 			if f.Enabled {
-				result[f.Protocol+":"+strconv.Itoa(f.ListenPort)] = true
+				for _, protocol := range f.protocols() {
+					result[protocol+":"+strconv.Itoa(f.ListenPort)] = true
+				}
 			}
 		}
 		return result

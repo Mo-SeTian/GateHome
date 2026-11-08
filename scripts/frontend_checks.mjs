@@ -119,3 +119,26 @@ certificateList.status.certificates[0].not_after='2027-01-01T00:00:00Z';
 certificateMarkup=vm.runInContext('certificateTable()',certificateList);
 assert.ok(certificateMarkup.includes(' · 到期 test date')&&!certificateMarkup.includes('尚未签发'));
 console.log('Certificate task summary: unsigned and issued expiry dates: PASS');
+
+const saveSource=source.slice(source.indexOf('async function save('),source.indexOf('function badge('));
+let resolveWrite,resolveRefresh;
+const saving=vm.createContext({config:{ddns:{}},revision:1,status:{},toast(){},applyConfig(data){saving.applied=true;saving.config=data.config;},refreshStatus:async()=>{},api:()=>new Promise(resolve=>{resolveWrite=resolve;})});
+vm.runInContext(saveSource,saving);
+for(const replacement of [undefined,{ddns:{ip_monitor:{interface:'TEST_ONLY_NEW_SESSION'}}}]) {
+  saving.config={ddns:{}};saving.applied=false;
+  const pending=vm.runInContext('save({ddns:{ip_monitor:{interface:"TEST_ONLY_SAVED"}}})',saving);
+  saving.config=replacement;
+  resolveWrite({config:{ddns:{ip_monitor:{interface:'TEST_ONLY_OLD_SESSION'}}}});
+  await assert.rejects(pending,/页面状态已变化/);
+  assert.equal(saving.applied,false,'a stale write response restored configuration after logout or a new login');
+  assert.equal(saving.config,replacement);
+}
+saving.config={ddns:{}};
+saving.api=async()=>({config:{ddns:{ip_monitor:{interface:'TEST_ONLY_SAVED'}}}});
+saving.refreshStatus=()=>new Promise(resolve=>{resolveRefresh=resolve;});
+const delayedStatus=vm.runInContext('save({ddns:{}})',saving);
+await new Promise(setImmediate);
+saving.config=undefined;resolveRefresh();
+await assert.rejects(delayedStatus,/页面状态已变化/);
+assert.equal(saving.config,undefined);
+console.log('Configuration saves: stale replies after logout, new login or delayed status cannot restore page state PASS');

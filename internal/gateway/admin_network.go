@@ -4,23 +4,24 @@ import (
 	"net/http"
 )
 
-type ipPreviewInput struct {
-	GroupID    string `json:"group_id"`
-	Interface  string `json:"interface"`
-	IPv4Source string `json:"ipv4_source"`
-	IPv6Source string `json:"ipv6_source"`
-}
-
 func (a *Admin) networkRoutes(mux *http.ServeMux) {
 	for _, method := range []string{"GET", "POST"} {
 		mux.HandleFunc(method+" /api/ddns/network", a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
-			input := ipPreviewInput{GroupID: r.URL.Query().Get("group_id"), Interface: r.URL.Query().Get("interface"), IPv4Source: r.URL.Query().Get("ipv4_source"), IPv6Source: r.URL.Query().Get("ipv6_source")}
-			if r.Method == "POST" && !decodeBody(w, r, &input) {
-				return
+			c := a.store.Snapshot().Config
+			input := c.DDNS.IPMonitor
+			query := r.URL.Query()
+			if query.Has("group_id") || query.Has("interface") || query.Has("ipv4_source") || query.Has("ipv6_source") {
+				input = IPMonitorConfig{GroupID: query.Get("group_id"), Interface: query.Get("interface"), IPv4Source: query.Get("ipv4_source"), IPv6Source: query.Get("ipv6_source")}
+			}
+			if r.Method == "POST" {
+				// An explicit preview is independent of the persisted GET defaults.
+				input = IPMonitorConfig{}
+				if !decodeBody(w, r, &input) {
+					return
+				}
 			}
 			g := DDNSGroup{Mode: "dual", Interface: input.Interface, IPv4Source: input.IPv4Source, IPv6Source: input.IPv6Source}
 			key := "preview:" + g.Interface + ":" + ipSource(g, "A") + ":" + ipSource(g, "AAAA")
-			c := a.store.Snapshot().Config
 			if input.GroupID != "" {
 				var ok bool
 				g, ok = c.DNSGroup(input.GroupID)

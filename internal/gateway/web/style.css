@@ -376,7 +376,7 @@ body:has(dialog:modal), body.nav-open { overflow: hidden; }
 .widget-note { color: var(--muted); font-size: 12px; line-height: 1.8; margin: 10px 0 0; }
 .widget-pair { display: flex; flex-wrap: wrap; gap: 8px 18px; font-size: 12px; color: var(--muted); margin-top: 16px; }
 .widget-pair b { color: var(--text); }
-.widget-body meter { display: block; width: 100%; height: 14px; margin-top: 10px; accent-color: var(--primary); }
+.widget-body meter { display: block; width: 100%; height: 6px; margin-top: 10px; accent-color: var(--primary); }
 .storage-rows>div { display: grid; grid-template-columns: 1fr auto; gap: 5px 10px; margin-bottom: 15px; font-size: 12px; }
 .storage-rows>div:last-child { margin-bottom: 0; }
 .storage-rows meter,.storage-rows small { grid-column: 1 / -1; margin-top: 0; }
@@ -800,7 +800,7 @@ input[aria-invalid="true"] { border-color: var(--danger); }
 .discovery-scan-fields legend { padding:0 8px; font-weight:550; }
 .discovery-scan-actions { display:flex; gap:10px; flex-wrap:wrap; margin-top:16px; }
 .discovery-progress { margin:20px 0; }
-.discovery-progress progress { width:100%; height:8px; accent-color:var(--primary); }
+.discovery-progress progress { width:100%; accent-color:var(--primary); }
 .discovery-progress p { margin-top:8px; font-size:13px; color:var(--muted); }
 .discovery-progress .error { color:var(--danger); }
 .discovery-service-list { display:grid; gap:16px; margin-top:16px; }

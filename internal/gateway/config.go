@@ -85,12 +85,20 @@ type DNSRecord struct {
 }
 
 type DDNSConfig struct {
-	Groups   []DDNSGroup `json:"groups"`
-	Enabled  bool        `json:"enabled,omitempty"` // Legacy fields, migrated on load.
-	Interval int         `json:"interval,omitempty"`
-	IPv4URL  string      `json:"ipv4_url,omitempty"`
-	IPv6URL  string      `json:"ipv6_url,omitempty"`
-	Records  []DNSRecord `json:"records,omitempty"`
+	IPMonitor IPMonitorConfig `json:"ip_monitor"`
+	Groups    []DDNSGroup     `json:"groups"`
+	Enabled   bool            `json:"enabled,omitempty"` // Legacy fields, migrated on load.
+	Interval  int             `json:"interval,omitempty"`
+	IPv4URL   string          `json:"ipv4_url,omitempty"`
+	IPv6URL   string          `json:"ipv6_url,omitempty"`
+	Records   []DNSRecord     `json:"records,omitempty"`
+}
+
+type IPMonitorConfig struct {
+	GroupID    string `json:"group_id"`
+	Interface  string `json:"interface"`
+	IPv4Source string `json:"ipv4_source"`
+	IPv6Source string `json:"ipv6_source"`
 }
 
 type DDNSGroup struct {
@@ -357,7 +365,7 @@ func migrateConfig(c *Config) bool {
 	}
 	if c.DDNS.Groups == nil {
 		old := c.DDNS
-		c.DDNS = DDNSConfig{Groups: []DDNSGroup{}}
+		c.DDNS = DDNSConfig{Groups: []DDNSGroup{}, IPMonitor: old.IPMonitor}
 		families := map[string]string{}
 		order := []string{}
 		for _, r := range old.Records {
@@ -513,7 +521,7 @@ func listenerSignature(c Config) string {
 	for _, f := range c.Forwards {
 		if f.Enabled {
 			key := fmt.Sprintf("forward:%s:%s:%d:%s:%s", f.ID, f.Protocol, f.ListenPort, f.Upstream, f.FirewallID)
-			if f.Protocol == "udp" {
+			if f.Protocol != "tcp" {
 				key += ":" + forwardUDPTimeout(f).String()
 			}
 			parts = append(parts, key)
@@ -541,7 +549,7 @@ func validateAdminPort(c Config, port int) error {
 		}
 	}
 	for _, f := range c.Forwards {
-		if f.Protocol == "tcp" && f.ListenPort == port {
+		if f.Protocol != "udp" && f.ListenPort == port {
 			return errors.New("TCP 转发端口不能与管理端口相同")
 		}
 	}
@@ -958,6 +966,14 @@ func Validate(c Config) error {
 	}
 	if recordCount > 1000 {
 		return errors.New("DDNS 最多同步 1000 条 A / AAAA 记录")
+	}
+	monitor := c.DDNS.IPMonitor
+	if monitor.GroupID != "" {
+		if _, ok := c.DNSGroup(monitor.GroupID); !ok {
+			return errors.New("公网 IP 检测引用了不存在的 DDNS 组，请重新选择检测配置")
+		}
+	} else if err := validateIPSources(DDNSGroup{Mode: "dual", Interface: monitor.Interface, IPv4Source: monitor.IPv4Source, IPv6Source: monitor.IPv6Source}); err != nil {
+		return err
 	}
 
 	if err := validateOutboundProxy(c.OutboundProxy); err != nil {

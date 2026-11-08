@@ -158,16 +158,22 @@ function toast(message) {
   clearTimeout(toastTimer); toastTimer = setTimeout(() => { $('#toast').hidden = true; }, 4500);
 }
 function showLogin() { resetMCPSettings(); resetRemoteBackups(); $('#account-menu').open=false;clearAccountPasswords();adminUsername='';$('#account-name').textContent='管理员';$('#account-avatar').textContent='G';resetDashboard();setNavigation(false,false); $('#login').hidden = false; $('#app').hidden = true; clearTimeout(toastTimer);$('#toast').hidden=true; document.querySelectorAll('dialog').forEach(d=>d.close()); config = undefined;routeFilter='';routeSearch='';forwardProtocolFilter='';backupCapacity=null;backupCapacityError='';backupCapacityRequest++;updateBackups.request++;updateBackups.data=null;updateBackups.error='';updateBackups.loading=false; renderedPage='';clearTimeout(onlineUpdate.timer);onlineUpdate.request++;onlineUpdate.phase='';onlineUpdate.job=null;onlineUpdate.release=null;onlineUpdate.error='';abandonDiscovery();for(const state of Object.values(securityEvents)) {state.request++;state.view=null;state.filters=emptyEventFilters();state.applied=emptyEventFilters();state.error='';} }
-function applyConfig(data) { serviceHealthRequest++; serviceHealthPending=null; serviceHealthData={routes:{}}; config = data.config; revision = data.revision; dnsCredentialsConfigured=data.dns_credentials_configured||{}; certificateCredentialsConfigured=data.certificate_credentials_configured||{};routePasswordsConfigured=data.route_passwords_configured||{}; proxyPasswordConfigured=data.proxy_password_configured; githubTokenConfigured=!!data.github_token_configured; ipRequest++;dnsRecordsRequest++;dnsRecords={};dnsRecordsError=''; if(networkInfo) networkInfo.groups={}; }
+function applyConfig(data) { serviceHealthRequest++; serviceHealthPending=null; serviceHealthData={routes:{}}; config = data.config; revision = data.revision; dnsCredentialsConfigured=data.dns_credentials_configured||{}; certificateCredentialsConfigured=data.certificate_credentials_configured||{};routePasswordsConfigured=data.route_passwords_configured||{}; proxyPasswordConfigured=data.proxy_password_configured; githubTokenConfigured=!!data.github_token_configured; ipRequest++;dnsRecordsRequest++;dnsRecords={};dnsRecordsError=''; if(networkInfo) networkInfo.groups={};const monitor=config.ddns?.ip_monitor||{};ipGroup=monitor.group_id||'';ipInterface=monitor.interface||'';ipIPv4Source=monitor.ipv4_source||'url';ipIPv6Source=monitor.ipv6_source||'url'; }
 async function save(next, dnsTokens, proxyPassword, certificateTokens, routePasswords, githubToken) {
+  const current=config;
+  if(!current) throw new Error('登录状态已变化，请重新登录');
   const payload = {config:next, revision};
   if (dnsTokens !== undefined) payload.dns_tokens = dnsTokens;
   if (proxyPassword !== undefined) payload.proxy_password=proxyPassword;
   if (certificateTokens !== undefined) payload.certificate_tokens=certificateTokens;
   if (routePasswords !== undefined) payload.route_passwords=routePasswords;
   if (githubToken !== undefined) payload.github_token=githubToken;
-  applyConfig(await api('config', 'PUT', payload));
+  const result=await api('config', 'PUT', payload);
+  if(config!==current) throw new Error('页面状态已变化，请刷新后确认保存结果');
+  applyConfig(result);
+  const committed=config;
   await refreshStatus();
+  if(config!==committed) throw new Error('页面状态已变化，请刷新后确认保存结果');
   toast('配置已保存' + (status.restart_required ? '，监听或转发变更重启后生效' : ''));
 }
 function badge(text, kind = '') { return `<span class="badge ${kind}">${esc(text)}</span>`; }
@@ -423,20 +429,20 @@ function forwardState(f) {
   if(!f.enabled) return running?badge('停用待重启','amber'):badge('已停用','gray');
   if(!running) return badge('启用待重启','amber');
   if(['protocol','listen_port','upstream','firewall_id'].some(key=>(f[key]||'')!==(running[key]||''))) return badge('修改待重启','amber');
-  if(f.protocol==='udp'&&(f.udp_idle_seconds||300)!==(running.udp_idle_seconds||300)) return badge('修改待重启','amber');
+  if(f.protocol!=='tcp'&&(f.udp_idle_seconds||300)!==(running.udp_idle_seconds||300)) return badge('修改待重启','amber');
   const firewall=config.firewalls.find(r=>r.id===f.firewall_id);
   return firewall&&firewallWaiting(firewall)?badge('等待订阅，暂拒访问','amber'):badge('正在监听');
 }
 function forwardsHTML() {
   const action='<button class="primary" data-action="add-forward"><span data-icon="plus"></span>添加转发规则</button>';
   const all=config.forwards||[];
-  const rows=all.map((f,i)=>({f,i})).filter(({f})=>!forwardProtocolFilter||f.protocol===forwardProtocolFilter).map(({f,i})=>{
+  const rows=all.map((f,i)=>({f,i})).filter(({f})=>!forwardProtocolFilter||f.protocol===forwardProtocolFilter||f.protocol==='tcp+udp'&&forwardProtocolFilter!=='tcp+udp').map(({f,i})=>{
     const menu=objectMenu(f.name,`<button class="text-button" data-action="toggle-forward" data-index="${i}">${f.enabled?'停用':'启用'}</button><button class="text-button danger" data-action="delete-forward" data-index="${i}">删除规则</button>`);
-    return `<article class="route-card"><div class="rc-head"><span class="rc-tile">${icon('router')}</span><span class="rc-who"><b class="rc-name">${esc(f.name)}</b><small class="rc-host">${esc(f.protocol.toUpperCase())} · ${f.listen_port}</small></span>${menu}</div><dl class="forward-addresses"><div><dt>监听端口</dt><dd class="mono">${f.listen_port}</dd></div><div><dt>转发目标</dt><dd class="mono">${esc(f.upstream)}</dd></div></dl><div class="rc-tags"><span class="rc-tag">${esc(f.protocol.toUpperCase())}</span><span class="rc-tag">${esc(firewallName(f.firewall_id))}</span></div><div class="rc-foot">${forwardState(f)}<span class="table-actions"><button class="text-button" data-action="edit-forward" data-index="${i}">编辑</button></span></div></article>`;
+    return `<article class="route-card"><div class="rc-head"><span class="rc-tile">${icon('router')}</span><span class="rc-who"><b class="rc-name">${esc(f.name)}</b><small class="rc-host">${esc(f.protocol==='tcp+udp'?'TCP + UDP':f.protocol.toUpperCase())} · ${f.listen_port}</small></span>${menu}</div><dl class="forward-addresses"><div><dt>监听端口</dt><dd class="mono">${f.listen_port}</dd></div><div><dt>转发目标</dt><dd class="mono">${esc(f.upstream)}</dd></div></dl><div class="rc-tags"><span class="rc-tag">${esc(f.protocol==='tcp+udp'?'TCP + UDP':f.protocol.toUpperCase())}</span><span class="rc-tag">${esc(firewallName(f.firewall_id))}</span></div><div class="rc-foot">${forwardState(f)}<span class="table-actions"><button class="text-button" data-action="edit-forward" data-index="${i}">编辑</button></span></div></article>`;
   }).join('');
   return heading('TCP / UDP','端口转发','将独立端口转发到指定主机，适用于 SSH、数据库、DNS 和其他 TCP / UDP 服务。',action)+
     '<p class="hint amber" data-visible-note>规则保存后需在设置中重启服务。监听所有网卡，TCP 与 UDP 可共用同一端口。路由器与 Docker bridge 需发布对应协议的端口。</p>'+
-    (all.length?`<section class="workspace-forward-list" aria-label="转发规则"><div class="workspace-filters"><div class="workspace-protocols" role="group" aria-label="筛选转发协议">${[['','全部协议'],['tcp','TCP'],['udp','UDP']].map(([protocol,label])=>`<button type="button" data-action="filter-forward" data-protocol="${protocol}" aria-pressed="${forwardProtocolFilter===protocol}">${label}</button>`).join('')}</div></div>${rows?`<div class="cards forward-cards">${rows}</div>`:'<p class="route-search-empty">当前协议没有转发规则。</p>'}</section>`:empty('还没有转发规则','选择 TCP 或 UDP，填写监听端口和目标主机即可创建。',action));
+    (all.length?`<section class="workspace-forward-list" aria-label="转发规则"><div class="workspace-filters"><div class="workspace-protocols" role="group" aria-label="筛选转发协议">${[['','全部协议'],['tcp','TCP'],['udp','UDP'],['tcp+udp','TCP + UDP']].map(([protocol,label])=>`<button type="button" data-action="filter-forward" data-protocol="${protocol}" aria-pressed="${forwardProtocolFilter===protocol}">${label}</button>`).join('')}</div></div>${rows?`<div class="cards forward-cards">${rows}</div>`:'<p class="route-search-empty">当前协议没有转发规则。</p>'}</section>`:empty('还没有转发规则','选择 TCP、UDP 或 TCP + UDP，填写监听端口和目标主机即可创建。',action));
 }
 function openForward(index=-1) {
   const form=$('#forward-form');form.reset();
@@ -451,7 +457,7 @@ function openForward(index=-1) {
   openDialog($('#forward-dialog'));
 }
 function updateForwardProtocol(form) {
-  const udp=form.elements.protocol.value==='udp';
+  const udp=form.elements.protocol.value!=='tcp';
   form.elements.udp_idle_seconds.disabled=!udp;
   form.elements.udp_idle_seconds.closest('label').hidden=!udp;
 }
@@ -568,11 +574,16 @@ function ipCardsHTML(g,ip={},compact=false) {
 function ipResultsHTML(compact=false) {
   const view=ipViewKey===ipSelectionKey()?networkInfo:null;
   const g=config.ddns.groups.find(g=>g.id===ipGroup);
-  return ipCardsHTML(g,view?.ip,compact)+(compact?'':`<p data-visible-note class="form-note">${view?.ip.running?'正在检测，IPv4 / IPv6 结果分别更新。':'页面打开期间每 30 秒检测，显示结果每 5 秒刷新。'}${ipGroup?'检测使用该组保存的 IP 设置。':'临时检测的接口方式使用默认列表；请在 DDNS 组中保存用于同步的 IP 设置。'}</p>`);
+  return ipCardsHTML(g,view?.ip,compact)+(compact?'':`<p data-visible-note class="form-note">${view?.ip.running?'正在检测，IPv4 / IPv6 结果分别更新。':'页面打开期间每 30 秒检测，显示结果每 5 秒刷新。'}${ipGroup?'检测使用该组保存的 IP 设置。':'本机检测使用默认公网查询接口；DDNS 同步使用各组保存的设置。'}</p>`);
 }
 function networkHTML() {
   if(ipGroup&&!config.ddns.groups.some(g=>g.id===ipGroup)) ipGroup='';
-  return '<div class="ip-monitor">'+panel('实时公网 IP','',`<div class="panel-body"><div id="ip-results" aria-live="polite">${ipResultsHTML(true)}</div><details class="ip-monitor-settings"><summary>检测设置与详情</summary><div class="ip-controls"><label>检测配置<select id="ip-group"><option value="">本机临时检测</option>${config.ddns.groups.map(g=>`<option value="${esc(g.id)}" ${g.id===ipGroup?'selected':''}>${esc(g.name)}</option>`).join('')}</select></label><div id="ip-controls" class="ip-controls">${ipControlsHTML()}</div></div><div id="ip-details">${ipResultsHTML()}</div><p class="form-note">Docker bridge 仅能看到容器内网卡；使用 Linux host 网络可选择主机网卡。</p></details></div>`,`<button class="secondary" data-action="refresh-public-ip">刷新公网 IP</button>`)+'</div>';
+  return '<div class="ip-monitor">'+panel('实时公网 IP','',`<div class="panel-body"><div id="ip-results" aria-live="polite">${ipResultsHTML(true)}</div><details class="ip-monitor-settings"><summary>检测设置与详情</summary><form id="ip-monitor-form"><div class="ip-controls"><label>检测配置<select id="ip-group"><option value="">本机检测</option>${config.ddns.groups.map(g=>`<option value="${esc(g.id)}" ${g.id===ipGroup?'selected':''}>${esc(g.name)}</option>`).join('')}</select></label><div id="ip-controls" class="ip-controls">${ipControlsHTML()}</div></div><p data-visible-note class="form-note">保存后作为默认检测配置，刷新页面或重新登录时沿用。</p><p class="error" role="alert"></p><div class="form-actions"><button type="submit" class="primary">保存检测设置</button></div></form><div id="ip-details">${ipResultsHTML()}</div><p class="form-note">Docker bridge 仅能看到容器内网卡；使用 Linux host 网络可选择主机网卡。</p></details></div>`,`<button class="secondary" data-action="refresh-public-ip">刷新公网 IP</button>`)+'</div>';
+}
+async function saveIPMonitor() {
+  const next=clone(config);
+  next.ddns.ip_monitor={group_id:ipGroup,interface:ipInterface,ipv4_source:ipIPv4Source,ipv6_source:ipIPv6Source};
+  await save(next);render();toast('公网 IP 检测设置已保存');await loadIPInfo();
 }
 async function loadIPInfo(force=false) {
   const request=++ipRequest,key=ipSelectionKey();
@@ -1376,6 +1387,7 @@ document.addEventListener('submit',event=>{
   if(form.id==='login-form') return submitForm(form,async()=>{ const username=form.elements.username.value,password=form.elements.password.value; form.elements.password.value=''; await api('login','POST',{username,password}); await load(); });
   if(!config) return;
   if(form.id==='account-form') return submitForm(form,()=>saveAdminAccount(form));
+  if(form.id==='ip-monitor-form') return submitForm(form,saveIPMonitor);
   if(form.id==='dashboard-form') return submitForm(form,saveDashboardSettings);
   if(form.id==='webdav-backup-form') return submitForm(form,()=>saveWebDAVSettings(form));
   if(form.id==='webdav-restore-form') return submitForm(form,()=>inspectWebDAVBackup(form));
@@ -1455,7 +1467,7 @@ document.addEventListener('submit',event=>{
       if(index<0) next.groups.push(g); else next.groups[index]=g;
       await save(next); closeDialog($('#group-dialog')); render();
     } else if(form.id==='forward-form') {
-      const index=Number(e.index.value),f={id:index<0?newID():next.forwards[index].id,name:e.name.value.trim(),protocol:e.protocol.value,listen_port:Number(e.listen_port.value),upstream:e.upstream.value.trim(),firewall_id:e.firewall_id.value,enabled:e.enabled.checked,udp_idle_seconds:e.protocol.value==='udp'?Number(e.udp_idle_seconds.value):0};
+      const index=Number(e.index.value),f={id:index<0?newID():next.forwards[index].id,name:e.name.value.trim(),protocol:e.protocol.value,listen_port:Number(e.listen_port.value),upstream:e.upstream.value.trim(),firewall_id:e.firewall_id.value,enabled:e.enabled.checked,udp_idle_seconds:e.protocol.value!=='tcp'?Number(e.udp_idle_seconds.value):0};
       next.forwards=next.forwards||[];
       if(index<0) next.forwards.push(f);else next.forwards[index]=f;
       await save(next);closeDialog($('#forward-dialog'));render();
@@ -1485,7 +1497,7 @@ document.addEventListener('click',async event=>{
   if(action==='edit-dashboard') return toggleDashboardEditing();
   if(action==='configure-dashboard') return openDashboardSettings();
   if(action==='dashboard-trend') return setDashboardTrend(Number(button.dataset.hours));
-  if(action==='filter-forward'&&['','tcp','udp'].includes(button.dataset.protocol)) {forwardProtocolFilter=button.dataset.protocol;render();return;}
+  if(action==='filter-forward'&&['','tcp','udp','tcp+udp'].includes(button.dataset.protocol)) {forwardProtocolFilter=button.dataset.protocol;render();return;}
   if(['refresh-remote-backups','list-webdav-backups','test-webdav-backup','run-webdav-backup','download-webdav-backup','inspect-webdav-backup'].includes(action)) return remoteBackupAction(button);
   if(action==='configure-service-health') {const form=$('#service-health-form'),options=config.service_health||{enabled:true,interval:60};form.elements.enabled.checked=options.enabled;form.elements.interval.value=options.interval;$('.error',form).textContent='';openDialog($('#service-health-settings-dialog'));return;}
   if(action==='service-health-details') {openServiceHealthDetails(button.dataset.routeId);return;}
@@ -1578,7 +1590,7 @@ document.addEventListener('click',async event=>{
     if(action==='run-ddns') {const g=config.ddns.groups[Number(button.dataset.index)];const result=await api('ddns/'+encodeURIComponent(g.id)+'/run','POST',{});toast(result.message);await refreshStatus();render();}
     if(action==='toggle-ddns'||action==='delete-ddns') {
       const next=clone(config),index=Number(button.dataset.index);
-      if(action==='delete-ddns') {if(next.groups.some(g=>g.ddns_group_id===next.ddns.groups[index].id)) throw new Error('请先在反代组中解除对此 DDNS 组的绑定。');if(!confirm('删除此 DDNS 组及其凭据？DNS 中已有记录会保留。')) return;const id=next.ddns.groups[index].id;next.ddns.groups.splice(index,1);if(next.acme.dns_groups) Object.keys(next.acme.dns_groups).forEach(host=>{if(next.acme.dns_groups[host]===id) delete next.acme.dns_groups[host];});}else next.ddns.groups[index].enabled=!next.ddns.groups[index].enabled;
+      if(action==='delete-ddns') {if(next.groups.some(g=>g.ddns_group_id===next.ddns.groups[index].id)) throw new Error('请先在反代组中解除对此 DDNS 组的绑定。');if(!confirm('删除此 DDNS 组及其凭据？DNS 中已有记录会保留。')) return;const id=next.ddns.groups[index].id;if(next.ddns.ip_monitor?.group_id===id) next.ddns.ip_monitor={};next.ddns.groups.splice(index,1);if(next.acme.dns_groups) Object.keys(next.acme.dns_groups).forEach(host=>{if(next.acme.dns_groups[host]===id) delete next.acme.dns_groups[host];});}else next.ddns.groups[index].enabled=!next.ddns.groups[index].enabled;
       await save(next);render();
     }
     if(action==='logout') { $('#account-menu').open=false;await api('logout','POST',{}); showLogin(); }
