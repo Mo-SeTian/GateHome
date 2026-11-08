@@ -2,7 +2,13 @@
 
 一个自托管的反向代理与 DDNS 综合管理工具。Go 主程序内嵌中文管理界面与 Sun-Panel 前后端；启用首页时由主程序管理独立的 Sun-Panel 子进程。运行无需 Node.js、外部数据库或额外 Web 服务器，Sun-Panel 使用内置 SQLite。
 
-当前版本为 **0.0.64**，安装包见 [v0.0.64 Release](https://github.com/Mo-SeTian/GateHome/releases/tag/v0.0.64)。程序和 systemd 服务名为 `gatehouse`。
+当前版本为 **0.0.65**，安装包见 [v0.0.65 Release](https://github.com/Mo-SeTian/GateHome/releases/tag/v0.0.65)。程序和 systemd 服务名为 `gatehouse`。
+
+## v0.0.65 更新
+
+- 对齐侧栏品牌图标和标题，点击品牌可返回概览。
+- 概览里的 CPU、内存和存储用量条使用不同的颜色，桌面与手机样式一致。
+- 退出登录入口收进用户菜单，移除侧栏里的重复按钮。
 
 ## v0.0.64 更新
 
@@ -175,7 +181,7 @@ sudo bash /tmp/gatehome-install.sh install --proxy "$GATEHOME_INSTALL_PROXY"
 
 下载使用 HTTP/1.1；TLS 连接中断等下载错误会清除残缺文件并重试，最多尝试 4 次。下载和校验成功后才修改安装。如果出现 `curl: (56)` / `unexpected eof while reading`，说明下载连接提前断开；请检查服务器的网络或代理规则。使用 MSM 等分流工具时，安装需要访问 `raw.githubusercontent.com`、`github.com` 和 `release-assets.githubusercontent.com`。仍无法下载时，可在其他能访问 GitHub 的设备下载下面的安装包，复制到服务器离线安装。
 
-离线安装可使用 `make release` 生成的 **`版本/0.0.64/`** 完整目录，或解压 Release 中对应架构的 `gatehome-linux-*.tar.gz`，然后运行：
+离线安装可使用 `make release` 生成的 **`版本/0.0.65/`** 完整目录，或解压 Release 中对应架构的 `gatehome-linux-*.tar.gz`，然后运行：
 
 ```sh
 sudo bash install.sh

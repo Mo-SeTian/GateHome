@@ -1404,7 +1404,7 @@ document.addEventListener('click',async event=>{
     return;
   }
   const action=button.dataset.action||'';
-  if(!action&&!button.dataset.job&&button.id!=='logout') return;
+  if(!action&&!button.dataset.job) return;
   if(action==='close-dialog') { closeDialog(button.closest('dialog')); return; }
   if(!config||busy) return;
   if(action==='edit-admin-account') return openAdminAccount();
@@ -1503,7 +1503,7 @@ document.addEventListener('click',async event=>{
       if(action==='delete-ddns') {if(next.groups.some(g=>g.ddns_group_id===next.ddns.groups[index].id)) throw new Error('请先在反代组中解除对此 DDNS 组的绑定。');if(!confirm('删除此 DDNS 组及其凭据？DNS 中已有记录会保留。')) return;const id=next.ddns.groups[index].id;next.ddns.groups.splice(index,1);if(next.acme.dns_groups) Object.keys(next.acme.dns_groups).forEach(host=>{if(next.acme.dns_groups[host]===id) delete next.acme.dns_groups[host];});}else next.ddns.groups[index].enabled=!next.ddns.groups[index].enabled;
       await save(next);render();
     }
-    if(button.id==='logout'||action==='logout') { $('#account-menu').open=false;await api('logout','POST',{}); showLogin(); }
+    if(action==='logout') { $('#account-menu').open=false;await api('logout','POST',{}); showLogin(); }
     if(button.dataset.job) { const result=await api('jobs/'+button.dataset.job,'POST',{}); toast(result.message); await refreshStatus(); }
     if(action==='refresh-subscription') { const d=config.subscriptions[Number(button.dataset.index)]; const result=await api('subscriptions/'+encodeURIComponent(d.id)+'/refresh','POST',{}); toast(result.message); await refreshStatus(); render(); }
     if(action==='toggle-group'||action==='delete-group') {

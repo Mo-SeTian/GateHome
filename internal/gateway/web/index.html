@@ -25,7 +25,10 @@
   <div id="app" class="app-shell" hidden>
     <button id="nav-scrim" class="nav-scrim" aria-label="关闭导航" tabindex="-1" hidden></button>
     <aside id="sidebar" class="sidebar" aria-label="工作空间导航">
-      <div class="sidebar-brand"><span class="brand-mark" data-icon="gateway"></span><a class="brand" href="#overview">GateHome<small>家庭网关</small></a><button id="nav-close" class="icon-button sidebar-close" aria-label="关闭导航"><span data-icon="close"></span></button></div>
+      <div class="sidebar-brand">
+        <a class="brand" href="#overview"><span class="brand-mark" data-icon="gateway" aria-hidden="true"></span><span>GateHome<small>家庭网关</small></span></a>
+        <button id="nav-close" class="icon-button sidebar-close" aria-label="关闭导航"><span data-icon="close"></span></button>
+      </div>
       <div class="nav-label">工作空间</div>
       <nav aria-label="主导航">
         <span class="nav-indicator" aria-hidden="true" hidden></span>
@@ -48,7 +51,6 @@
       </nav>
       <div class="sidebar-foot"><span class="connection" role="status"><i class="status-dot"></i><span id="connection-label">已连接</span></span><span id="uptime">已运行 —</span></div>
       <details id="account-menu" class="object-menu account-menu"><summary id="account-button" class="account-button" aria-label="管理员菜单" aria-controls="account-menu-items"><span class="avatar" id="account-avatar" aria-hidden="true">G</span><span id="account-name">管理员</span><span data-icon="chevron-down"></span></summary><div id="account-menu-items" class="object-menu-items account-menu-items"><button type="button" class="text-button" data-action="edit-admin-account"><span data-icon="edit"></span>修改密码</button><button type="button" class="text-button danger" data-action="logout"><span data-icon="logout"></span>退出登录</button></div></details>
-      <button id="logout" class="logout"><span data-icon="logout"></span>退出登录</button>
     </aside>
     <main id="main">
       <span id="breadcrumb" class="sr-only">工作空间 / 概览</span>

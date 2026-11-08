@@ -43,7 +43,7 @@ function metricHTML(value,note='',unit='') {return `<div class="widget-metric">$
 function meterHTML(used,total) {
   if(!total) return '';
   const percent=Math.min(100,Math.max(0,100*used/total));
-  return `<meter min="0" max="100" value="${percent}" aria-label="已使用 ${percent.toFixed(1)}%"></meter>`;
+  return `<meter class="resource-meter" min="0" max="100" value="${percent}" aria-label="已使用 ${percent.toFixed(1)}%"></meter>`;
 }
 function widgetBody(id) {
   const resources=dashboardView?.resources||{},access=dashboardView?.access||{},regions=dashboardView?.regions||{};

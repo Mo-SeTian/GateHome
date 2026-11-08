@@ -46,8 +46,8 @@ h2, h3 { letter-spacing: -.1px; }
 .sidebar-brand { display: flex; align-items: center; gap: 9px; padding: 0 8px; margin: 0 0 4px; }
 .sidebar-brand .brand-mark { width: 26px; height: 26px; border-radius: 8px; background: linear-gradient(150deg, #5668e0, #3447ba); color: #fff; flex: 0 0 auto; }
 .sidebar-brand .brand-mark svg, .sidebar-brand .brand-mark .icon { width: 15px; height: 15px; }
-.sidebar-brand .brand { display: flex; flex-direction: column; font-size: 14.5px; font-weight: 650; letter-spacing: -.2px; gap: 1px; color: var(--text); }
-.sidebar-brand .brand small { display: block; font-size: 9.5px; font-weight: 500; color: var(--faint); letter-spacing: .8px; }
+.sidebar-brand .brand { padding: 0; font-size: 14.5px; font-weight: 650; line-height: 1.3; letter-spacing: -.2px; }
+.sidebar-brand .brand small { margin-top: 2px; font-size: 9.5px; font-weight: 500; color: var(--faint); letter-spacing: .8px; }
 .sidebar-close { display: none; }
 
 .nav-label { margin: 20px 10px 7px; font-size: 9.5px; letter-spacing: 1.3px; color: var(--faint); font-weight: 500; }
@@ -77,9 +77,6 @@ h2, h3 { letter-spacing: -.1px; }
 .account-button { display: flex; align-items: center; gap: 8px; width: 100%; height: 38px; padding: 0 10px; border-radius: 8px; font-size: 12px; color: var(--muted); }
 .account-button:hover { background: #f4f7fb; }
 .account-button .avatar { width: 24px; height: 24px; border-radius: 7px; background: #f2f5fb; border: 1px solid var(--border); color: #47546c; font-size: 10px; display: grid; place-items: center; }
-.logout { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 10px; margin-top: 4px; border: 0; border-radius: 8px; background: transparent; color: var(--faint); font-size: 11.5px; text-align: left; }
-.logout:hover { background: var(--danger-soft); color: var(--danger); }
-.logout .icon, .logout svg { width: 15px; height: 15px; }
 
 main { min-width: 0; margin: 0; display: flex; flex-direction: column; min-height: 100vh; }
 .topbar { display: none; }
@@ -393,6 +390,12 @@ dialog::backdrop { background: rgba(23, 33, 51, .34); }
 .dashboard-meta { display: flex; gap: 10px; font-size: 11.5px; color: var(--faint); margin: -4px 0 14px; }
 .message, .dashboard-meta .context-note { color: var(--faint); }
 meter { width: 100%; height: 5px; border-radius: 3px; overflow: hidden; }
+.dashboard-widget[data-widget="memory"] { --meter-fill: #6550b5; }
+.dashboard-widget[data-widget="storage"] { --meter-fill: #2b6a9f; }
+.widget-body .resource-meter { appearance: none; height: 6px; background: var(--border); border-radius: 999px; }
+.widget-body .resource-meter::-webkit-meter-bar { background: transparent; border: 0; border-radius: 999px; }
+.widget-body .resource-meter::-webkit-meter-optimum-value { background: var(--meter-fill, var(--primary)); border-radius: 999px; }
+.resource-meter::-moz-meter-bar { background: var(--meter-fill, var(--primary)); border-radius: 999px; }
 .storage-rows > div { padding: 7px 0; border-bottom: 1px solid #f2f5fa; }
 .storage-rows > div:last-child { border-bottom: 0; }
 .storage-rows b { font-size: 11.5px; font-weight: 500; color: var(--muted); }
@@ -456,7 +459,6 @@ button .icon, button .icon svg, summary .icon { flex: 0 0 auto; }
   .sidebar-foot::before { content: ""; position: absolute; left: 0; right: 0; top: -16px; height: 16px; pointer-events: none; background: linear-gradient(to bottom, rgba(255,255,255,0), #fff); }
   .sidebar nav button { min-height: 44px; font-size: 13.5px; }
   .account-button { height: 44px; }
-  .logout { min-height: 44px; }
   .mobile-bar .icon-button { width: 44px; height: 44px; }
   .mobile-bar { height: calc(54px + env(safe-area-inset-top)); padding-top: env(safe-area-inset-top); }
   .sidebar-close { width: 44px; height: 44px; }
