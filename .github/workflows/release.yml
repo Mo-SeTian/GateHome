@@ -86,10 +86,14 @@ jobs:
             gh release create "$RELEASE_TAG" "${args[@]}"
             metadata=$(find_release)
           fi
-          release_id=$(jq -er --arg tag "$RELEASE_TAG" --argjson beta "$PRERELEASE" '
-            select(.draft == true and .prerelease == $beta and
+          release_id=$(jq -er --arg tag "$RELEASE_TAG" '
+            select(.draft == true and
               (.tag_name == $tag or (.name == ("GateHome " + $tag) and (.tag_name | startswith("untagged-"))))) | .id
           ' <<< "$metadata")
+          gh api --method PATCH "repos/$GH_REPO/releases/$release_id" \
+            -f tag_name="$RELEASE_TAG" -f target_commitish="$target_commit" \
+            -F draft=true -F prerelease="$PRERELEASE" --silent
+          metadata=$(gh api "repos/$GH_REPO/releases/$release_id")
           upload_url=$(jq -er '.upload_url | split("{")[0]' <<< "$metadata")
           test "$upload_url" = "https://uploads.github.com/repos/$GH_REPO/releases/$release_id/assets"
           for source in "${assets[@]}"; do
