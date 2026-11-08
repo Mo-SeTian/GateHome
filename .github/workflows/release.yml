@@ -70,10 +70,12 @@ jobs:
             "更新版本/gatehouse-$RELEASE_VERSION-update.zip"
           )
           target_commit=$(git rev-parse HEAD)
+          test "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")" = "$target_commit"
           find_release() {
             gh api --paginate "repos/$GH_REPO/releases?per_page=100" |
               jq -cs --arg tag "$RELEASE_TAG" '
-                map(.[]) | map(select(.tag_name == $tag)) |
+                map(.[]) | map(select(.tag_name == $tag or
+                  (.draft == true and .name == ("GateHome " + $tag) and (.tag_name | startswith("untagged-"))))) |
                 if length > 1 then error("Duplicate release tag") else .[0] // null end
               '
           }
@@ -84,8 +86,9 @@ jobs:
             gh release create "$RELEASE_TAG" "${args[@]}"
             metadata=$(find_release)
           fi
-          release_id=$(jq -er --arg tag "$RELEASE_TAG" --arg commit "$target_commit" --argjson beta "$PRERELEASE" '
-            select(.tag_name == $tag and .draft == true and .prerelease == $beta and .target_commitish == $commit) | .id
+          release_id=$(jq -er --arg tag "$RELEASE_TAG" --argjson beta "$PRERELEASE" '
+            select(.draft == true and .prerelease == $beta and
+              (.tag_name == $tag or (.name == ("GateHome " + $tag) and (.tag_name | startswith("untagged-"))))) | .id
           ' <<< "$metadata")
           upload_url=$(jq -er '.upload_url | split("{")[0]' <<< "$metadata")
           test "$upload_url" = "https://uploads.github.com/repos/$GH_REPO/releases/$release_id/assets"
@@ -119,6 +122,7 @@ jobs:
           latest=true
           if [ "$PRERELEASE" = true ]; then latest=false; fi
           gh api --method PATCH "repos/$GH_REPO/releases/$release_id" \
+            -f tag_name="$RELEASE_TAG" -f target_commitish="$target_commit" \
             -F draft=false -F prerelease="$PRERELEASE" -f make_latest="$latest" --jq '.html_url'
           gh api "repos/$GH_REPO/releases/$release_id" |
-            jq -e --argjson beta "$PRERELEASE" '(.draft == false) and (.prerelease == $beta)' > /dev/null
+            jq -e --arg tag "$RELEASE_TAG" --argjson beta "$PRERELEASE" '(.tag_name == $tag) and (.draft == false) and (.prerelease == $beta)' > /dev/null
