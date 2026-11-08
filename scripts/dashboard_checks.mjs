@@ -11,6 +11,22 @@ context.heading=(kicker,title,description,actions)=>actions;context.addRouteButt
 assert.ok(run('dashboardHTML()').includes('编辑布局'));
 assert.ok(!run('dashboardHTML()').includes('data-widget-handle='),'view mode exposed drag handles');
 assert.ok(!run('dashboardHTML()').includes('data-action="configure-dashboard"'),'view mode exposed configuration controls');
+for(const [ids,expected] of [
+  [[],[]],
+  [['cpu'],[2]],
+  [['cpu','memory'],[1,1]],
+  [['cpu','server','memory'],[2,2,2]],
+  [['cpu','memory','requests','storage','blocked'],[1,1,2,2,2]],
+  [['server','cpu','memory','storage','traffic','transfer','requests','blocked'],[2,1,1,2,2,2,1,1]]
+]) {
+  context.mobileIDs=ids;
+  assert.deepEqual(plain(run('mobileWidgetSpans(mobileIDs)')),expected,'mobile grid left an unpaired metric beside a full-width widget');
+  assert.deepEqual(context.mobileIDs,ids,'responsive layout changed the saved widget order');
+}
+const mobileHTML=run('dashboardHTML()');
+assert.match(mobileHTML,/data-widget="cpu" data-mobile-span="2"/);
+assert.match(mobileHTML,/data-widget="memory" data-mobile-span="2"/);
+console.log('Dashboard mobile grid: pairs, orphan metrics, custom order and full-width content PASS');
 let viewWrites=0;context.save=async()=>{viewWrites++;};
 await run("moveDashboardWidget('cpu',1)");
 await run("persistWidgetOrder(['map','cpu','memory'],'map')");
