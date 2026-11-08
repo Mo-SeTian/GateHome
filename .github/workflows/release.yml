@@ -91,8 +91,8 @@ jobs:
               (.tag_name == $tag or (.name == ("GateHome " + $tag) and (.tag_name | startswith("untagged-"))))) | .id
           ' <<< "$metadata")
           gh api --method PATCH "repos/$GH_REPO/releases/$release_id" \
-            -f tag_name="$RELEASE_TAG" -f target_commitish="$target_commit" \
-            -F draft=true -F prerelease="$PRERELEASE" --silent
+            -f tag_name="$RELEASE_TAG" \
+            -F prerelease="$PRERELEASE" --silent
           metadata=$(gh api "repos/$GH_REPO/releases/$release_id")
           upload_url=$(jq -er '.upload_url | split("{")[0]' <<< "$metadata")
           test "$upload_url" = "https://uploads.github.com/repos/$GH_REPO/releases/$release_id/assets"
@@ -126,7 +126,7 @@ jobs:
           latest=true
           if [ "$PRERELEASE" = true ]; then latest=false; fi
           gh api --method PATCH "repos/$GH_REPO/releases/$release_id" \
-            -f tag_name="$RELEASE_TAG" -f target_commitish="$target_commit" \
+            -f tag_name="$RELEASE_TAG" \
             -F draft=false -F prerelease="$PRERELEASE" -f make_latest="$latest" --jq '.html_url'
           gh api "repos/$GH_REPO/releases/$release_id" |
             jq -e --arg tag "$RELEASE_TAG" --argjson beta "$PRERELEASE" '(.tag_name == $tag) and (.draft == false) and (.prerelease == $beta)' > /dev/null
