@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="color-scheme" content="light">
-  <meta name="theme-color" content="#4256d5">
+  <meta name="theme-color" content="#eaf0fc">
   <title>GateHome · 家庭网络入口</title>
   <link rel="stylesheet" href="/style.css">
   <link rel="stylesheet" href="/ui.css">
@@ -24,6 +24,13 @@
   </section>
   <div id="app" class="app-shell" hidden>
     <button id="nav-scrim" class="nav-scrim" aria-label="关闭导航" tabindex="-1" hidden></button>
+    <header id="workspace-header" class="workspace-header">
+      <button id="nav-toggle" class="icon-button" aria-label="打开导航" aria-controls="sidebar" aria-expanded="false"><span data-icon="menu"></span></button>
+      <a class="brand" href="#overview"><span class="brand-mark" data-icon="gateway" aria-hidden="true"></span><span>GateHome</span></a>
+      <span id="breadcrumb" class="workspace-context">工作空间 / 概览</span>
+      <span class="connection workspace-connection" role="status"><i class="status-dot"></i><span id="connection-label">已连接</span></span>
+      <details id="account-menu" class="object-menu account-menu"><summary id="account-button" class="account-button" aria-label="管理员菜单" aria-controls="account-menu-items"><span class="avatar" id="account-avatar" aria-hidden="true">G</span><span id="account-name">管理员</span><span data-icon="chevron-down"></span></summary><div id="account-menu-items" class="object-menu-items account-menu-items"><button type="button" class="text-button" data-action="edit-admin-account"><span data-icon="edit"></span>修改密码</button><button type="button" class="text-button danger" data-action="logout"><span data-icon="logout"></span>退出登录</button></div></details>
+    </header>
     <aside id="sidebar" class="sidebar" aria-label="工作空间导航">
       <div class="sidebar-brand">
         <a class="brand" href="#overview"><span class="brand-mark" data-icon="gateway" aria-hidden="true"></span><span>GateHome<small>家庭网关</small></span></a>
@@ -49,12 +56,9 @@
         <button data-page="backups"><span class="nav-icon" data-icon="download"></span>备份与恢复</button>
         <button data-page="settings"><span class="nav-icon" data-icon="settings"></span>设置</button>
       </nav>
-      <div class="sidebar-foot"><span class="connection" role="status"><i class="status-dot"></i><span id="connection-label">已连接</span></span><span id="uptime">已运行 —</span></div>
-      <details id="account-menu" class="object-menu account-menu"><summary id="account-button" class="account-button" aria-label="管理员菜单" aria-controls="account-menu-items"><span class="avatar" id="account-avatar" aria-hidden="true">G</span><span id="account-name">管理员</span><span data-icon="chevron-down"></span></summary><div id="account-menu-items" class="object-menu-items account-menu-items"><button type="button" class="text-button" data-action="edit-admin-account"><span data-icon="edit"></span>修改密码</button><button type="button" class="text-button danger" data-action="logout"><span data-icon="logout"></span>退出登录</button></div></details>
+      <div class="sidebar-foot"><strong>家庭网关</strong><span id="uptime">已运行 —</span></div>
     </aside>
     <main id="main">
-      <span id="breadcrumb" class="sr-only">工作空间 / 概览</span>
-      <header class="mobile-bar"><button id="nav-toggle" class="icon-button" aria-label="打开导航" aria-controls="sidebar" aria-expanded="false"><span data-icon="menu"></span></button><span class="mark">G</span><b>GateHome</b><span class="connection mobile-state" role="status"><i class="status-dot"></i><span id="mobile-connection-label">已连接</span></span></header>
       <div id="restart-banner" class="restart-banner" hidden>监听或端口转发配置已修改，在设置页重启服务后生效。Docker bridge 模式还需同步修改对应协议的端口映射。</div>
       <div id="content" class="content" tabindex="-1"></div>
     </main>

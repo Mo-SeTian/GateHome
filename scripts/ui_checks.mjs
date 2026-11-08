@@ -164,7 +164,7 @@ const forwarding=vm.createContext({
   icon:()=>'',heading:()=>'',empty:(title)=>title,objectMenu:(_name,body)=>body,
   firewallName:()=> '不限制来源 IP',firewallWaiting:()=>false
 });
-vm.runInContext(source.slice(source.indexOf('function forwardState('),source.indexOf('function openForward(')),forwarding);
+vm.runInContext("let forwardProtocolFilter='';"+source.slice(source.indexOf('function forwardState('),source.indexOf('function openForward(')),forwarding);
 assert.match(vm.runInContext('forwardsHTML()',forwarding),/还没有转发规则/);
 forwarding.rule={id:'native',name:'<script>test</script>',protocol:'tcp',listen_port:20022,upstream:'[::1]:22',firewall_id:'',enabled:true};
 forwarding.config.forwards=[forwarding.rule];
@@ -195,6 +195,10 @@ assert.ok(!forwardHTML.includes('<script>'));
 assert.match(forwardHTML,/&lt;script&gt;/);
 assert.match(forwardHTML,/\[::1\]:22/);
 for(const action of ['edit-forward','toggle-forward','delete-forward']) assert.match(forwardHTML,new RegExp('data-action="'+action+'" data-index="0"'));
+forwarding.config.forwards.unshift({...forwarding.rule,id:'tcp',name:'TCP fixture',protocol:'tcp'});
+const udpOnly=vm.runInContext("forwardProtocolFilter='udp';forwardsHTML()",forwarding);
+assert.doesNotMatch(udpOnly,/TCP fixture/);
+assert.match(udpOnly,/data-action="edit-forward" data-index="1"/,'filter changed the original rule index');
 console.log('Port forwards: running versus pending changes, disabled rules, IPv6 and escaped names PASS');
 
 const udpInput={disabled:false,closest:()=>udpLabel},udpLabel={hidden:false},udpForm={elements:{protocol:{value:'tcp'},udp_idle_seconds:udpInput}};
