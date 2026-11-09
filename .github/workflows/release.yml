@@ -81,6 +81,25 @@ jobs:
               '
           }
           metadata=$(find_release)
+          # A release published through the UI already has its selected channel and assets.
+          if [ "$metadata" != null ] && [ "$(jq -r '.draft' <<< "$metadata")" = false ]; then
+            jq -e --arg tag "$RELEASE_TAG" --argjson beta "$PRERELEASE" \
+              '(.tag_name == $tag) and (.prerelease == $beta)' <<< "$metadata" > /dev/null
+            published_dir="$RUNNER_TEMP/gatehome-published-assets"
+            mkdir -p "$published_dir"
+            for source in "${assets[@]}"; do
+              name=$(basename "$source")
+              asset_id=$(jq -er --arg name "$name" '
+                [.assets[] | select(.name == $name and .state == "uploaded")] |
+                select(length == 1) | .[0].id
+              ' <<< "$metadata")
+              gh api -H 'Accept: application/octet-stream' "repos/$GH_REPO/releases/assets/$asset_id" \
+                > "$published_dir/$name"
+            done
+            (cd "$published_dir" && sha256sum -c gatehome-SHA256SUMS)
+            echo 'Published release and asset checksums verified; keeping the existing publication.'
+            exit 0
+          fi
           if [ "$metadata" = null ]; then
             args=(--verify-tag --target "$target_commit" --draft --title "GateHome $RELEASE_TAG" --generate-notes)
             if [ "$PRERELEASE" = true ]; then args+=(--prerelease); fi
