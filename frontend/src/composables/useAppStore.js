@@ -170,74 +170,6 @@ export function useAppStore() {
     }
   ])
 
-  // ================= 6. DDNS GROUPS (动态域名任务组) =================
-  const ddnsTasks = ref([
-    {
-      id: 'ddns_cf_main',
-      name: 'Cloudflare 个人根域名组',
-      provider: 'Cloudflare',
-      zone: 'nas.tech',
-      hosts: ['@', 'cloud', 'vault', 'plex'],
-      mode: 'dual', // 'ipv4' | 'ipv6' | 'dual'
-      enabled: true,
-      interval: 300,
-      lastSync: '2 分钟前',
-      status: 'synced',
-      currentIpv4: '114.88.23.109',
-      currentIpv6: '2408:8207:1800::4a91',
-      message: 'IPv4 与 IPv6 解析记录已全部同步正常'
-    },
-    {
-      id: 'ddns_aliyun',
-      name: '阿里云 DNS 国内备份',
-      provider: 'Aliyun 阿里云 DNS',
-      zone: 'example.cn',
-      hosts: ['gate', 'vpn'],
-      mode: 'ipv4',
-      enabled: true,
-      interval: 600,
-      lastSync: '12 分钟前',
-      status: 'synced',
-      currentIpv4: '114.88.23.109',
-      currentIpv6: '',
-      message: 'IPv4 解析记录匹配成功'
-    }
-  ])
-
-  // ================= 8. CERTIFICATES (ACME SSL 证书) =================
-  const certificates = ref([
-    {
-      id: 'cert_1',
-      domain: '*.nas.tech, nas.tech',
-      issuer: "Let's Encrypt Authority X3",
-      expiresAt: '2026-12-28',
-      daysLeft: 49,
-      status: 'valid',
-      autoRenew: true,
-      keyType: 'ECDSA P-256'
-    },
-    {
-      id: 'cert_2',
-      domain: 'gate.internal.lan',
-      issuer: 'GateHome Internal CA',
-      expiresAt: '2027-10-15',
-      daysLeft: 340,
-      status: 'valid',
-      autoRenew: true,
-      keyType: 'RSA 4096'
-    },
-    {
-      id: 'cert_3',
-      domain: 'home.iot.tech',
-      issuer: 'ZeroSSL Global TLS CA',
-      expiresAt: '2026-11-20',
-      daysLeft: 11,
-      status: 'expiring_soon',
-      autoRenew: true,
-      keyType: 'ECDSA P-256'
-    }
-  ])
-
   // ================= 12. MCP & BACKUPS & SETTINGS =================
   const mcp = reactive({
     enabled: true,
@@ -295,8 +227,6 @@ export function useAppStore() {
     openCmdk,
     closeCmdk,
     routes,
-    ddnsTasks,
-    certificates,
     mcp,
     backups,
     settings

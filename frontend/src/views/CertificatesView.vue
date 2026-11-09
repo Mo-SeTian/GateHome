@@ -1,262 +1,308 @@
 <template>
-  <div class="certificates-page animate-fade-in">
-    <div class="page-topbar">
+  <div class="report-page animate-fade-in">
+    <div class="report-heading">
       <div>
-        <h1 class="page-title">SSL / TLS 证书管理</h1>
-        <p class="page-subtitle">Let's Encrypt 自动申请、ACME HTTP-01/DNS-01 验证与全生命周期续期追踪</p>
+        <h1>SSL / TLS 证书管理</h1>
+        <p>按任务管理普通域名与泛域名证书，Cloudflare DNS-01 自动验证</p>
       </div>
-      <div class="header-actions">
-        <button class="btn btn-secondary" @click="checkRenewAll">
-          <RefreshCw :size="14" :class="{ 'spin-icon': isChecking }" />
-          检查全部到期续签
-        </button>
-        <button class="btn btn-primary" @click="openApplyModal">
-          <Plus :size="15" />
-          申请新证书
+      <div class="report-actions">
+        <button class="btn btn-secondary" :disabled="loading || isSavingConfig" @click="reload">
+          刷新状态</button
+        ><button
+          class="btn btn-secondary"
+          :disabled="!gatewayConfig || isSavingConfig"
+          @click="edit(undefined, true)"
+        >
+          证书配置</button
+        ><button class="btn btn-secondary" :disabled="!acme?.enabled || queuing || job?.running" @click="run">
+          检查 / 申请证书</button
+        ><button class="btn btn-primary" :disabled="!gatewayConfig || isSavingConfig" @click="edit()">
+          <Plus :size="15" /> 添加证书任务
         </button>
       </div>
     </div>
-
-    <!-- Certificates Grid -->
+    <p v-if="error || pollError" class="report-error" role="alert">{{ error || pollError }}</p>
+    <p v-if="acme?.staging" class="report-warning" role="status">
+      当前为测试环境，签发的证书不被浏览器信任。正式环境切换会加载各自独立的证书。
+    </p>
+    <div v-if="acme" class="job-summary">
+      <span class="badge" :class="jobState(acme.enabled, job).tone">{{
+        jobState(acme.enabled, job).label
+      }}</span>
+      <p>{{ job?.message || '尚未运行证书检查' }}</p>
+      <p class="report-note">
+        最近检查 {{ reportDate(job?.last_run) }} · 最近成功 {{ reportDate(job?.last_success) }} · 自动签发{{
+          acme.enabled ? '已启用' : '已停用'
+        }}
+      </p>
+    </div>
+    <p class="report-note">
+      全局检查只处理已启用且需要申请或续期的任务，每小时自动检查。停用任务只暂停申请与续期，已有有效证书继续加载；移除任务会停止加载该任务证书。
+    </p>
     <div class="certs-grid">
-      <SpotlightCard 
-        v-for="cert in certificates" 
-        :key="cert.id"
-        class="cert-card"
+      <SpotlightCard
+        v-for="request in acme?.requests"
+        :key="request.id"
+        class="report-panel cert-card"
+        :data-request-id="request.id"
       >
-        <div class="card-head">
-          <div class="lock-icon-box" :class="cert.status">
-            <Lock :size="18" />
-          </div>
-          <div class="cert-status-group">
-            <span class="badge" :class="cert.status === 'valid' ? 'badge-ok' : 'badge-warn'">
-              <span class="status-dot" :class="cert.status === 'valid' ? 'ok' : 'warn'" />
-              {{ cert.status === 'valid' ? '证书有效' : '即将到期' }}
-            </span>
-          </div>
+        <div class="report-heading">
+          <Lock :size="18" /><span
+            class="badge"
+            :class="
+              certificate(request.id)?.ready ? 'badge-ok' : expired(request.id) ? 'badge-bad' : 'badge-warn'
+            "
+            >{{
+              certificate(request.id)?.ready
+                ? '证书有效'
+                : expired(request.id)
+                  ? '证书已过期'
+                  : '等待有效证书'
+            }}</span
+          >
         </div>
-
-        <div class="cert-domain-title mono-text">{{ cert.domain }}</div>
-
-        <div class="cert-meta-box">
-          <div class="meta-item">
-            <span class="meta-label">颁发者 (CA):</span>
-            <span class="meta-val">{{ cert.issuer }}</span>
+        <p class="domains mono-text">{{ request.domains.join('\n') }}</p>
+        <dl>
+          <div>
+            <dt>DNS 验证</dt>
+            <dd>Cloudflare · DNS-01</dd>
           </div>
-          <div class="meta-item">
-            <span class="meta-label">加密算法:</span>
-            <span class="meta-val mono-text">{{ cert.keyType }}</span>
+          <div>
+            <dt>申请算法</dt>
+            <dd>ECDSA P-256</dd>
           </div>
-          <div class="meta-item">
-            <span class="meta-label">到期时间:</span>
-            <span class="meta-val mono-text">{{ cert.expiresAt }}</span>
+          <div>
+            <dt>独立凭据</dt>
+            <dd>
+              {{
+                gatewayConfigSnapshot.certificate_credentials_configured?.[request.id] ? '已配置' : '尚未配置'
+              }}
+            </dd>
           </div>
-          <div class="meta-item">
-            <span class="meta-label">剩余天数:</span>
-            <span class="days-pill" :class="{ warn: cert.daysLeft < 30 }">
-              {{ cert.daysLeft }} 天
-            </span>
+          <div>
+            <dt>签发环境</dt>
+            <dd>{{ (certificate(request.id)?.staging ?? acme.staging) ? '测试环境' : '正式环境' }}</dd>
           </div>
-        </div>
-
-        <div class="card-footer">
-          <div class="auto-renew-chip">
-            <CheckCircle :size="12" class="ok-icon" />
-            <span>自动轮换续期已启用</span>
+          <div>
+            <dt>到期时间</dt>
+            <dd>{{ reportDate(certificate(request.id)?.not_after) }}</dd>
           </div>
-          <div class="actions">
-            <button class="btn btn-secondary btn-sm" @click="renewCert(cert)">
-              立即续期
-            </button>
-            <button class="btn btn-ghost btn-sm text-bad" @click="deleteCert(cert)">
-              <Trash2 :size="13" />
-            </button>
+          <div>
+            <dt>剩余时间</dt>
+            <dd>{{ remaining(request.id) }}</dd>
           </div>
+          <div>
+            <dt>申请与续期</dt>
+            <dd>{{ request.enabled ? '任务已启用' : '任务已暂停' }}</dd>
+          </div>
+        </dl>
+        <div class="report-actions">
+          <button class="btn btn-secondary btn-sm" :disabled="isSavingConfig" @click="edit(request)">
+            编辑任务</button
+          ><button class="btn btn-ghost btn-sm" :disabled="isSavingConfig" @click="toggle(request)">
+            {{ request.enabled ? '暂停续期' : '启用续期' }}</button
+          ><button class="btn btn-ghost btn-sm text-bad" :disabled="isSavingConfig" @click="remove(request)">
+            移除任务
+          </button>
         </div>
       </SpotlightCard>
     </div>
-
-    <!-- Apply Modal -->
-    <transition name="modal-fade">
-      <div v-if="isModalOpen" class="modal-backdrop" @click.self="isModalOpen = false">
-        <div class="modal-dialog">
-          <div class="modal-header">
-            <h3 class="modal-title">申请 Let's Encrypt SSL 证书</h3>
-            <button class="close-modal-btn" @click="isModalOpen = false"><X :size="18" /></button>
-          </div>
-          <form class="modal-body" @submit.prevent="applyNewCert">
-            <div class="form-group">
-              <label class="form-label">申请域名 (多个域名逗号分隔)</label>
-              <input v-model="form.domain" type="text" placeholder="example.com, *.example.com" class="form-input mono-text" required />
-            </div>
-            <div class="form-group">
-              <label class="form-label">验证方式 (Challenge)</label>
-              <select v-model="form.challenge" class="form-select">
-                <option value="http">HTTP-01 (自动放置 Token 文件)</option>
-                <option value="dns">DNS-01 (自动配置 Cloudflare/Aliyun DNS TXT)</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label class="form-label">私钥算法</label>
-              <select v-model="form.keyType" class="form-select">
-                <option value="ECDSA P-256">ECDSA P-256 (推荐 · 更快更安全)</option>
-                <option value="RSA 2048">RSA 2048 (兼容老设备)</option>
-                <option value="RSA 4096">RSA 4096 (高强度)</option>
-              </select>
-            </div>
-            <div class="modal-footer">
-              <button type="button" class="btn btn-secondary" @click="isModalOpen = false">取消</button>
-              <button type="submit" class="btn btn-primary" :disabled="isSubmitting">
-                {{ isSubmitting ? '正在签发中...' : '提交签发' }}
-              </button>
-            </div>
-          </form>
-        </div>
-      </div>
-    </transition>
+    <p v-if="acme && !acme.requests.length" class="report-empty">
+      尚无证书任务，可添加一个或多个普通域名与泛域名。
+    </p>
+    <CertificateEditor
+      v-if="editor"
+      :snapshot="editor.snapshot"
+      :request="editor.request"
+      :settings="editor.settings"
+      @close="editor = null"
+      @saved="saved"
+    />
   </div>
 </template>
-
 <script setup>
-import { ref } from 'vue'
-import { RefreshCw, Plus, Lock, CheckCircle, Trash2, X } from 'lucide-vue-next'
+import { computed, onMounted, onUnmounted, ref, shallowRef } from 'vue'
+import { Lock, Plus } from 'lucide-vue-next'
 import SpotlightCard from '@/components/SpotlightCard.vue'
-import { useAppStore } from '@/composables/useAppStore'
+import CertificateEditor from '@/components/CertificateEditor.vue'
+import { adminApi } from '@/api/admin'
+import { jobState, replaceCertificate } from '@/api/dns'
+import { reportDate } from '@/api/reports'
+import { useGatewayStatus } from '@/composables/useGatewayStatus'
 import { useToast } from '@/composables/useToast'
-
-const { certificates } = useAppStore()
-const { success, info } = useToast()
-
-const isChecking = ref(false)
-const isModalOpen = ref(false)
-const isSubmitting = ref(false)
-
-const form = ref({
-  domain: '',
-  challenge: 'http',
-  keyType: 'ECDSA P-256'
-})
-
-const checkRenewAll = () => {
-  isChecking.value = true
-  setTimeout(() => {
-    isChecking.value = false
-    success('所有证书有效性已复核完毕，下一次自动续签预定在到期前 30 天')
-  }, 700)
+import '@/styles/reports.css'
+const {
+  gatewayConfig,
+  gatewayConfigSnapshot,
+  gatewayStatus,
+  isSavingConfig,
+  refreshConfig,
+  refreshStatus,
+  saveConfig
+} = useGatewayStatus()
+const toast = useToast(),
+  acme = computed(() => gatewayConfig.value?.acme),
+  job = computed(() => gatewayStatus.value?.jobs?.acme)
+const loading = ref(false),
+  error = ref(''),
+  pollError = ref(''),
+  queuing = ref(false),
+  editor = shallowRef(null),
+  now = ref(Date.now())
+const controller = new AbortController()
+let timer
+function certificate(id) {
+  return gatewayStatus.value?.certificates.find((item) => item.id === id)
 }
-
-const renewCert = (cert) => {
-  cert.daysLeft = 90
-  cert.status = 'valid'
-  cert.expiresAt = '2027-02-09'
-  success(`证书 "${cert.domain}" 续期成功，有效期已延长至 90 天`)
+function remaining(id) {
+  const value = certificate(id)?.not_after
+  if (!value || value.startsWith('0001')) return '尚未签发'
+  const days = Math.ceil((Date.parse(value) - now.value) / 86400000)
+  return days <= 0 ? '已到期' : `${days} 天`
 }
-
-const openApplyModal = () => {
-  form.value = {
-    domain: '',
-    challenge: 'http',
-    keyType: 'ECDSA P-256'
+function expired(id) {
+  const value = certificate(id)?.not_after
+  return value && !value.startsWith('0001') && Date.parse(value) <= now.value
+}
+async function reload() {
+  if (loading.value || isSavingConfig.value) return
+  loading.value = true
+  error.value = ''
+  try {
+    await Promise.all([refreshConfig(controller.signal), refreshStatus(controller.signal)])
+  } catch (err) {
+    if (!controller.signal.aborted) error.value = err.message
+  } finally {
+    loading.value = false
   }
-  isModalOpen.value = true
 }
-
-const applyNewCert = () => {
-  isSubmitting.value = true
-  setTimeout(() => {
-    certificates.value.unshift({
-      id: `cert_${Date.now()}`,
-      domain: form.value.domain,
-      issuer: "Let's Encrypt Authority X3",
-      expiresAt: '2027-02-09',
-      daysLeft: 90,
-      status: 'valid',
-      autoRenew: true,
-      keyType: form.value.keyType
+function edit(request, settings = false) {
+  const snapshot = structuredClone(gatewayConfigSnapshot.value)
+  editor.value = {
+    snapshot,
+    request: request ? snapshot.config.acme.requests.find((item) => item.id === request.id) : undefined,
+    settings
+  }
+}
+async function saved() {
+  editor.value = null
+  toast.success('证书配置已保存')
+  await reload()
+}
+async function toggle(request) {
+  const snapshot = structuredClone(gatewayConfigSnapshot.value)
+  try {
+    await saveConfig(
+      snapshot,
+      replaceCertificate(snapshot, { ...request, enabled: !request.enabled }, request.id)
+    )
+    await saved()
+  } catch (err) {
+    toast.error(err.message)
+  }
+}
+async function remove(request) {
+  if (
+    !confirm(
+      `移除证书任务「${request.domains.join(', ')}」？此任务证书将不再加载，关联 HTTPS 服务可能不可用。`
+    )
+  )
+    return
+  const snapshot = structuredClone(gatewayConfigSnapshot.value)
+  try {
+    await saveConfig(snapshot, {
+      ...snapshot.config,
+      acme: {
+        ...snapshot.config.acme,
+        requests: snapshot.config.acme.requests.filter((item) => item.id !== request.id)
+      }
     })
-    isSubmitting.value = false
-    isModalOpen.value = false
-    success(`SSL 证书 "${form.value.domain}" 已成功签发并部署`)
-  }, 1000)
-}
-
-const deleteCert = (cert) => {
-  if (confirm(`确定要移除证书 "${cert.domain}" 吗？关联的反代将无法使用 HTTPS`)) {
-    certificates.value = certificates.value.filter(c => c.id !== cert.id)
-    info(`已删除证书: ${cert.domain}`)
+    await saved()
+  } catch (err) {
+    toast.error(err.message)
   }
 }
+async function run() {
+  if (queuing.value) return
+  queuing.value = true
+  try {
+    const result = await adminApi.runJobs('acme')
+    toast.info(result.message || '检查任务已加入队列，请等待真实执行结果')
+    await refreshStatus(controller.signal)
+  } catch (err) {
+    if (!controller.signal.aborted) toast.error(err.message)
+  } finally {
+    queuing.value = false
+  }
+}
+onMounted(() => {
+  reload()
+  timer = setInterval(async () => {
+    now.value = Date.now()
+    try {
+      await refreshStatus(controller.signal)
+      if (!controller.signal.aborted) pollError.value = ''
+    } catch (err) {
+      if (!controller.signal.aborted) pollError.value = err.message
+    }
+  }, 5000)
+})
+onUnmounted(() => {
+  clearInterval(timer)
+  controller.abort()
+})
 </script>
-
 <style scoped>
-.certificates-page { display: flex; flex-direction: column; gap: 20px; }
-.page-topbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; }
-.page-title { font-size: 22px; font-weight: 700; color: var(--ink); }
-.page-subtitle { font-size: 13px; color: var(--muted); margin-top: 3px; }
-.header-actions { display: flex; gap: 10px; }
-.spin-icon { animation: spin 0.8s linear infinite; }
-@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-
-.certs-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
-.cert-card { padding: 18px; display: flex; flex-direction: column; gap: 12px; }
-
-.card-head { display: flex; align-items: center; justify-content: space-between; }
-.lock-icon-box {
-  width: 34px; height: 34px; border-radius: var(--radius-sm);
-  display: flex; align-items: center; justify-content: center;
+.certs-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 16px;
+}
+.cert-card :deep(.card-inner) {
+  display: grid;
+  gap: 14px;
+}
+.domains {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 14px;
+}
+.cert-card dl {
+  display: grid;
+  gap: 10px;
+  font-size: 12px;
+}
+.cert-card dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+dt,
+.job-summary {
+  color: var(--muted);
+}
+dd {
+  margin: 0;
+  color: var(--ink-secondary);
+}
+.job-summary {
+  padding: 16px;
   border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  display: grid;
+  gap: 10px;
 }
-.lock-icon-box.valid { background: rgba(16, 185, 129, 0.12); color: var(--ok); }
-.lock-icon-box.expiring_soon { background: rgba(245, 158, 11, 0.12); color: var(--warn); }
-
-.cert-domain-title { font-size: 14.5px; font-weight: 700; color: var(--ink); }
-
-.cert-meta-box {
-  background: var(--strip-bg); border: 1px solid var(--line);
-  border-radius: var(--radius-sm); padding: 10px 14px;
-  display: flex; flex-direction: column; gap: 6px; font-size: 12px;
+.text-bad {
+  color: var(--bad);
 }
-.meta-item { display: flex; align-items: center; justify-content: space-between; }
-.meta-label { color: var(--faint); }
-.meta-val { color: var(--ink); }
-
-.days-pill {
-  font-family: var(--mono); font-weight: 600; font-size: 11px;
-  padding: 2px 7px; border-radius: 4px;
-  background: rgba(16, 185, 129, 0.15); color: var(--ok);
+.job-summary > .badge {
+  justify-self: start;
 }
-.days-pill.warn { background: rgba(245, 158, 11, 0.15); color: var(--warn); }
-
-.card-footer {
-  display: flex; align-items: center; justify-content: space-between;
-  border-top: 1px solid var(--line); padding-top: 10px; font-size: 11px;
+@media (max-width: 900px) {
+  .certs-grid {
+    grid-template-columns: 1fr;
+  }
 }
-.auto-renew-chip { display: flex; align-items: center; gap: 5px; color: var(--muted); }
-.ok-icon { color: var(--ok); }
-.actions { display: flex; gap: 4px; }
-.text-bad { color: var(--bad) !important; }
-
-/* Modal */
-.modal-backdrop {
-  position: fixed; inset: 0; background: rgba(0,0,0,0.65);
-  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
-  z-index: 1050; display: flex; align-items: center; justify-content: center; padding: 20px;
-}
-.modal-dialog {
-  width: 100%; max-width: 480px; background: var(--card-bg);
-  border: 1px solid var(--card-border-hover); border-radius: var(--radius-card);
-  backdrop-filter: blur(30px); -webkit-backdrop-filter: blur(30px);
-  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.6), var(--inner-highlight);
-  overflow: hidden;
-}
-.modal-header { padding: 18px 20px; border-bottom: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; }
-.modal-title { font-size: 16px; font-weight: 700; color: var(--ink); }
-.close-modal-btn { color: var(--muted); }
-.modal-body { padding: 20px; display: flex; flex-direction: column; gap: 14px; }
-.form-group { display: flex; flex-direction: column; gap: 6px; }
-.form-label { font-size: 12px; font-weight: 600; color: var(--ink-secondary); }
-.modal-footer { display: flex; justify-content: flex-end; gap: 10px; padding-top: 8px; }
-
-@media (max-width: 1100px) { .certs-grid { grid-template-columns: repeat(2, 1fr); } }
-@media (max-width: 700px) { .certs-grid { grid-template-columns: 1fr; } }
 </style>

@@ -1,245 +1,319 @@
 <template>
-  <div class="ddns-page animate-fade-in">
-    <div class="page-topbar">
+  <div class="report-page ddns-page animate-fade-in">
+    <div class="report-heading">
       <div>
-        <h1 class="page-title">动态域名解析 (DDNS)</h1>
-        <p class="page-subtitle">自动检测公网 IPv4 / IPv6 地址变动并同步至 DNS 托管商</p>
+        <h1>动态域名解析 DDNS</h1>
+        <p>每组独立配置 Cloudflare 账户与域名，自动同步 IPv4 / IPv6，仅修改 DNS 灰云记录</p>
       </div>
-      <div class="header-actions">
-        <button class="btn btn-secondary" @click="syncAllTasks">
-          <RefreshCw :size="14" :class="{ 'spin-icon': isSyncing }" />
-          立即强制同步
-        </button>
-        <button class="btn btn-primary" @click="openCreateModal">
-          <Plus :size="15" />
-          添加 DDNS 任务
+      <div class="report-actions">
+        <button class="btn btn-secondary" :disabled="loading || isSavingConfig" @click="reload(true)">
+          刷新配置与解析</button
+        ><button
+          class="btn btn-secondary"
+          :disabled="queuing || !groups.some((item) => item.enabled)"
+          @click="sync()"
+        >
+          同步全部启用组</button
+        ><button
+          class="btn btn-primary"
+          :disabled="!gatewayConfig || loading || isSavingConfig"
+          @click="edit()"
+        >
+          <Plus :size="15" /> 添加 DDNS 组
         </button>
       </div>
     </div>
-
-    <!-- DDNS Task Cards -->
+    <p v-if="error" class="report-error" role="alert">{{ error }}</p>
+    <p v-if="pollError" class="report-error" role="alert">{{ pollError }}</p>
+    <PublicIPMonitor v-if="gatewayConfig" @network="network = $event" />
+    <p class="report-note">
+      公网 IP 查询保持直连。保存后立即生效；同一 A / AAAA 记录不可跨组重复。删除组或域名不会删除托管商已有的
+      DNS 记录。
+    </p>
     <div class="ddns-grid">
-      <SpotlightCard 
-        v-for="task in ddnsTasks" 
-        :key="task.id"
-        class="ddns-card"
+      <SpotlightCard
+        v-for="group in groups"
+        :key="group.id"
+        class="report-panel ddns-card"
+        :data-group-id="group.id"
       >
-        <div class="card-head">
-          <div class="provider-badge">
-            <Globe :size="16" class="provider-icon" />
-            <span class="provider-name">{{ task.provider }}</span>
-          </div>
-          <span class="badge" :class="task.status === 'synced' ? 'badge-ok' : 'badge-warn'">
-            <span class="status-dot" :class="task.status === 'synced' ? 'ok' : 'warn'" />
-            {{ task.status === 'synced' ? '已同步' : '同步中' }}
-          </span>
+        <div class="report-heading">
+          <strong>{{ group.name }}</strong
+          ><span class="badge" :class="state(group).tone">{{ state(group).label }}</span>
         </div>
-
-        <div class="domain-title mono-text">{{ task.domain }}</div>
-
-        <div class="task-details-box">
-          <div class="detail-row">
-            <span class="detail-label">解析记录类型:</span>
-            <span class="badge badge-neutral mono-text">{{ task.recordType }}</span>
-          </div>
-          <div class="detail-row">
-            <span class="detail-label">当前解析 IP:</span>
-            <span class="ip-text mono-text">{{ task.currentIp }}</span>
-          </div>
-          <div class="detail-row">
-            <span class="detail-label">TTL 设置:</span>
-            <span class="detail-val">{{ task.ttl }}</span>
-          </div>
-          <div class="detail-row">
-            <span class="detail-label">上次同步:</span>
-            <span class="detail-val">{{ task.lastSync }}</span>
-          </div>
+        <p class="mono-text domain-title">{{ group.zone }} · {{ modeLabel(group.mode) }}</p>
+        <p class="report-note">
+          Cloudflare · 每 {{ group.interval.toLocaleString() }} 秒 ·
+          {{
+            gatewayConfigSnapshot.dns_credentials_configured?.[group.id]
+              ? '独立 Token 已配置'
+              : '尚未配置 Token'
+          }}
+        </p>
+        <p class="report-note">{{ job(group.id)?.message || '此组尚未运行' }}</p>
+        <p class="report-note">
+          检查 {{ reportDate(job(group.id)?.last_run) }} · 成功 {{ reportDate(job(group.id)?.last_success) }}
+        </p>
+        <div v-if="network?.groups[group.id]" class="group-ips">
+          <p v-for="family in families(group.mode)" :key="family" class="report-note">
+            {{ family === 'ipv4' ? 'IPv4' : 'IPv6' }} 检测：<span class="mono-text">{{
+              network.groups[group.id][family].address || '未获取'
+            }}</span
+            ><span v-if="network.groups[group.id][family].error" class="report-error">
+              · {{ network.groups[group.id][family].error }}</span
+            >
+          </p>
         </div>
-
-        <div class="card-footer">
-          <button class="btn btn-secondary btn-sm" @click="syncSingle(task)">
-            <RefreshCw :size="12" /> 单独同步
-          </button>
-          <button class="btn btn-ghost btn-sm text-bad" @click="deleteTask(task)">
-            <Trash2 :size="13" />
+        <div class="report-table-wrap">
+          <table class="report-table dns-records">
+            <thead>
+              <tr>
+                <th>域名</th>
+                <th>公网解析 A / AAAA</th>
+                <th>最近查询</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="host in group.hosts" :key="host">
+                <td class="mono-text">{{ host }}</td>
+                <td>
+                  <div v-for="family in ['ipv4', 'ipv6']" :key="family">
+                    <span>{{ family === 'ipv4' ? 'A' : 'AAAA' }}: </span
+                    ><span :class="{ 'report-error': record(group.id, host)?.[family + '_error'] }">{{
+                      address(group.id, host, family)
+                    }}</span>
+                  </div>
+                </td>
+                <td>{{ reportDate(record(group.id, host)?.checked_at) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <details v-if="references(group.id).length">
+          <summary>关联 {{ references(group.id).length }} 个反代组</summary>
+          <p v-for="name in references(group.id)" :key="name" class="report-note">{{ name }}</p>
+        </details>
+        <div class="report-actions card-actions">
+          <button
+            class="btn btn-secondary btn-sm"
+            :disabled="!group.enabled || queuing || job(group.id)?.running"
+            @click="sync(group.id)"
+          >
+            单独同步</button
+          ><button class="btn btn-secondary btn-sm" :disabled="isSavingConfig" @click="edit(group, true)">
+            编辑域名</button
+          ><button class="btn btn-ghost btn-sm" :disabled="isSavingConfig" @click="edit(group)">编辑组</button
+          ><button class="btn btn-ghost btn-sm" :disabled="isSavingConfig" @click="toggle(group)">
+            {{ group.enabled ? '停用' : '启用' }}</button
+          ><button
+            class="btn btn-ghost btn-sm text-bad"
+            :disabled="
+              isSavingConfig ||
+              references(group.id).length > 0 ||
+              gatewayConfig.ddns.ip_monitor.group_id === group.id
+            "
+            :title="'先解除反代组和公网检测引用，再删除'"
+            @click="remove(group)"
+          >
+            删除
           </button>
         </div>
       </SpotlightCard>
     </div>
-
-    <!-- Create Modal -->
-    <transition name="modal-fade">
-      <div v-if="isModalOpen" class="modal-backdrop" @click.self="isModalOpen = false">
-        <div class="modal-dialog">
-          <div class="modal-header">
-            <h3 class="modal-title">添加 DDNS 动态域名任务</h3>
-            <button class="close-modal-btn" @click="isModalOpen = false"><X :size="18" /></button>
-          </div>
-          <form class="modal-body" @submit.prevent="createTask">
-            <div class="form-group">
-              <label class="form-label">DNS 托管商</label>
-              <select v-model="form.provider" class="form-select">
-                <option value="Cloudflare">Cloudflare (推荐)</option>
-                <option value="Aliyun 阿里云 DNS">Aliyun 阿里云 DNS</option>
-                <option value="DNSPod (腾讯云)">DNSPod (腾讯云)</option>
-                <option value="HuaweiCloud 华为云">HuaweiCloud 华为云</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label class="form-label">解析域名</label>
-              <input v-model="form.domain" type="text" placeholder="nas.example.com" class="form-input mono-text" required />
-            </div>
-            <div class="form-row-2">
-              <div class="form-group">
-                <label class="form-label">记录类型</label>
-                <select v-model="form.recordType" class="form-select">
-                  <option value="A (IPv4)">A (IPv4)</option>
-                  <option value="AAAA (IPv6)">AAAA (IPv6)</option>
-                </select>
-              </div>
-              <div class="form-group">
-                <label class="form-label">TTL</label>
-                <input v-model="form.ttl" type="text" placeholder="自动 / 600s" class="form-input" />
-              </div>
-            </div>
-            <div class="form-group">
-              <label class="form-label">API 凭据密钥 / Token</label>
-              <input type="password" placeholder="••••••••••••••••••••" class="form-input" required />
-            </div>
-            <div class="modal-footer">
-              <button type="button" class="btn btn-secondary" @click="isModalOpen = false">取消</button>
-              <button type="submit" class="btn btn-primary">保存任务</button>
-            </div>
-          </form>
-        </div>
-      </div>
-    </transition>
+    <p v-if="gatewayConfig && !groups.length" class="report-empty">
+      尚无 DDNS 任务组，可先停用保存账户配置，再验证并启用。
+    </p>
+    <DdnsEditor
+      v-if="editor"
+      :snapshot="editor.snapshot"
+      :group="editor.group"
+      :hosts-only="editor.hostsOnly"
+      :interfaces="network?.interfaces"
+      :defaults="gatewayStatus?.ip_query_defaults"
+      @close="editor = null"
+      @saved="saved"
+    />
   </div>
 </template>
-
 <script setup>
-import { ref } from 'vue'
-import { RefreshCw, Plus, Globe, Trash2, X } from 'lucide-vue-next'
+import { computed, onMounted, onUnmounted, ref, shallowRef } from 'vue'
+import { Plus } from 'lucide-vue-next'
 import SpotlightCard from '@/components/SpotlightCard.vue'
-import { useAppStore } from '@/composables/useAppStore'
+import DdnsEditor from '@/components/DdnsEditor.vue'
+import PublicIPMonitor from '@/components/PublicIPMonitor.vue'
+import { adminApi } from '@/api/admin'
+import { jobState, replaceDDNS } from '@/api/dns'
+import { reportDate } from '@/api/reports'
+import { useGatewayStatus } from '@/composables/useGatewayStatus'
 import { useToast } from '@/composables/useToast'
-
-const { ddnsTasks } = useAppStore()
-const { success, info } = useToast()
-
-const isSyncing = ref(false)
-const isModalOpen = ref(false)
-const form = ref({
-  provider: 'Cloudflare',
-  domain: '',
-  recordType: 'A (IPv4)',
-  ttl: '自动'
-})
-
-const syncAllTasks = () => {
-  isSyncing.value = true
-  setTimeout(() => {
-    isSyncing.value = false
-    ddnsTasks.value.forEach(t => {
-      t.lastSync = '刚刚'
-      t.status = 'synced'
+import '@/styles/reports.css'
+const {
+  gatewayConfig,
+  gatewayConfigSnapshot,
+  gatewayStatus,
+  isSavingConfig,
+  refreshConfig,
+  refreshStatus,
+  saveConfig
+} = useGatewayStatus()
+const toast = useToast(),
+  groups = computed(() => gatewayConfig.value?.ddns.groups ?? [])
+const loading = ref(false),
+  error = ref(''),
+  pollError = ref(''),
+  queuing = ref(false),
+  records = shallowRef({}),
+  network = shallowRef(null),
+  editor = shallowRef(null)
+const controller = new AbortController()
+let recordsVersion = 0,
+  timer
+function job(id) {
+  return gatewayStatus.value?.jobs?.['ddns:' + id]
+}
+function state(group) {
+  return jobState(group.enabled, job(group.id))
+}
+function modeLabel(mode) {
+  return { ipv4: 'IPv4 · A', ipv6: 'IPv6 · AAAA', dual: 'IPv4 + IPv6' }[mode]
+}
+function families(mode) {
+  return mode === 'dual' ? ['ipv4', 'ipv6'] : [mode]
+}
+function references(id) {
+  return (gatewayConfig.value?.groups ?? [])
+    .filter((item) => item.ddns_group_id === id)
+    .map((item) => item.name)
+}
+function record(id, host) {
+  return records.value[id]?.find((item) => item.host === host)
+}
+function address(id, host, family) {
+  const row = record(id, host)
+  return (
+    row?.[family + '_error'] ||
+    row?.[family]?.join(', ') ||
+    (row?.running ? '查询中…' : !row?.checked_at || row.checked_at.startsWith('0001') ? '等待查询' : '无记录')
+  )
+}
+async function readRecords(force = false) {
+  const version = ++recordsVersion,
+    result = await adminApi.ddnsRecords(force, controller.signal)
+  if (!controller.signal.aborted && version === recordsVersion) records.value = result.groups
+}
+async function reload(force = false) {
+  if (loading.value || isSavingConfig.value) return
+  loading.value = true
+  error.value = ''
+  try {
+    await refreshConfig(controller.signal)
+    await Promise.all([refreshStatus(controller.signal), readRecords(force)])
+  } catch (err) {
+    if (!controller.signal.aborted) error.value = err.message
+  } finally {
+    loading.value = false
+  }
+}
+function edit(group, hostsOnly = false) {
+  const snapshot = structuredClone(gatewayConfigSnapshot.value)
+  editor.value = {
+    snapshot,
+    group: group ? snapshot.config.ddns.groups.find((item) => item.id === group.id) : undefined,
+    hostsOnly
+  }
+}
+async function saved() {
+  editor.value = null
+  toast.success('DDNS 配置已保存，后台将按配置检查')
+  await reload()
+}
+async function toggle(group) {
+  const snapshot = structuredClone(gatewayConfigSnapshot.value)
+  try {
+    await saveConfig(snapshot, replaceDDNS(snapshot, { ...group, enabled: !group.enabled }, group.id))
+    await saved()
+  } catch (err) {
+    toast.error(err.message)
+  }
+}
+async function remove(group) {
+  if (!confirm(`删除 DDNS 组「${group.name}」？托管商已有记录会保留。`)) return
+  const snapshot = structuredClone(gatewayConfigSnapshot.value)
+  try {
+    await saveConfig(snapshot, {
+      ...snapshot.config,
+      ddns: {
+        ...snapshot.config.ddns,
+        groups: snapshot.config.ddns.groups.filter((item) => item.id !== group.id)
+      }
     })
-    success('所有 DDNS 动态域名已强制更新成功')
-  }, 700)
-}
-
-const syncSingle = (task) => {
-  task.lastSync = '刚刚'
-  success(`域名 "${task.domain}" 同步成功 (当前IP: ${task.currentIp})`)
-}
-
-const openCreateModal = () => {
-  form.value = {
-    provider: 'Cloudflare',
-    domain: '',
-    recordType: 'A (IPv4)',
-    ttl: '自动'
-  }
-  isModalOpen.value = true
-}
-
-const createTask = () => {
-  ddnsTasks.value.push({
-    id: `ddns_${Date.now()}`,
-    provider: form.value.provider,
-    domain: form.value.domain,
-    recordType: form.value.recordType,
-    currentIp: form.value.recordType.includes('IPv6') ? '2408:8207:1800::4a91' : '114.88.23.109',
-    lastSync: '刚刚',
-    status: 'synced',
-    ttl: form.value.ttl || '自动'
-  })
-  success(`DDNS 任务 "${form.value.domain}" 已建立`)
-  isModalOpen.value = false
-}
-
-const deleteTask = (task) => {
-  if (confirm(`确定要移除 DDNS 任务 "${task.domain}" 吗？`)) {
-    ddnsTasks.value = ddnsTasks.value.filter(t => t.id !== task.id)
-    info(`已删除任务: ${task.domain}`)
+    await saved()
+  } catch (err) {
+    toast.error(err.message)
   }
 }
+async function sync(id) {
+  if (queuing.value) return
+  queuing.value = true
+  try {
+    const result = id ? await adminApi.syncDDNS(id) : await adminApi.runJobs('ddns')
+    toast.info(result.message || '同步任务已加入队列，请等待执行结果')
+    await refreshStatus(controller.signal)
+  } catch (err) {
+    if (!controller.signal.aborted) toast.error(err.message)
+  } finally {
+    queuing.value = false
+  }
+}
+onMounted(() => {
+  reload()
+  timer = setInterval(async () => {
+    try {
+      await Promise.all([refreshStatus(controller.signal), readRecords()])
+      if (!controller.signal.aborted) pollError.value = ''
+    } catch (err) {
+      if (!controller.signal.aborted) pollError.value = err.message
+    }
+  }, 5000)
+})
+onUnmounted(() => {
+  clearInterval(timer)
+  controller.abort()
+})
 </script>
-
 <style scoped>
-.ddns-page { display: flex; flex-direction: column; gap: 20px; }
-.page-topbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; }
-.page-title { font-size: 22px; font-weight: 700; color: var(--ink); }
-.page-subtitle { font-size: 13px; color: var(--muted); margin-top: 3px; }
-.header-actions { display: flex; gap: 10px; }
-.spin-icon { animation: spin 0.8s linear infinite; }
-@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-
-.ddns-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
-.ddns-card { padding: 18px; display: flex; flex-direction: column; gap: 12px; }
-
-.card-head { display: flex; align-items: center; justify-content: space-between; }
-.provider-badge { display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 12.5px; color: var(--ink); }
-.provider-icon { color: var(--brand-light); }
-
-.domain-title { font-size: 15px; font-weight: 700; color: var(--ink); }
-
-.task-details-box {
-  background: var(--strip-bg); border: 1px solid var(--line);
-  border-radius: var(--radius-sm); padding: 10px 14px;
-  display: flex; flex-direction: column; gap: 6px; font-size: 12px;
+.ddns-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 16px;
 }
-.detail-row { display: flex; align-items: center; justify-content: space-between; }
-.detail-label { color: var(--faint); }
-.detail-val { color: var(--ink); }
-.ip-text { color: var(--brand-cyan); font-weight: 600; }
-
-.card-footer { display: flex; align-items: center; justify-content: space-between; border-top: 1px solid var(--line); padding-top: 10px; }
-.text-bad { color: var(--bad) !important; }
-
-/* Modal */
-.modal-backdrop {
-  position: fixed; inset: 0; background: rgba(0,0,0,0.65);
-  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
-  z-index: 1050; display: flex; align-items: center; justify-content: center; padding: 20px;
+.ddns-card :deep(.card-inner) {
+  display: grid;
+  gap: 14px;
 }
-.modal-dialog {
-  width: 100%; max-width: 480px; background: var(--card-bg);
-  border: 1px solid var(--card-border-hover); border-radius: var(--radius-card);
-  backdrop-filter: blur(30px); -webkit-backdrop-filter: blur(30px);
-  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.6), var(--inner-highlight);
-  overflow: hidden;
+.domain-title {
+  overflow-wrap: anywhere;
+  font-size: 14px;
 }
-.modal-header { padding: 18px 20px; border-bottom: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; }
-.modal-title { font-size: 16px; font-weight: 700; color: var(--ink); }
-.close-modal-btn { color: var(--muted); }
-.modal-body { padding: 20px; display: flex; flex-direction: column; gap: 14px; }
-.form-group { display: flex; flex-direction: column; gap: 6px; }
-.form-label { font-size: 12px; font-weight: 600; color: var(--ink-secondary); }
-.form-row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.modal-footer { display: flex; justify-content: flex-end; gap: 10px; padding-top: 8px; }
-
-@media (max-width: 800px) {
-  .ddns-grid { grid-template-columns: 1fr; }
+.dns-records {
+  min-width: 520px;
+}
+.card-actions {
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+}
+.text-bad {
+  color: var(--bad);
+}
+summary {
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+@media (max-width: 1100px) {
+  .ddns-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>
