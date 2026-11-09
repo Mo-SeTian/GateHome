@@ -1,280 +1,521 @@
 <template>
-  <div class="statistics-page animate-fade-in">
-    <div class="page-topbar">
+  <div class="report-page animate-fade-in">
+    <div class="report-heading">
       <div>
-        <h1 class="page-title">访问数据统计</h1>
-        <p class="page-subtitle">24 小时流量走势、HTTP 状态码分布、Top 热门反代服务与客户端地理溯源</p>
+        <h1>访问统计</h1>
+        <p>按保留日志核对请求、账号验证和安全事件，趋势显示实际请求次数</p>
       </div>
-      <div class="header-actions">
-        <div class="timeframe-selector">
-          <button 
-            v-for="tf in timeframes" 
-            :key="tf.key"
-            class="tf-btn"
-            :class="{ active: selectedTf === tf.key }"
-            @click="selectedTf = tf.key"
+      <button class="btn btn-secondary" :disabled="!data || loading || !!error" @click="exportSVG">
+        导出图表 SVG
+      </button>
+    </div>
+    <form class="report-form" @submit.prevent="load">
+      <label
+        >统计时间<select v-model="form.hours" name="hours" class="form-select">
+          <option v-for="item in ranges" :key="item.value" :value="item.value">{{ item.label }}</option>
+        </select></label
+      >
+      <label
+        >反代规则<select v-model="form.rule" name="rule" class="form-select">
+          <option value="">全部反代规则</option>
+          <option v-for="route in gatewayConfig?.routes" :key="routeKey(route)" :value="routeKey(route)">
+            {{ ruleName(routeKey(route)) }}
+          </option>
+        </select></label
+      >
+      <button type="submit" class="btn btn-primary" :disabled="loading">
+        {{ loading ? '查询中…' : '查询统计' }}
+      </button>
+    </form>
+    <p v-if="error" ref="errorElement" class="report-error" role="alert" tabindex="-1">
+      {{ error }}{{ data ? '。当前显示上次成功查询的统计。' : '' }}
+    </p>
+    <p v-if="dirty && data" class="report-note">筛选条件尚未应用，当前仍显示上次查询结果。</p>
+    <template v-if="data">
+      <p class="report-note">
+        统计范围 {{ reportDate(data.from) }} — {{ reportDate(data.to) }}；最早保留记录
+        {{ reportDate(data.retained_from) }}，当前保留
+        {{ data.retained_entries.toLocaleString() }} 条项目与反代日志。日志清理后的记录不包含在统计中。
+      </p>
+      <p v-if="data.write_error || data.freeze_write_error" class="report-warning" role="alert">
+        {{ data.write_error ? '日志写入或清理失败，统计可能仅反映内存记录。' : ''
+        }}{{ data.freeze_write_error ? '冻结记录保存失败，最新变更可能无法在重启后恢复。' : '' }}
+      </p>
+      <div class="report-metrics">
+        <SpotlightCard v-for="metric in primaryMetrics" :key="metric.key" class="report-metric"
+          ><span class="metric-label">{{ metric.label }}</span>
+          <div class="metric-value" :data-metric="metric.key">
+            {{ data[metric.key].toLocaleString() }}
+          </div></SpotlightCard
+        >
+      </div>
+      <p class="report-note">
+        正常为 HTTP
+        1xx–3xx；安全拦截为防火墙和冻结拒绝；其他失败包含未验证请求、错误账号与后端错误。验证和冻结指标是请求总数的子集，不能相加。TLS
+        握手失败不产生 HTTP 记录。
+      </p>
+      <div ref="charts" class="report-page">
+        <SpotlightCard class="report-panel"
+          ><h2>访问趋势 · {{ formDescription }}</h2>
+          <div class="chart-legend">
+            <span v-for="series in seriesList" :key="series.key"
+              ><i :style="{ background: series.color }" />{{ series.label }}</span
+            >
+          </div>
+          <svg
+            :viewBox="`0 0 ${chartWidth} 270`"
+            class="statistics-chart"
+            role="img"
+            aria-label="访问趋势"
+            data-chart="访问趋势"
           >
-            {{ tf.label }}
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <!-- 4 Stats Cards -->
-    <div class="stats-metric-grid">
-      <SpotlightCard class="metric-card">
-        <span class="m-label">总请求数 (Hits)</span>
-        <div class="m-val mono-text">1,428,904</div>
-        <div class="m-sub ok-text">↑ 14.2% 较昨日</div>
-      </SpotlightCard>
-
-      <SpotlightCard class="metric-card">
-        <span class="m-label">独立访客 (UV)</span>
-        <div class="m-val mono-text">48,920</div>
-        <div class="m-sub ok-text">↑ 8.6% 较昨日</div>
-      </SpotlightCard>
-
-      <SpotlightCard class="metric-card">
-        <span class="m-label">平均响应耗时</span>
-        <div class="m-val mono-text">2.14<span class="m-unit">ms</span></div>
-        <div class="m-sub info-text">95% 请求 &lt; 5ms</div>
-      </SpotlightCard>
-
-      <SpotlightCard class="metric-card">
-        <span class="m-label">网关健康正常率</span>
-        <div class="m-val mono-text">99.98<span class="m-unit">%</span></div>
-        <div class="m-sub ok-text">SLA 正常运转</div>
-      </SpotlightCard>
-    </div>
-
-    <!-- Middle Row: QPS Area Chart & Status Code Donut -->
-    <div class="charts-middle-grid">
-      <!-- 24h QPS Trend Chart -->
-      <SpotlightCard class="trend-card">
-        <div class="card-title-bar">
-          <span class="card-title">24 小时 QPS 吞吐走势图</span>
-          <span class="badge badge-brand">峰值 384 req/s</span>
-        </div>
-
-        <div class="svg-chart-wrapper">
-          <svg viewBox="0 0 760 200" class="qps-chart-svg">
-            <defs>
-              <linearGradient id="qpsGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-                <stop offset="0%" stop-color="#6366f1" stop-opacity="0.45" />
-                <stop offset="100%" stop-color="#6366f1" stop-opacity="0.0" />
-              </linearGradient>
-            </defs>
-
-            <!-- Grid Lines -->
-            <line x1="0" y1="50" x2="760" y2="50" stroke="var(--line)" stroke-dasharray="3" />
-            <line x1="0" y1="100" x2="760" y2="100" stroke="var(--line)" stroke-dasharray="3" />
-            <line x1="0" y1="150" x2="760" y2="150" stroke="var(--line)" stroke-dasharray="3" />
-
-            <!-- Area Path -->
-            <path 
-              d="M 0 170 Q 70 120 140 140 T 280 80 T 420 50 T 560 90 T 700 70 L 760 110 L 760 200 L 0 200 Z" 
-              fill="url(#qpsGrad)" 
-            />
-            <!-- Stroke Path -->
-            <path 
-              d="M 0 170 Q 70 120 140 140 T 280 80 T 420 50 T 560 90 T 700 70 L 760 110" 
-              fill="none" 
-              stroke="#6366f1" 
-              stroke-width="3" 
-            />
-
-            <!-- Peak point -->
-            <circle cx="420" cy="50" r="5" fill="#6366f1" stroke="#fff" stroke-width="2" />
+            <title>访问趋势，共 {{ data.total }} 次请求</title>
+            <g v-for="ratio in [0, 0.5, 1]" :key="ratio">
+              <line
+                x1="40"
+                :x2="chartWidth - 20"
+                :y1="220 - ratio * 170"
+                :y2="220 - ratio * 170"
+                stroke="var(--line)"
+              />
+              <text x="34" :y="225 - ratio * 170" text-anchor="end" fill="var(--muted)" font-size="12">
+                {{ Math.round(maximum * ratio) }}
+              </text>
+            </g>
+            <g v-for="series in seriesList" :key="series.key">
+              <polyline
+                :points="trendPoints(series.key)"
+                fill="none"
+                :stroke="series.color"
+                stroke-width="2.5"
+              />
+              <circle
+                v-for="(bucket, index) in data.trend"
+                :key="bucket.time"
+                :cx="trendX(index)"
+                :cy="220 - (bucket[series.key] * 170) / maximum"
+                r="3"
+                :fill="series.color"
+              >
+                <title>{{ reportDate(bucket.time) }} · {{ series.label }} {{ bucket[series.key] }} 次</title>
+              </circle>
+            </g>
+            <text
+              v-for="index in axisIndices"
+              :key="index"
+              :x="trendX(index)"
+              y="252"
+              :text-anchor="index === 0 ? 'start' : index === data.trend.length - 1 ? 'end' : 'middle'"
+              fill="var(--muted)"
+              font-size="12"
+            >
+              {{ axisDate(data.trend[index].time) }}
+            </text>
           </svg>
+        </SpotlightCard>
+        <div class="chart-grid">
+          <SpotlightCard class="report-panel"
+            ><h2>HTTP 状态码分布</h2>
+            <svg
+              :viewBox="`0 0 ${chartWidth} 260`"
+              class="statistics-chart"
+              role="img"
+              aria-label="HTTP 状态码分布"
+              data-chart="HTTP 状态码分布"
+            >
+              <title>HTTP 状态码分布</title>
+              <g v-for="(status, index) in data.statuses" :key="status.label">
+                <rect
+                  :x="40 + index * statusStep"
+                  :y="210 - (status.count * 150) / statusMaximum"
+                  :width="statusStep * 0.6"
+                  :height="(status.count * 150) / statusMaximum"
+                  rx="4"
+                  :fill="['4xx', '5xx'].includes(status.label) ? 'var(--warn)' : 'var(--ok)'"
+                />
+                <text
+                  :x="40 + (index + 0.3) * statusStep"
+                  :y="200 - (status.count * 150) / statusMaximum"
+                  text-anchor="middle"
+                  fill="var(--muted)"
+                  font-size="14"
+                >
+                  {{ status.count }}
+                </text>
+                <text
+                  :x="40 + (index + 0.3) * statusStep"
+                  y="240"
+                  text-anchor="middle"
+                  fill="var(--muted)"
+                  font-size="14"
+                >
+                  {{ status.label }}
+                </text>
+              </g>
+            </svg></SpotlightCard
+          >
+          <SpotlightCard class="report-panel"
+            ><h2>反代规则访问排行 · 前 8 条</h2>
+            <svg
+              :viewBox="`0 0 ${chartWidth} ${Math.max(130, topRules.length * rankHeight + 20)}`"
+              class="statistics-chart"
+              role="img"
+              aria-label="反代规则排行"
+              data-chart="反代规则访问排行"
+            >
+              <title>反代规则访问排行</title>
+              <g v-for="(row, index) in topRules" :key="row.rule">
+                <text x="12" :y="index * rankHeight + (narrow ? 20 : 30)" fill="var(--muted)" font-size="13">
+                  <title>{{ ruleName(row.rule) }}</title>
+                  {{ shortRule(row.rule) }}
+                </text>
+                <rect
+                  v-for="(segment, part) in rankSegments(row)"
+                  :key="part"
+                  :x="segment.x"
+                  :y="index * rankHeight + (narrow ? 32 : 12)"
+                  :width="segment.width"
+                  height="24"
+                  :fill="segment.color"
+                >
+                  <title>{{ segment.label }} {{ segment.value }} 次</title>
+                </rect>
+                <text
+                  :x="rankStart + (row.total * rankSpan) / rankMaximum + 8"
+                  :y="index * rankHeight + (narrow ? 50 : 30)"
+                  fill="var(--muted)"
+                  font-size="13"
+                >
+                  {{ row.total }}
+                </text>
+              </g>
+              <text v-if="!topRules.length" x="20" y="60" fill="var(--muted)" font-size="14">
+                暂无访问记录
+              </text>
+            </svg></SpotlightCard
+          >
         </div>
-
-        <div class="time-axis-labels">
-          <span>00:00</span>
-          <span>04:00</span>
-          <span>08:00</span>
-          <span>12:00</span>
-          <span>16:00</span>
-          <span>20:00</span>
-          <span>当前</span>
-        </div>
-      </SpotlightCard>
-
-      <!-- Status Code Distribution -->
-      <SpotlightCard class="status-dist-card">
-        <div class="card-title-bar">
-          <span class="card-title">HTTP 状态码分布</span>
-          <span class="badge badge-ok">97.3% 成功</span>
-        </div>
-
-        <div class="dist-stacked-bar">
-          <div class="stack-slice s2" style="width: 94.2%;" title="2xx 正常: 94.2%" />
-          <div class="stack-slice s3" style="width: 3.1%;" title="3xx 重定向: 3.1%" />
-          <div class="stack-slice s4" style="width: 1.8%;" title="4xx 错误: 1.8%" />
-          <div class="stack-slice s5" style="width: 0.9%;" title="5xx 异常: 0.9%" />
-        </div>
-
-        <div class="status-legend-list">
-          <div class="s-legend-item">
-            <span class="dot s2" />
-            <span class="name">2xx 正常请求</span>
-            <span class="percent mono-text">94.2%</span>
-            <span class="count mono-text">1.34M</span>
-          </div>
-          <div class="s-legend-item">
-            <span class="dot s3" />
-            <span class="name">3xx 缓存/重定向</span>
-            <span class="percent mono-text">3.1%</span>
-            <span class="count mono-text">44.3K</span>
-          </div>
-          <div class="s-legend-item">
-            <span class="dot s4" />
-            <span class="name">4xx 客户端错误</span>
-            <span class="percent mono-text">1.8%</span>
-            <span class="count mono-text">25.7K</span>
-          </div>
-          <div class="s-legend-item">
-            <span class="dot s5" />
-            <span class="name">5xx 网关/上游异常</span>
-            <span class="percent mono-text">0.9%</span>
-            <span class="count mono-text">12.8K</span>
-          </div>
-        </div>
-      </SpotlightCard>
-    </div>
-
-    <!-- Bottom Row: Top 5 Routes Ranking -->
-    <SpotlightCard class="ranking-card">
-      <div class="card-title-bar">
-        <span class="card-title">热门服务访问排行榜 (Top 5)</span>
-        <span class="badge badge-neutral">按请求量排序</span>
       </div>
-
-      <div class="ranking-list">
-        <div v-for="(item, idx) in topRoutes" :key="item.name" class="ranking-item">
-          <div class="rank-num" :class="`top-${idx + 1}`">{{ idx + 1 }}</div>
-          <div class="rank-info">
-            <div class="rank-name-row">
-              <span class="rank-name">{{ item.name }}</span>
-              <span class="rank-count mono-text">{{ item.hits }} 请求 ({{ item.pct }}%)</span>
-            </div>
-            <div class="progress-track">
-              <div class="progress-fill brand" :style="{ width: `${item.pct}%` }" />
-            </div>
-          </div>
-        </div>
+      <h2 class="section-title">账号验证与安全防护</h2>
+      <div class="report-metrics">
+        <SpotlightCard v-for="metric in securityMetrics" :key="metric.key" class="report-metric"
+          ><span class="metric-label">{{ metric.label }}</span>
+          <div class="metric-value" :data-metric="metric.key">
+            {{ data[metric.key].toLocaleString() }}
+          </div></SpotlightCard
+        >
       </div>
-    </SpotlightCard>
+      <p class="report-note">
+        账号验证仅统计 GateHome 独立服务账号，后端返回 401 不会算作账号验证失败。当前冻结 IP
+        为实时值，不受所选时间范围限制。
+      </p>
+      <SpotlightCard class="report-panel"
+        ><h2>安全规则命中汇总</h2>
+        <div v-if="data.security_rules?.length" class="report-table-wrap">
+          <table class="report-table">
+            <thead>
+              <tr>
+                <th>检测引擎 / 规则</th>
+                <th>命中请求</th>
+                <th>拦截请求</th>
+                <th>最近命中</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in data.security_rules" :key="row.engine + '/' + row.rule_id + '/' + row.name">
+                <td>
+                  {{ engineLabel(row.engine) }} #{{ row.rule_id }}<small>{{ row.name }}</small>
+                </td>
+                <td>{{ row.count }}</td>
+                <td>{{ row.blocked }}</td>
+                <td>{{ reportDate(row.last_seen) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p v-else class="report-note">暂无安全规则命中。</p></SpotlightCard
+      >
+      <SpotlightCard class="report-panel"
+        ><h2>防火墙策略命中汇总</h2>
+        <div v-if="data.firewalls.length" class="report-table-wrap">
+          <table class="report-table">
+            <thead>
+              <tr>
+                <th>防火墙 / IP 组</th>
+                <th>原因</th>
+                <th>拦截请求</th>
+                <th>最近命中</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(row, index) in data.firewalls" :key="index">
+                <td>
+                  {{ row.name || '历史规则'
+                  }}<small
+                    >{{ row.group || row.kind }}{{ row.order ? ' · 第 ' + row.order + ' 组' : '' }}</small
+                  >
+                </td>
+                <td>{{ row.reason }}</td>
+                <td>{{ row.count }}</td>
+                <td>{{ reportDate(row.last_seen) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p v-else class="report-note">暂无防火墙拦截。</p></SpotlightCard
+      >
+    </template>
+    <LogExplorer scope="security" title="安全事件明细" />
   </div>
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef } from 'vue'
 import SpotlightCard from '@/components/SpotlightCard.vue'
+import LogExplorer from '@/components/LogExplorer.vue'
+import { adminApi } from '@/api/admin'
+import { routeKey } from '@/api/configuration'
+import { engineLabel, reportDate } from '@/api/reports'
+import { useGatewayStatus } from '@/composables/useGatewayStatus'
+import { useToast } from '@/composables/useToast'
+import '@/styles/reports.css'
 
-const selectedTf = ref('today')
-const timeframes = [
-  { key: 'today', label: '今日 (24h)' },
-  { key: '7d', label: '近 7 天' },
-  { key: '30d', label: '近 30 天' }
+const { gatewayConfig, refreshConfig } = useGatewayStatus()
+const toast = useToast()
+const form = ref({ hours: '24', rule: '' }),
+  applied = shallowRef({ hours: '24', rule: '' })
+const data = shallowRef(null),
+  loading = ref(false),
+  error = ref(''),
+  errorElement = ref(null),
+  charts = ref(null)
+const ranges = [
+  { value: '24', label: '最近 24 小时' },
+  { value: '168', label: '最近 7 天' },
+  { value: '720', label: '最近 30 天' }
 ]
-
-const topRoutes = [
-  { name: 'Prometheus 遥测采集 (monitor.ops.lan)', hits: '6.7M', pct: 46.8 },
-  { name: 'GateHome 核心控制台 (gate.internal.lan)', hits: '2.4M', pct: 28.2 },
-  { name: 'HomeAssistant 智能家居 (home.iot.tech)', hits: '1.8M', pct: 14.5 },
-  { name: 'Nextcloud 云盘服务 (cloud.nas.tech)', hits: '890K', pct: 6.8 },
-  { name: 'Jellyfin 影音媒体中心 (media.stream.org)', hits: '520K', pct: 3.7 }
+const primaryMetrics = [
+  { key: 'total', label: '请求总数' },
+  { key: 'normal', label: '正常访问' },
+  { key: 'blocked', label: '安全拦截' },
+  { key: 'failed', label: '其他失败' }
 ]
+const securityMetrics = Object.entries({
+  waf_matched: 'WAF 命中请求',
+  waf_blocked: 'WAF 拦截',
+  rate_blocked: '访问限速拦截',
+  custom_blocked: 'HTTP 规则拦截',
+  auth_success: '账号验证成功',
+  auth_failed: '账号验证失败',
+  auth_required: '等待账号验证',
+  auth_limited: '验证速率限制',
+  firewall_blocked: '防火墙拦截',
+  frozen_blocked: '冻结 IP 拦截',
+  freeze_created: '新增自动冻结',
+  active_freezes: '当前冻结 IP'
+}).map(([key, label]) => ({ key, label }))
+const seriesList = [
+  { key: 'normal', label: '正常访问', color: 'var(--ok)' },
+  { key: 'blocked', label: '安全拦截', color: 'var(--bad)' },
+  { key: 'failed', label: '其他失败', color: 'var(--warn)' }
+]
+const media = matchMedia('(max-width: 600px)'),
+  narrow = ref(media.matches)
+const chartWidth = computed(() => (narrow.value ? 400 : 800))
+const dirty = computed(() => JSON.stringify(form.value) !== JSON.stringify(applied.value))
+const formDescription = computed(() => (applied.value.hours === '24' ? '每小时请求次数' : '每天请求次数'))
+const maximum = computed(() =>
+  Math.max(1, ...(data.value?.trend ?? []).flatMap((row) => seriesList.map((series) => row[series.key])))
+)
+const axisIndices = computed(() =>
+  [
+    ...new Set(
+      narrow.value
+        ? [0, data.value.trend.length - 1]
+        : [0, Math.floor(data.value.trend.length / 2), data.value.trend.length - 1]
+    )
+  ].filter((index) => data.value.trend[index])
+)
+const statusStep = computed(() => (chartWidth.value - 60) / Math.max(1, data.value?.statuses.length || 0))
+const statusMaximum = computed(() => Math.max(1, ...(data.value?.statuses ?? []).map((row) => row.count)))
+const topRules = computed(() => data.value?.rules.slice(0, 8) ?? [])
+const rankMaximum = computed(() => Math.max(1, ...topRules.value.map((row) => row.total)))
+const rankStart = computed(() => (narrow.value ? 20 : 300)),
+  rankSpan = computed(() => chartWidth.value - (narrow.value ? 90 : 340)),
+  rankHeight = computed(() => (narrow.value ? 80 : 58))
+const controller = new AbortController()
+let version = 0
+function trendX(index) {
+  return 40 + (index * (chartWidth.value - 60)) / Math.max(1, data.value.trend.length - 1)
+}
+function trendPoints(key) {
+  return data.value.trend
+    .map((row, index) => `${trendX(index)},${220 - (row[key] * 170) / maximum.value}`)
+    .join(' ')
+}
+function axisDate(value) {
+  return new Date(value).toLocaleString(undefined, {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+}
+function ruleName(key) {
+  const route = gatewayConfig.value?.routes.find((item) => routeKey(item) === key)
+  const group = gatewayConfig.value?.groups.find((item) => item.id === route?.group_id)
+  return route ? `${group?.name || route.group_id} / ${route.name || route.host}` : key || '未匹配反代规则'
+}
+function shortRule(key) {
+  const name = ruleName(key)
+  const limit = narrow.value ? 26 : 20
+  return name.length > limit ? name.slice(0, limit - 1) + '…' : name
+}
+function rankSegments(row) {
+  let x = rankStart.value
+  return seriesList.map((series) => {
+    const width = (row[series.key] * rankSpan.value) / rankMaximum.value
+    const part = { x, width, color: series.color, value: row[series.key], label: series.label }
+    x += width
+    return part
+  })
+}
+async function load() {
+  const request = ++version,
+    filters = { ...form.value }
+  loading.value = true
+  error.value = ''
+  try {
+    const result = await adminApi.statistics(
+      { hours: Number(filters.hours), rule: filters.rule },
+      controller.signal
+    )
+    if (!controller.signal.aborted && request === version) {
+      data.value = result
+      applied.value = filters
+    }
+  } catch (err) {
+    if (!controller.signal.aborted && request === version) {
+      error.value = err.message
+      await nextTick()
+      errorElement.value?.focus()
+    }
+  } finally {
+    if (request === version) loading.value = false
+  }
+}
+function exportSVG() {
+  const ns = 'http://www.w3.org/2000/svg',
+    root = document.createElementNS(ns, 'svg')
+  const theme = getComputedStyle(document.body),
+    background = document.createElementNS(ns, 'rect')
+  root.setAttribute('xmlns', ns)
+  root.setAttribute('width', '900')
+  root.setAttribute('font-family', 'sans-serif')
+  background.setAttribute('width', '100%')
+  background.setAttribute('height', '100%')
+  background.setAttribute('fill', theme.getPropertyValue('--canvas').trim())
+  root.append(background)
+  let y = 34
+  for (const source of charts.value.querySelectorAll('svg[data-chart]')) {
+    const heading = document.createElementNS(ns, 'text')
+    heading.setAttribute('x', '20')
+    heading.setAttribute('y', String(y))
+    heading.setAttribute('fill', theme.getPropertyValue('--ink').trim())
+    heading.setAttribute('font-size', '18')
+    heading.textContent = `${source.dataset.chart} · ${reportDate(data.value.from)} — ${reportDate(data.value.to)}`
+    root.append(heading)
+    const legendHeight = source.dataset.chart === '访问趋势' ? 26 : 0
+    if (legendHeight)
+      seriesList.forEach((series, index) => {
+        const label = document.createElementNS(ns, 'text')
+        label.setAttribute('x', String(20 + index * 180))
+        label.setAttribute('y', String(y + 26))
+        label.setAttribute('font-size', '14')
+        const variable = series.color.slice(4, -1)
+        label.setAttribute('fill', theme.getPropertyValue(variable).trim())
+        label.textContent = `● ${series.label}`
+        root.append(label)
+      })
+    const clone = source.cloneNode(true),
+      originals = [source, ...source.querySelectorAll('*')],
+      copies = [clone, ...clone.querySelectorAll('*')]
+    originals.forEach((node, index) => {
+      const style = getComputedStyle(node)
+      for (const attr of ['fill', 'stroke'])
+        if (node.getAttribute(attr)?.includes('var(')) copies[index].setAttribute(attr, style[attr])
+    })
+    const height = (source.viewBox.baseVal.height * 860) / source.viewBox.baseVal.width
+    clone.setAttribute('x', '20')
+    clone.setAttribute('y', String(y + 16 + legendHeight))
+    clone.setAttribute('width', '860')
+    clone.setAttribute('height', String(height))
+    root.append(clone)
+    y += height + 70 + legendHeight
+  }
+  root.setAttribute('height', String(y))
+  root.setAttribute('viewBox', `0 0 900 ${y}`)
+  const url = URL.createObjectURL(
+    new Blob([new XMLSerializer().serializeToString(root)], { type: 'image/svg+xml;charset=utf-8' })
+  )
+  const link = document.createElement('a')
+  link.href = url
+  link.download = 'gatehome-statistics.svg'
+  link.click()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+  toast.success('已导出当前查询的统计图表')
+}
+function mediaChanged(event) {
+  narrow.value = event.matches
+}
+onMounted(() => {
+  load()
+  media.addEventListener('change', mediaChanged)
+  refreshConfig(controller.signal).catch((err) => {
+    if (!controller.signal.aborted) error.value = err.message
+  })
+})
+onUnmounted(() => {
+  media.removeEventListener('change', mediaChanged)
+  controller.abort()
+})
 </script>
-
 <style scoped>
-.statistics-page { display: flex; flex-direction: column; gap: 20px; }
-.page-topbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; }
-.page-title { font-size: 22px; font-weight: 700; color: var(--ink); }
-.page-subtitle { font-size: 13px; color: var(--muted); margin-top: 3px; }
-
-.timeframe-selector {
-  display: flex; background: var(--strip-bg); border: 1px solid var(--line);
-  border-radius: var(--radius-sm); padding: 3px;
+.statistics-chart {
+  width: 100%;
+  height: auto;
+  display: block;
 }
-.tf-btn {
-  padding: 5px 12px; border-radius: 6px; font-size: 12px;
-  color: var(--muted); font-weight: 500; transition: var(--transition-smooth);
+.chart-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  min-width: 0;
 }
-.tf-btn.active {
-  background: var(--card-bg); color: var(--ink); font-weight: 600;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+.chart-legend {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--muted);
 }
-
-.stats-metric-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
-.metric-card { padding: 18px 20px; display: flex; flex-direction: column; gap: 4px; }
-.m-label { font-size: 12px; color: var(--muted); }
-.m-val { font-size: 24px; font-weight: 700; color: var(--ink); }
-.m-unit { font-size: 14px; color: var(--faint); margin-left: 2px; }
-.m-sub { font-size: 11px; font-weight: 500; }
-.ok-text { color: var(--ok); }
-.info-text { color: var(--brand-cyan); }
-
-.charts-middle-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; }
-
-.trend-card, .status-dist-card, .ranking-card { padding: 20px; display: flex; flex-direction: column; }
-.card-title-bar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
-.card-title { font-size: 14px; font-weight: 700; color: var(--ink); }
-
-.svg-chart-wrapper { height: 180px; width: 100%; }
-.qps-chart-svg { width: 100%; height: 100%; }
-
-.time-axis-labels {
-  display: flex; justify-content: space-between; font-size: 11px;
-  color: var(--faint); font-family: var(--mono); padding-top: 10px;
+.chart-legend span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
-
-/* Stacked bar */
-.dist-stacked-bar {
-  display: flex; height: 12px; border-radius: 999px; overflow: hidden;
-  margin-bottom: 16px; background: var(--strip-bg);
+.chart-legend i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
 }
-.stack-slice.s2 { background: var(--ok); }
-.stack-slice.s3 { background: #38bdf8; }
-.stack-slice.s4 { background: var(--warn); }
-.stack-slice.s5 { background: var(--bad); }
-
-.status-legend-list { display: flex; flex-direction: column; gap: 10px; }
-.s-legend-item { display: flex; align-items: center; font-size: 12px; }
-.dot { width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; }
-.dot.s2 { background: var(--ok); }
-.dot.s3 { background: #38bdf8; }
-.dot.s4 { background: var(--warn); }
-.dot.s5 { background: var(--bad); }
-.name { flex: 1; color: var(--ink-secondary); }
-.percent { font-weight: 600; color: var(--ink); margin-right: 12px; }
-.count { color: var(--faint); }
-
-/* Ranking List */
-.ranking-list { display: flex; flex-direction: column; gap: 14px; }
-.ranking-item { display: flex; align-items: center; gap: 14px; }
-.rank-num {
-  width: 24px; height: 24px; border-radius: 6px; font-size: 12px;
-  font-weight: 700; display: flex; align-items: center; justify-content: center;
-  background: var(--strip-bg); color: var(--muted); font-family: var(--mono);
+.section-title {
+  font-size: 16px;
+  color: var(--ink);
 }
-.rank-num.top-1 { background: rgba(245, 158, 11, 0.2); color: var(--warn); }
-.rank-num.top-2 { background: rgba(99, 102, 241, 0.2); color: var(--brand-light); }
-.rank-num.top-3 { background: rgba(6, 182, 212, 0.2); color: var(--brand-cyan); }
-
-.rank-info { flex: 1; display: flex; flex-direction: column; gap: 6px; }
-.rank-name-row { display: flex; justify-content: space-between; font-size: 12.5px; }
-.rank-name { color: var(--ink); font-weight: 500; }
-.rank-count { color: var(--muted); font-size: 11.5px; }
-
-.progress-track { height: 6px; background: var(--strip-bg); border-radius: 999px; overflow: hidden; }
-.progress-fill.brand { height: 100%; background: var(--brand-gradient); border-radius: 999px; }
-
 @media (max-width: 1100px) {
-  .stats-metric-grid { grid-template-columns: repeat(2, 1fr); }
-  .charts-middle-grid { grid-template-columns: 1fr; }
-}
-@media (max-width: 600px) {
-  .stats-metric-grid { grid-template-columns: 1fr; }
+  .chart-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

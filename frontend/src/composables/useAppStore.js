@@ -170,152 +170,6 @@ export function useAppStore() {
     }
   ])
 
-  // ================= 3. IP SUBSCRIPTIONS (真实 IP/CIDR 规则订阅) =================
-  const subscriptions = ref([
-    {
-      id: 'sub_cn_v4',
-      name: '中国大陆 IPv4 地址段 (chnroute)',
-      url: 'https://raw.githubusercontent.com/mayaxcn/china-ip-list/master/chnroute.txt',
-      enabled: true,
-      interval: 86400,
-      count: 8624,
-      usedCount: 2,
-      ready: true,
-      running: false,
-      lastSuccess: '2026-11-09 03:00',
-      message: '解析成功，共 8,624 条 CIDR'
-    },
-    {
-      id: 'sub_cn_v6',
-      name: '中国大陆 IPv6 地址段 (chnroute-v6)',
-      url: 'https://raw.githubusercontent.com/mayaxcn/china-ip-list/master/chnroute-v6.txt',
-      enabled: true,
-      interval: 86400,
-      count: 2140,
-      usedCount: 1,
-      ready: true,
-      running: false,
-      lastSuccess: '2026-11-09 03:01',
-      message: '解析成功，共 2,140 条 CIDR'
-    },
-    {
-      id: 'sub_threat_intel',
-      name: '全网高危自动化恶意扫描器黑名单 (Blocklist.de)',
-      url: 'https://lists.blocklist.de/lists/all.txt',
-      enabled: true,
-      interval: 43200,
-      count: 14500,
-      usedCount: 2,
-      ready: true,
-      running: false,
-      lastSuccess: '2026-11-09 06:12',
-      message: '解析成功，共 14,500 条高危来源'
-    },
-    {
-      id: 'sub_cf_nodes',
-      name: 'Cloudflare 边缘节点 IP 网段 (白名单直通)',
-      url: 'https://www.cloudflare.com/ips-v4/',
-      enabled: false,
-      interval: 604800,
-      count: 14,
-      usedCount: 0,
-      ready: true,
-      running: false,
-      lastSuccess: '2026-11-02 12:00',
-      message: '已停用 · 缓存可用 (14 条)'
-    }
-  ])
-
-  // ================= 4. FIREWALLS & WAF (防火墙与 Web 攻击防护) =================
-  const firewalls = ref([
-    {
-      id: 'fw_china_only',
-      name: '仅允许国内访问 + WAF 拦截',
-      defaultAction: 'deny',
-      groups: [
-        {
-          name: '中国大陆受信任访问组',
-          match: 'include',
-          action: 'allow',
-          cidrs: ['192.168.0.0/16', '10.0.0.0/8'],
-          subscriptions: ['sub_cn_v4', 'sub_cn_v6']
-        },
-        {
-          name: '高危恶意扫描器阻断组',
-          match: 'include',
-          action: 'deny',
-          cidrs: [],
-          subscriptions: ['sub_threat_intel']
-        }
-      ],
-      protection: {
-        wafMode: 'block', // 'off' | 'detect' | 'block'
-        wafLevel: 1,     // PL1 - PL4
-        wafBodyKib: 1024,
-        exceptions: [
-          { ruleId: 942100, host: 'cloud.nas.tech', path: '/remote.php/dav' }
-        ]
-      }
-    },
-    {
-      id: 'fw_internal_only',
-      name: '纯内网访问控制策略',
-      defaultAction: 'deny',
-      groups: [
-        {
-          name: '本地内网私有网段',
-          match: 'include',
-          action: 'allow',
-          cidrs: ['192.168.2.0/24', '127.0.0.1/32'],
-          subscriptions: []
-        }
-      ],
-      protection: {
-        wafMode: 'detect',
-        wafLevel: 1,
-        wafBodyKib: 512,
-        exceptions: []
-      }
-    }
-  ])
-
-  // ================= 5. IP BLOCKS (IP 冻结名单) =================
-  const ipBlocks = ref([
-    {
-      id: 'blk_1',
-      ip: '198.51.100.45',
-      rule: 'grp_default/cloud.nas.tech',
-      ruleName: 'Nextcloud 云盘服务',
-      reason: '达到账号验证失败上限 (5次) · 自动冻结',
-      until: '2026-11-09 15:28:10',
-      remaining: '24 分钟',
-      hits: 14,
-      manual: false
-    },
-    {
-      id: 'blk_2',
-      ip: '203.0.113.88',
-      rule: 'grp_default/vault.nas.tech',
-      ruleName: 'Vaultwarden 密码库',
-      reason: '触发 WAF 规则: SQL 注入 (CRS #942100)',
-      until: '2026-11-16 14:26:00',
-      remaining: '7 天',
-      hits: 56,
-      manual: false
-    },
-    {
-      id: 'blk_3',
-      ip: '185.220.101.5',
-      rule: '全局阻断',
-      ruleName: '全部反代规则',
-      reason: '管理员手动永久冻结 · 恶意自动化扫描',
-      until: '永久',
-      remaining: '永久冻结',
-      hits: 182,
-      manual: true
-    }
-  ])
-
   // ================= 6. DDNS GROUPS (动态域名任务组) =================
   const ddnsTasks = ref([
     {
@@ -384,32 +238,6 @@ export function useAppStore() {
     }
   ])
 
-  // ================= 9. LOGS (项目日志与反代访问日志双引擎) =================
-  const accessLogs = ref([
-    { id: 'log_1', time: '14:31:02', method: 'GET', status: 200, duration: 1.2, path: '/api/v1/telemetry', ip: '192.168.2.55', geo: '局域网 · 本地私网', route: 'GateHome 核心控制台', target: 'http://127.0.0.1:16666', ok: true },
-    { id: 'log_2', time: '14:30:58', method: 'POST', status: 200, duration: 4.8, path: '/remote.php/dav/files', ip: '114.88.23.109', geo: '中国上海 · 电信', route: 'Nextcloud 云盘服务', target: 'http://192.168.2.110:80', ok: true },
-    { id: 'log_3', time: '14:30:42', method: 'GET', status: 101, duration: 0.4, path: '/api/websocket', ip: '192.168.2.150', geo: '局域网 · IoT', route: 'HomeAssistant 智能家居', target: 'http://192.168.2.150:8123', ok: true },
-    { id: 'log_4', time: '14:30:15', method: 'GET', status: 403, duration: 0.9, path: '/.env', ip: '45.154.255.8', geo: '德国 · 法兰克福', route: '默认拦截网关', target: 'WAF 阻断', ok: false },
-    { id: 'log_5', time: '14:29:50', method: 'POST', status: 200, duration: 3.1, path: '/api/sync', ip: '192.168.2.120', geo: '局域网 · NAS', route: 'Vaultwarden 密码库', target: 'http://192.168.2.120:8001', ok: true },
-    { id: 'log_6', time: '14:28:12', method: 'GET', status: 502, duration: 124.0, path: '/stream/live/ch1', ip: '192.168.2.185', geo: '局域网', route: 'Plex 多媒体服务', target: 'http://192.168.2.185:32400', ok: false }
-  ])
-
-  const projectLogs = ref([
-    { id: 'pj_1', time: '14:30:00', category: 'ddns', action: 'DDNS 域名同步', target: 'Cloudflare nas.tech', ok: true, duration: 180, message: 'IPv4 与 IPv6 记录已匹配，无需变更' },
-    { id: 'pj_2', time: '06:12:00', category: 'subscriptions', action: '拉取 IP 规则订阅', target: 'lists.blocklist.de', ok: true, duration: 920, message: '成功拉取 14,500 条高危 CIDR，已应用到防火墙组' },
-    { id: 'pj_3', time: '03:00:00', category: 'subscriptions', action: '拉取 IP 规则订阅', target: 'mayaxcn/china-ip-list', ok: true, duration: 450, message: '成功拉取 8,624 条中国 IPv4 CIDR' },
-    { id: 'pj_4', time: '02:00:15', category: 'certificates', action: 'ACME 证书检查', target: '*.nas.tech', ok: true, duration: 42, message: '证书有效期剩余 49 天，尚未达到 30 天续签阈值' },
-    { id: 'pj_5', time: '01:00:00', category: 'admin', action: '自动日志轮换清理', target: 'log_storage', ok: true, duration: 12, message: '清理超过 30 天的历史调用日志 420 条' }
-  ])
-
-  // ================= 10. FIREWALL AUDIT LOGS (安全拦截事件) =================
-  const firewallLogs = ref([
-    { id: 'flog_1', time: '14:28:10', ip: '198.51.100.45', geo: '美国 · 俄勒冈', engine: 'CRS', rule: '敏感文件访问 (.env)', uri: '/.env', action: 'BLOCK', severity: 'HIGH' },
-    { id: 'flog_2', time: '14:26:02', ip: '203.0.113.88', geo: '俄罗斯 · 莫斯科', engine: 'CRS', rule: 'SQL 注入攻击 (UNION SELECT)', uri: '/api/v1/user?id=1%20UNION%20SELECT', action: 'BLOCK', severity: 'CRITICAL' },
-    { id: 'flog_3', time: '14:21:49', ip: '192.0.2.12', geo: '荷兰 · 阿姆斯特丹', engine: 'RATE', rule: '高频 CC 速率超限', uri: '/login', action: 'RATE_LIMIT', severity: 'MEDIUM' },
-    { id: 'flog_4', time: '14:15:33', ip: '45.154.255.8', geo: '德国 · 法兰克福', engine: 'CRS', rule: '探测 wp-admin 路径', uri: '/wp-login.php', action: 'BLOCK', severity: 'LOW' }
-  ])
-
   // ================= 12. MCP & BACKUPS & SETTINGS =================
   const mcp = reactive({
     enabled: true,
@@ -467,14 +295,8 @@ export function useAppStore() {
     openCmdk,
     closeCmdk,
     routes,
-    subscriptions,
-    firewalls,
-    ipBlocks,
     ddnsTasks,
     certificates,
-    accessLogs,
-    projectLogs,
-    firewallLogs,
     mcp,
     backups,
     settings

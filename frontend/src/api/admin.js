@@ -1,5 +1,10 @@
 import { request } from './client'
 
+function queryPath(path, params) {
+  const query = new URLSearchParams(Object.entries(params).filter(([, value]) => value !== '' && value != null))
+  return `${path}?${query}`
+}
+
 export const adminApi = {
   account: () => request('/api/account', { notifyUnauthorized: false }),
   login: (username, password) => request('/api/login', {
@@ -13,6 +18,10 @@ export const adminApi = {
   restart: () => request('/api/maintenance/restart', { method: 'POST', body: {} }),
   dashboard: (signal) => request('/api/dashboard', { signal }),
   serviceHealth: (signal) => request('/api/service-health', { signal }),
+  logs: (params, signal) => request(queryPath('/api/logs', params), { signal }),
+  statistics: (params, signal) => request(queryPath('/api/statistics', params), { signal }),
+  traffic: (params, signal) => request(queryPath('/api/statistics/traffic', params), { signal }),
+  refreshSubscription: (id) => request(`/api/subscriptions/${encodeURIComponent(id)}/refresh`, { method: 'POST', body: {} }),
   ipBlocks: (signal) => request('/api/ip-blocks', { signal }),
   freezeIP: (body) => request('/api/ip-blocks', { method: 'POST', body }),
   releaseIP: (body) => request('/api/ip-blocks', { method: 'DELETE', body }),

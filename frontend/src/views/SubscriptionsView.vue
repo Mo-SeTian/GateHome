@@ -1,465 +1,474 @@
 <template>
-  <div class="subscriptions-page animate-fade-in">
-    <div class="page-topbar">
+  <div class="report-page subscriptions-page animate-fade-in">
+    <div class="report-heading">
       <div>
-        <h1 class="page-title">IP 规则订阅管理</h1>
-        <p class="page-subtitle">逐条管理远程 IP / CIDR 威胁黑名单与运营商地址段，定时自动拉取并应用到防火墙组</p>
+        <h1>IP 规则订阅管理</h1>
+        <p>自动获取 IPv4 / IPv6 / CIDR 规则，更新后应用到引用它的防火墙 IP 组</p>
       </div>
-      <div class="header-actions">
-        <button class="btn btn-secondary" @click="updateAllSubscriptions">
-          <RefreshCw :size="14" :class="{ 'spin-icon': isUpdatingAll }" />
+      <div class="report-actions">
+        <button class="btn btn-secondary" :disabled="loading || isSavingConfig" @click="reload">
+          刷新状态
+        </button>
+        <button
+          class="btn btn-secondary"
+          :disabled="queuingAll || !subscriptions.some((item) => item.enabled)"
+          @click="refreshAll"
+        >
           全部立即更新
         </button>
-        <button class="btn btn-primary" @click="openCreateModal">
-          <Plus :size="15" />
-          添加 IP 订阅
+        <button class="btn btn-primary" :disabled="!gatewayConfig || isSavingConfig" @click="open()">
+          <Plus :size="15" /> 添加 IP 订阅
         </button>
       </div>
     </div>
-
-    <!-- Presets Hub Panel (快捷预设导入) -->
-    <SpotlightCard class="preset-panel">
-      <div class="preset-left">
-        <div class="preset-icon-box">
-          <Download :size="18" />
-        </div>
-        <div class="preset-info">
-          <span class="preset-title">快捷预设源 · 中国大陆 IP 列表</span>
-          <span class="preset-desc">基于 mayaxcn/china-ip-list 提供亚太互联网络信息中心分配列表，阻断海外扫描直达国内服务</span>
-        </div>
+    <p v-if="loading && !gatewayConfig" role="status">正在读取订阅配置…</p>
+    <p v-if="error || statusError" class="report-error" role="alert">{{ error || statusError }}</p>
+    <SpotlightCard class="report-panel preset-panel">
+      <div>
+        <strong>快捷预设源 · 中国大陆 IP 列表</strong>
+        <p class="report-note">mayaxcn/china-ip-list；选择后可检查配置再保存。</p>
       </div>
-      <div class="preset-actions">
-        <button class="btn btn-secondary btn-sm" @click="addPreset('v4')">
-          <Plus :size="12" /> 中国大陆 IPv4
-        </button>
-        <button class="btn btn-secondary btn-sm" @click="addPreset('v6')">
-          <Plus :size="12" /> 中国大陆 IPv6
-        </button>
-        <a 
-          href="https://github.com/mayaxcn/china-ip-list" 
-          target="_blank" 
-          rel="noopener noreferrer" 
-          class="btn btn-ghost btn-sm"
+      <div class="report-actions">
+        <button
+          v-for="family in [4, 6]"
+          :key="family"
+          class="btn btn-secondary btn-sm"
+          :disabled="!gatewayConfig || isSavingConfig"
+          @click="preset(family)"
         >
-          查看 GitHub <ExternalLink :size="12" />
-        </a>
+          中国大陆 IPv{{ family }}</button
+        ><a
+          class="btn btn-ghost btn-sm"
+          href="https://github.com/mayaxcn/china-ip-list"
+          target="_blank"
+          rel="noopener noreferrer"
+          >查看来源 <ExternalLink :size="13"
+        /></a>
       </div>
     </SpotlightCard>
-
-    <!-- Subscriptions Grid -->
+    <p class="report-note">
+      订阅为 HTTPS 文本，每行一个 IP / CIDR，支持注释；不跟随重定向。手动更新有 5
+      秒冷却，接受任务不代表下载完成。停用或删除前须解除全部防火墙引用。
+    </p>
     <div class="subs-grid">
-      <SpotlightCard 
-        v-for="sub in subscriptions" 
+      <SpotlightCard
+        v-for="sub in subscriptions"
         :key="sub.id"
         class="sub-card"
         :class="{ inactive: !sub.enabled }"
       >
-        <!-- Card Header -->
-        <div class="card-head">
-          <div class="sub-icon-box" :class="{ active: sub.enabled }">
-            <Globe :size="18" />
+        <div class="sub-head">
+          <div>
+            <strong>{{ sub.name }}</strong>
+            <p>
+              <span class="badge" :class="state(sub).tone">{{ state(sub).label }}</span>
+            </p>
           </div>
-          <div class="sub-head-info">
-            <span class="sub-title">{{ sub.name }}</span>
-            <span class="badge" :class="statusBadgeClass(sub)">
-              <span class="status-dot" :class="statusDotClass(sub)" />
-              {{ statusText(sub) }}
-            </span>
-          </div>
-          <label class="switch">
-            <input 
-              type="checkbox" 
+          <label class="switch"
+            ><input
+              type="checkbox"
               :checked="sub.enabled"
-              @change="toggleSubscription(sub)"
-            />
-            <span class="switch-slider" />
-          </label>
+              :disabled="isSavingConfig || (sub.enabled && references(sub.id).length > 0)"
+              :aria-label="`启用 ${sub.name}`"
+              :title="references(sub.id).length ? '请先解除防火墙引用' : ''"
+              @change="toggle(sub, $event)" /><span class="switch-slider"
+          /></label>
         </div>
-
-        <!-- URL Source Box -->
-        <div class="url-source-box" @click="copyUrl(sub.url)">
-          <span class="url-text mono-text">{{ sub.url }}</span>
-          <Copy :size="12" class="copy-icon" />
-        </div>
-
-        <!-- Metrics & Firewall Usage -->
-        <div class="meta-stats-box">
-          <div class="meta-row">
-            <span class="label">包含 CIDR 记录条目:</span>
-            <span class="val mono-text count-highlight">{{ sub.count.toLocaleString() }} 条</span>
+        <button
+          class="source-url mono-text"
+          type="button"
+          :aria-label="`复制 ${sub.name} 的订阅地址`"
+          @click="copy(sub.url)"
+        >
+          {{ sub.url }} <Copy :size="12" />
+        </button>
+        <p class="report-note">{{ status(sub.id)?.message || '等待服务器返回运行状态' }}</p>
+        <dl>
+          <div>
+            <dt>有效规则</dt>
+            <dd>{{ (status(sub.id)?.count ?? 0).toLocaleString() }} 条</dd>
           </div>
-          <div class="meta-row">
-            <span class="label">防火墙策略引用:</span>
-            <span class="val">{{ sub.usedCount }} 个防火墙组已引用</span>
+          <div>
+            <dt>更新周期</dt>
+            <dd>{{ sub.interval.toLocaleString() }} 秒</dd>
           </div>
-          <div class="meta-row">
-            <span class="label">更新周期:</span>
-            <span class="val">每 {{ (sub.interval / 3600).toFixed(0) }} 小时自动更新</span>
+          <div>
+            <dt>最近尝试</dt>
+            <dd>{{ reportDate(status(sub.id)?.last_run) }}</dd>
           </div>
-          <div class="meta-row">
-            <span class="label">最近成功更新:</span>
-            <span class="val mono-text">{{ sub.lastSuccess }}</span>
+          <div>
+            <dt>最近成功</dt>
+            <dd>{{ reportDate(status(sub.id)?.last_success) }}</dd>
           </div>
-        </div>
-
-        <!-- Card Footer -->
-        <div class="card-footer">
-          <button 
-            class="btn btn-secondary btn-sm" 
-            :disabled="!sub.enabled || sub.running"
-            @click="refreshSingle(sub)"
+        </dl>
+        <details v-if="references(sub.id).length">
+          <summary>{{ references(sub.id).length }} 个防火墙 IP 组引用</summary>
+          <p v-for="name in references(sub.id)" :key="name" class="report-note">{{ name }}</p>
+        </details>
+        <p v-else class="report-note">尚未被防火墙引用</p>
+        <div class="report-actions sub-footer">
+          <button
+            class="btn btn-secondary btn-sm"
+            :disabled="!sub.enabled || status(sub.id)?.running || queued.has(sub.id) || queuingAll"
+            @click="refreshOne(sub)"
           >
-            <RefreshCw :size="12" :class="{ 'spin-icon': sub.running }" />
-            {{ sub.running ? '更新拉取中...' : '立即拉取' }}
+            <RefreshCw :size="13" /> 立即拉取
           </button>
-          <div class="actions-right">
-            <button class="btn btn-ghost btn-sm" @click="openEditModal(sub)">
-              <Edit3 :size="13" /> 编辑
-            </button>
-            <button class="btn btn-ghost btn-sm text-bad" @click="deleteSub(sub)">
+          <div class="report-actions">
+            <button class="btn btn-ghost btn-sm" :disabled="isSavingConfig" @click="open(sub)">
+              <Edit3 :size="13" /> 编辑</button
+            ><button
+              class="btn btn-ghost btn-sm text-bad"
+              :disabled="isSavingConfig || references(sub.id).length > 0"
+              :aria-label="`删除 ${sub.name}`"
+              @click="remove(sub)"
+            >
               <Trash2 :size="13" />
             </button>
           </div>
         </div>
       </SpotlightCard>
     </div>
-
-    <!-- Create / Edit Modal -->
-    <transition name="modal-fade">
-      <div v-if="isModalOpen" class="modal-backdrop" @click.self="isModalOpen = false">
-        <div class="modal-dialog">
-          <div class="modal-header">
-            <h3 class="modal-title">{{ isEdit ? '编辑 IP 规则订阅' : '添加 IP 规则订阅' }}</h3>
-            <button class="close-modal-btn" @click="isModalOpen = false"><X :size="18" /></button>
-          </div>
-          <form class="modal-body" @submit.prevent="saveSubscription">
-            <div class="form-group">
-              <label class="form-label">订阅名称</label>
-              <input 
-                v-model="form.name" 
-                type="text" 
-                placeholder="例如: 某省 IP / 中国 IPv4 / 恶意扫描黑名单" 
-                class="form-input" 
-                required 
-              />
-            </div>
-            <div class="form-group">
-              <label class="form-label">订阅下载链接 (HTTPS 文本，每行一个 IP 或 CIDR)</label>
-              <input 
-                v-model="form.url" 
-                type="url" 
-                placeholder="https://example.com/ips.txt" 
-                class="form-input mono-text" 
-                required 
-              />
-              <small class="form-hint">支持每行一个 IPv4/IPv6 或 CIDR 网段，支持 # 注释。下载不跟随重定向。</small>
-            </div>
-            <div class="form-group">
-              <label class="form-label">更新间隔 (秒)</label>
-              <input 
-                v-model.number="form.interval" 
-                type="number" 
-                min="300" 
-                max="604800" 
-                class="form-input mono-text" 
-                required 
-              />
-              <small class="form-hint">推荐 86400 秒 (24 小时)，最短 300 秒。</small>
-            </div>
-            <div class="form-group">
-              <label class="checkbox-row">
-                <input v-model="form.enabled" type="checkbox" />
-                <span>启用此订阅并按间隔自动在后台拉取更新</span>
-              </label>
-            </div>
-            <div class="modal-footer">
-              <button type="button" class="btn btn-secondary" @click="isModalOpen = false">取消</button>
-              <button type="submit" class="btn btn-primary">保存订阅</button>
-            </div>
-          </form>
-        </div>
-      </div>
-    </transition>
+    <p v-if="gatewayConfig && !subscriptions.length" class="report-empty">
+      尚无 IP 规则订阅，请添加 HTTPS 文本规则源。
+    </p>
+    <dialog ref="dialog" class="report-dialog" aria-labelledby="subscription-title" @cancel="blockBusyClose">
+      <header>
+        <h2 id="subscription-title">{{ originalId ? '编辑' : '添加' }} IP 规则订阅</h2>
+        <button class="btn btn-ghost" aria-label="关闭" :disabled="isSavingConfig" @click="dialog.close()">
+          <X :size="18" />
+        </button>
+      </header>
+      <form @submit.prevent="save">
+        <p v-if="formError" ref="formErrorElement" class="report-error" role="alert" tabindex="-1">
+          {{ formError }}
+        </p>
+        <fieldset :disabled="isSavingConfig">
+          <label
+            >名称<input v-model="form.name" name="name" class="form-input" required maxlength="100" autofocus
+          /></label>
+          <label
+            >HTTPS 规则地址<input
+              v-model="form.url"
+              name="url"
+              type="url"
+              class="form-input mono-text"
+              placeholder="https://example.com/cidrs.txt"
+              maxlength="4096"
+              required
+          /></label>
+          <p class="report-note">
+            支持
+            IPv4、IPv6、CIDR、空行和注释。新来源首次成功前，关联防火墙会暂拒访问；更新失败保留同一来源上次成功的缓存。
+          </p>
+          <label
+            >更新周期 秒<input
+              v-model.number="form.interval"
+              name="interval"
+              class="form-input"
+              type="number"
+              min="300"
+              max="604800"
+              required
+          /></label>
+          <label class="check-label"
+            ><input v-model="form.enabled" name="enabled" type="checkbox" />启用后台自动更新</label
+          >
+          <footer>
+            <button type="button" class="btn btn-secondary" @click="dialog.close()">取消</button
+            ><button type="submit" class="btn btn-primary">
+              {{ isSavingConfig ? '保存中…' : '保存订阅' }}
+            </button>
+          </footer>
+        </fieldset>
+      </form>
+    </dialog>
   </div>
 </template>
 
 <script setup>
-import { ref } from 'vue'
-import { Plus, RefreshCw, Download, Globe, ExternalLink, Copy, Edit3, Trash2, X } from 'lucide-vue-next'
+import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef } from 'vue'
+import { Copy, Edit3, ExternalLink, Plus, RefreshCw, Trash2, X } from 'lucide-vue-next'
 import SpotlightCard from '@/components/SpotlightCard.vue'
-import { useAppStore } from '@/composables/useAppStore'
+import { adminApi } from '@/api/admin'
+import { replaceConfigItem } from '@/api/configuration'
+import { reportDate, subscriptionState } from '@/api/reports'
+import { useGatewayStatus } from '@/composables/useGatewayStatus'
 import { useToast } from '@/composables/useToast'
+import '@/styles/reports.css'
 
-const { subscriptions, firewalls } = useAppStore()
-const { success, warn, info } = useToast()
-
-const isUpdatingAll = ref(false)
-const isModalOpen = ref(false)
-const isEdit = ref(false)
-
-const form = ref({
-  id: '',
-  name: '',
-  url: '',
-  interval: 86400,
-  enabled: true
-})
-
-const statusBadgeClass = (sub) => {
-  if (!sub.enabled) return 'badge-neutral'
-  if (sub.running) return 'badge-brand'
-  if (sub.ready) return 'badge-ok'
-  return 'badge-warn'
+const {
+  gatewayConfig,
+  gatewayConfigSnapshot,
+  gatewayStatus,
+  isSavingConfig,
+  refreshConfig,
+  refreshStatus,
+  saveConfig
+} = useGatewayStatus()
+const toast = useToast()
+const subscriptions = computed(() => gatewayConfig.value?.subscriptions ?? [])
+const loading = ref(false),
+  error = ref(''),
+  statusError = ref(''),
+  queuingAll = ref(false),
+  queued = ref(new Set())
+const dialog = ref(null),
+  snapshot = shallowRef(null),
+  originalId = ref(null),
+  form = ref({})
+const formError = ref(''),
+  formErrorElement = ref(null)
+const controller = new AbortController()
+function status(id) {
+  return gatewayStatus.value?.subscriptions?.find((item) => item.id === id)
 }
-
-const statusDotClass = (sub) => {
-  if (!sub.enabled) return 'neutral'
-  if (sub.running) return 'warn'
-  if (sub.ready) return 'ok'
-  return 'warn'
+function state(sub) {
+  return subscriptionState(sub, status(sub.id))
 }
-
-const statusText = (sub) => {
-  if (!sub.enabled) return '已停用'
-  if (sub.running) return '更新拉取中'
-  if (sub.ready) return '规则可用'
-  return '更新失败，使用缓存'
-}
-
-const toggleSubscription = (sub) => {
-  sub.enabled = !sub.enabled
-  if (sub.enabled) {
-    success(`已启用订阅: ${sub.name}`)
-  } else {
-    // Check if referenced by firewalls
-    const referenced = firewalls.value.filter(f => 
-      f.groups.some(g => g.subscriptions.includes(sub.id))
-    )
-    if (referenced.length > 0) {
-      warn(`注意: 该订阅正被 ${referenced.length} 个防火墙组引用，停用后防火墙将使用已有缓存`)
-    } else {
-      info(`已暂停订阅: ${sub.name}`)
-    }
-  }
-}
-
-const refreshSingle = (sub) => {
-  sub.running = true
-  setTimeout(() => {
-    sub.running = false
-    sub.ready = true
-    sub.lastSuccess = '刚刚'
-    success(`订阅 "${sub.name}" 更新成功，已加载 ${sub.count.toLocaleString()} 条 CIDR`)
-  }, 800)
-}
-
-const updateAllSubscriptions = () => {
-  isUpdatingAll.value = true
-  subscriptions.value.forEach(s => { s.running = true })
-  setTimeout(() => {
-    isUpdatingAll.value = false
-    subscriptions.value.forEach(s => {
-      s.running = false
-      s.ready = true
-      s.lastSuccess = '刚刚'
-    })
-    success('所有已启用的 IP 订阅源均已重新拉取并重新装载到防火墙匹配桶')
-  }, 900)
-}
-
-const copyUrl = (url) => {
-  navigator.clipboard?.writeText(url)
-  success('已复制订阅源下载地址')
-}
-
-const addPreset = (type) => {
-  if (type === 'v4') {
-    const exists = subscriptions.value.find(s => s.id === 'sub_cn_v4')
-    if (exists) {
-      warn('中国大陆 IPv4 订阅源已存在')
-      return
-    }
-    subscriptions.value.unshift({
-      id: 'sub_cn_v4',
-      name: '中国大陆 IPv4 地址段 (chnroute)',
-      url: 'https://raw.githubusercontent.com/mayaxcn/china-ip-list/master/chnroute.txt',
-      enabled: true,
-      interval: 86400,
-      count: 8624,
-      usedCount: 0,
-      ready: true,
-      running: false,
-      lastSuccess: '刚刚',
-      message: '解析成功'
-    })
-    success('已导入预设: 中国大陆 IPv4 订阅源')
-  } else {
-    const exists = subscriptions.value.find(s => s.id === 'sub_cn_v6')
-    if (exists) {
-      warn('中国大陆 IPv6 订阅源已存在')
-      return
-    }
-    subscriptions.value.unshift({
-      id: 'sub_cn_v6',
-      name: '中国大陆 IPv6 地址段 (chnroute-v6)',
-      url: 'https://raw.githubusercontent.com/mayaxcn/china-ip-list/master/chnroute-v6.txt',
-      enabled: true,
-      interval: 86400,
-      count: 2140,
-      usedCount: 0,
-      ready: true,
-      running: false,
-      lastSuccess: '刚刚',
-      message: '解析成功'
-    })
-    success('已导入预设: 中国大陆 IPv6 订阅源')
-  }
-}
-
-const openCreateModal = () => {
-  isEdit.value = false
-  form.value = {
-    id: `sub_${Date.now()}`,
-    name: '',
-    url: '',
-    interval: 86400,
-    enabled: true
-  }
-  isModalOpen.value = true
-}
-
-const openEditModal = (sub) => {
-  isEdit.value = true
-  form.value = { ...sub }
-  isModalOpen.value = true
-}
-
-const saveSubscription = () => {
-  if (isEdit.value) {
-    const idx = subscriptions.value.findIndex(s => s.id === form.value.id)
-    if (idx !== -1) {
-      subscriptions.value[idx] = { ...subscriptions.value[idx], ...form.value }
-      success(`订阅 "${form.value.name}" 已更新`)
-    }
-  } else {
-    subscriptions.value.unshift({
-      ...form.value,
-      count: Math.floor(Math.random() * 5000 + 1000),
-      usedCount: 0,
-      ready: true,
-      running: false,
-      lastSuccess: '刚刚',
-      message: '首次拉取完成'
-    })
-    success(`成功添加 IP 规则订阅 "${form.value.name}"`)
-  }
-  isModalOpen.value = false
-}
-
-const deleteSub = (sub) => {
-  // Check if referenced
-  const referenced = firewalls.value.filter(f => 
-    f.groups.some(g => g.subscriptions.includes(sub.id))
+function references(id) {
+  return (gatewayConfig.value?.firewalls ?? []).flatMap((firewall) =>
+    (firewall.groups ?? [])
+      .filter((group) => group.subscriptions?.includes(id))
+      .map((group) => `${firewall.name} / ${group.name}`)
   )
-  if (referenced.length > 0) {
-    alert(`无法删除！请先从以下防火墙策略中解除此订阅的引用：\n${referenced.map(r => '· ' + r.name).join('\n')}`)
+}
+async function reload() {
+  if (loading.value || isSavingConfig.value) return
+  loading.value = true
+  error.value = ''
+  statusError.value = ''
+  try {
+    await Promise.all([refreshConfig(controller.signal), refreshStatus(controller.signal)])
+  } catch (err) {
+    if (!controller.signal.aborted) error.value = err.message
+  } finally {
+    loading.value = false
+  }
+}
+function open(sub, defaults = {}) {
+  snapshot.value = structuredClone(gatewayConfigSnapshot.value)
+  originalId.value = sub?.id ?? null
+  form.value = sub
+    ? structuredClone(sub)
+    : { id: crypto.randomUUID(), name: '', url: '', enabled: true, interval: 86400, ...defaults }
+  formError.value = ''
+  dialog.value.showModal()
+}
+function preset(family) {
+  const url = `https://raw.githubusercontent.com/mayaxcn/china-ip-list/master/${family === 6 ? 'chnroute_v6.txt' : 'chnroute.txt'}`
+  if (subscriptions.value.some((item) => item.url === url)) {
+    toast.info('此预设来源已存在')
     return
   }
-  if (confirm(`确定要移除 IP 规则订阅 "${sub.name}" 吗？`)) {
-    subscriptions.value = subscriptions.value.filter(s => s.id !== sub.id)
-    info(`已删除订阅: ${sub.name}`)
+  open(undefined, { name: `中国大陆 IPv${family}（mayaxcn）`, url, interval: 28800 })
+}
+function blockBusyClose(event) {
+  if (isSavingConfig.value) event.preventDefault()
+}
+async function saved() {
+  toast.success('订阅配置已保存')
+  try {
+    await refreshStatus(controller.signal)
+  } catch (err) {
+    if (!controller.signal.aborted && err.status !== 401) toast.warn('配置已保存，运行状态刷新失败')
   }
 }
+async function save() {
+  if (isSavingConfig.value) return
+  formError.value = ''
+  try {
+    const record = { ...form.value, name: form.value.name.trim(), url: form.value.url.trim() }
+    await saveConfig(
+      snapshot.value,
+      replaceConfigItem(snapshot.value, 'subscriptions', record, originalId.value)
+    )
+    dialog.value.close()
+    await saved()
+  } catch (err) {
+    formError.value = err.message
+    await nextTick()
+    formErrorElement.value?.focus()
+  }
+}
+async function toggle(sub, event) {
+  event.target.checked = sub.enabled
+  if (isSavingConfig.value || (sub.enabled && references(sub.id).length)) return
+  const current = structuredClone(gatewayConfigSnapshot.value)
+  try {
+    await saveConfig(
+      current,
+      replaceConfigItem(current, 'subscriptions', { ...sub, enabled: !sub.enabled }, sub.id)
+    )
+    await saved()
+  } catch (err) {
+    toast.error(err.message)
+  }
+}
+async function remove(sub) {
+  if (isSavingConfig.value || references(sub.id).length || !confirm(`删除 IP 订阅「${sub.name}」？`)) return
+  const current = structuredClone(gatewayConfigSnapshot.value)
+  try {
+    await saveConfig(current, {
+      ...current.config,
+      subscriptions: current.config.subscriptions.filter((item) => item.id !== sub.id)
+    })
+    await saved()
+  } catch (err) {
+    toast.error(err.message)
+  }
+}
+async function queue(sub) {
+  queued.value.add(sub.id)
+  try {
+    await adminApi.refreshSubscription(sub.id)
+    return true
+  } finally {
+    queued.value.delete(sub.id)
+  }
+}
+async function refreshOne(sub) {
+  try {
+    await queue(sub)
+    toast.info('更新任务已加入队列，请等待服务器返回结果')
+    await refreshStatus(controller.signal)
+  } catch (err) {
+    if (!controller.signal.aborted) toast.error(err.message)
+  }
+}
+async function refreshAll() {
+  queuingAll.value = true
+  let accepted = 0,
+    failed = 0
+  for (const sub of subscriptions.value.filter((item) => item.enabled)) {
+    if (controller.signal.aborted) break
+    try {
+      await queue(sub)
+      accepted++
+    } catch {
+      failed++
+    }
+  }
+  queuingAll.value = false
+  if (controller.signal.aborted) return
+  toast.info(`${accepted} 个更新任务已加入队列${failed ? `，${failed} 个请求失败，请单独重试` : ''}`)
+  try {
+    await refreshStatus(controller.signal)
+  } catch (err) {
+    if (!controller.signal.aborted) error.value = err.message
+  }
+}
+async function copy(url) {
+  try {
+    await navigator.clipboard.writeText(url)
+    toast.success('订阅地址已复制')
+  } catch {
+    toast.error('复制失败，请手动复制地址')
+  }
+}
+let timer
+onMounted(() => {
+  reload()
+  timer = setInterval(async () => {
+    try {
+      await refreshStatus(controller.signal)
+      if (!controller.signal.aborted) statusError.value = ''
+    } catch (err) {
+      if (!controller.signal.aborted) statusError.value = err.message
+    }
+  }, 5000)
+})
+onUnmounted(() => {
+  clearInterval(timer)
+  controller.abort()
+})
 </script>
 
 <style scoped>
-.subscriptions-page { display: flex; flex-direction: column; gap: 20px; }
-.page-topbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; }
-.page-title { font-size: 22px; font-weight: 700; color: var(--ink); }
-.page-subtitle { font-size: 13px; color: var(--muted); margin-top: 3px; }
-.header-actions { display: flex; gap: 10px; }
-.spin-icon { animation: spin 0.8s linear infinite; }
-@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-
-/* Preset Hub Panel */
-.preset-panel {
-  padding: 16px 20px; display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+.subs-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
 }
-.preset-left { display: flex; align-items: center; gap: 14px; }
-.preset-icon-box {
-  width: 40px; height: 40px; border-radius: var(--radius-sm);
-  background: rgba(99, 102, 241, 0.12); color: var(--brand-light);
-  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+.sub-card {
+  padding: 20px;
+  min-width: 0;
 }
-.preset-info { display: flex; flex-direction: column; gap: 2px; }
-.preset-title { font-size: 13.5px; font-weight: 700; color: var(--ink); }
-.preset-desc { font-size: 12px; color: var(--muted); }
-.preset-actions { display: flex; align-items: center; gap: 8px; }
-
-/* Subscriptions Grid */
-.subs-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
-.sub-card { padding: 18px; display: flex; flex-direction: column; gap: 14px; }
-.sub-card.inactive { opacity: 0.65; }
-
-.card-head { display: flex; align-items: center; gap: 12px; }
-.sub-icon-box {
-  width: 36px; height: 36px; border-radius: var(--radius-sm);
-  background: rgba(99, 102, 241, 0.12); color: var(--brand-light);
-  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+.sub-card :deep(.card-inner) {
+  display: grid;
+  gap: 14px;
 }
-.sub-head-info { flex: 1; display: flex; flex-direction: column; gap: 4px; }
-.sub-title { font-size: 14px; font-weight: 700; color: var(--ink); }
-
-.url-source-box {
-  background: var(--strip-bg); border: 1px solid var(--line);
-  border-radius: var(--radius-sm); padding: 8px 12px;
-  display: flex; align-items: center; justify-content: space-between;
-  cursor: pointer; transition: var(--transition-smooth);
+.sub-head {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
 }
-.url-source-box:hover { border-color: var(--card-border-hover); }
-.url-source-box:hover .url-text { color: var(--brand-light); }
-.url-text { font-size: 11.5px; color: var(--ink-secondary); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.copy-icon { color: var(--faint); margin-left: 8px; }
-
-.meta-stats-box {
-  background: var(--strip-bg); border: 1px solid var(--line);
-  border-radius: var(--radius-sm); padding: 10px 14px;
-  display: flex; flex-direction: column; gap: 6px; font-size: 12px;
+.sub-head strong {
+  color: var(--ink);
+  font-size: 14px;
+  overflow-wrap: anywhere;
 }
-.meta-row { display: flex; align-items: center; justify-content: space-between; }
-.meta-row .label { color: var(--faint); }
-.meta-row .val { color: var(--ink); font-weight: 500; }
-.count-highlight { color: var(--brand-cyan); font-weight: 700; }
-
-.card-footer { display: flex; align-items: center; justify-content: space-between; border-top: 1px solid var(--line); padding-top: 10px; }
-.actions-right { display: flex; gap: 4px; }
-.text-bad { color: var(--bad) !important; }
-
-/* Modal */
-.modal-backdrop {
-  position: fixed; inset: 0; background: rgba(0,0,0,0.65);
-  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
-  z-index: 1050; display: flex; align-items: center; justify-content: center; padding: 20px;
+.sub-head p {
+  margin-top: 6px;
 }
-.modal-dialog {
-  width: 100%; max-width: 500px; background: var(--card-bg);
-  border: 1px solid var(--card-border-hover); border-radius: var(--radius-card);
-  backdrop-filter: blur(30px); -webkit-backdrop-filter: blur(30px);
-  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.6), var(--inner-highlight);
-  overflow: hidden;
+.source-url {
+  text-align: left;
+  color: var(--ink-secondary);
+  font-size: 12px;
+  overflow-wrap: anywhere;
 }
-.modal-header { padding: 18px 20px; border-bottom: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; }
-.modal-title { font-size: 16px; font-weight: 700; color: var(--ink); }
-.close-modal-btn { color: var(--muted); }
-.modal-body { padding: 20px; display: flex; flex-direction: column; gap: 14px; }
-.form-group { display: flex; flex-direction: column; gap: 6px; }
-.form-label { font-size: 12px; font-weight: 600; color: var(--ink-secondary); }
-.form-hint { font-size: 11px; color: var(--faint); }
-.checkbox-row { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-secondary); cursor: pointer; }
-.modal-footer { display: flex; justify-content: flex-end; gap: 10px; padding-top: 8px; }
-
+.source-url svg {
+  display: inline;
+}
+.sub-card dl {
+  display: grid;
+  gap: 10px;
+  font-size: 12px;
+}
+.sub-card dl div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.sub-card dt,
+.sub-card summary {
+  color: var(--muted);
+}
+.sub-card dd {
+  color: var(--ink-secondary);
+  margin: 0;
+}
+.sub-card summary {
+  font-size: 12px;
+  cursor: pointer;
+}
+.sub-footer {
+  justify-content: space-between;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+.inactive {
+  opacity: 0.65;
+}
+.text-bad {
+  color: var(--bad);
+}
+.preset-panel :deep(.card-inner) {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.check-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 @media (max-width: 900px) {
-  .subs-grid { grid-template-columns: 1fr; }
-  .preset-panel { flex-direction: column; align-items: flex-start; }
+  .subs-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>
