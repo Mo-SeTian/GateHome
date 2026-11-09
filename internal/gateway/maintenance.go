@@ -119,14 +119,16 @@ func (m *Maintenance) inspectUpdateVersion(data []byte, expectedVersion string) 
 	message := "校验通过，应用时会先创建回退备份，再安装更新"
 	if comparison <= 0 {
 		message = "更新包版本不高于当前版本，无需更新"
+	} else if !m.Available() {
+		message = "可检查更新包，应用更新需要 Linux 安装脚本或新版 Docker 启动方式"
 	} else if !m.UpdateHistoryAvailable() {
-		message = updateLauncherRequired
+		message = "校验通过，可正常更新；当前启动器不支持保留更新前备份和历史版本回退"
 	}
 	compatible := m.checkSunPanelFiles()
 	if compatible != nil && m.Available() {
 		message = compatible.Error()
 	}
-	return map[string]any{"id": id, "version": version, "can_apply": m.UpdateHistoryAvailable() && comparison > 0 && compatible == nil, "message": message}, nil
+	return map[string]any{"id": id, "version": version, "can_apply": m.Available() && comparison > 0 && compatible == nil, "message": message}, nil
 }
 
 func (m *Maintenance) inspectBackup(data []byte, password string, adminPort int) (map[string]any, error) {
@@ -184,9 +186,6 @@ func (m *Maintenance) schedule(id, kind string) error {
 		return errors.New("暂存包不存在或已过期，请重新上传并检查")
 	}
 	if kind == "update" {
-		if !m.UpdateHistoryAvailable() {
-			return errors.New(updateLauncherRequired)
-		}
 		cmp, err := compareVersions(m.stage.Version, Version)
 		if err != nil || cmp <= 0 {
 			return errors.New("只可更新到更高版本")
@@ -220,7 +219,7 @@ func (m *Maintenance) schedule(id, kind string) error {
 		return err
 	}
 	op := maintenanceOperation{Kind: kind, Version: m.stage.Version, Digest: m.stage.Digest}
-	if kind == "update" {
+	if kind == "update" && m.UpdateHistoryAvailable() {
 		op.FromVersion = Version
 	}
 	if err := writeJSON(filepath.Join(m.dir, "operation.json"), op); err != nil {

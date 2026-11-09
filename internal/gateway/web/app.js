@@ -644,20 +644,20 @@ function certificatesHTML() {
     '<p class="form-note certificate-note">一项任务的多个域名申请为同一张证书。泛域名仅覆盖一级子域名；需要同时覆盖根域名时，请一并添加根域名。</p>'+`<div id="certificate-table">${certificateTable()}</div>`;
 }
 function onlineUpdateHTML() {
-  const release=onlineUpdate.release,pending=!!onlineUpdate.phase,supported=status.update_history_available;
+  const release=onlineUpdate.release,pending=!!onlineUpdate.phase,supported=status.maintenance_available,history=status.update_history_available;
   const available=release?.update_available&&release.version!==status.version;
   const beta=onlineUpdate.channel==='beta',channelName=beta?'Beta 测试版':'正式版';
-  const message=onlineUpdate.job?.phase==='checking'?'正在确认本次更新版本…':({checking:`正在检查 GitHub 最新${channelName}…`,downloading:'1 / 3 · 正在后台下载，当前服务继续运行…',applying:'2 / 3 · 正在校验更新包并安排备份、安装…'}[onlineUpdate.phase]||'');
+  const message=onlineUpdate.job?.phase==='checking'?'正在确认本次更新版本…':({checking:`正在检查 GitHub 最新${channelName}…`,downloading:'1 / 3 · 正在后台下载，当前服务继续运行…',applying:history?'2 / 3 · 正在校验更新包并安排备份、安装…':'2 / 3 · 正在校验更新包并安排安装…'}[onlineUpdate.phase]||'');
   const resultMessage=release?(release.version?(available?'有新版本可用。':'当前版本已达到或高于所选渠道的最新版本。'):'暂未发布 Beta 测试版。'):'';
   const progress=onlineUpdate.phase==='downloading'&&onlineUpdate.job?.total?`<div class="online-update-progress"><progress max="${onlineUpdate.job.total}" value="${onlineUpdate.job.downloaded}" aria-label="更新包下载进度"></progress><span>${Math.min(100,Math.floor(100*onlineUpdate.job.downloaded/onlineUpdate.job.total))}% · ${(onlineUpdate.job.downloaded/1048576).toFixed(1)} / ${(onlineUpdate.job.total/1048576).toFixed(1)} MiB</span></div>`:'';
   return panel('在线更新','选择发行渠道，检查并安装新版本。',`<div class="panel-body online-update" aria-busy="${pending}">
     <label class="update-channel">更新渠道<select id="update-channel" ${pending?'disabled':''}><option value="stable" ${!beta?'selected':''}>正式版</option><option value="beta" ${beta?'selected':''}>Beta 测试版</option></select></label>
-    <p data-visible-note class="form-note update-channel-note">${beta?'Beta 提前提供新功能，可能存在未修复的问题。更新前会自动保存回退备份。':'正式版提供经过发布验证的版本。需要提前体验新功能时可切换 Beta。'}</p>
+    <p data-visible-note class="form-note update-channel-note">${beta?'Beta 提前提供新功能，可能存在未修复的问题。':'正式版提供经过发布验证的版本。需要提前体验新功能时可切换 Beta。'}</p>
     <ul class="info-list"><li><span>当前版本</span><b>v${esc(status.version||'加载中')}</b></li><li><span>更新连接</span><b>${config.outbound_proxy?.enabled?'使用已保存的出站代理':'直接连接 GitHub'}</b></li><li><span>GitHub API 认证</span><b>${githubTokenConfigured?'已配置 Token':'匿名访问'}</b></li><li><span>最新${channelName}</span><b>${release?(release.version?'v'+esc(release.version):'尚未发布'):'尚未检查'}</b></li>${release?.version?`<li><span>发布时间 / 更新包</span><b>${date(release.published_at)} · ${(release.size/1048576).toFixed(1)} MiB</b></li>`:''}${release?.checked_at?`<li><span>检查时间 / 下次联网检查</span><b>${date(release.checked_at)} / ${date(release.cache_until)}</b></li>`:''}${onlineUpdate.job?.version?`<li><span>本次更新版本</span><b>v${esc(onlineUpdate.job.version)}</b></li>`:''}</ul>
-    <p class="form-note">更新会依次校验安装包、停止服务、备份旧程序与全部数据，再安装并重启。备份失败会取消更新；新版本启动失败会自动恢复。下载任务在后台运行，刷新页面可继续查看进度。</p>
-    ${!supported?'<p class="error" role="alert">需要新版启动器才能自动备份和回退。请先使用新版完整安装包更新部署，或重建新版 Docker 镜像。</p>':''}
+    <p class="form-note">${history?'更新会依次校验安装包、停止服务、备份旧程序与全部数据，再安装并重启。备份失败会取消更新；新版本启动失败会自动恢复。':'更新会校验安装包，再安装并重启。当前启动器不保留供手动回退的历史备份，建议先在“备份与恢复”导出备份；升级启动器可启用自动备份与历史回退。'}下载任务在后台运行，刷新页面可继续查看进度。</p>
+    ${!supported?'<p class="error" role="alert">此部署未启用自动维护，请使用 Linux 安装脚本或新版 Docker 启动方式。</p>':''}
     <p class="online-update-status" role="status" aria-live="polite">${esc(message||resultMessage)}</p>${progress}<p class="error" role="alert">${esc(onlineUpdate.error)}</p>
-    <div class="form-actions"><button type="button" class="secondary" data-action="check-online-update" ${pending?'disabled':''}>${onlineUpdate.phase==='checking'?'检查中…':'检查更新'}</button><button type="button" class="primary" data-action="install-online-update" ${pending||!available||!supported||status.maintenance_busy?'disabled':''}>${pending&&onlineUpdate.phase!=='checking'?'更新中…':'备份并更新'}</button>${release?.release_url?`<a href="${esc(release.release_url)}" target="_blank" rel="noopener noreferrer">${icon('external-link')}发行说明</a>`:''}</div></div>`);
+    <div class="form-actions"><button type="button" class="secondary" data-action="check-online-update" ${pending?'disabled':''}>${onlineUpdate.phase==='checking'?'检查中…':'检查更新'}</button><button type="button" class="primary" data-action="install-online-update" ${pending||!available||!supported||status.maintenance_busy?'disabled':''}>${pending&&onlineUpdate.phase!=='checking'?'更新中…':history?'备份并更新':'更新并重启'}</button>${release?.release_url?`<a href="${esc(release.release_url)}" target="_blank" rel="noopener noreferrer">${icon('external-link')}发行说明</a>`:''}</div></div>`);
 }
 function selectUpdateChannel(channel) {
   if(onlineUpdate.phase||!['stable','beta'].includes(channel)) return;
@@ -679,8 +679,8 @@ async function checkOnlineUpdate() {
 }
 async function installOnlineUpdate() {
   const release=onlineUpdate.release;
-  if(onlineUpdate.phase||!release?.update_available||release.version===status.version) return;
-  if(!confirm('更新至 v'+release.version+'？服务停止后先保存当前程序和数据，备份完成再安装。备份失败会取消更新。')) return;
+  if(onlineUpdate.phase||!release?.update_available||release.version===status.version||!status.maintenance_available||status.maintenance_busy) return;
+  if(!confirm('更新至 v'+release.version+'？'+(status.update_history_available?'服务停止后先保存当前程序和数据，备份完成再安装。备份失败会取消更新。':'服务将安装更新并重启。当前启动器不保留历史回退备份，建议先导出数据备份。'))) return;
   const request=++onlineUpdate.request;
   onlineUpdate.phase='downloading';onlineUpdate.error='';renderOnlineUpdate();
   try {
@@ -698,7 +698,7 @@ async function loadOnlineUpdateStatus() {
     const job=await api('maintenance/online-update-status');
     if(request!==onlineUpdate.request||!config) return;
     onlineUpdate.job=job.phase?job:null;onlineUpdate.error=(job.error||'')+(job.retry_at?`；可在 ${date(job.retry_at)} 后重试`:'');
-    if(job.phase==='restarting') {showLogin();toast('3 / 3 · 服务正在备份并安装，完成后重新登录查看版本与维护结果。');return;}
+    if(job.phase==='restarting') {const message=status.update_history_available?'3 / 3 · 服务正在备份并安装，完成后重新登录查看版本与维护结果。':'3 / 3 · 服务正在安装并重启，完成后重新登录查看版本。';showLogin();toast(message);return;}
     if(job.phase&&job.phase!=='error'&&['stable','beta'].includes(job.channel)) onlineUpdate.channel=job.channel;
     onlineUpdate.phase=job.phase==='verifying'?'applying':['checking','downloading'].includes(job.phase)?'downloading':'';
     if(onlineUpdate.phase) onlineUpdate.timer=setTimeout(loadOnlineUpdateStatus,1500);
@@ -730,7 +730,7 @@ function maintenanceHTML() {
   const detail=!preview?'':`<div class="maintenance-preview"><b>${preview.kind==='update'?'更新包 v'+esc(preview.version):'备份 v'+esc(preview.version)}</b>${preview.kind==='restore'?`<p>${preview.groups} 个反代组 · ${preview.routes} 个服务 · ${preview.forwards||0} 条端口转发 · ${preview.ddns_groups} 个 DDNS 组 · ${preview.firewalls} 个防火墙 · ${preview.subscriptions} 个订阅<br>${preview.sunpanel_files||0} 个 Sun-Panel 文件（${preview.sunpanel_images||0} 张图片） · ${preview.images||0} 张反代图片 · ${preview.certificates||0} 个证书文件 · ${preview.log_entries||0} 条日志 · ${preview.subscription_caches||0} 个订阅缓存<br>${preview.includes_files?'':'此旧备份未包含日志、缓存与图片；恢复时保留服务器现有文件。<br>'}备份时间：${date(preview.created_at)} · ${preview.token_configured?'含 Cloudflare Token':'未配置 Cloudflare Token'}</p>`:''}<p>${esc(preview.message)}</p><button class="primary" data-action="apply-maintenance" ${!preview.can_apply?'disabled':''}>${preview.kind==='update'?'应用更新并重启':'恢复数据并重启'}</button></div>`;
   const backupDetail=preview?.kind==='restore'?detail:'',updateDetail=preview?.kind==='update'?detail:'';
   const backup=panel('备份与恢复','备份配置与凭据、证书、服务图片、Sun-Panel 全部数据、日志和订阅缓存。',`<div class="panel-body two-col maintenance-forms"><form id="backup-form"><h3>下载加密备份</h3><label>备份密码<input name="password" type="password" autocomplete="new-password"></label><label>再次输入备份密码<input name="confirm_password" type="password" autocomplete="new-password"></label><p class="form-note">密码不限长度，可以留空；留空时恢复也无需填写密码。请保存设置的密码，恢复时需保持一致。ZIP 内的数据使用 AES-256-GCM 加密，含反代访问密码、IP 冻结名单与全部已保存的业务数据。登录会话、未保存的扫描结果和维护临时文件不备份。</p><p class="error" role="alert"></p><div class="form-actions"><button class="primary" type="submit">下载备份 ZIP</button></div></form><form id="restore-form"><h3>上传备份</h3><label>备份 ZIP<input name="file" type="file" accept=".zip,application/zip" required></label><label>导出时的备份密码<input name="password" type="password" autocomplete="off"></label><p class="form-note">密码不限长度；导出时留空，这里也留空。先检查备份再确认恢复。恢复后使用备份时的管理员账号和管理密码重新登录。</p><p class="error" role="alert"></p><div class="form-actions"><button class="secondary" type="submit">检查备份</button></div></form></div>${backupDetail}`);
-  const upload=panel('上传版本更新','使用本项目“更新版本”目录生成的 ZIP；只接受更高版本。',`<form id="update-form" class="panel-body"><label>更新 ZIP<input name="file" type="file" accept=".zip,application/zip" required></label><p class="form-note">支持正式版与 Beta 的更高版本。校验通过后先自动备份旧程序和数据，备份成功后安装。请使用你信任的项目更新包。</p><p data-visible-note class="form-note">${supported?'维护时短暂停止服务，新程序启动检查失败会回滚。':'此部署可导出备份及检查上传包。应用更新或恢复需要 Linux 安装脚本或新版 Docker 启动方式。'}</p><p class="error" role="alert"></p><div class="form-actions"><button type="submit" class="secondary">检查更新包</button></div></form>${updateDetail}`);
+  const upload=panel('上传版本更新','使用本项目“更新版本”目录生成的 ZIP；只接受更高版本。',`<form id="update-form" class="panel-body"><label>更新 ZIP<input name="file" type="file" accept=".zip,application/zip" required></label><p class="form-note">支持正式版与 Beta 的更高版本。${status.update_history_available?'校验通过后先自动备份旧程序和数据，备份成功后安装。':'当前启动器可正常更新，但不保留历史回退备份，建议先导出数据备份。'}请使用你信任的项目更新包。</p><p data-visible-note class="form-note">${supported?'维护时短暂停止服务，新程序启动检查失败会回滚。':'此部署可导出备份及检查上传包。应用更新或恢复需要 Linux 安装脚本或新版 Docker 启动方式。'}</p><p class="error" role="alert"></p><div class="form-actions"><button type="submit" class="secondary">检查更新包</button></div></form>${updateDetail}`);
   return {
     updates:'<div id="online-update">'+onlineUpdateHTML()+'</div>',
     upload,
@@ -1566,7 +1566,7 @@ document.addEventListener('click',async event=>{
     if(action==='restart-service') {if(!confirm('重启会短暂中断服务，监听端口变更将生效。确认重启？')) return;const result=await api('maintenance/restart','POST',{});toast(result.message);showLogin();}
     if(action==='apply-maintenance') {
       const preview=maintenancePreview;if(!preview?.can_apply) throw new Error('请先检查可用的维护包');
-      const message=preview.kind==='restore'?'恢复会覆盖当前全部配置、Token 和管理员账户数据，并重启服务。确认恢复？':'确认更新至 '+preview.version+'？服务停止后先保存旧程序和数据，备份成功再安装。';
+      const message=preview.kind==='restore'?'恢复会覆盖当前全部配置、Token 和管理员账户数据，并重启服务。确认恢复？':'确认更新至 '+preview.version+'？'+(status.update_history_available?'服务停止后先保存旧程序和数据，备份成功再安装。':'服务将安装更新并重启。当前启动器不保留历史回退备份，建议先导出数据备份。');
       if(!confirm(message)) return;
       const result=await api('maintenance/apply-'+preview.kind,'POST',{id:preview.id});maintenancePreview=null;toast(result.message);showLogin();
     }

@@ -165,7 +165,7 @@ func (a *Admin) maintenanceRoutes(mux *http.ServeMux) {
 				apiError(w, 409, "维护功能未初始化")
 				return
 			}
-			if kind == "update" && a.maintenance.UpdateHistoryAvailable() {
+			if kind == "update" {
 				if err := checkRestartPorts(a.ports, a.store.Snapshot().Config); err != nil {
 					apiError(w, 409, err.Error())
 					return
@@ -176,7 +176,7 @@ func (a *Admin) maintenanceRoutes(mux *http.ServeMux) {
 				return
 			}
 			message := "维护操作已接受，服务即将重启；请稍后刷新并重新登录"
-			if kind == "update" {
+			if kind == "update" && a.maintenance.UpdateHistoryAvailable() {
 				message = "更新已安排，服务会先备份再安装；请稍后刷新并重新登录"
 			}
 			jsonResponse(w, 202, map[string]string{"message": message})

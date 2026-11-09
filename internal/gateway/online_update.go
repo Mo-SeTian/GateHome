@@ -370,9 +370,14 @@ func (a *Admin) onlineUpdateRoutes(mux *http.ServeMux) {
 			apiError(w, 409, "正在保存配置或执行维护操作，请稍后重试")
 			return
 		}
-		if !a.maintenance.UpdateHistoryAvailable() {
+		if a.maintenance == nil || !a.maintenance.Available() {
 			a.updateMu.Unlock()
-			apiError(w, 409, updateLauncherRequired)
+			apiError(w, 409, "此部署尚未启用自动维护，请使用 Linux 安装脚本或更新后的 Docker 部署")
+			return
+		}
+		if err := a.maintenance.checkSunPanelFiles(); err != nil {
+			a.updateMu.Unlock()
+			apiError(w, 409, err.Error())
 			return
 		}
 		if a.maintenance.Busy() {

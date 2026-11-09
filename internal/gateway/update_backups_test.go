@@ -312,13 +312,7 @@ func TestManagedUpdateAndRollbackAPI(t *testing.T) {
 	if err := writeProgram(filepath.Join(app, "gatehouse"), testELF(releaseArch())); err != nil {
 		t.Fatal(err)
 	}
-	m.updateHistory = false
 	preview, err := m.inspectUpdate(testRelease(t, "99.0.0-beta.1", releaseArch()))
-	if err != nil || preview["can_apply"] != false || m.schedule(preview["id"].(string), "update") == nil {
-		t.Fatal("old launcher was allowed to update without a persistent backup")
-	}
-	m.updateHistory = true
-	preview, err = m.inspectUpdate(testRelease(t, "99.0.0-beta.1", releaseArch()))
 	if err != nil || preview["can_apply"] != true {
 		t.Fatal("new launcher rejected a valid beta package")
 	}

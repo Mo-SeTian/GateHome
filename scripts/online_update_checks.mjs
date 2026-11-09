@@ -5,12 +5,12 @@ import vm from 'node:vm';
 const source=readFileSync(new URL('../internal/gateway/web/app.js',import.meta.url),'utf8');
 const helpers=source.slice(source.indexOf('function onlineUpdateHTML('),source.indexOf('function maintenanceHTML('));
 const root={innerHTML:''},calls=[];
-let approve=true,loggedOut=false;
+let approve=true,loggedOut=false,confirmation='';
 const context=vm.createContext({
   githubTokenConfigured:false,config:{outbound_proxy:{enabled:true}},status:{version:'0.0.21',maintenance_available:true,update_history_available:true},
   $:selector=>selector==='#online-update'?root:null,hydrateIcons:()=>{},panel:(title,description,body)=>body,icon:()=>'',
   esc:value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])),
-  date:value=>String(value),confirm:()=>approve,showLogin:()=>{loggedOut=true;vm.runInContext('onlineUpdate.phase="";onlineUpdate.release=null;',context);},toast:()=>{},setTimeout:()=>1,clearTimeout:()=>{},
+  date:value=>String(value),confirm:message=>{confirmation=message;return approve;},showLogin:()=>{loggedOut=true;vm.runInContext('onlineUpdate.phase="";onlineUpdate.release=null;',context);},toast:()=>{},setTimeout:()=>1,clearTimeout:()=>{},
 });
 vm.runInContext('const onlineUpdate={channel:"stable",release:null,phase:"",error:"",job:null,timer:null,request:0};let maintenancePreview=null;'+helpers,context);
 const release={version:'0.0.22',update_available:true,size:1048576,published_at:'2026-10-09',release_url:'https://github.com/Mo-SeTian/GateHome/releases/tag/v0.0.22'};
@@ -124,8 +124,25 @@ vm.runInContext('onlineUpdate.request++;onlineUpdate.phase="";config=undefined;'
 finishBeta(release);await staleCheck;
 assert.equal(snapshot().release,null,'a stale check resurrected release state after logout');
 context.config={outbound_proxy:{enabled:true}};
+// History support must never become a prerequisite for ordinary updates.
+vm.runInContext('onlineUpdate.release={version:"0.0.23-beta.10",update_available:true};status.update_history_available=false;renderOnlineUpdate();',context);
+assert.ok(!/data-action="install-online-update" disabled/.test(root.innerHTML),'legacy launcher lost normal updates');
+assert.match(root.innerHTML,/更新并重启/);
+assert.match(root.innerHTML,/不保留供手动回退的历史备份/);
+assert.ok(!root.innerHTML.includes('备份失败会取消更新'),'legacy launcher promised a persistent backup');
+approve=false;
+await vm.runInContext('installOnlineUpdate()',context);
+assert.match(confirmation,/不保留历史回退备份/);
+assert.ok(!confirmation.includes('备份完成再安装'));
+context.status.maintenance_available=false;
+vm.runInContext('renderOnlineUpdate()',context);
+assert.match(root.innerHTML,/data-action="install-online-update" disabled/);
+confirmation='';
+await vm.runInContext('installOnlineUpdate()',context);
+assert.equal(confirmation,'','unsupported deployment entered the update flow');
 console.log('Online update: duplicate prevention, proxy label, restart confirmation, failure preservation, background progress, reload recovery and error escaping: PASS');
 console.log('Update channels: independent selection, pending guard, empty Beta and stale login response: PASS');
+console.log('Legacy launcher: normal updates remain enabled; history limitation shown without blocking PASS');
 
 let reloads=0;
 const versionContext=vm.createContext({
