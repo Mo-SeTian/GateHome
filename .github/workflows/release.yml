@@ -72,7 +72,7 @@ jobs:
           target_commit=$(git rev-parse HEAD)
           test "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")" = "$target_commit"
           find_release() {
-            gh api --paginate "repos/$GH_REPO/releases?per_page=100" |
+            gh api --paginate -H 'Cache-Control: no-cache' "repos/$GH_REPO/releases?per_page=100" |
               jq -cs --arg tag "$RELEASE_TAG" '
                 map(.[]) | map(select(.tag_name == $tag or
                   (.draft == true and .name == ("GateHome " + $tag) and (.tag_name | startswith("untagged-"))))) |
@@ -84,7 +84,11 @@ jobs:
             args=(--verify-tag --target "$target_commit" --draft --title "GateHome $RELEASE_TAG" --generate-notes)
             if [ "$PRERELEASE" = true ]; then args+=(--prerelease); fi
             gh release create "$RELEASE_TAG" "${args[@]}"
-            metadata=$(find_release)
+            for attempt in {1..10}; do
+              metadata=$(find_release)
+              if [ "$metadata" != null ]; then break; fi
+              sleep 1
+            done
           fi
           release_id=$(jq -er --arg tag "$RELEASE_TAG" '
             select(.draft == true and
