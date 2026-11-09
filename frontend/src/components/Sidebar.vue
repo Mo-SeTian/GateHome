@@ -128,7 +128,7 @@
             <span class="uptime-text" title="网关运行时长">{{ uptime }}</span>
           </div>
           <div class="status-details">
-            <span>管理入口 {{ adminAddress }}</span>
+            <span class="admin-addr" :title="`管理入口 ${adminAddress}`">入口 {{ adminAddress }}</span>
             <button type="button" class="login-link-btn" :disabled="isLoggingOut" @click="handleLogout">退出登录</button>
           </div>
         </div>
@@ -397,15 +397,26 @@ const handleLogout = () => {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
   color: var(--faint);
-  font-size: 10.5px;
+  font-size: 11px;
+}
+
+.admin-addr {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .login-link-btn {
+  flex-shrink: 0;
+  white-space: nowrap;
   background: transparent;
   border: none;
   padding: 0;
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--brand-light);
   cursor: pointer;
   transition: var(--transition-smooth);

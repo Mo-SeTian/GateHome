@@ -1,117 +1,195 @@
 <template>
   <section class="report-page log-explorer" :aria-label="title">
     <h2 v-if="title" class="explorer-title">{{ title }}</h2>
-    <p class="report-note">
-      翻页保留当前日志快照；筛选或刷新读取最新记录。查询来自当前保留的最多 5000
-      条日志，历史清理后的记录不在列表中。
-    </p>
-    <form class="report-form" @submit.prevent="applyFilters">
-      <label v-if="scope === 'project'"
-        >项目分类<select v-model="form.category" name="category" class="form-select">
-          <option value="">全部分类</option>
-          <option v-for="(label, key) in categories" :key="key" :value="key">{{ label }}</option>
-        </select></label
-      >
-      <label v-else
-        >反代规则<select v-model="form.rule" name="rule" class="form-select">
-          <option value="">全部反代规则</option>
-          <option v-for="route in gatewayConfig?.routes" :key="routeKey(route)" :value="routeKey(route)">
-            {{ routeLabel(route) }}
-          </option>
-          <option v-if="form.rule && !hasRoute(form.rule)" :value="form.rule">
-            {{ form.rule }}（历史规则）
-          </option>
-        </select></label
-      >
-      <label
-        >执行结果<select v-model="form.result" name="result" class="form-select">
-          <option value="">全部结果</option>
-          <option value="success">成功</option>
-          <option value="error">失败</option>
-        </select></label
-      >
-      <template v-if="scope !== 'project'">
-        <label
-          >来源 IP<input
-            v-model="form.ip"
-            name="ip"
-            class="form-input mono-text"
-            placeholder="精确 IPv4 / IPv6"
-            maxlength="64"
-        /></label>
-        <label
-          >请求方法<select v-model="form.method" name="method" class="form-select">
-            <option value="">全部方法</option>
-            <option v-for="method in methods" :key="method">{{ method }}</option>
-          </select></label
-        >
-        <label
-          >HTTP 状态码<input
-            v-model="form.status"
-            name="status"
-            class="form-input"
-            type="number"
-            min="100"
-            max="599"
-            placeholder="例如 403"
-        /></label>
-      </template>
-      <template v-if="securityScope">
-        <label
-          >防火墙<select v-model="form.firewall" name="firewall" class="form-select">
-            <option value="">全部策略</option>
-            <option v-for="firewall in gatewayConfig?.firewalls" :key="firewall.id" :value="firewall.id">
-              {{ firewall.name }}
-            </option>
-            <option
-              v-if="form.firewall && !gatewayConfig?.firewalls.some((item) => item.id === form.firewall)"
-              :value="form.firewall"
-            >
-              {{ form.firewall }}（历史策略）
-            </option>
-          </select></label
-        >
-        <label
-          >检测引擎<select v-model="form.engine" name="engine" class="form-select">
-            <option value="">全部引擎</option>
-            <option v-for="engine in engines" :key="engine" :value="engine">{{ engineLabel(engine) }}</option>
-          </select></label
-        >
-        <label
-          >处理动作<select v-model="form.decision" name="decision" class="form-select">
-            <option value="">全部动作</option>
-            <option value="block">拦截</option>
-            <option value="detect">仅记录</option>
-          </select></label
-        >
-        <label
-          >检测规则编号<input
-            v-model="form.rule_id"
-            name="rule_id"
-            class="form-input"
-            type="number"
-            min="1"
-            max="999999999"
-        /></label>
-      </template>
-      <label
-        >开始时间<input v-model="form.from" name="from" class="form-input" type="datetime-local"
-      /></label>
-      <label>结束时间<input v-model="form.to" name="to" class="form-input" type="datetime-local" /></label>
-      <label
-        >关键词<input
-          v-model="form.search"
-          name="search"
-          class="form-input"
-          maxlength="200"
-          placeholder="域名、IP、路径、操作或规则名称"
-      /></label>
-      <div class="report-actions wide">
-        <button type="submit" class="btn btn-primary" :disabled="loading">筛选</button
-        ><button type="button" class="btn btn-secondary" :disabled="loading" @click="reset">重置</button
-        ><button type="button" class="btn btn-secondary" :disabled="loading" @click="refresh">
-          {{ loading ? '读取中…' : '刷新日志' }}
-        </button>
+
+    <form class="report-form report-filter-bar" @submit.prevent="applyFilters">
+      <!-- 常用核心筛选项（一行铺开并自适应，右侧为操作按钮组） -->
+      <div class="filter-primary-row">
+        <div class="filter-primary-fields">
+          <!-- 规则 / 分类 -->
+          <div v-if="scope === 'project'" class="filter-col">
+            <label class="col-label">项目分类</label>
+            <select v-model="form.category" name="category" class="form-select">
+              <option value="">全部分类</option>
+              <option v-for="(label, key) in categories" :key="key" :value="key">{{ label }}</option>
+            </select>
+          </div>
+          <div v-else class="filter-col">
+            <label class="col-label">反代规则</label>
+            <select v-model="form.rule" name="rule" class="form-select">
+              <option value="">全部反代规则</option>
+              <option v-for="route in gatewayConfig?.routes" :key="routeKey(route)" :value="routeKey(route)">
+                {{ routeLabel(route) }}
+              </option>
+              <option v-if="form.rule && !hasRoute(form.rule)" :value="form.rule">
+                {{ form.rule }}（历史规则）
+              </option>
+            </select>
+          </div>
+
+          <!-- 执行结果 -->
+          <div class="filter-col filter-col-sm">
+            <label class="col-label">执行结果</label>
+            <select v-model="form.result" name="result" class="form-select">
+              <option value="">全部结果</option>
+              <option value="success">成功</option>
+              <option value="error">失败</option>
+            </select>
+          </div>
+
+          <!-- 关键词搜索 -->
+          <div class="filter-col filter-col-search">
+            <label class="col-label">关键词搜索</label>
+            <div class="search-box">
+              <Search :size="14" class="search-icon" />
+              <input
+                v-model="form.search"
+                name="search"
+                class="form-input"
+                maxlength="200"
+                placeholder="搜索域名、IP、路径、操作或规则…"
+              />
+            </div>
+          </div>
+        </div>
+
+        <!-- 按钮组 -->
+        <div class="filter-actions-group">
+          <button type="submit" class="btn btn-primary" :disabled="loading">
+            <Search :size="14" />
+            <span>筛选</span>
+          </button>
+          <button
+            type="button"
+            class="btn btn-secondary filter-toggle-btn"
+            :class="{ active: showAdvanced }"
+            @click="showAdvanced = !showAdvanced"
+          >
+            <SlidersHorizontal :size="14" />
+            <span>{{ showAdvanced ? '收起' : '更多筛选' }}</span>
+            <span v-if="!showAdvanced && activeAdvancedCount > 0" class="filter-badge">
+              {{ activeAdvancedCount }}
+            </span>
+            <ChevronDown :size="13" class="toggle-arrow" :class="{ rotated: showAdvanced }" />
+          </button>
+          <button
+            type="button"
+            class="btn btn-secondary btn-icon-btn"
+            :disabled="loading"
+            title="重置全部筛选"
+            aria-label="重置全部筛选"
+            @click="reset"
+          >
+            <RotateCcw :size="14" />
+          </button>
+          <button
+            type="button"
+            class="btn btn-secondary"
+            :disabled="loading"
+            @click="refresh"
+          >
+            <RefreshCw :size="14" :class="{ 'spin-anim': loading }" />
+            <span>{{ loading ? '读取中…' : '刷新' }}</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- 高级筛选项抽屉 -->
+      <transition name="drawer-fade">
+        <div v-if="showAdvanced" class="filter-advanced-drawer">
+          <div class="advanced-grid">
+            <template v-if="scope !== 'project'">
+              <div class="filter-col">
+                <label class="col-label">来源 IP</label>
+                <input
+                  v-model="form.ip"
+                  name="ip"
+                  class="form-input mono-text"
+                  placeholder="精确 IPv4 / IPv6"
+                  maxlength="64"
+                />
+              </div>
+              <div class="filter-col">
+                <label class="col-label">请求方法</label>
+                <select v-model="form.method" name="method" class="form-select">
+                  <option value="">全部方法</option>
+                  <option v-for="method in methods" :key="method">{{ method }}</option>
+                </select>
+              </div>
+              <div class="filter-col">
+                <label class="col-label">HTTP 状态码</label>
+                <input
+                  v-model="form.status"
+                  name="status"
+                  class="form-input"
+                  type="number"
+                  min="100"
+                  max="599"
+                  placeholder="例如 403"
+                />
+              </div>
+            </template>
+
+            <template v-if="securityScope">
+              <div class="filter-col">
+                <label class="col-label">防火墙策略</label>
+                <select v-model="form.firewall" name="firewall" class="form-select">
+                  <option value="">全部策略</option>
+                  <option v-for="firewall in gatewayConfig?.firewalls" :key="firewall.id" :value="firewall.id">
+                    {{ firewall.name }}
+                  </option>
+                  <option
+                    v-if="form.firewall && !gatewayConfig?.firewalls.some((item) => item.id === form.firewall)"
+                    :value="form.firewall"
+                  >
+                    {{ form.firewall }}（历史策略）
+                  </option>
+                </select>
+              </div>
+              <div class="filter-col">
+                <label class="col-label">检测引擎</label>
+                <select v-model="form.engine" name="engine" class="form-select">
+                  <option value="">全部引擎</option>
+                  <option v-for="engine in engines" :key="engine" :value="engine">{{ engineLabel(engine) }}</option>
+                </select>
+              </div>
+              <div class="filter-col">
+                <label class="col-label">处理动作</label>
+                <select v-model="form.decision" name="decision" class="form-select">
+                  <option value="">全部动作</option>
+                  <option value="block">拦截</option>
+                  <option value="detect">仅记录</option>
+                </select>
+              </div>
+              <div class="filter-col">
+                <label class="col-label">检测规则编号</label>
+                <input
+                  v-model="form.rule_id"
+                  name="rule_id"
+                  class="form-input"
+                  type="number"
+                  min="1"
+                  max="999999999"
+                  placeholder="规则 ID"
+                />
+              </div>
+            </template>
+
+            <div class="filter-col">
+              <label class="col-label">开始时间</label>
+              <input v-model="form.from" name="from" class="form-input" type="datetime-local" />
+            </div>
+            <div class="filter-col">
+              <label class="col-label">结束时间</label>
+              <input v-model="form.to" name="to" class="form-input" type="datetime-local" />
+            </div>
+          </div>
+        </div>
+      </transition>
+
+      <div class="filter-quick-info">
+        <span class="quick-info-text">保留最多 5000 条实时日志 · 翻页保留快照 · 筛选或刷新读取最新记录</span>
+        <span v-if="dirty && data" class="dirty-badge">筛选条件已变更，点击「筛选」生效</span>
       </div>
     </form>
     <p v-if="error" ref="errorElement" class="report-error" role="alert" tabindex="-1">
@@ -286,7 +364,14 @@
 
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef } from 'vue'
-import { X } from 'lucide-vue-next'
+import {
+  ChevronDown,
+  RefreshCw,
+  RotateCcw,
+  Search,
+  SlidersHorizontal,
+  X
+} from 'lucide-vue-next'
 import { adminApi } from '@/api/admin'
 import { routeKey } from '@/api/configuration'
 import { engineLabel, logQuery, reportDate } from '@/api/reports'
@@ -308,6 +393,7 @@ const categories = {
 const methods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS', 'CONNECT']
 const engines = ['ip', 'waf', 'custom', 'rate', 'system', 'auth', 'freeze']
 const securityScope = computed(() => props.scope === 'firewall' || props.scope === 'security')
+const showAdvanced = ref(false)
 const emptyForm = () => ({
   category: '',
   result: '',
@@ -339,6 +425,25 @@ const freezeMinutes = ref(60),
   freezeError = ref(''),
   freezeErrorElement = ref(null)
 const dirty = computed(() => JSON.stringify(form.value) !== JSON.stringify(applied.value))
+
+const activeAdvancedCount = computed(() => {
+  let count = 0
+  if (props.scope !== 'project') {
+    if (form.value.ip) count++
+    if (form.value.method) count++
+    if (form.value.status) count++
+  }
+  if (securityScope.value) {
+    if (form.value.firewall) count++
+    if (form.value.engine) count++
+    if (form.value.decision) count++
+    if (form.value.rule_id) count++
+  }
+  if (form.value.from) count++
+  if (form.value.to) count++
+  return count
+})
+
 const controller = new AbortController()
 let requestVersion = 0
 function hasRoute(key) {
@@ -445,6 +550,7 @@ function filterRule() {
 }
 function filterFirewall() {
   form.value.firewall = selected.value.firewall.id
+  showAdvanced.value = true
   detailDialog.value.close()
   applyFilters()
 }
@@ -490,12 +596,207 @@ onUnmounted(() => controller.abort())
   font-size: 16px;
   color: var(--ink);
 }
+
+/* 现代化紧凑筛选栏容器 */
+.report-filter-bar {
+  display: flex !important;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px !important;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  min-width: 0;
+}
+
+.filter-primary-row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  width: 100%;
+}
+
+.filter-primary-fields {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+}
+
+.filter-col {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 140px;
+  flex: 1;
+}
+
+.filter-col-sm {
+  max-width: 130px;
+  min-width: 100px;
+  flex: 0 0 auto;
+}
+
+.filter-col-search {
+  min-width: 220px;
+  flex: 2;
+}
+
+.col-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--muted);
+  user-select: none;
+}
+
+.search-box {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.search-icon {
+  position: absolute;
+  left: 11px;
+  color: var(--muted);
+  pointer-events: none;
+}
+
+.search-box .form-input {
+  padding-left: 32px !important;
+  width: 100%;
+}
+
+.filter-actions-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.filter-actions-group .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.filter-toggle-btn {
+  position: relative;
+  transition: var(--transition-smooth);
+}
+
+.filter-toggle-btn.active {
+  background: var(--surface-hover);
+  color: var(--ink);
+  border-color: var(--brand);
+}
+
+.filter-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--brand);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  line-height: 1;
+}
+
+.toggle-arrow {
+  transition: transform 0.2s ease;
+}
+
+.toggle-arrow.rotated {
+  transform: rotate(180deg);
+}
+
+.btn-icon-btn {
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.spin-anim {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* 高级筛选抽屉 */
+.filter-advanced-drawer {
+  padding-top: 14px;
+  border-top: 1px dashed var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.advanced-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 12px;
+  align-items: flex-end;
+}
+
+/* 抽屉过渡动画 */
+.drawer-fade-enter-active,
+.drawer-fade-leave-active {
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  overflow: hidden;
+}
+
+.drawer-fade-enter-from,
+.drawer-fade-leave-to {
+  opacity: 0;
+  transform: translateY(-8px);
+}
+
+.filter-quick-info {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 11.5px;
+  color: var(--muted);
+  padding: 2px 2px 0;
+  flex-wrap: wrap;
+}
+
+.dirty-badge {
+  color: var(--brand);
+  font-weight: 600;
+  background: rgba(99, 102, 241, 0.1);
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+}
+
+/* 详情弹窗样式 */
 .detail-dl {
   display: flex;
   flex-direction: column;
   gap: 8px;
   margin: 0;
 }
+
 .detail-row {
   display: grid;
   grid-template-columns: 110px minmax(0, 1fr);
@@ -504,10 +805,12 @@ onUnmounted(() => controller.abort())
   padding-bottom: 8px;
   border-bottom: 1px solid var(--line);
 }
+
 .detail-row dt {
   color: var(--muted);
   font-weight: 500;
 }
+
 .detail-row dd {
   margin: 0;
   overflow-wrap: anywhere;
@@ -515,6 +818,7 @@ onUnmounted(() => controller.abort())
   font-family: var(--mono);
   color: var(--ink);
 }
+
 .glass-section {
   display: flex;
   flex-direction: column;
@@ -524,15 +828,18 @@ onUnmounted(() => controller.abort())
   background: rgba(255, 255, 255, 0.02);
   border: 1px solid var(--line);
 }
+
 .glass-section h3 {
   font-size: 13.5px;
   font-weight: 600;
   color: var(--ink);
   margin: 0;
 }
+
 .detail-freeze-form {
   margin-top: 6px;
 }
+
 .freeze-fieldset {
   display: flex;
   flex-direction: column;
@@ -540,5 +847,12 @@ onUnmounted(() => controller.abort())
   border: none;
   padding: 0;
   margin: 0;
+}
+
+@media (max-width: 900px) {
+  .filter-actions-group {
+    width: 100%;
+    justify-content: flex-end;
+  }
 }
 </style>

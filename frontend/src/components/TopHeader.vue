@@ -396,15 +396,28 @@ onUnmounted(() => {
   top: calc(100% + 8px);
   right: 0;
   width: 240px;
-  background: var(--modal-bg);
+  background: var(--popover-bg, #111827);
   backdrop-filter: blur(25px);
-  border: 1px solid var(--modal-border);
+  -webkit-backdrop-filter: blur(25px);
+  border: 1px solid var(--popover-border, rgba(255, 255, 255, 0.12));
   border-radius: 14px;
   padding: 8px;
   box-shadow: 0 16px 36px rgba(0, 0, 0, 0.45);
-  z-index: 100;
+  z-index: 1000;
   display: flex;
   flex-direction: column;
+}
+
+body.theme-light .user-dropdown-popover {
+  background: #ffffff !important;
+  border-color: rgba(226, 232, 240, 1) !important;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.15) !important;
+}
+
+body.theme-dark .user-dropdown-popover {
+  background: #111827 !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.6) !important;
 }
 
 .popover-user-info {
