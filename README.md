@@ -2,7 +2,14 @@
 
 一个自托管的反向代理与 DDNS 综合管理工具。Go 主程序内嵌中文管理界面与 Sun-Panel 前后端；启用首页时由主程序管理独立的 Sun-Panel 子进程。运行无需 Node.js、外部数据库或额外 Web 服务器，Sun-Panel 使用内置 SQLite。
 
-当前代码版本为 **0.0.67-beta.2（Beta 测试版）**，安装包见 [v0.0.67-beta.2 Pre-release](https://github.com/Mo-SeTian/GateHome/releases/tag/v0.0.67-beta.2)。最新正式版为 [v0.0.66](https://github.com/Mo-SeTian/GateHome/releases/tag/v0.0.66)。程序和 systemd 服务名为 `gatehouse`。
+当前代码版本为 **0.0.67-beta.3（Beta 测试版）**，安装包见 [v0.0.67-beta.3 Pre-release](https://github.com/Mo-SeTian/GateHome/releases/tag/v0.0.67-beta.3)。最新正式版为 [v0.0.66](https://github.com/Mo-SeTian/GateHome/releases/tag/v0.0.66)。程序和 systemd 服务名为 `gatehouse`。
+
+## v0.0.67-beta.3 更新
+
+- 修复下拉选择框中文字与输入框的缩进和垂直位置不一致，统一 GateHome 各页面的选择框样式。
+- 为长选项预留箭头空间，保持手机横竖屏布局、键盘选择与高对比度模式下的原生操作。
+
+在侧边栏 **更新 → 更新渠道** 选择 **Beta 测试版**，检查并安装本版；保留 beta.2 的旧启动器更新兼容修复。版本检查缓存 5 分钟，刚检查过旧版本时，请在页面显示的下次联网检查时间后重试。
 
 ## v0.0.67-beta.2 更新
 
