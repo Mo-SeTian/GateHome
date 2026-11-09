@@ -23,6 +23,8 @@ __pycache__/
 /docs/route-images-backup-0.0.19/
 
 /runtime/
+/frontend/node_modules/
+/frontend/dist/
 
 /sunpanel/service/integration/web/*
 !/sunpanel/service/integration/web/.gitkeep

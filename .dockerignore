@@ -2,6 +2,8 @@
 !go.mod
 !go.sum
 !VERSION
+!scripts/
+!scripts/build_leibox.mjs
 !cmd/
 !cmd/**
 !internal/

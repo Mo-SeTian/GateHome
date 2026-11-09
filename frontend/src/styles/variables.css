@@ -1,0 +1,73 @@
+:root {
+  /* Common Brand Accents */
+  --brand: #6366f1;
+  --brand-light: #818cf8;
+  --brand-cyan: #06b6d4;
+  --brand-gradient: linear-gradient(135deg, #6366f1 0%, #06b6d4 100%);
+  --brand-glow: 0 0 24px rgba(99, 102, 241, 0.35);
+
+  --ok: #10b981;
+  --ok-glow: 0 0 12px rgba(16, 185, 129, 0.4);
+  --bad: #f43f5e;
+  --bad-glow: 0 0 14px rgba(244, 63, 94, 0.45);
+  --warn: #f59e0b;
+  --info: #38bdf8;
+
+  --sans: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+  --mono: "JetBrains Mono", "SF Mono", "Fira Code", monospace;
+
+  --radius-card: 16px;
+  --radius-md: 12px;
+  --radius-sm: 8px;
+  --radius-pill: 999px;
+
+  --sidebar-w: 240px;
+  --topbar-h: 60px;
+  --transition-smooth: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ================= DARK MODE (OBSIDIAN TECH) ================= */
+body.theme-dark {
+  --canvas: #090d16;
+  --sidebar-bg: rgba(13, 18, 30, 0.95);
+  --card-bg: rgba(17, 24, 39, 0.75);
+  --card-hover-bg: rgba(23, 32, 51, 0.9);
+  --card-border: rgba(255, 255, 255, 0.08);
+  --card-border-hover: rgba(99, 102, 241, 0.35);
+  --inner-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  
+  --ink: #f8fafc;
+  --ink-secondary: #cbd5e1;
+  --muted: #94a3b8;
+  --faint: #64748b;
+  --line: rgba(255, 255, 255, 0.08);
+  --strip-bg: rgba(15, 23, 42, 0.6);
+  --input-bg: rgba(15, 23, 42, 0.85);
+
+  --spotlight-color: rgba(99, 102, 241, 0.12);
+  --shadow-card: 0 8px 30px rgba(0, 0, 0, 0.4);
+  --shadow-hover: 0 16px 40px rgba(0, 0, 0, 0.6), 0 0 30px rgba(99, 102, 241, 0.15);
+}
+
+/* ================= LIGHT MODE (VISIONOS FROSTED WHITE) ================= */
+body.theme-light {
+  --canvas: #f1f5f9;
+  --sidebar-bg: rgba(255, 255, 255, 0.95);
+  --card-bg: rgba(255, 255, 255, 0.85);
+  --card-hover-bg: #ffffff;
+  --card-border: rgba(226, 232, 240, 0.9);
+  --card-border-hover: rgba(99, 102, 241, 0.4);
+  --inner-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+
+  --ink: #0f172a;
+  --ink-secondary: #334155;
+  --muted: #475569;
+  --faint: #64748b;
+  --line: #e2e8f0;
+  --strip-bg: #f8fafc;
+  --input-bg: #ffffff;
+
+  --spotlight-color: rgba(99, 102, 241, 0.08);
+  --shadow-card: 0 4px 16px rgba(15, 23, 42, 0.04);
+  --shadow-hover: 0 16px 36px -4px rgba(15, 23, 42, 0.12), 0 0 20px rgba(99, 102, 241, 0.12);
+}
