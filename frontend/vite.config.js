@@ -21,6 +21,14 @@ export default defineConfig({
       '/api/': {
         target: process.env.GATEHOME_API_TARGET || 'http://127.0.0.1:16666',
         changeOrigin: false
+      },
+      '/sunpanel/': {
+        target: process.env.GATEHOME_API_TARGET || 'http://127.0.0.1:16666',
+        changeOrigin: false
+      },
+      '/mcp': {
+        target: process.env.GATEHOME_API_TARGET || 'http://127.0.0.1:16666',
+        changeOrigin: false
       }
     }
   }

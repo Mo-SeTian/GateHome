@@ -194,8 +194,9 @@ function handWindowIframeIdLoad(payload: Event) {
 function getList() {
   // 获取组数据
   getGroupList<Common.ListResponse<ItemGroup[]>>().then(({ code, data, msg }) => {
-    if (code === 0)
-      items.value = data.list
+    if (code !== 0)
+      return
+    items.value = data.list
     for (let i = 0; i < data.list.length; i++) {
       const element = data.list[i]
       if (element.id)

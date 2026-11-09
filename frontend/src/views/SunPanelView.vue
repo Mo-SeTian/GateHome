@@ -1,222 +1,213 @@
 <template>
-  <div class="sunpanel-page animate-fade-in">
-    <div class="page-topbar">
+  <div class="report-page animate-fade-in">
+    <header class="report-heading">
       <div>
-        <h1 class="page-title">SunPanel 导航首页</h1>
-        <p class="page-subtitle">内置私有导航页，集中管理 NAS、开发服务器与常用内网服务的快速书签入口</p>
+        <h1>SunPanel 浏览器首页</h1>
+        <p>管理首页服务与访问入口，保留独立账号、分组、网站和上传资源</p>
       </div>
-      <div class="header-actions">
-        <button class="btn btn-secondary" @click="reloadIframe">
-          <RotateCw :size="14" :class="{ 'spin-icon': isReloading }" />
-          重载页面
-        </button>
-        <button class="btn btn-primary" @click="openExternal">
-          <ExternalLink :size="14" />
-          新标签页打开
-        </button>
-      </div>
-    </div>
-
-    <!-- Quick Bookmark Cards Hub -->
-    <div class="bookmarks-grid">
-      <SpotlightCard 
-        v-for="item in bookmarks" 
-        :key="item.name"
-        class="bm-card"
-        @click="openUrl(item.url)"
-      >
-        <div class="bm-icon-box" :style="{ color: item.color }">
-          <component :is="item.icon" :size="20" />
+      <button class="btn btn-secondary" :disabled="loading || isSavingConfig" @click="reload">
+        刷新配置
+      </button>
+    </header>
+    <p v-if="error" class="report-error" role="alert">{{ error }}</p>
+    <RestartNotice />
+    <p v-if="gatewayStatus?.sunpanel_storage_supported === false" class="report-warning">
+      当前启动器不支持 SunPanel 持久化，请先升级启动器。
+    </p>
+    <SpotlightCard v-if="draft" class="report-panel home-config">
+      <h2>首页服务</h2>
+      <form class="report-form" @submit.prevent="save">
+        <label
+          ><span>启用首页服务</span><input v-model="draft.enabled" name="enabled" type="checkbox"
+        /></label>
+        <label
+          >监听端口<input
+            v-model.number="draft.port"
+            name="port"
+            class="form-input"
+            type="number"
+            min="1"
+            max="65535"
+            required
+        /></label>
+        <label
+          >内网访问地址<input
+            v-model.trim="draft.launch_url"
+            name="launch_url"
+            class="form-input"
+            placeholder="留空使用当前主机和监听端口"
+            maxlength="2048"
+        /></label>
+        <label
+          >外网访问地址<input
+            v-model.trim="draft.external_url"
+            name="external_url"
+            class="form-input"
+            placeholder="https://home.example.com"
+            maxlength="2048"
+        /></label>
+        <p class="report-note wide">
+          开关与端口修改需要重启；访问地址保存后即可使用。内网地址支持本站路径（如
+          /sunpanel/），外网地址须为完整 HTTP(S) 地址。Docker 部署需发布首页端口。
+        </p>
+        <div class="report-actions wide">
+          <button class="btn btn-primary" type="submit" :disabled="loading || isSavingConfig">
+            {{ isSavingConfig ? '保存中…' : '保存首页设置' }}
+          </button>
         </div>
-        <div class="bm-info">
-          <span class="bm-title">{{ item.name }}</span>
-          <span class="bm-desc">{{ item.desc }}</span>
-        </div>
-        <ArrowUpRight :size="14" class="bm-arrow" />
-      </SpotlightCard>
-    </div>
-
-    <!-- Embedded Container Card -->
-    <SpotlightCard class="frame-card">
-      <div class="frame-bar">
-        <div class="frame-dots">
-          <span class="f-dot red" />
-          <span class="f-dot yellow" />
-          <span class="f-dot green" />
-        </div>
-        <div class="frame-address mono-text">
-          <Lock :size="12" class="ok-text" />
-          {{ sunpanelUrl }}
-        </div>
-        <div class="frame-status">
-          <span class="status-dot ok" />
-          <span>服务在线</span>
-        </div>
-      </div>
-
-      <div class="frame-viewport">
-        <!-- Mock SunPanel Showcase or Iframe -->
-        <div class="mock-sunpanel-content">
-          <div class="sun-hero">
-            <div class="sun-logo-glow">
-              <Compass :size="38" class="sun-icon" />
-            </div>
-            <h2 class="sun-heading">GateHome · SunPanel 极客导航</h2>
-            <p class="sun-tagline">快速直达您的私有云与物联网集群</p>
-          </div>
-
-          <div class="sun-category-title">常用控制面板</div>
-          <div class="sun-cards-row">
-            <div class="sun-card-tile" @click="$router.push('/routes')">
-              <Network :size="24" class="tile-icon" />
-              <div class="tile-title">反代控制矩阵</div>
-              <div class="tile-sub">已连接 8 个上游服务</div>
-            </div>
-            <div class="sun-card-tile" @click="$router.push('/overview')">
-              <Activity :size="24" class="tile-icon" />
-              <div class="tile-title">系统遥测监控</div>
-              <div class="tile-sub">实时负载 18.4%</div>
-            </div>
-            <div class="sun-card-tile" @click="$router.push('/firewall')">
-              <ShieldAlert :size="24" class="tile-icon" />
-              <div class="tile-title">WAF 安全拦截</div>
-              <div class="tile-sub">拦截 1,384 次恶意探测</div>
-            </div>
-          </div>
+      </form>
+    </SpotlightCard>
+    <SpotlightCard class="report-panel">
+      <div class="report-heading">
+        <h2>首页预览</h2>
+        <div class="report-actions">
+          <button class="btn btn-secondary btn-sm" :disabled="!enabled" @click="frameKey++">重载首页</button>
+          <a
+            v-if="enabled && internalURL"
+            class="btn btn-primary btn-sm"
+            :href="internalURL"
+            target="_blank"
+            rel="noopener noreferrer"
+            >内网打开 <ExternalLink :size="13"
+          /></a>
+          <a
+            v-if="enabled && externalURL"
+            class="btn btn-secondary btn-sm"
+            :href="externalURL"
+            target="_blank"
+            rel="noopener noreferrer"
+            >外网打开 <ExternalLink :size="13"
+          /></a>
         </div>
       </div>
+      <p class="report-note">
+        首页使用独立的 SunPanel 登录。登录后通过首页工具栏的「GateHome
+        联动」批量导入已启用反代，也可预览关联更新；自定义名称、地址和分组会保留。
+      </p>
+      <p v-if="!enabled" class="report-empty">首页服务未启用，请保存设置并重启服务。</p>
+      <p v-else-if="gatewayStatus?.restart_required" class="report-empty">
+        监听配置待重启，重启后可加载首页。
+      </p>
+      <iframe
+        v-else
+        :key="frameKey"
+        class="home-frame"
+        title="SunPanel 浏览器首页"
+        src="/sunpanel/"
+        referrerpolicy="same-origin"
+      />
+    </SpotlightCard>
+    <SpotlightCard class="report-panel">
+      <h2>可导入反代（{{ routes.length }}）</h2>
+      <p class="report-note">
+        以下内容来自已启用的反代组和路由。在上方首页内选择导入目标分组并确认导入，重复项会自动跳过。
+      </p>
+      <div v-if="routes.length" class="report-table-wrap">
+        <table class="report-table">
+          <thead>
+            <tr>
+              <th>服务 / 分组</th>
+              <th>默认网址</th>
+              <th>内网地址</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="route in routes" :key="route.id">
+              <td>
+                {{ route.title }}<small>{{ route.group }}</small>
+              </td>
+              <td>{{ route.url }}</td>
+              <td>{{ route.lanUrl }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p v-else class="report-empty">{{ loading ? '正在读取反代…' : '暂无可导入的反代' }}</p>
     </SpotlightCard>
   </div>
 </template>
-
 <script setup>
-import { ref } from 'vue'
-import { 
-  RotateCw, ExternalLink, ArrowUpRight, Lock, Compass, Network, Activity, 
-  ShieldAlert, HardDrive, Key, Home, Play, Code
-} from 'lucide-vue-next'
+import { computed, onMounted, onBeforeUnmount, ref } from 'vue'
+import { ExternalLink } from 'lucide-vue-next'
 import SpotlightCard from '@/components/SpotlightCard.vue'
+import RestartNotice from '@/components/RestartNotice.vue'
+import { adminApi } from '@/api/admin'
+import { sunPanelLaunchURL } from '@/api/sunpanel'
+import { useGatewayStatus } from '@/composables/useGatewayStatus'
 import { useToast } from '@/composables/useToast'
-
-const { success } = useToast()
-
-const sunpanelUrl = ref('http://127.0.0.1:8080/sunpanel/')
-const isReloading = ref(false)
-
-const bookmarks = [
-  { name: 'Nextcloud 网盘', desc: '私有文件同步与 WebDAV 存储', url: 'https://cloud.nas.tech', color: '#06b6d4', icon: HardDrive },
-  { name: 'Vaultwarden 密码库', desc: '端到端加密密码保险箱', url: 'https://vault.nas.tech', color: '#6366f1', icon: Key },
-  { name: 'HomeAssistant 物联网', desc: '全屋智能家居自动化中枢', url: 'https://home.iot.tech', color: '#10b981', icon: Home },
-  { name: 'Jellyfin 影视中心', desc: '4K HDR 硬件转码多媒体库', url: 'https://media.stream.org', color: '#f43f5e', icon: Play },
-  { name: 'Gitea 私有代码库', desc: '自建 Git 仓库与流水线', url: 'https://git.dev.lan', color: '#c084fc', icon: Code }
-]
-
-const reloadIframe = () => {
-  isReloading.value = true
-  setTimeout(() => {
-    isReloading.value = false
-    success('SunPanel 导航内容已重新加载')
-  }, 500)
+import '@/styles/reports.css'
+const { gatewayConfig, gatewayStatus, isSavingConfig, refreshConfig, refreshStatus, saveConfig } =
+  useGatewayStatus()
+const toast = useToast(),
+  controller = new AbortController()
+const snapshot = ref(null),
+  draft = ref(null),
+  routes = ref([]),
+  loading = ref(false),
+  error = ref(''),
+  frameKey = ref(0)
+const enabled = computed(() => Boolean(gatewayConfig.value?.sunpanel?.enabled))
+const internalURL = computed(() => sunPanelLaunchURL(gatewayConfig.value?.sunpanel || {}, location.hostname))
+const externalURL = computed(() =>
+  sunPanelLaunchURL(gatewayConfig.value?.sunpanel || {}, location.hostname, true)
+)
+async function reload() {
+  if (loading.value || isSavingConfig.value) return
+  loading.value = true
+  error.value = ''
+  try {
+    const [config, items] = await Promise.all([
+      refreshConfig(controller.signal),
+      adminApi.sunPanelRoutes(controller.signal),
+      refreshStatus(controller.signal)
+    ])
+    if (controller.signal.aborted) return
+    snapshot.value = config
+    draft.value = { ...config.config.sunpanel }
+    routes.value = items
+  } catch (err) {
+    if (!controller.signal.aborted) error.value = err.message
+  } finally {
+    loading.value = false
+  }
 }
-
-const openExternal = () => {
-  window.open(sunpanelUrl.value, '_blank')
+async function save() {
+  error.value = ''
+  try {
+    const result = await saveConfig(snapshot.value, {
+      ...snapshot.value.config,
+      sunpanel: { ...draft.value }
+    })
+    snapshot.value = result
+    draft.value = { ...result.config.sunpanel }
+    toast.success('首页设置已保存')
+    await refreshStatus(controller.signal)
+  } catch (err) {
+    if (!controller.signal.aborted) error.value = err.message
+  }
 }
-
-const openUrl = (url) => {
-  window.open(url, '_blank')
-}
+onMounted(reload)
+onBeforeUnmount(() => controller.abort())
 </script>
-
 <style scoped>
-.sunpanel-page { display: flex; flex-direction: column; gap: 20px; }
-.page-topbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; }
-.page-title { font-size: 22px; font-weight: 700; color: var(--ink); }
-.page-subtitle { font-size: 13px; color: var(--muted); margin-top: 3px; }
-.header-actions { display: flex; gap: 10px; }
-.spin-icon { animation: spin 0.8s linear infinite; }
-@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-
-.bookmarks-grid {
-  display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px;
+.home-frame {
+  width: 100%;
+  height: 680px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  margin-top: 16px;
+  background: var(--strip-bg);
 }
-.bm-card {
-  padding: 14px 16px; display: flex; align-items: center; gap: 12px;
-  cursor: pointer; position: relative;
+.report-panel :deep(.card-inner) {
+  display: grid;
+  gap: 12px;
 }
-.bm-icon-box {
-  width: 36px; height: 36px; border-radius: var(--radius-sm);
-  background: var(--strip-bg); border: 1px solid var(--line);
-  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+h2 {
+  margin-bottom: 0;
 }
-.bm-info { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.bm-title { font-size: 13px; font-weight: 600; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.bm-desc { font-size: 11px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.bm-arrow { color: var(--faint); transition: transform 0.2s ease; }
-.bm-card:hover .bm-arrow { transform: translate(2px, -2px); color: var(--brand-light); }
-
-.frame-card { padding: 0; overflow: hidden; }
-.frame-bar {
-  padding: 10px 18px; background: var(--strip-bg); border-bottom: 1px solid var(--line);
-  display: flex; align-items: center; justify-content: space-between; font-size: 12px;
-}
-.frame-dots { display: flex; gap: 6px; }
-.f-dot { width: 10px; height: 10px; border-radius: 50%; }
-.f-dot.red { background: #ef4444; }
-.f-dot.yellow { background: #f59e0b; }
-.f-dot.green { background: #10b981; }
-
-.frame-address {
-  display: flex; align-items: center; gap: 6px; color: var(--muted);
-  background: var(--input-bg); border: 1px solid var(--line);
-  border-radius: var(--radius-pill); padding: 3px 14px; font-size: 11.5px;
-}
-.frame-status { display: flex; align-items: center; gap: 6px; color: var(--ok); font-size: 11.5px; }
-
-.frame-viewport {
-  min-height: 480px; padding: 40px 24px;
-  display: flex; align-items: center; justify-content: center;
-}
-
-.mock-sunpanel-content {
-  max-width: 760px; width: 100%; display: flex; flex-direction: column; align-items: center; text-align: center;
-}
-.sun-hero { margin-bottom: 32px; }
-.sun-logo-glow {
-  width: 72px; height: 72px; border-radius: 20px;
-  background: var(--brand-gradient); margin: 0 auto 16px auto;
-  display: flex; align-items: center; justify-content: center;
-  box-shadow: var(--brand-glow); color: #fff;
-}
-.sun-heading { font-size: 22px; font-weight: 700; color: var(--ink); }
-.sun-tagline { font-size: 13px; color: var(--muted); margin-top: 4px; }
-
-.sun-category-title {
-  font-size: 12px; font-weight: 700; text-transform: uppercase;
-  color: var(--faint); letter-spacing: 0.8px; margin-bottom: 16px;
-}
-
-.sun-cards-row {
-  display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; width: 100%;
-}
-.sun-card-tile {
-  background: var(--strip-bg); border: 1px solid var(--line);
-  border-radius: var(--radius-card); padding: 22px 18px;
-  cursor: pointer; transition: var(--transition-smooth);
-}
-.sun-card-tile:hover {
-  background: var(--card-hover-bg); border-color: var(--card-border-hover);
-  transform: translateY(-2px);
-}
-.tile-icon { color: var(--brand-light); margin-bottom: 10px; }
-.tile-title { font-size: 14px; font-weight: 600; color: var(--ink); }
-.tile-sub { font-size: 11.5px; color: var(--faint); margin-top: 4px; }
-
-@media (max-width: 1200px) {
-  .bookmarks-grid { grid-template-columns: repeat(3, 1fr); }
-}
-@media (max-width: 800px) {
-  .bookmarks-grid { grid-template-columns: 1fr; }
-  .sun-cards-row { grid-template-columns: 1fr; }
+@media (max-width: 600px) {
+  .home-frame {
+    height: 620px;
+  }
 }
 </style>

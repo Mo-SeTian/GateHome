@@ -1,312 +1,363 @@
 <template>
-  <div class="settings-page animate-fade-in">
-    <div class="page-topbar">
+  <div class="report-page animate-fade-in">
+    <header class="report-heading">
       <div>
-        <h1 class="page-title">系统与网关全局设置</h1>
-        <p class="page-subtitle">配置管理界面公网反代接入、出站代理加速、日志保留配额与在线版本升级诊断</p>
+        <h1>系统与网关设置</h1>
+        <p>管理访问来源、出站代理、日志保留和管理员账户</p>
       </div>
-      <div class="header-actions">
-        <button class="btn btn-primary" @click="saveAll">
-          <Save :size="15" />
-          保存全局配置
-        </button>
-      </div>
-    </div>
-
-    <!-- Dual Column Settings Layout -->
-    <div class="settings-layout">
-      <!-- Left Column: Access & Outbound -->
-      <div class="settings-column">
-        <!-- 1. Admin Access Reverse Proxy (管理界面反代访问) -->
-        <SpotlightCard class="setting-card">
-          <div class="card-head">
-            <div class="card-icon-box">
-              <Globe :size="18" />
-            </div>
-            <div>
-              <h3 class="card-title">管理界面反代访问</h3>
-              <p class="card-desc">允许通过自己解析的公网域名安全访问 GateHome 控制中心</p>
-            </div>
-          </div>
-
-          <div class="card-form">
-            <label class="toggle-row">
-              <div class="toggle-text">
-                <span class="t-name">允许指定公网域名反代访问</span>
-                <span class="t-sub">兼容公网 HTTPS 接入内部 HTTP 16666 管理端口</span>
-              </div>
-              <input type="checkbox" v-model="settings.adminAccess.enabled" />
-            </label>
-
-            <div v-if="settings.adminAccess.enabled" class="form-group">
-              <label class="form-label">允许的公网访问地址 (每行一个)</label>
-              <textarea 
-                rows="2" 
-                class="form-input mono-text" 
-                placeholder="https://gate.example.com"
-                :value="settings.adminAccess.origins.join('\n')"
-                @input="settings.adminAccess.origins = $event.target.value.split('\n').filter(Boolean)"
-              />
-              <small class="form-hint">仅允许填写的地址，自动防御跨站 API 调用攻击；默认管理端口为 16666。</small>
-            </div>
-          </div>
+      <button class="btn btn-secondary" :disabled="loading || isSavingConfig" @click="reload">
+        重新读取
+      </button>
+    </header>
+    <p v-if="error" class="report-error" role="alert">{{ error }}</p>
+    <RestartNotice />
+    <form v-if="draft" class="settings-layout" @submit.prevent="save">
+      <fieldset :disabled="loading || isSavingConfig" class="settings-fields">
+        <SpotlightCard class="report-panel">
+          <h2>管理界面反代访问</h2>
+          <label class="check-row"
+            ><input
+              v-model="draft.admin_access.enabled"
+              name="admin_access_enabled"
+              type="checkbox"
+            />允许指定公网来源访问</label
+          >
+          <label
+            >允许的公网来源（每行一个）<textarea
+              v-model="origins"
+              name="origins"
+              class="form-input"
+              rows="3"
+              placeholder="https://gate.example.com"
+            />
+          </label>
+          <p class="report-note">
+            填写 HTTP(S) 协议、主机和可选端口，不包含路径、账号或密码。启用时至少填写一个，最多 20 个。
+          </p>
         </SpotlightCard>
-
-        <!-- 2. Outbound Proxy (出站代理设置) -->
-        <SpotlightCard class="setting-card">
-          <div class="card-head">
-            <div class="card-icon-box">
-              <Send :size="18" />
-            </div>
-            <div>
-              <h3 class="card-title">出站网络代理 (Outbound Proxy)</h3>
-              <p class="card-desc">为 DDNS 查询、GitHub 版本检测与 IP 订阅拉取配置代理</p>
-            </div>
-          </div>
-
-          <div class="card-form">
-            <label class="toggle-row">
-              <div class="toggle-text">
-                <span class="t-name">开启出站 HTTP / SOCKS 代理</span>
-                <span class="t-sub">解决内网无法直接连接 GitHub 或海外 IP 源的问题</span>
-              </div>
-              <input type="checkbox" v-model="settings.outboundProxy.enabled" />
-            </label>
-
-            <div v-if="settings.outboundProxy.enabled" class="form-group">
-              <label class="form-label">代理服务器地址 (URL)</label>
-              <input 
-                v-model="settings.outboundProxy.url" 
-                type="text" 
-                placeholder="http://127.0.0.1:7890 或 socks5://127.0.0.1:1080" 
-                class="form-input mono-text" 
-              />
-            </div>
-          </div>
-        </SpotlightCard>
-
-        <!-- 3. Log Retention (日志空间与保留周期) -->
-        <SpotlightCard class="setting-card">
-          <div class="card-head">
-            <div class="card-icon-box">
-              <HardDrive :size="18" />
-            </div>
-            <div>
-              <h3 class="card-title">日志保留与存储配额</h3>
-              <p class="card-desc">项目、反代、防火墙与安全事件共用一个存储上限</p>
-            </div>
-          </div>
-
-          <div class="card-form">
-            <div class="form-row-2">
-              <div class="form-group">
-                <label class="form-label">最大占用空间 (MiB)</label>
-                <input v-model.number="settings.logRetention.maxSizeMb" type="number" min="16" max="1024" class="form-input mono-text" />
-              </div>
-              <div class="form-group">
-                <label class="form-label">保留天数 (Days)</label>
-                <input v-model.number="settings.logRetention.keepDays" type="number" min="1" max="365" class="form-input mono-text" />
-              </div>
-            </div>
-            <small class="form-hint">超过任一限制时系统按时间每分钟检查并清理最早的日志文件。</small>
-          </div>
-        </SpotlightCard>
-      </div>
-
-      <!-- Right Column: Theme & Version -->
-      <div class="settings-column">
-        <!-- 4. Theme & Appearance -->
-        <SpotlightCard class="setting-card">
-          <div class="card-head">
-            <div class="card-icon-box">
-              <Palette :size="18" />
-            </div>
-            <div>
-              <h3 class="card-title">界面外观与设计风格</h3>
-              <p class="card-desc">选择契合工作场景的 Aurora Next 极客设计规范</p>
-            </div>
-          </div>
-
-          <div class="theme-picker-grid">
-            <div 
-              class="theme-option dark"
-              :class="{ selected: theme === 'dark' }"
-              @click="setTheme('dark')"
+        <SpotlightCard class="report-panel">
+          <h2>出站网络代理</h2>
+          <label class="check-row"
+            ><input v-model="draft.outbound_proxy.enabled" name="proxy_enabled" type="checkbox" />启用 HTTP /
+            HTTPS / SOCKS5 代理</label
+          >
+          <label
+            >代理地址<input
+              v-model.trim="draft.outbound_proxy.url"
+              name="proxy_url"
+              class="form-input"
+              placeholder="http://127.0.0.1:7890"
+          /></label>
+          <label
+            >认证用户名<input
+              v-model.trim="draft.outbound_proxy.username"
+              name="proxy_username"
+              class="form-input"
+              autocomplete="off"
+          /></label>
+          <label
+            >代理密码（{{ snapshot.proxy_password_configured ? '已配置' : '未配置' }}）<select
+              v-model="passwordAction"
+              name="proxy_password_action"
+              class="form-select"
             >
-              <div class="theme-swatch dark" />
-              <div class="theme-info">
-                <span class="theme-name">Obsidian Tech (黑曜石深色)</span>
-                <span class="theme-desc">深色沉浸 · 光晕跟随 · 推荐极客夜间环境</span>
-              </div>
-            </div>
-
-            <div 
-              class="theme-option light"
-              :class="{ selected: theme === 'light' }"
-              @click="setTheme('light')"
+              <option value="keep">保留已存密码</option>
+              <option value="replace">设置新密码</option>
+              <option value="clear">清除已存密码</option>
+            </select></label
+          >
+          <label v-if="passwordAction === 'replace'"
+            >新代理密码<input
+              v-model="proxyPassword"
+              name="proxy_password"
+              type="password"
+              class="form-input"
+              autocomplete="new-password"
+              required
+          /></label>
+          <p class="report-note">
+            用于
+            DDNS、订阅与版本检测等出站请求。修改代理地址或用户名时，后端会清除旧密码，请按需填写新密码；连接失败不会回退直连。
+          </p>
+        </SpotlightCard>
+        <SpotlightCard class="report-panel">
+          <h2>日志保留与存储配额</h2>
+          <label
+            >最大占用空间（MiB）<input
+              v-model.number="draft.log_retention.max_size_mb"
+              name="max_size_mb"
+              class="form-input"
+              type="number"
+              min="1"
+              max="1024"
+              required
+          /></label>
+          <label
+            >保留天数<input
+              v-model.number="draft.log_retention.keep_days"
+              name="keep_days"
+              class="form-input"
+              type="number"
+              min="1"
+              max="3650"
+              required
+          /></label>
+          <p class="report-note">
+            已使用
+            {{
+              formatBytes(gatewayStatus?.log_storage?.used_bytes)
+            }}。保存后会按配额清理旧日志，请确认保留范围。
+          </p>
+          <p v-if="gatewayStatus?.log_storage?.write_error" class="report-error">
+            日志写入失败，请检查存储目录和可用空间。
+          </p>
+        </SpotlightCard>
+        <div class="report-actions">
+          <button type="submit" class="btn btn-primary">
+            {{ isSavingConfig ? '保存中…' : '保存全局配置' }}
+          </button>
+        </div>
+      </fieldset>
+      <div class="settings-fields">
+        <SpotlightCard class="report-panel"
+          ><h2>管理员账户</h2>
+          <p class="report-note">当前账号：{{ username }}。修改账号或密码将退出全部管理会话。</p>
+          <button type="button" class="btn btn-secondary" @click="openAccountModal">
+            修改账号与密码
+          </button></SpotlightCard
+        >
+        <SpotlightCard class="report-panel"
+          ><h2>界面外观</h2>
+          <div class="theme-options">
+            <button
+              v-for="option in themes"
+              :key="option.value"
+              type="button"
+              class="btn btn-secondary"
+              :aria-pressed="theme === option.value"
+              @click="setTheme(option.value)"
             >
-              <div class="theme-swatch light" />
-              <div class="theme-info">
-                <span class="theme-name">VisionOS White (清透磨砂浅色)</span>
-                <span class="theme-desc">纯净通透 · 高对比度清晰排版</span>
-              </div>
-            </div>
+              {{ option.label }}{{ theme === option.value ? ' · 已选择' : '' }}
+            </button>
+          </div></SpotlightCard
+        >
+        <SpotlightCard class="report-panel"
+          ><h2>版本与运行环境</h2>
+          <dl class="system-meta">
+            <dt>当前版本</dt>
+            <dd>{{ gatewayVersion }}</dd>
+            <dt>运行平台</dt>
+            <dd>{{ maintenance?.platform || '读取中…' }}</dd>
+            <dt>维护状态</dt>
+            <dd>
+              {{
+                maintenance?.busy
+                  ? '维护进行中'
+                  : maintenance?.can_apply
+                    ? '支持服务内维护'
+                    : '请由启动器管理服务'
+              }}
+            </dd>
+          </dl>
+          <div class="report-actions">
+            <RouterLink class="btn btn-secondary" to="/updates">版本与更新</RouterLink
+            ><button
+              type="button"
+              class="btn btn-secondary"
+              :disabled="!maintenance?.can_apply || maintenance?.busy || restarting || isSavingConfig"
+              @click="restart"
+            >
+              {{ restarting ? '正在安排重启…' : '重启网关服务' }}
+            </button>
+          </div></SpotlightCard
+        >
+        <SpotlightCard class="report-panel"
+          ><h2>反代监听端口</h2>
+          <div v-for="group in snapshot?.config.groups || []" :key="group.id" class="listener-row">
+            <strong>{{ group.name }}</strong
+            ><span
+              >{{ group.enabled ? '启用' : '停用' }} · HTTP {{ group.http_port || '关闭' }} / HTTPS
+              {{ group.https_port || '关闭' }}</span
+            >
           </div>
-        </SpotlightCard>
-
-        <!-- 5. Online Updates & Diagnostics -->
-        <SpotlightCard class="setting-card">
-          <div class="card-head">
-            <div class="card-icon-box">
-              <Cpu :size="18" />
-            </div>
-            <div>
-              <h3 class="card-title">版本诊断与在线升级 (Updates)</h3>
-              <p class="card-desc">检测 GitHub Releases 最新版本，更新前自动生成快照备份</p>
-            </div>
-          </div>
-
-          <div class="card-form">
-            <div class="version-status-box">
-              <div class="v-left">
-                <span class="v-label">当前运行版本</span>
-                <span class="v-num mono-text">{{ settings.currentVersion }}</span>
-              </div>
-              <button class="btn btn-secondary btn-sm" @click="checkUpdate" :disabled="isChecking">
-                <RefreshCw :size="13" :class="{ 'spin-icon': isChecking }" />
-                {{ isChecking ? '检测中...' : '检查更新' }}
-              </button>
-            </div>
-
-            <div class="form-group">
-              <label class="form-label">更新推送通道</label>
-              <select v-model="settings.channel" class="form-select">
-                <option value="stable">正式稳定版 (Stable · 推荐生产环境)</option>
-                <option value="beta">公测尝鲜版 (Beta · 体验前沿特性)</option>
-              </select>
-            </div>
-
-            <div class="env-diagnostics">
-              <div class="diag-item">
-                <span class="d-label">操作系统 / 架构:</span>
-                <span class="d-val mono-text">Darwin (macOS) / arm64</span>
-              </div>
-              <div class="diag-item">
-                <span class="d-label">Go 内核驱动:</span>
-                <span class="d-val mono-text">go1.23.2 · Single Binary</span>
-              </div>
-              <div class="diag-item">
-                <span class="d-label">嵌入式前端引擎:</span>
-                <span class="d-val ok-text mono-text">Vue 3.5 + Aurora Next</span>
-              </div>
-            </div>
-          </div>
-        </SpotlightCard>
+          <RouterLink class="btn btn-secondary" to="/routes">管理反代组与监听</RouterLink></SpotlightCard
+        >
       </div>
-    </div>
+    </form>
   </div>
 </template>
-
 <script setup>
-import { ref } from 'vue'
-import { Save, Globe, Send, HardDrive, Palette, Cpu, RefreshCw } from 'lucide-vue-next'
+import { onMounted, onBeforeUnmount, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import SpotlightCard from '@/components/SpotlightCard.vue'
+import RestartNotice from '@/components/RestartNotice.vue'
+import { adminApi } from '@/api/admin'
+import { useGatewayStatus } from '@/composables/useGatewayStatus'
 import { useAppStore } from '@/composables/useAppStore'
+import { useSession } from '@/composables/useSession'
 import { useToast } from '@/composables/useToast'
-
-const { settings, theme, setTheme } = useAppStore()
-const { success } = useToast()
-
-const isChecking = ref(false)
-
-const saveAll = () => {
-  success('全局配置保存成功，网关参数已动态生效')
+import '@/styles/reports.css'
+const { gatewayStatus, gatewayVersion, isSavingConfig, refreshConfig, refreshStatus, saveConfig } =
+  useGatewayStatus()
+const { theme, setTheme } = useAppStore(),
+  { username, openAccountModal, endSession } = useSession()
+const toast = useToast(),
+  router = useRouter(),
+  controller = new AbortController()
+const themes = [
+  { value: 'dark', label: 'Obsidian Tech 黑曜石深色' },
+  { value: 'light', label: 'VisionOS 磨砂浅色' }
+]
+const snapshot = ref(null),
+  draft = ref(null),
+  maintenance = ref(null),
+  origins = ref(''),
+  loading = ref(false),
+  error = ref(''),
+  restarting = ref(false),
+  passwordAction = ref('keep'),
+  proxyPassword = ref('')
+function apply(config) {
+  snapshot.value = config
+  draft.value = structuredClone(config.config)
+  origins.value = (config.config.admin_access?.origins || []).join('\n')
+  passwordAction.value = 'keep'
+  proxyPassword.value = ''
 }
-
-const checkUpdate = () => {
-  isChecking.value = true
-  setTimeout(() => {
-    isChecking.value = false
-    success(`检查完成: 当前 ${settings.currentVersion} 已是最新版`)
-  }, 700)
+function formatBytes(value) {
+  return value == null ? '—' : `${(value / 1024 / 1024).toFixed(2)} MiB`
 }
+async function reload() {
+  if (loading.value || isSavingConfig.value) return
+  loading.value = true
+  error.value = ''
+  try {
+    const [config, state] = await Promise.all([
+      refreshConfig(controller.signal),
+      adminApi.maintenance(controller.signal),
+      refreshStatus(controller.signal)
+    ])
+    if (!controller.signal.aborted) {
+      apply(config)
+      maintenance.value = state
+    }
+  } catch (err) {
+    if (!controller.signal.aborted) error.value = err.message
+  } finally {
+    loading.value = false
+  }
+}
+async function save() {
+  error.value = ''
+  const config = {
+    ...snapshot.value.config,
+    admin_access: {
+      ...draft.value.admin_access,
+      origins: origins.value
+        .split('\n')
+        .map((value) => value.trim())
+        .filter(Boolean)
+    },
+    outbound_proxy: { ...draft.value.outbound_proxy },
+    log_retention: { ...draft.value.log_retention }
+  }
+  const credentials =
+    passwordAction.value === 'keep'
+      ? {}
+      : { proxy_password: passwordAction.value === 'clear' ? '' : proxyPassword.value }
+  try {
+    const result = await saveConfig(snapshot.value, config, credentials)
+    apply(result)
+    toast.success('全局配置已保存')
+    await refreshStatus(controller.signal)
+  } catch (err) {
+    if (!controller.signal.aborted) error.value = err.message
+  } finally {
+    proxyPassword.value = ''
+  }
+}
+async function restart() {
+  if (!confirm('重启将中断当前连接并使管理会话失效，确定继续？')) return
+  restarting.value = true
+  try {
+    const result = await adminApi.restart()
+    endSession()
+    await router.replace({ name: 'Login', query: { redirect: '/settings' } })
+    toast.info(result.message)
+  } catch (err) {
+    toast.error(err.message)
+  } finally {
+    restarting.value = false
+  }
+}
+onMounted(reload)
+onBeforeUnmount(() => {
+  controller.abort()
+  proxyPassword.value = ''
+})
 </script>
-
 <style scoped>
-.settings-page { display: flex; flex-direction: column; gap: 20px; }
-.page-topbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; }
-.page-title { font-size: 22px; font-weight: 700; color: var(--ink); }
-.page-subtitle { font-size: 13px; color: var(--muted); margin-top: 3px; }
-
-.settings-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-.settings-column { display: flex; flex-direction: column; gap: 16px; }
-
-.setting-card { padding: 20px; display: flex; flex-direction: column; gap: 16px; }
-.card-head { display: flex; align-items: center; gap: 12px; }
-.card-icon-box {
-  width: 38px; height: 38px; border-radius: var(--radius-sm);
-  background: rgba(99, 102, 241, 0.12); color: var(--brand-light);
-  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+.settings-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
 }
-.card-title { font-size: 15px; font-weight: 700; color: var(--ink); }
-.card-desc { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
-
-.card-form { display: flex; flex-direction: column; gap: 14px; }
-.form-group { display: flex; flex-direction: column; gap: 6px; }
-.form-label { font-size: 12px; font-weight: 600; color: var(--ink-secondary); }
-.form-hint { font-size: 11px; color: var(--faint); }
-.form-row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-
-.toggle-row {
-  display: flex; align-items: center; justify-content: space-between;
-  background: var(--strip-bg); border: 1px solid var(--line);
-  border-radius: var(--radius-sm); padding: 12px 14px; cursor: pointer;
+.settings-fields {
+  display: grid;
+  gap: 18px;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
 }
-.toggle-text { display: flex; flex-direction: column; }
-.t-name { font-size: 12.5px; font-weight: 600; color: var(--ink); }
-.t-sub { font-size: 11px; color: var(--faint); }
-
-.theme-picker-grid { display: flex; flex-direction: column; gap: 10px; }
-.theme-option {
-  display: flex; align-items: center; gap: 12px; padding: 12px 14px;
-  border-radius: var(--radius-sm); border: 1px solid var(--line);
-  background: var(--strip-bg); cursor: pointer; transition: var(--transition-smooth);
+.report-panel :deep(.card-inner) {
+  display: grid;
+  gap: 14px;
 }
-.theme-option:hover, .theme-option.selected {
-  border-color: var(--brand); background: var(--card-hover-bg);
+.report-panel h2 {
+  margin-bottom: 0;
 }
-.theme-option.selected { box-shadow: 0 0 16px rgba(99, 102, 241, 0.2); }
-
-.theme-swatch { width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--line); }
-.theme-swatch.dark { background: #090d16; }
-.theme-swatch.light { background: #f1f5f9; }
-
-.theme-info { display: flex; flex-direction: column; }
-.theme-name { font-size: 13px; font-weight: 600; color: var(--ink); }
-.theme-desc { font-size: 11px; color: var(--faint); }
-
-.version-status-box {
-  display: flex; align-items: center; justify-content: space-between;
-  background: var(--strip-bg); border: 1px solid var(--line);
-  border-radius: var(--radius-sm); padding: 12px 16px;
+label {
+  display: grid;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--ink-secondary);
 }
-.v-left { display: flex; flex-direction: column; }
-.v-label { font-size: 11px; color: var(--faint); }
-.v-num { font-size: 15px; font-weight: 700; color: var(--ink); margin-top: 2px; }
-
-.env-diagnostics {
-  display: flex; flex-direction: column; gap: 6px; font-size: 12px;
-  padding: 10px 14px; background: var(--strip-bg); border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
-.diag-item { display: flex; justify-content: space-between; }
-.d-label { color: var(--faint); }
-.d-val { color: var(--ink); }
-.ok-text { color: var(--ok); }
-.spin-icon { animation: spin 0.8s linear infinite; }
-@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-
+.theme-options {
+  display: grid;
+  gap: 12px;
+}
+.theme-options [aria-pressed='true'] {
+  border-color: var(--brand);
+}
+.system-meta {
+  display: grid;
+  grid-template-columns: 90px minmax(0, 1fr);
+  gap: 12px;
+  font-size: 13px;
+}
+dt {
+  color: var(--muted);
+}
+dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.listener-row {
+  display: grid;
+  gap: 6px;
+  color: var(--ink-secondary);
+  font-size: 12px;
+}
 @media (max-width: 900px) {
-  .settings-layout { grid-template-columns: 1fr; }
+  .settings-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 </style>
