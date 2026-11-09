@@ -27,7 +27,9 @@ GATEHOME_API_TARGET=http://127.0.0.1:16666 npm run preview
 
 ## 页面与联调状态
 
-登录、账户管理和概览使用 Go API。Vite 通过同源路径转发 `/api/`，浏览器负责管理会话 Cookie。其余业务页面仍使用模拟数据，逐页范围见[迁移验收清单](../docs/aurora-next-migration-checklist.md)。订阅管理对应防火墙 IP/CIDR 规则源。
+登录、账户管理、概览、反向代理和端口转发使用 Go API。反向代理包括分组、路由、服务发现、健康检查、图片和独立访问账户；端口转发支持 TCP、UDP、双协议及真实监听状态。配置编辑提交原始 `revision`，冲突时保留草稿，保存时保留未编辑字段及既有密码。
+
+Vite 通过同源路径转发 `/api/`，浏览器负责管理会话 Cookie。其余业务页面仍使用模拟数据，逐页范围见[迁移验收清单](../docs/aurora-next-migration-checklist.md)。订阅管理对应防火墙 IP/CIDR 规则源。
 
 ---
 

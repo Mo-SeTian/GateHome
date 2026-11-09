@@ -38,28 +38,6 @@ export function useAppStore() {
     isCmdkOpen.value = false
   }
 
-  // ================= 1. PROXY GROUPS (反代组) =================
-  const proxyGroups = ref([
-    {
-      id: 'grp_default',
-      name: '默认业务组 (公网对外)',
-      enabled: true,
-      httpPort: 80,
-      httpsPort: 443,
-      domainSuffix: '.nas.tech',
-      ddnsGroupId: 'ddns_cf_main'
-    },
-    {
-      id: 'grp_internal',
-      name: '内部管理组 (局域网专用)',
-      enabled: true,
-      httpPort: 8080,
-      httpsPort: 8443,
-      domainSuffix: '.internal.lan',
-      ddnsGroupId: ''
-    }
-  ])
-
   // ================= 2. ROUTES (反代域名规则) =================
   const routes = ref([
     {
@@ -372,14 +350,6 @@ export function useAppStore() {
     }
   ])
 
-  // ================= 7. PORT FORWARDS (端口转发) =================
-  const forwards = ref([
-    { id: 'fwd_1', name: 'MC 游戏专用服务器', protocol: 'tcp', listenPort: 25565, target: '192.168.2.105:25565', firewallId: 'fw_china_only', traffic: '48.2 GB', enabled: true },
-    { id: 'fwd_2', name: 'WireGuard VPN 穿透', protocol: 'udp', listenPort: 51820, target: '192.168.2.1:51820', firewallId: '', traffic: '128.5 GB', enabled: true },
-    { id: 'fwd_3', name: 'NAS SSH 调试端口', protocol: 'tcp', listenPort: 2222, target: '192.168.2.100:22', firewallId: 'fw_internal_only', traffic: '320 MB', enabled: true },
-    { id: 'fwd_4', name: 'Git SSH 提交端口', protocol: 'tcp', listenPort: 2223, target: '192.168.2.200:22', firewallId: 'fw_internal_only', traffic: '1.8 GB', enabled: false }
-  ])
-
   // ================= 8. CERTIFICATES (ACME SSL 证书) =================
   const certificates = ref([
     {
@@ -496,13 +466,11 @@ export function useAppStore() {
     toggleCmdk,
     openCmdk,
     closeCmdk,
-    proxyGroups,
     routes,
     subscriptions,
     firewalls,
     ipBlocks,
     ddnsTasks,
-    forwards,
     certificates,
     accessLogs,
     projectLogs,

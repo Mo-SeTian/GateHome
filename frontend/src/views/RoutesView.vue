@@ -1,438 +1,806 @@
 <template>
   <div class="routes-page animate-fade-in">
-    <!-- Top Bar -->
     <div class="page-topbar">
       <div>
         <h1 class="page-title">反向代理与路由组</h1>
-        <p class="page-subtitle">按反代组管理公网与局域网域名路由、SSL 卸载、来源 IP 防火墙挂载与专属账号验证</p>
+        <p class="page-subtitle">管理反代组、域名路由、来源 IP 防火墙与独立访问账户</p>
       </div>
       <div class="header-actions">
-        <button class="btn btn-primary" @click="openCreateModal">
-          <Plus :size="15" />
-          新建反代服务
+        <button class="btn btn-secondary" :disabled="loading || isSavingConfig" @click="reload">刷新</button>
+        <button
+          class="btn btn-secondary"
+          :disabled="!gatewayConfig || isSavingConfig"
+          @click="openHealthSettings"
+        >
+          健康检查
+        </button>
+        <button
+          class="btn btn-secondary"
+          :disabled="!proxyGroups.length || isSavingConfig"
+          @click="openDiscovery"
+        >
+          发现服务
+        </button>
+        <button class="btn btn-secondary" :disabled="!gatewayConfig || isSavingConfig" @click="openGroup()">
+          新建反代组
+        </button>
+        <button
+          class="btn btn-primary"
+          :disabled="!proxyGroups.length || isSavingConfig"
+          @click="openRoute()"
+        >
+          <Plus :size="15" /> 新建反代服务
         </button>
       </div>
     </div>
 
-    <!-- Filter & Search Controls -->
+    <RestartNotice />
+    <p v-if="loadError" class="page-error" role="alert">{{ loadError }}</p>
+    <p v-if="loading" role="status">正在读取反代配置…</p>
+
+    <details v-if="gatewayConfig" class="group-panel">
+      <summary>反代组与监听端口</summary>
+      <div v-for="group in proxyGroups" :key="group.id" class="group-row">
+        <div>
+          <strong>{{ group.name }}</strong>
+          <p>
+            HTTP {{ group.http_port || '关闭' }} / HTTPS {{ group.https_port || '关闭' }} ·
+            {{ groupState(group) }}
+          </p>
+          <p v-if="group.domain_suffix">域名后缀 {{ group.domain_suffix }}</p>
+        </div>
+        <div class="action-btn-group">
+          <button class="btn btn-secondary btn-sm" :disabled="isSavingConfig" @click="openGroup(group)">
+            编辑
+          </button>
+          <button class="btn btn-ghost btn-sm" :disabled="isSavingConfig" @click="toggleGroup(group)">
+            {{ group.enabled ? '停用' : '启用' }}
+          </button>
+          <button
+            class="btn btn-ghost btn-sm text-bad"
+            :disabled="isSavingConfig || getGroupCount(group.id) > 0"
+            title="先移走或删除组内路由，再删除此组"
+            @click="deleteGroup(group)"
+          >
+            删除
+          </button>
+        </div>
+      </div>
+      <p v-if="!proxyGroups.length">尚无反代组，请先新建反代组。</p>
+    </details>
+
     <div class="filter-bar">
-      <!-- Group Chips (按反代组筛选) -->
       <div class="chips-group">
-        <button 
-          class="chip-btn" 
-          :class="{ active: selectedGroup === 'ALL' }" 
-          @click="selectedGroup = 'ALL'"
-        >
-          全部路由
-          <span class="chip-count">{{ routes.length }}</span>
+        <button class="chip-btn" :class="{ active: selectedGroup === 'ALL' }" @click="selectedGroup = 'ALL'">
+          全部路由 <span class="chip-count">{{ routes.length }}</span>
         </button>
-        <button 
-          v-for="grp in proxyGroups" 
-          :key="grp.id"
+        <button
+          v-for="group in proxyGroups"
+          :key="group.id"
           class="chip-btn"
-          :class="{ active: selectedGroup === grp.id }"
-          @click="selectedGroup = grp.id"
+          :class="{ active: selectedGroup === group.id }"
+          @click="selectedGroup = group.id"
         >
-          {{ grp.name }}
-          <span class="chip-count">{{ getGroupCount(grp.id) }}</span>
+          {{ group.name }} <span class="chip-count">{{ getGroupCount(group.id) }}</span>
         </button>
-        <button 
-          class="chip-btn" 
-          :class="{ active: selectedGroup === 'INACTIVE' }" 
+        <button
+          class="chip-btn"
+          :class="{ active: selectedGroup === 'INACTIVE' }"
           @click="selectedGroup = 'INACTIVE'"
         >
-          已停用
-          <span class="chip-count">{{ inactiveCount }}</span>
+          已停用 <span class="chip-count">{{ routes.filter((route) => !route.enabled).length }}</span>
         </button>
       </div>
-
-      <!-- Search Input -->
       <div class="search-box">
-        <Search :size="14" class="search-box-icon" />
-        <input 
-          v-model="searchQuery" 
-          type="text" 
-          placeholder="按服务名、域名或目标IP搜索..."
+        <Search :size="14" /><input
+          v-model="searchQuery"
           class="search-input"
+          aria-label="搜索反代服务"
+          placeholder="按名称、域名或上游搜索"
         />
-        <button v-if="searchQuery" class="clear-btn" @click="searchQuery = ''">
-          <X :size="12" />
-        </button>
       </div>
     </div>
 
-    <!-- Routes Cards Grid (4 Columns) -->
     <div class="routes-grid">
-      <SpotlightCard 
-        v-for="rt in filteredRoutes" 
-        :key="rt.id"
+      <SpotlightCard
+        v-for="route in filteredRoutes"
+        :key="route.id || routeKey(route)"
         class="route-card"
-        :class="{ inactive: rt.status !== 'active' }"
+        :class="{ inactive: !route.enabled }"
       >
-        <!-- Card Header -->
         <div class="card-head">
-          <div class="app-icon-wrap" :class="rt.category.toLowerCase()">
-            <Shield v-if="rt.icon === 'shield'" :size="18" />
-            <HardDrive v-else-if="rt.icon === 'hard-drive'" :size="18" />
-            <Key v-else-if="rt.icon === 'key'" :size="18" />
-            <Home v-else-if="rt.icon === 'home'" :size="18" />
-            <Play v-else-if="rt.icon === 'play'" :size="18" />
-            <Code v-else-if="rt.icon === 'code'" :size="18" />
-            <Tv v-else-if="rt.icon === 'tv'" :size="18" />
-            <Activity v-else :size="18" />
+          <div class="app-icon-wrap system">
+            <img
+              v-if="route.image"
+              :src="`/api/route-images/${route.image}`"
+              width="32"
+              height="32"
+              alt=""
+            /><Network v-else :size="18" />
           </div>
-
           <div class="card-title-group">
             <div class="card-title-row">
-              <span class="service-name">{{ rt.name }}</span>
-              <span 
-                class="status-dot" 
-                :class="rt.status === 'active' ? 'ok' : 'neutral'" 
-                :title="rt.status === 'active' ? '服务运行中' : '服务已暂停'"
-              />
+              <span class="service-name">{{ route.name || route.host }}</span>
             </div>
-            <div class="service-category">所属组: {{ getGroupName(rt.groupId) }}</div>
+            <div class="service-category">所属组 {{ groupName(route.group_id) }}</div>
           </div>
-
-          <!-- Switch Toggle -->
-          <label class="switch">
-            <input 
-              type="checkbox" 
-              :checked="rt.status === 'active'"
-              @change="toggleStatus(rt)"
-            />
-            <span class="switch-slider" />
-          </label>
+          <label class="switch"
+            ><input
+              type="checkbox"
+              :checked="route.enabled"
+              :disabled="isSavingConfig"
+              :aria-label="`启用 ${route.name || route.host}`"
+              @change="toggleRoute(route, $event)" /><span class="switch-slider"
+          /></label>
         </div>
-
-        <!-- Domain & Target Info -->
         <div class="endpoint-info">
-          <!-- Public Domain -->
-          <div class="info-row domain-row" @click="copyText(rt.domain, '已复制访问域名')">
-            <Globe :size="14" class="info-icon" />
-            <span class="info-text mono-text domain-text">{{ rt.domain }}</span>
-            <Copy :size="12" class="copy-icon" />
-          </div>
-
-          <!-- Upstream Target -->
+          <button type="button" class="info-row domain-row" @click="copyHost(route.host)">
+            <Globe :size="14" /><span class="info-text mono-text domain-text">{{ route.host }}</span
+            ><Copy :size="12" />
+          </button>
           <div class="info-row target-row">
-            <ArrowRight :size="14" class="info-icon target-arrow" />
-            <span class="info-text mono-text">{{ rt.target }}</span>
+            <ArrowRight :size="14" /><span class="info-text mono-text">{{ route.upstream }}</span>
           </div>
         </div>
-
-        <!-- Security & Feature Badges -->
         <div class="feature-badges">
-          <span v-if="rt.ssl" class="feature-badge ssl" title="已启用 SSL 证书与 HTTPS 强制加密">
-            <Lock :size="10" /> HTTPS
-          </span>
-          <span v-if="rt.firewallId" class="feature-badge fw" :title="`挂载防火墙: ${getFwName(rt.firewallId)}`">
-            <ShieldCheck :size="10" /> {{ getFwName(rt.firewallId) }}
-          </span>
-          <span v-if="rt.auth?.enabled" class="feature-badge auth" title="已开启账号密码登录防护">
-            <Key :size="10" /> 账号保护
-          </span>
-          <span v-if="rt.websocket" class="feature-badge ws" title="支持 WebSocket 协议升级">
-            <Zap :size="10" /> WS
-          </span>
-          <span class="feature-badge hits">
-            {{ rt.hitCount }} 次
-          </span>
+          <span v-if="route.tls" class="feature-badge ssl"><Lock :size="10" /> HTTPS</span>
+          <span v-if="route.firewall_id" class="feature-badge fw">{{ firewallName(route.firewall_id) }}</span>
+          <span v-if="route.auth.enabled" class="feature-badge auth"><Key :size="10" /> 账号保护</span>
+          <span class="feature-badge hits">{{ route.enabled ? '已启用' : '已停用' }}</span>
         </div>
-
-        <!-- Card Footer -->
+        <button type="button" class="health-detail" @click="showHealth(route)">
+          {{ routeHealth(route) }}
+        </button>
         <div class="card-actions">
-          <div class="latency-indicator">
-            <span class="latency-label">延迟:</span>
-            <span class="latency-val" :class="{ 'zero': rt.status !== 'active' }">
-              {{ rt.latency }}
-            </span>
-          </div>
+          <span class="latency-label">{{ route.tls ? 'HTTPS' : 'HTTP' }}</span>
           <div class="action-btn-group">
-            <button class="btn btn-ghost btn-sm" @click="openEditModal(rt)">
+            <button class="btn btn-ghost btn-sm" :disabled="isSavingConfig" @click="openRoute(route)">
               <Edit3 :size="13" /> 编辑
             </button>
-            <button class="btn btn-ghost btn-sm text-bad" @click="deleteRouteItem(rt)">
+            <button
+              class="btn btn-ghost btn-sm text-bad"
+              :disabled="isSavingConfig"
+              :aria-label="`删除 ${route.name || route.host}`"
+              @click="deleteRoute(route)"
+            >
               <Trash2 :size="13" />
             </button>
           </div>
         </div>
       </SpotlightCard>
     </div>
-
-    <!-- Empty State -->
-    <div v-if="filteredRoutes.length === 0" class="empty-state">
-      <AlertCircle :size="32" class="empty-icon" />
-      <div class="empty-title">未找到匹配的反代服务</div>
-      <div class="empty-desc">请尝试调整搜索条件或切换反代组筛选</div>
-      <button class="btn btn-secondary btn-sm" @click="resetFilters">重置筛选</button>
+    <div v-if="gatewayConfig && !filteredRoutes.length" class="empty-state">
+      <AlertCircle :size="30" />
+      <p>暂无匹配的反代服务</p>
     </div>
 
-    <!-- Create / Edit Modal -->
-    <transition name="modal-fade">
-      <div v-if="isModalOpen" class="modal-backdrop" @click.self="isModalOpen = false">
-        <div class="modal-dialog">
-          <div class="modal-header">
-            <h3 class="modal-title">{{ isEdit ? '编辑反向代理路由' : '新建反向代理路由' }}</h3>
-            <button class="close-modal-btn" @click="isModalOpen = false">
-              <X :size="18" />
-            </button>
-          </div>
-
-          <form class="modal-body" @submit.prevent="saveRoute">
-            <div class="form-row-2">
-              <div class="form-group">
-                <label class="form-label">服务名称</label>
-                <input 
-                  v-model="formData.name" 
-                  type="text" 
-                  placeholder="例如: Nextcloud 云盘服务" 
-                  class="form-input" 
-                  required 
-                />
-              </div>
-              <div class="form-group">
-                <label class="form-label">所属反代组</label>
-                <select v-model="formData.groupId" class="form-select">
-                  <option v-for="g in proxyGroups" :key="g.id" :value="g.id">
-                    {{ g.name }} (:{{ g.httpPort }} / :{{ g.httpsPort }})
-                  </option>
-                </select>
-              </div>
-            </div>
-
-            <div class="form-group">
-              <label class="form-label">访问完整域名 (Host)</label>
-              <input 
-                v-model="formData.domain" 
-                type="text" 
-                placeholder="例如: cloud.nas.tech" 
-                class="form-input mono-text" 
-                required 
-              />
-            </div>
-
-            <div class="form-group">
-              <label class="form-label">内网目标主机与端口 (Upstream)</label>
-              <input 
-                v-model="formData.target" 
-                type="text" 
-                placeholder="例如: http://192.168.2.110:80" 
-                class="form-input mono-text" 
-                required 
-              />
-            </div>
-
-            <div class="form-group">
-              <label class="form-label">来源 IP 防火墙 / WAF 策略</label>
-              <select v-model="formData.firewallId" class="form-select">
-                <option value="">无防火墙 (直接放行所有来源 IP)</option>
-                <option v-for="fw in firewalls" :key="fw.id" :value="fw.id">
-                  {{ fw.name }}
-                </option>
-              </select>
-            </div>
-
-            <!-- Toggles Panel -->
-            <div class="toggles-panel">
-              <label class="toggle-row">
-                <div class="toggle-info">
-                  <span class="toggle-title">启用 SSL 证书与强制 HTTPS</span>
-                  <span class="toggle-desc">自动匹配 ACME 证书并进行 TLS 握手</span>
-                </div>
-                <input v-model="formData.ssl" type="checkbox" />
-              </label>
-
-              <label class="toggle-row">
-                <div class="toggle-info">
-                  <span class="toggle-title">开启专属账号登录鉴权</span>
-                  <span class="toggle-desc">要求在网关前置输入账号密码，连续失败自动冻结来源 IP</span>
-                </div>
-                <input v-model="formData.auth.enabled" type="checkbox" />
-              </label>
-
-              <div v-if="formData.auth.enabled" class="auth-sub-fields">
-                <div class="form-row-2">
-                  <div class="form-group">
-                    <label class="form-label">鉴权用户名</label>
-                    <input v-model="formData.auth.username" type="text" placeholder="admin" class="form-input" required />
-                  </div>
-                  <div class="form-group">
-                    <label class="form-label">鉴权密码</label>
-                    <input type="password" placeholder="••••••••••••" class="form-input" />
-                  </div>
-                </div>
-              </div>
-
-              <label class="toggle-row">
-                <div class="toggle-info">
-                  <span class="toggle-title">WebSocket 长连接支持</span>
-                  <span class="toggle-desc">允许协议升级双向传输数据</span>
-                </div>
-                <input v-model="formData.websocket" type="checkbox" />
-              </label>
-            </div>
-
-            <div class="modal-footer">
-              <button type="button" class="btn btn-secondary" @click="isModalOpen = false">
-                取消
-              </button>
-              <button type="submit" class="btn btn-primary">
-                {{ isEdit ? '保存更改' : '立即创建' }}
-              </button>
-            </div>
-          </form>
-        </div>
+    <dialog
+      ref="routeDialog"
+      class="modal-dialog"
+      aria-labelledby="route-title"
+      @close="closeRoute"
+      @cancel="blockBusyClose"
+    >
+      <div class="modal-header">
+        <h2 id="route-title" class="modal-title">
+          {{ originalRouteId == null ? '新建' : '编辑' }}反向代理路由
+        </h2>
+        <button
+          class="close-modal-btn"
+          aria-label="关闭"
+          :disabled="isSavingConfig || imageBusy"
+          @click="routeDialog.close()"
+        >
+          <X :size="18" />
+        </button>
       </div>
-    </transition>
+      <form class="modal-body" @submit.prevent="saveRoute">
+        <p v-if="formError" ref="routeError" class="page-error" role="alert" tabindex="-1">{{ formError }}</p>
+        <label class="form-group"
+          >服务名称<input v-model="routeDraft.name" name="name" class="form-input" maxlength="100" autofocus
+        /></label>
+        <label class="form-group"
+          >所属反代组<select v-model="routeDraft.group_id" name="group_id" class="form-select" required>
+            <option v-for="group in editSnapshot.config.groups" :key="group.id" :value="group.id">
+              {{ group.name }}
+            </option>
+          </select></label
+        >
+        <label class="form-group"
+          >访问域名<input
+            v-model="routeDraft.host"
+            name="host"
+            class="form-input mono-text"
+            required
+            placeholder="完整域名，或本组的子域名前缀"
+        /></label>
+        <p class="form-note">保存为 {{ resolvedHost || '—' }}</p>
+        <label class="form-group"
+          >上游地址<input
+            v-model="routeDraft.upstream"
+            name="upstream"
+            class="form-input mono-text"
+            required
+            placeholder="http://192.168.1.10:8080"
+        /></label>
+        <label class="form-group"
+          >防火墙<select v-model="routeDraft.firewall_id" name="firewall_id" class="form-select">
+            <option value="">不限制来源 IP</option>
+            <option v-for="firewall in editSnapshot.config.firewalls" :key="firewall.id" :value="firewall.id">
+              {{ firewall.name }}
+            </option>
+          </select></label
+        >
+        <label class="toggle-row"
+          >启用此路由<input v-model="routeDraft.enabled" name="enabled" type="checkbox"
+        /></label>
+        <label class="toggle-row"
+          >使用 HTTPS 访问，需要匹配证书<input v-model="routeDraft.tls" name="tls" type="checkbox"
+        /></label>
+        <label class="toggle-row"
+          >启用独立访问账户<input v-model="routeDraft.auth.enabled" name="auth_enabled" type="checkbox"
+        /></label>
+        <fieldset v-if="routeDraft.auth.enabled" class="auth-fields">
+          <label class="form-group"
+            >访问用户名<input
+              v-model="routeDraft.auth.username"
+              name="auth_username"
+              class="form-input"
+              required
+              autocomplete="off"
+              maxlength="64"
+          /></label>
+          <label class="form-group"
+            >{{ passwordRequired ? '设置访问密码' : '修改访问密码'
+            }}<input
+              v-model="routePassword"
+              name="route_password"
+              class="form-input"
+              type="password"
+              autocomplete="new-password"
+              :required="passwordRequired"
+              :placeholder="passwordRequired ? '12–72 字节' : '留空保留已配置密码'"
+          /></label>
+          <label class="form-group"
+            >验证失败上限<input
+              v-model.number="routeDraft.auth.failure_limit"
+              name="failure_limit"
+              class="form-input"
+              type="number"
+              min="1"
+              max="100"
+              required
+          /></label>
+          <label class="form-group"
+            >冻结时长 分钟<input
+              v-model.number="freezeMinutes"
+              name="freeze_minutes"
+              class="form-input"
+              type="number"
+              min="1"
+              max="10080"
+              required
+          /></label>
+        </fieldset>
+        <RouteImagePicker v-if="routeOpen" v-model="routeDraft.image" @busy="imageBusy = $event" />
+        <div class="modal-footer">
+          <button
+            type="button"
+            class="btn btn-secondary"
+            :disabled="isSavingConfig || imageBusy"
+            @click="routeDialog.close()"
+          >
+            取消</button
+          ><button type="submit" class="btn btn-primary" :disabled="isSavingConfig || imageBusy">
+            {{ isSavingConfig ? '保存中…' : '保存路由' }}
+          </button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog ref="groupDialog" class="modal-dialog" aria-labelledby="group-title" @cancel="blockBusyClose">
+      <div class="modal-header">
+        <h2 id="group-title" class="modal-title">{{ originalGroupId == null ? '新建' : '编辑' }}反代组</h2>
+        <button
+          class="close-modal-btn"
+          aria-label="关闭"
+          :disabled="isSavingConfig"
+          @click="groupDialog.close()"
+        >
+          <X :size="18" />
+        </button>
+      </div>
+      <form class="modal-body" @submit.prevent="saveGroup">
+        <p v-if="formError" class="page-error" role="alert">{{ formError }}</p>
+        <label class="form-group"
+          >组名称<input
+            v-model="groupDraft.name"
+            name="name"
+            class="form-input"
+            required
+            maxlength="100"
+            autofocus
+        /></label>
+        <div class="form-row-2">
+          <label class="form-group"
+            >HTTP 端口<input
+              v-model.number="groupDraft.http_port"
+              name="http_port"
+              type="number"
+              class="form-input"
+              min="0"
+              max="65535"
+              required /></label
+          ><label class="form-group"
+            >HTTPS 端口<input
+              v-model.number="groupDraft.https_port"
+              name="https_port"
+              type="number"
+              class="form-input"
+              min="0"
+              max="65535"
+              required
+          /></label>
+        </div>
+        <p class="form-note">端口为 0 时关闭对应协议。监听变更在重启后生效。</p>
+        <label class="form-group"
+          >域名后缀<input
+            v-model="groupDraft.domain_suffix"
+            name="domain_suffix"
+            class="form-input"
+            placeholder="example.com"
+        /></label>
+        <label class="form-group"
+          >绑定 DDNS 组<select v-model="groupDraft.ddns_group_id" name="ddns_group_id" class="form-select">
+            <option value="">不绑定</option>
+            <option v-for="group in editSnapshot.config.ddns.groups" :key="group.id" :value="group.id">
+              {{ group.name }} · {{ group.zone }}
+            </option>
+          </select></label
+        >
+        <label class="toggle-row"
+          >启用此组<input v-model="groupDraft.enabled" name="enabled" type="checkbox"
+        /></label>
+        <div class="modal-footer">
+          <button
+            type="button"
+            class="btn btn-secondary"
+            :disabled="isSavingConfig"
+            @click="groupDialog.close()"
+          >
+            取消</button
+          ><button type="submit" class="btn btn-primary" :disabled="isSavingConfig">保存反代组</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog ref="healthDialog" class="modal-dialog" aria-labelledby="health-title" @cancel="blockBusyClose">
+      <div class="modal-header">
+        <h2 id="health-title" class="modal-title">服务健康检查</h2>
+        <button
+          class="close-modal-btn"
+          aria-label="关闭"
+          :disabled="isSavingConfig"
+          @click="healthDialog.close()"
+        >
+          <X :size="18" />
+        </button>
+      </div>
+      <form class="modal-body" @submit.prevent="saveHealthSettings">
+        <p v-if="formError" class="page-error" role="alert">{{ formError }}</p>
+        <label class="toggle-row"
+          >启用服务器上游检查<input v-model="healthDraft.enabled" type="checkbox" name="enabled"
+        /></label>
+        <label class="form-group"
+          >检查间隔 秒<input
+            v-model.number="healthDraft.interval"
+            name="interval"
+            type="number"
+            min="30"
+            max="86400"
+            class="form-input"
+            required
+        /></label>
+        <button type="submit" class="btn btn-primary" :disabled="isSavingConfig">保存检查设置</button>
+      </form>
+    </dialog>
+    <dialog ref="healthDetailDialog" class="modal-dialog" aria-labelledby="health-detail-title">
+      <div class="modal-header">
+        <h2 id="health-detail-title" class="modal-title">上游健康诊断</h2>
+        <button aria-label="关闭" class="close-modal-btn" @click="healthDetailDialog.close()">
+          <X :size="18" />
+        </button>
+      </div>
+      <div class="modal-body">
+        <p>{{ healthDetail?.label || '等待检测' }}</p>
+        <p>{{ healthDetail?.message }}</p>
+        <p v-if="healthDetail?.checked_at">
+          最近检查 {{ new Date(healthDetail.checked_at).toLocaleString() }} · HTTP
+          {{ healthDetail.status || '—' }} · {{ healthDetail.duration_ms }} ms
+        </p>
+      </div>
+    </dialog>
+    <dialog
+      ref="discoveryDialog"
+      class="modal-dialog"
+      aria-labelledby="discovery-title"
+      @close="discoveryOpen = false"
+      @cancel="blockBusyClose"
+    >
+      <div class="modal-header">
+        <h2 id="discovery-title" class="modal-title">发现内网服务</h2>
+        <button
+          aria-label="关闭"
+          class="close-modal-btn"
+          :disabled="isSavingConfig"
+          @click="discoveryDialog.close()"
+        >
+          <X :size="18" />
+        </button>
+      </div>
+      <div class="modal-body">
+        <ServiceDiscovery v-if="discoveryOpen" :snapshot="editSnapshot" @saved="discoverySaved" />
+      </div>
+    </dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
-import { 
-  Plus, Search, X, Globe, ArrowRight, Lock, ShieldCheck, Zap, 
-  Copy, Edit3, Trash2, AlertCircle, Shield, HardDrive, Key, Home, 
-  Play, Code, Tv, Activity
+import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import {
+  AlertCircle,
+  ArrowRight,
+  Copy,
+  Edit3,
+  Globe,
+  Key,
+  Lock,
+  Network,
+  Plus,
+  Search,
+  Trash2,
+  X
 } from 'lucide-vue-next'
 import SpotlightCard from '@/components/SpotlightCard.vue'
-import { useAppStore } from '@/composables/useAppStore'
+import RestartNotice from '@/components/RestartNotice.vue'
+import RouteImagePicker from '@/components/RouteImagePicker.vue'
+import ServiceDiscovery from '@/components/ServiceDiscovery.vue'
+import { adminApi } from '@/api/admin'
+import { replaceConfigItem, routeHost, routeKey } from '@/api/configuration'
+import { useGatewayStatus } from '@/composables/useGatewayStatus'
 import { useToast } from '@/composables/useToast'
 
-const { routes, proxyGroups, firewalls } = useAppStore()
-const { success, info } = useToast()
-
+const {
+  gatewayConfig,
+  gatewayConfigSnapshot,
+  gatewayStatus,
+  isSavingConfig,
+  refreshConfig,
+  refreshStatus,
+  saveConfig
+} = useGatewayStatus()
+const toast = useToast()
+const currentRoute = useRoute()
+const router = useRouter()
+const routes = computed(() => gatewayConfig.value?.routes ?? [])
+const proxyGroups = computed(() => gatewayConfig.value?.groups ?? [])
 const selectedGroup = ref('ALL')
 const searchQuery = ref('')
-const isModalOpen = ref(false)
-const isEdit = ref(false)
-
-const formData = ref({
-  id: '',
-  groupId: 'grp_default',
-  name: '',
-  domain: '',
-  target: '',
-  category: 'System',
-  ssl: true,
-  firewallId: 'fw_china_only',
-  auth: { enabled: false, username: 'admin', failureLimit: 5, freezeSeconds: 1800 },
-  websocket: false
-})
-
-const getGroupCount = (grpId) => {
-  return routes.value.filter(r => r.groupId === grpId).length
-}
-
-const getGroupName = (grpId) => {
-  const g = proxyGroups.value.find(p => p.id === grpId)
-  return g ? g.name.split(' ')[0] : '默认组'
-}
-
-const getFwName = (fwId) => {
-  const fw = firewalls.value.find(f => f.id === fwId)
-  return fw ? fw.name.split(' ')[0] : 'WAF 防护'
-}
-
-const inactiveCount = computed(() => routes.value.filter(r => r.status !== 'active').length)
-
-const filteredRoutes = computed(() => {
-  return routes.value.filter(rt => {
-    // Group filter
-    if (selectedGroup.value === 'INACTIVE') {
-      if (rt.status === 'active') return false
-    } else if (selectedGroup.value !== 'ALL') {
-      if (rt.groupId !== selectedGroup.value) return false
-    }
-
-    // Search query
-    if (searchQuery.value.trim()) {
-      const q = searchQuery.value.toLowerCase()
-      return rt.name.toLowerCase().includes(q) ||
-             rt.domain.toLowerCase().includes(q) ||
-             rt.target.toLowerCase().includes(q)
-    }
-
-    return true
+const loading = ref(false)
+const loadError = ref('')
+const health = ref(null)
+const healthDetail = ref(null)
+const controller = new AbortController()
+const editSnapshot = shallowRef({ config: { groups: [], firewalls: [], ddns: { groups: [] } } })
+const formError = ref('')
+const routeDialog = ref(null)
+const groupDialog = ref(null)
+const healthDialog = ref(null)
+const healthDetailDialog = ref(null)
+const discoveryDialog = ref(null)
+const routeOpen = ref(false)
+const discoveryOpen = ref(false)
+const originalRouteId = ref(null)
+const originalGroupId = ref(null)
+const originalRoute = ref(null)
+const routeDraft = ref({ auth: {} })
+const groupDraft = ref({})
+const healthDraft = ref({})
+const routePassword = ref('')
+const freezeMinutes = ref(30)
+const imageBusy = ref(false)
+const routeError = ref(null)
+const filteredRoutes = computed(() =>
+  routes.value.filter((route) => {
+    if (selectedGroup.value === 'INACTIVE' && route.enabled) return false
+    if (!['ALL', 'INACTIVE'].includes(selectedGroup.value) && route.group_id !== selectedGroup.value)
+      return false
+    const query = searchQuery.value.trim().toLowerCase()
+    return [route.name, route.host, route.upstream].some((value) =>
+      (value || '').toLowerCase().includes(query)
+    )
   })
+)
+const resolvedHost = computed(() =>
+  routeHost(
+    routeDraft.value.host || '',
+    editSnapshot.value.config.groups.find((group) => group.id === routeDraft.value.group_id)
+  )
+)
+const passwordRequired = computed(() => {
+  const previous = originalRoute.value
+  return (
+    !previous ||
+    !editSnapshot.value.route_passwords_configured?.[routeKey(previous)] ||
+    routeKey(previous) !== `${routeDraft.value.group_id}/${resolvedHost.value}` ||
+    previous.auth.username !== routeDraft.value.auth.username
+  )
 })
 
-const toggleStatus = (rt) => {
-  rt.status = rt.status === 'active' ? 'inactive' : 'active'
-  if (rt.status === 'active') {
-    rt.latency = `${(Math.random() * 3 + 1).toFixed(1)}ms`
-    success(`已启用服务: ${rt.name}`)
-  } else {
-    rt.latency = '--'
-    info(`已暂停服务: ${rt.name}`)
+function getGroupCount(id) {
+  return routes.value.filter((route) => route.group_id === id).length
+}
+function groupName(id) {
+  return proxyGroups.value.find((group) => group.id === id)?.name || id
+}
+function firewallName(id) {
+  return gatewayConfig.value?.firewalls.find((firewall) => firewall.id === id)?.name || id
+}
+function groupState(group) {
+  if (!gatewayStatus.value) return '正在读取监听状态'
+  const running = gatewayStatus.value?.listeners?.find((item) => item.id === group.id && item.enabled)
+  if (!group.enabled) return running ? '停用待重启' : '已停用'
+  if (!running) return '启用待重启'
+  return running.http_port === group.http_port && running.https_port === group.https_port
+    ? '正在监听'
+    : '端口修改待重启'
+}
+function routeHealth(route) {
+  if (!route.enabled) return '路由已停用'
+  if (!proxyGroups.value.find((group) => group.id === route.group_id)?.enabled) return '反代组已停用'
+  const result = health.value?.routes?.[route.id]
+  return result ? `${result.label}${result.healthy ? ` · ${result.duration_ms} ms` : ''}` : '等待上游探测'
+}
+async function refreshHealth() {
+  try {
+    const value = await adminApi.serviceHealth(controller.signal)
+    if (!controller.signal.aborted) health.value = value
+  } catch (err) {
+    if (!controller.signal.aborted && err.status !== 401) loadError.value = err.message
   }
 }
-
-const copyText = (text, message) => {
-  navigator.clipboard?.writeText(text)
-  success(message || '已复制到剪贴板')
-}
-
-const openCreateModal = () => {
-  isEdit.value = false
-  formData.value = {
-    id: `rt_${Date.now()}`,
-    groupId: proxyGroups.value[0]?.id || 'grp_default',
-    name: '',
-    domain: '',
-    target: 'http://192.168.2.',
-    category: 'System',
-    ssl: true,
-    firewallId: firewalls.value[0]?.id || '',
-    auth: { enabled: false, username: 'admin', failureLimit: 5, freezeSeconds: 1800 },
-    websocket: false
+async function reload() {
+  if (loading.value || isSavingConfig.value) return
+  loading.value = true
+  loadError.value = ''
+  try {
+    await Promise.all([refreshConfig(controller.signal), refreshStatus(controller.signal), refreshHealth()])
+  } catch (err) {
+    if (!controller.signal.aborted) loadError.value = err.message
+  } finally {
+    loading.value = false
   }
-  isModalOpen.value = true
 }
-
-const openEditModal = (rt) => {
-  isEdit.value = true
-  formData.value = {
-    ...rt,
-    auth: { ...(rt.auth || { enabled: false, username: 'admin', failureLimit: 5, freezeSeconds: 1800 }) }
+function beginEdit() {
+  editSnapshot.value = structuredClone(gatewayConfigSnapshot.value)
+  formError.value = ''
+}
+function openRoute(route) {
+  beginEdit()
+  originalRouteId.value = route ? route.id || routeKey(route) : null
+  originalRoute.value = route ? structuredClone(route) : null
+  routeDraft.value = route
+    ? structuredClone(route)
+    : {
+        id: crypto.randomUUID(),
+        name: '',
+        group_id: proxyGroups.value.some((group) => group.id === selectedGroup.value)
+          ? selectedGroup.value
+          : proxyGroups.value[0].id,
+        host: '',
+        upstream: '',
+        tls: false,
+        enabled: true,
+        firewall_id: '',
+        image: '',
+        auth: { enabled: false, username: '', failure_limit: 5, freeze_seconds: 1800 }
+      }
+  routeDraft.value.auth = {
+    ...routeDraft.value.auth,
+    failure_limit: routeDraft.value.auth.failure_limit || 5
   }
-  isModalOpen.value = true
+  freezeMinutes.value = (routeDraft.value.auth.freeze_seconds || 1800) / 60
+  routePassword.value = ''
+  imageBusy.value = false
+  routeOpen.value = true
+  nextTick(() => routeDialog.value.showModal())
 }
-
-const saveRoute = () => {
-  if (isEdit.value) {
-    const idx = routes.value.findIndex(r => r.id === formData.value.id)
-    if (idx !== -1) {
-      routes.value[idx] = { ...routes.value[idx], ...formData.value }
-      success(`反代服务 "${formData.value.name}" 已更新`)
+function closeRoute() {
+  routeOpen.value = false
+  routePassword.value = ''
+  imageBusy.value = false
+}
+function blockBusyClose(event) {
+  if (isSavingConfig.value || imageBusy.value) event.preventDefault()
+}
+async function saved(message) {
+  toast.success(message)
+  try {
+    await refreshStatus(controller.signal)
+  } catch (err) {
+    if (!controller.signal.aborted && err.status !== 401)
+      toast.warn('配置已保存，监听状态刷新失败，请稍后刷新')
+  }
+  refreshHealth()
+}
+async function saveRoute() {
+  if (isSavingConfig.value || imageBusy.value) return
+  formError.value = ''
+  try {
+    const record = {
+      ...routeDraft.value,
+      host: resolvedHost.value,
+      name: routeDraft.value.name.trim(),
+      upstream: routeDraft.value.upstream.trim(),
+      auth: { ...routeDraft.value.auth, freeze_seconds: Number(freezeMinutes.value) * 60 }
     }
-  } else {
-    routes.value.unshift({
-      ...formData.value,
-      status: 'active',
-      hitCount: '0',
-      latency: '1.4ms',
-      icon: 'shield'
+    const credentials = {}
+    if (record.auth.enabled) {
+      if (passwordRequired.value && !routePassword.value)
+        throw new Error('域名、所属组或访问账号变化后，请重新设置独立访问密码')
+      if (routePassword.value) credentials.route_passwords = { [routeKey(record)]: routePassword.value }
+    }
+    await saveConfig(
+      editSnapshot.value,
+      replaceConfigItem(editSnapshot.value, 'routes', record, originalRouteId.value),
+      credentials
+    )
+    routeDialog.value.close()
+    await saved('反代路由已保存')
+  } catch (err) {
+    formError.value = err.message
+    await nextTick()
+    routeError.value?.focus()
+  }
+}
+function openGroup(group) {
+  beginEdit()
+  originalGroupId.value = group?.id ?? null
+  groupDraft.value = group
+    ? structuredClone(group)
+    : {
+        id: crypto.randomUUID(),
+        name: '',
+        http_port: 0,
+        https_port: 0,
+        enabled: true,
+        domain_suffix: '',
+        ddns_group_id: ''
+      }
+  nextTick(() => groupDialog.value.showModal())
+}
+async function saveGroup() {
+  if (isSavingConfig.value) return
+  try {
+    const record = {
+      ...groupDraft.value,
+      name: groupDraft.value.name.trim(),
+      domain_suffix: (groupDraft.value.domain_suffix || '').trim().toLowerCase()
+    }
+    await saveConfig(
+      editSnapshot.value,
+      replaceConfigItem(editSnapshot.value, 'groups', record, originalGroupId.value)
+    )
+    groupDialog.value.close()
+    await saved('反代组已保存，监听变化在重启后生效')
+  } catch (err) {
+    formError.value = err.message
+  }
+}
+async function changeItem(collection, record, remove = false) {
+  if (isSavingConfig.value) return
+  const snapshot = structuredClone(gatewayConfigSnapshot.value)
+  try {
+    const id = record.id || routeKey(record)
+    const config = remove
+      ? {
+          ...snapshot.config,
+          [collection]: snapshot.config[collection].filter((item) => (item.id || routeKey(item)) !== id)
+        }
+      : replaceConfigItem(snapshot, collection, { ...record, enabled: !record.enabled }, id)
+    await saveConfig(snapshot, config)
+    if (remove && selectedGroup.value === id) selectedGroup.value = 'ALL'
+    await saved('配置已保存')
+  } catch (err) {
+    toast.error(err.message)
+  }
+}
+function toggleRoute(route, event) {
+  event.target.checked = route.enabled
+  return changeItem('routes', route)
+}
+function toggleGroup(group) {
+  return changeItem('groups', group)
+}
+function deleteRoute(route) {
+  if (confirm(`删除反代路由「${route.name || route.host}」？`)) return changeItem('routes', route, true)
+}
+function deleteGroup(group) {
+  if (confirm(`删除反代组「${group.name}」？`)) return changeItem('groups', group, true)
+}
+async function copyHost(host) {
+  try {
+    await navigator.clipboard.writeText(host)
+    toast.success('域名已复制')
+  } catch {
+    toast.error('复制失败，请手动复制域名')
+  }
+}
+function showHealth(route) {
+  healthDetail.value = health.value?.routes?.[route.id] ?? null
+  healthDetailDialog.value.showModal()
+}
+function openHealthSettings() {
+  beginEdit()
+  healthDraft.value = { ...editSnapshot.value.config.service_health }
+  if (!healthDraft.value.interval) healthDraft.value = { enabled: true, interval: 60 }
+  healthDialog.value.showModal()
+}
+async function saveHealthSettings() {
+  if (isSavingConfig.value) return
+  try {
+    await saveConfig(editSnapshot.value, {
+      ...editSnapshot.value.config,
+      service_health: { ...healthDraft.value }
     })
-    success(`成功创建反代路由 "${formData.value.name}"`)
-  }
-  isModalOpen.value = false
-}
-
-const deleteRouteItem = (rt) => {
-  if (confirm(`确定要移除反代路由 "${rt.name}" (${rt.domain}) 吗？`)) {
-    routes.value = routes.value.filter(r => r.id !== rt.id)
-    info(`已删除反代服务: ${rt.name}`)
+    healthDialog.value.close()
+    await saved('健康检查设置已保存')
+  } catch (err) {
+    formError.value = err.message
   }
 }
-
-const resetFilters = () => {
-  selectedGroup.value = 'ALL'
-  searchQuery.value = ''
+function openDiscovery() {
+  beginEdit()
+  discoveryOpen.value = true
+  nextTick(() => discoveryDialog.value.showModal())
 }
+function discoverySaved() {
+  discoveryDialog.value.close()
+  saved('已创建所选服务的反代路由')
+}
+watch(
+  [() => currentRoute.query.new, gatewayConfig],
+  ([requested, config]) => {
+    if (requested !== '1' || !config || routeOpen.value) return
+    router.replace({ query: { ...currentRoute.query, new: undefined } })
+    if (config.groups.length) openRoute()
+    else openGroup()
+  },
+  { immediate: true }
+)
+let healthTimer
+onMounted(() => {
+  reload()
+  healthTimer = setInterval(refreshHealth, 30000)
+})
+onUnmounted(() => {
+  clearInterval(healthTimer)
+  controller.abort()
+  routePassword.value = ''
+})
 </script>
 
 <style scoped>
+.header-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.page-error { color: var(--bad); font-size: 13px; overflow-wrap: anywhere; }
+.form-note { color: var(--muted); font-size: 12px; margin: 0; overflow-wrap: anywhere; }
+.group-panel { padding: 14px; background: var(--strip-bg); border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.group-panel summary { cursor: pointer; color: var(--ink); }
+.group-row { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; padding-top: 12px; color: var(--ink); }
+.group-row p { color: var(--muted); font-size: 12px; margin: 4px 0; }
+.health-detail { color: var(--muted); text-align: left; font-size: 12px; margin-bottom: 12px; }
+.auth-fields { border: 1px solid var(--line); border-radius: var(--radius-sm); display: grid; gap: 12px; padding: 12px; min-width: 0; }
 .routes-page { display: flex; flex-direction: column; gap: 20px; }
 .page-topbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; }
 .page-title { font-size: 22px; font-weight: 700; color: var(--ink); }
@@ -531,17 +899,17 @@ const resetFilters = () => {
 .empty-desc { font-size: 12.5px; color: var(--muted); }
 
 /* Modal */
-.modal-backdrop {
-  position: fixed; inset: 0; background: rgba(0,0,0,0.65);
-  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
-  z-index: 1050; display: flex; align-items: center; justify-content: center; padding: 20px;
-}
 .modal-dialog {
-  width: 100%; max-width: 520px; background: var(--card-bg);
+  width: 100%; max-width: 520px; background: var(--card-hover-bg);
   border: 1px solid var(--card-border-hover); border-radius: var(--radius-card);
   backdrop-filter: blur(30px); -webkit-backdrop-filter: blur(30px);
-  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.6), var(--inner-highlight); overflow: hidden;
+  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.6), var(--inner-highlight);
+  margin: auto; max-height: calc(100dvh - 40px); overflow: auto; color: var(--ink);
 }
+.modal-dialog::backdrop { background: rgba(0,0,0,0.65); backdrop-filter: blur(8px); }
+.route-card { min-width: 0; }
+.info-text { min-width: 0; overflow-wrap: anywhere; }
+.domain-row { width: 100%; background: transparent; border: 0; text-align: left; }
 .modal-header { padding: 18px 20px; border-bottom: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; }
 .modal-title { font-size: 16px; font-weight: 700; color: var(--ink); }
 .close-modal-btn { color: var(--muted); }

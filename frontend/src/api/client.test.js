@@ -30,6 +30,22 @@ test('write requests use the browser cookie and the Go request verification head
   assert.equal(sent.headers.Authorization, undefined)
 })
 
+test('image upload preserves FormData so the browser supplies its multipart boundary', async () => {
+  let sent
+  globalThis.fetch = async (_, options) => {
+    sent = options
+    return response(201, { id: 'image-fixture' })
+  }
+  const body = new FormData()
+  body.append('file', new Blob(['fake image fixture'], { type: 'image/png' }), 'fixture.png')
+
+  await request('/api/route-images/upload', { method: 'POST', body })
+
+  assert.equal(sent.body, body)
+  assert.equal(sent.headers['Content-Type'], undefined)
+  assert.equal(sent.headers['X-Gatehouse-Request'], '1')
+})
+
 test('unauthorized responses from the same session notify only once after it ends', async () => {
   let notifications = 0
   setUnauthorizedHandler(() => {

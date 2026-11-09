@@ -3,177 +3,327 @@
     <div class="page-topbar">
       <div>
         <h1 class="page-title">端口转发</h1>
-        <p class="page-subtitle">配置 TCP / UDP 四层流量透明代理与端口映射规则</p>
+        <p class="page-subtitle">管理 TCP / UDP 四层转发、来源 IP 防火墙及当前监听状态</p>
       </div>
       <div class="header-actions">
-        <button class="btn btn-primary" @click="openCreateModal">
-          <Plus :size="15" />
-          添加转发规则
+        <button class="btn btn-secondary" :disabled="loading || isSavingConfig" @click="reload">刷新</button
+        ><button class="btn btn-primary" :disabled="!gatewayConfig || isSavingConfig" @click="openForward()">
+          <Plus :size="15" /> 添加转发规则
         </button>
       </div>
     </div>
-
-    <!-- Forwards Grid -->
+    <RestartNotice />
+    <p v-if="loading" role="status">正在读取转发配置…</p>
+    <p v-if="loadError" class="page-error" role="alert">{{ loadError }}</p>
+    <div class="protocol-filters" role="group" aria-label="筛选协议">
+      <button
+        v-for="item in protocols"
+        :key="item.value"
+        class="btn btn-secondary btn-sm"
+        :aria-pressed="protocolFilter === item.value"
+        @click="protocolFilter = item.value"
+      >
+        {{ item.label }}
+      </button>
+    </div>
+    <details class="live-listeners">
+      <summary>当前实际监听 {{ runningListeners.length }} 条</summary>
+      <p v-for="listener in runningListeners" :key="listener.id">
+        {{ listener.name }} · {{ listener.protocol.toUpperCase() }} :{{ listener.listen_port }} →
+        {{ listener.upstream }}
+      </p>
+      <p v-if="!runningListeners.length">暂无端口转发监听。</p>
+    </details>
     <div class="forwards-grid">
-      <SpotlightCard 
-        v-for="fwd in forwards" 
-        :key="fwd.id" 
+      <SpotlightCard
+        v-for="forward in filteredForwards"
+        :key="forward.id"
         class="forward-card"
-        :class="{ inactive: !fwd.enabled }"
+        :class="{ inactive: !forward.enabled }"
       >
         <div class="card-head">
-          <div class="protocol-badge" :class="fwd.protocol.toLowerCase()">
-            {{ fwd.protocol }}
+          <div class="protocol-badge" :class="forward.protocol === 'tcp+udp' ? 'dual' : forward.protocol">
+            {{ forward.protocol.toUpperCase() }}
           </div>
           <div class="forward-info">
-            <span class="forward-name">{{ fwd.name }}</span>
-            <span class="traffic-tag">已穿透 {{ fwd.traffic }}</span>
+            <span class="forward-name">{{ forward.name }}</span
+            ><span class="traffic-tag">{{ firewallName(forward.firewall_id) }}</span>
           </div>
-          <label class="switch">
-            <input 
-              type="checkbox" 
-              :checked="fwd.enabled" 
-              @change="toggleForward(fwd)" 
-            />
-            <span class="switch-slider" />
-          </label>
+          <label class="switch"
+            ><input
+              type="checkbox"
+              :checked="forward.enabled"
+              :disabled="isSavingConfig"
+              :aria-label="`启用 ${forward.name}`"
+              @change="toggleForward(forward, $event)" /><span class="switch-slider"
+          /></label>
         </div>
-
-        <!-- Connection Pipeline Diagram -->
         <div class="pipeline-box">
           <div class="pipeline-node">
-            <span class="node-label">本地监听</span>
-            <span class="node-val mono-text">:{{ fwd.listenPort }}</span>
+            <span class="node-label">所有网卡监听</span
+            ><span class="node-val mono-text">:{{ forward.listen_port }}</span>
           </div>
-          <div class="pipeline-arrow">
-            <ArrowRight :size="15" />
-          </div>
+          <ArrowRight :size="15" />
           <div class="pipeline-node">
-            <span class="node-label">转发目标</span>
-            <span class="node-val mono-text">{{ fwd.target }}</span>
+            <span class="node-label">转发目标</span
+            ><span class="node-val mono-text">{{ forward.upstream }}</span>
           </div>
         </div>
-
+        <p v-if="forward.protocol !== 'tcp'" class="traffic-tag">
+          UDP 空闲超时 {{ forward.udp_idle_seconds || 300 }} 秒
+        </p>
         <div class="card-footer">
-          <span class="status-indicator">
-            <span class="status-dot" :class="fwd.enabled ? 'ok' : 'neutral'" />
-            {{ fwd.enabled ? '转发监听中' : '已暂停' }}
-          </span>
-          <button class="btn btn-ghost btn-sm text-bad" @click="deleteForward(fwd)">
-            <Trash2 :size="13" />
-          </button>
+          <span class="status-indicator"
+            ><span
+              class="status-dot"
+              :class="forwardState(forward, gatewayStatus?.forward_listeners).tone"
+            />{{ forwardState(forward, gatewayStatus?.forward_listeners).label }}</span
+          >
+          <div class="header-actions">
+            <button class="btn btn-ghost btn-sm" :disabled="isSavingConfig" @click="openForward(forward)">
+              <Edit3 :size="13" /> 编辑</button
+            ><button
+              class="btn btn-ghost btn-sm text-bad"
+              :disabled="isSavingConfig"
+              :aria-label="`删除 ${forward.name}`"
+              @click="deleteForward(forward)"
+            >
+              <Trash2 :size="13" />
+            </button>
+          </div>
         </div>
       </SpotlightCard>
     </div>
+    <p v-if="gatewayConfig && !filteredForwards.length" class="empty-message">暂无匹配的端口转发规则。</p>
 
-    <!-- Create Forward Modal -->
-    <transition name="modal-fade">
-      <div v-if="isModalOpen" class="modal-backdrop" @click.self="isModalOpen = false">
-        <div class="modal-dialog">
-          <div class="modal-header">
-            <h3 class="modal-title">添加端口转发规则</h3>
-            <button class="close-modal-btn" @click="isModalOpen = false">
-              <X :size="18" />
-            </button>
-          </div>
-
-          <form class="modal-body" @submit.prevent="createForward">
-            <div class="form-group">
-              <label class="form-label">规则名称</label>
-              <input v-model="form.name" type="text" placeholder="例如: 幻兽帕鲁服务器" class="form-input" required />
-            </div>
-
-            <div class="form-row-2">
-              <div class="form-group">
-                <label class="form-label">传输协议</label>
-                <select v-model="form.protocol" class="form-select">
-                  <option value="TCP">TCP</option>
-                  <option value="UDP">UDP</option>
-                  <option value="TCP+UDP">TCP + UDP (双栈)</option>
-                </select>
-              </div>
-              <div class="form-group">
-                <label class="form-label">本地监听端口</label>
-                <input v-model="form.listenPort" type="number" placeholder="8211" class="form-input mono-text" required />
-              </div>
-            </div>
-
-            <div class="form-group">
-              <label class="form-label">目标主机与端口</label>
-              <input v-model="form.target" type="text" placeholder="192.168.2.160:8211" class="form-input mono-text" required />
-            </div>
-
-            <div class="modal-footer">
-              <button type="button" class="btn btn-secondary" @click="isModalOpen = false">取消</button>
-              <button type="submit" class="btn btn-primary">立即添加</button>
-            </div>
-          </form>
-        </div>
+    <dialog ref="dialog" class="modal-dialog" aria-labelledby="forward-title" @cancel="blockBusyClose">
+      <div class="modal-header">
+        <h2 id="forward-title" class="modal-title">{{ originalId == null ? '添加' : '编辑' }}端口转发规则</h2>
+        <button class="close-modal-btn" aria-label="关闭" :disabled="isSavingConfig" @click="dialog.close()">
+          <X :size="18" />
+        </button>
       </div>
-    </transition>
+      <form class="modal-body" @submit.prevent="saveForward">
+        <p v-if="formError" ref="errorElement" class="page-error" role="alert" tabindex="-1">
+          {{ formError }}
+        </p>
+        <label class="form-group"
+          >规则名称<input
+            v-model="form.name"
+            name="name"
+            class="form-input"
+            required
+            maxlength="100"
+            autofocus
+        /></label>
+        <div class="form-row-2">
+          <label class="form-group"
+            >传输协议<select v-model="form.protocol" name="protocol" class="form-select">
+              <option value="tcp">TCP</option>
+              <option value="udp">UDP</option>
+              <option value="tcp+udp">TCP + UDP</option>
+            </select></label
+          >
+          <label class="form-group"
+            >本地监听端口<input
+              v-model.number="form.listen_port"
+              name="listen_port"
+              type="number"
+              min="1024"
+              max="65535"
+              class="form-input"
+              required
+          /></label>
+        </div>
+        <label class="form-group"
+          >目标主机与端口<input
+            v-model="form.upstream"
+            name="upstream"
+            class="form-input mono-text"
+            placeholder="192.168.1.10:9000 或 [::1]:9000"
+            required
+        /></label>
+        <label class="form-group"
+          >来源 IP 防火墙<select v-model="form.firewall_id" name="firewall_id" class="form-select">
+            <option value="">不限制来源 IP</option>
+            <option v-for="firewall in snapshot?.config.firewalls" :key="firewall.id" :value="firewall.id">
+              {{ firewall.name }}
+            </option>
+          </select></label
+        >
+        <label v-if="form.protocol !== 'tcp'" class="form-group"
+          >UDP 空闲超时 秒<input
+            v-model.number="form.udp_idle_seconds"
+            name="udp_idle_seconds"
+            class="form-input"
+            type="number"
+            min="30"
+            max="86400"
+            required
+        /></label>
+        <label class="toggle-row"
+          >启用此规则<input v-model="form.enabled" name="enabled" type="checkbox"
+        /></label>
+        <p class="form-note">保存后重启服务使监听配置生效。Docker bridge 部署需发布对应协议的端口。</p>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" :disabled="isSavingConfig" @click="dialog.close()">
+            取消</button
+          ><button type="submit" class="btn btn-primary" :disabled="isSavingConfig">
+            {{ isSavingConfig ? '保存中…' : '保存转发规则' }}
+          </button>
+        </div>
+      </form>
+    </dialog>
   </div>
 </template>
 
 <script setup>
-import { ref } from 'vue'
-import { Plus, ArrowRight, Trash2, X } from 'lucide-vue-next'
+import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef } from 'vue'
+import { ArrowRight, Edit3, Plus, Trash2, X } from 'lucide-vue-next'
 import SpotlightCard from '@/components/SpotlightCard.vue'
-import { useAppStore } from '@/composables/useAppStore'
+import RestartNotice from '@/components/RestartNotice.vue'
+import { forwardState, replaceConfigItem } from '@/api/configuration'
+import { useGatewayStatus } from '@/composables/useGatewayStatus'
 import { useToast } from '@/composables/useToast'
 
-const { forwards } = useAppStore()
-const { success, info } = useToast()
+const {
+  gatewayConfig,
+  gatewayConfigSnapshot,
+  gatewayStatus,
+  isSavingConfig,
+  refreshConfig,
+  refreshStatus,
+  saveConfig
+} = useGatewayStatus()
+const toast = useToast()
+const forwards = computed(() => gatewayConfig.value?.forwards ?? [])
+const runningListeners = computed(() =>
+  (gatewayStatus.value?.forward_listeners ?? []).filter((item) => item.enabled)
+)
+const protocols = [
+  { value: '', label: '全部协议' },
+  { value: 'tcp', label: 'TCP' },
+  { value: 'udp', label: 'UDP' },
+  { value: 'tcp+udp', label: 'TCP + UDP' }
+]
+const protocolFilter = ref('')
+const filteredForwards = computed(() =>
+  forwards.value.filter(
+    (item) =>
+      !protocolFilter.value ||
+      item.protocol === protocolFilter.value ||
+      (item.protocol === 'tcp+udp' && protocolFilter.value !== 'tcp+udp')
+  )
+)
+const loading = ref(false)
+const loadError = ref('')
+const dialog = ref(null)
+const snapshot = shallowRef(null)
+const originalId = ref(null)
+const form = ref({})
+const formError = ref('')
+const errorElement = ref(null)
+const controller = new AbortController()
 
-const isModalOpen = ref(false)
-const form = ref({
-  name: '',
-  protocol: 'TCP',
-  listenPort: '',
-  target: ''
-})
-
-const openCreateModal = () => {
-  form.value = {
-    name: '',
-    protocol: 'TCP',
-    listenPort: '',
-    target: '192.168.2.'
+function firewallName(id) {
+  return gatewayConfig.value?.firewalls.find((item) => item.id === id)?.name || '不限制来源 IP'
+}
+async function reload() {
+  if (loading.value || isSavingConfig.value) return
+  loading.value = true
+  loadError.value = ''
+  try {
+    await Promise.all([refreshConfig(controller.signal), refreshStatus(controller.signal)])
+  } catch (err) {
+    if (!controller.signal.aborted) loadError.value = err.message
+  } finally {
+    loading.value = false
   }
-  isModalOpen.value = true
 }
-
-const createForward = () => {
-  forwards.value.push({
-    id: `fwd_${Date.now()}`,
-    name: form.value.name,
-    protocol: form.value.protocol,
-    listenPort: Number(form.value.listenPort),
-    target: form.value.target,
-    traffic: '0 MB',
-    enabled: true
-  })
-  success(`端口转发规则 "${form.value.name}" 已启动`)
-  isModalOpen.value = false
+function openForward(forward) {
+  snapshot.value = structuredClone(gatewayConfigSnapshot.value)
+  originalId.value = forward?.id ?? null
+  form.value = forward
+    ? structuredClone(forward)
+    : {
+        id: crypto.randomUUID(),
+        name: '',
+        protocol: 'tcp',
+        listen_port: '',
+        upstream: '',
+        firewall_id: '',
+        enabled: true
+      }
+  form.value.udp_idle_seconds ||= 300
+  formError.value = ''
+  nextTick(() => dialog.value.showModal())
 }
-
-const toggleForward = (fwd) => {
-  fwd.enabled = !fwd.enabled
-  if (fwd.enabled) {
-    success(`已开启端口转发: :${fwd.listenPort} -> ${fwd.target}`)
-  } else {
-    info(`已关闭端口转发: :${fwd.listenPort}`)
+function blockBusyClose(event) {
+  if (isSavingConfig.value) event.preventDefault()
+}
+async function saved() {
+  toast.success('转发配置已保存，监听变化在重启后生效')
+  try {
+    await refreshStatus(controller.signal)
+  } catch (err) {
+    if (!controller.signal.aborted && err.status !== 401)
+      toast.warn('配置已保存，监听状态刷新失败，请稍后刷新')
   }
 }
-
-const deleteForward = (fwd) => {
-  if (confirm(`确定要移除 "${fwd.name}" 端口转发规则吗？`)) {
-    forwards.value = forwards.value.filter(f => f.id !== fwd.id)
-    info(`已移除端口转发规则: ${fwd.name}`)
+async function saveForward() {
+  if (isSavingConfig.value) return
+  formError.value = ''
+  try {
+    const record = { ...form.value, name: form.value.name.trim(), upstream: form.value.upstream.trim() }
+    if (record.protocol === 'tcp') delete record.udp_idle_seconds
+    await saveConfig(snapshot.value, replaceConfigItem(snapshot.value, 'forwards', record, originalId.value))
+    dialog.value.close()
+    await saved()
+  } catch (err) {
+    formError.value = err.message
+    await nextTick()
+    errorElement.value?.focus()
   }
 }
+async function toggleForward(forward, event) {
+  event.target.checked = forward.enabled
+  if (isSavingConfig.value) return
+  const current = structuredClone(gatewayConfigSnapshot.value)
+  try {
+    await saveConfig(
+      current,
+      replaceConfigItem(current, 'forwards', { ...forward, enabled: !forward.enabled }, forward.id)
+    )
+    await saved()
+  } catch (err) {
+    toast.error(err.message)
+  }
+}
+async function deleteForward(forward) {
+  if (isSavingConfig.value || !confirm(`删除端口转发「${forward.name}」？`)) return
+  const current = structuredClone(gatewayConfigSnapshot.value)
+  try {
+    await saveConfig(current, {
+      ...current.config,
+      forwards: current.config.forwards.filter((item) => item.id !== forward.id)
+    })
+    await saved()
+  } catch (err) {
+    toast.error(err.message)
+  }
+}
+onMounted(reload)
+onUnmounted(() => controller.abort())
 </script>
 
 <style scoped>
+.header-actions, .protocol-filters { display: flex; flex-wrap: wrap; gap: 8px; }
+.protocol-filters [aria-pressed="true"] { border-color: var(--brand-light); color: var(--ink); }
+.live-listeners { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.live-listeners summary { cursor: pointer; }
+.page-error { color: var(--bad); font-size: 13px; overflow-wrap: anywhere; }
+.empty-message, .form-note { color: var(--muted); font-size: 13px; }
+.toggle-row { display: flex; justify-content: space-between; color: var(--ink); font-size: 13px; }
 .forwards-page {
   display: flex;
   flex-direction: column;
@@ -202,6 +352,10 @@ const deleteForward = (fwd) => {
   flex-direction: column;
   gap: 14px;
 }
+.forward-card, .pipeline-node { min-width: 0; }
+.forward-card :deep(.card-inner) { display: flex; flex-direction: column; gap: 14px; }
+.node-val { overflow-wrap: anywhere; }
+.protocol-badge.dual { background: var(--strip-bg); color: var(--brand-light); border: 1px solid var(--brand); }
 .forward-card.inactive {
   opacity: 0.65;
 }
@@ -274,18 +428,14 @@ const deleteForward = (fwd) => {
 .text-bad { color: var(--bad) !important; }
 
 /* Modal */
-.modal-backdrop {
-  position: fixed; inset: 0; background: rgba(0,0,0,0.65);
-  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
-  z-index: 1050; display: flex; align-items: center; justify-content: center; padding: 20px;
-}
 .modal-dialog {
-  width: 100%; max-width: 460px; background: var(--card-bg);
+  width: 100%; max-width: 460px; background: var(--card-hover-bg);
   border: 1px solid var(--card-border-hover); border-radius: var(--radius-card);
   backdrop-filter: blur(30px); -webkit-backdrop-filter: blur(30px);
   box-shadow: 0 25px 60px rgba(0, 0, 0, 0.6), var(--inner-highlight);
-  overflow: hidden;
+  margin: auto; max-height: calc(100dvh - 40px); overflow: auto; color: var(--ink);
 }
+.modal-dialog::backdrop { background: rgba(0,0,0,0.65); backdrop-filter: blur(8px); }
 .modal-header {
   padding: 18px 20px; border-bottom: 1px solid var(--line);
   display: flex; align-items: center; justify-content: space-between;

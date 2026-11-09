@@ -122,7 +122,7 @@ const pages = [
 const actions = [
   { id: 'act_theme', title: '切换 深色 / 浅色 主题', icon: Moon, run: () => { toggleTheme(); success(`已切换为 ${theme.value === 'dark' ? 'Obsidian 深色' : 'VisionOS 浅色'} 主题`) } },
   { id: 'act_account', title: '修改管理员账户密码', icon: KeyRound, run: () => { closeCmdk(); openAccountModal() } },
-  { id: 'act_new_route', title: '新建反向代理路由', icon: PlusCircle, shortcut: '⌘N', run: () => { closeCmdk(); router.push('/routes'); success('已打开新建反代弹窗') } },
+  { id: 'act_new_route', title: '新建反向代理路由', icon: PlusCircle, shortcut: '⌘N', run: () => { closeCmdk(); router.push({ path: '/routes', query: { new: '1' } }) } },
   { id: 'act_ddns_sync', title: '立即同步全部 DDNS 动态域名', icon: RefreshCw, run: () => { success('已向各 DNS 服务商发出刷新同步指令') } },
   { id: 'act_logout', title: '退出登录 (Logout)', icon: LogOut, run: () => { closeCmdk(); return logout() } }
 ]

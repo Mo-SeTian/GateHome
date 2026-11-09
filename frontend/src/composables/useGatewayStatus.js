@@ -2,7 +2,10 @@ import { computed, ref, shallowRef } from 'vue'
 import { adminApi } from '@/api/admin'
 
 const gatewayStatus = shallowRef(null)
-const gatewayConfig = shallowRef(null)
+const gatewayConfigSnapshot = shallowRef(null)
+const gatewayConfig = computed(() => gatewayConfigSnapshot.value?.config ?? null)
+const isSavingConfig = ref(false)
+let configGeneration = 0
 const statusUnavailable = ref(false)
 const gatewayVersion = computed(() => gatewayStatus.value?.version
   ? `v${gatewayStatus.value.version.replace(/^v/, '')}` : `v${__GATEHOME_VERSION__}`)
@@ -28,16 +31,36 @@ async function refreshStatus(signal) {
 }
 
 async function refreshConfig(signal) {
+  if (isSavingConfig.value) throw new Error('正在保存配置，请稍后刷新')
+  const generation = ++configGeneration
   const response = await adminApi.config(signal)
-  if (!signal?.aborted) gatewayConfig.value = response.config
+  if (!signal?.aborted && generation === configGeneration) gatewayConfigSnapshot.value = response
+  return response
+}
+
+async function saveConfig(snapshot, config, credentials = {}) {
+  if (isSavingConfig.value) throw new Error('正在保存配置，请稍后重试')
+  isSavingConfig.value = true
+  const generation = ++configGeneration
+  try {
+    const response = await adminApi.saveConfig({ ...credentials, config, revision: snapshot.revision })
+    if (generation === configGeneration) gatewayConfigSnapshot.value = response
+    return response
+  } finally {
+    isSavingConfig.value = false
+  }
 }
 
 function resetGatewayStatus() {
   gatewayStatus.value = null
-  gatewayConfig.value = null
+  configGeneration++
+  gatewayConfigSnapshot.value = null
   statusUnavailable.value = false
 }
 
 export function useGatewayStatus() {
-  return { gatewayStatus, gatewayConfig, gatewayVersion, gatewayState, refreshStatus, refreshConfig, resetGatewayStatus }
+  return {
+    gatewayStatus, gatewayConfig, gatewayConfigSnapshot, gatewayVersion, gatewayState,
+    isSavingConfig, refreshStatus, refreshConfig, saveConfig, resetGatewayStatus
+  }
 }

@@ -19,8 +19,9 @@ export function markSessionChanged() {
 export async function request(path, { method = 'GET', body, signal, notifyUnauthorized = true } = {}) {
   const generation = sessionGeneration
   const headers = { Accept: 'application/json' }
+  const multipart = body instanceof FormData
   if (body !== undefined) {
-    headers['Content-Type'] = 'application/json'
+    if (!multipart) headers['Content-Type'] = 'application/json'
     headers['X-Gatehouse-Request'] = '1'
   }
 
@@ -28,7 +29,7 @@ export async function request(path, { method = 'GET', body, signal, notifyUnauth
   try {
     response = await fetch(path, {
       method, headers, signal, credentials: 'same-origin',
-      body: body === undefined ? undefined : JSON.stringify(body)
+      body: body === undefined || multipart ? body : JSON.stringify(body)
     })
   } catch (err) {
     if (err.name === 'AbortError') throw err
