@@ -71,7 +71,13 @@ func TestEmbeddedConsoleAssetsAndBoundaries(t *testing.T) {
 	if w := adminRequest(h, "GET", "/api/account", nil, nil, ""); w.Code != 401 {
 		t.Fatal("public console assets must not bypass API authentication")
 	}
-	if w := adminRequest(h, "GET", "/", nil, nil, ""); w.Code != 200 || strings.Contains(w.Body.String(), `<div id="app">`) {
-		t.Fatal("legacy entry must remain available during stage 9")
+	if w := adminRequest(h, "GET", "/", nil, nil, ""); w.Code != http.StatusTemporaryRedirect || w.Header().Get("Location") != "/console/" {
+		t.Fatal("default entry must open the embedded console")
+	}
+	if w := adminRequest(h, "GET", "/legacy/", nil, nil, ""); w.Code != 200 || !strings.Contains(w.Body.String(), `id="login-form"`) {
+		t.Fatal("legacy entry must remain available for fallback")
+	}
+	if w := adminRequest(h, "GET", "/legacy/state.json", nil, nil, ""); w.Code != 404 {
+		t.Fatal("legacy fallback must not expose unintended files")
 	}
 }

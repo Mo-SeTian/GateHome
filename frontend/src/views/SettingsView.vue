@@ -161,7 +161,7 @@
           </dl>
           <div class="report-actions">
             <RouterLink class="btn btn-secondary" to="/updates">版本与更新</RouterLink
-            ><button
+            ><a class="btn btn-secondary" href="/legacy/">旧版控制台</a><button
               type="button"
               class="btn btn-secondary"
               :disabled="!maintenance?.can_apply || maintenance?.busy || restarting || isSavingConfig"

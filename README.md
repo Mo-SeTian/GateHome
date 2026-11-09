@@ -580,7 +580,7 @@ Sun-Panel 首页卡片不显示服务状态标识。登录后通过右下角 **�
 
 ## 界面与交互
 
-GateHome 管理台采用浅蓝工作台样式，桌面使用顶栏与侧栏，手机通过顶栏打开导航抽屉。反代页可以按组筛选或搜索服务、域名及内网地址，端口转发可以按 TCP / UDP 筛选。管理页、登录与编辑弹窗共用配色和操作样式；补充说明支持悬停、键盘聚焦和手机点按，状态与错误直接显示。
+GateHome 默认管理台采用 Aurora Next 双主题，桌面使用顶栏与侧栏，手机通过顶栏打开导航抽屉。两组 17 项菜单与原版一致，支持命令面板、真实任务反馈和概览组件配置。反代页可以按组筛选或搜索服务、域名及内网地址，端口转发可以按 TCP / UDP 筛选。原版浅蓝工作台保留在 `/legacy/`。
 
 [LeiBox 点阵加载](https://leibox.pantoria.cn/docs/animations/ai-generating) 用于实际任务的等待反馈，源码与来源说明位于 `internal/gateway/ui/leibox/`。导航、弹窗、分组和菜单使用原生动画，支持减少动态效果；小屏操作菜单自动避开视口边界。样式限定于 GateHome，Sun-Panel 自身界面保持不变。
 
@@ -588,7 +588,7 @@ GateHome 管理台采用浅蓝工作台样式，桌面使用顶栏与侧栏，�
 
 ## 本地开发与验证
 
-`develop` 的 `0.9.0` 迁移版在同一管理端口提供 Aurora Next 控制台 `/console/`，原版 `/` 暂时保留。`make build`、Docker 和发布构建会先构建并嵌入新版、SunPanel 及原版组件；只运行生成的 Go 二进制即可访问新版，无需单独的前端服务。字体也随程序分发，遵循原管理端 CSP；完整说明见 [frontend/README.md](frontend/README.md)。
+`develop` 的 `1.0.0` 已完成 Aurora Next 迁移：同一管理端口的 `/` 默认跳转 `/console/`，原版入口为 `/legacy/`。`make build`、Docker 和发布构建会先构建并嵌入新版、SunPanel 及原版组件；只运行生成的 Go 二进制即可访问新版，无需单独的前端服务。字体也随程序分发，遵循原管理端 CSP；完整说明见 [frontend/README.md](frontend/README.md) 和 [1.0.0 迁移交接说明](docs/aurora-next-1.0.0-handover.md)。
 
 ```sh
 make test

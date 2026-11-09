@@ -5,6 +5,8 @@
 > **前端技术栈**：Vue 3.5 (`<script setup>`) + Vite 6 + Vue Router 4 + Lucide Icons + CSS Custom Properties  
 > **设计语言**：Aurora Next (极客暗曜石 Obsidian Tech & 清透磨砂白 VisionOS White)
 
+> **迁移完成说明**：本文保留设计与 Mock 模版阶段的背景。`1.0.0` 已完成登录、账户与全部 17 页真实 API 对接及 Go 静态资源嵌入；当前入口、数据保留与部署方式以 [交接说明](../../docs/aurora-next-1.0.0-handover.md) 和 [验收清单](../../docs/aurora-next-migration-checklist.md) 为准。
+
 ---
 
 ## 目录

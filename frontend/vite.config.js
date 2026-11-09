@@ -18,6 +18,10 @@ export default defineConfig({
     port: 5173,
     host: '127.0.0.1',
     proxy: {
+      '/china-outline.svg': {
+        target: process.env.GATEHOME_API_TARGET || 'http://127.0.0.1:16666',
+        changeOrigin: false
+      },
       '/api/': {
         target: process.env.GATEHOME_API_TARGET || 'http://127.0.0.1:16666',
         changeOrigin: false

@@ -272,7 +272,19 @@ func (a *Admin) Handler() http.Handler {
 	}))
 	sub, _ := fs.Sub(webFiles, "web")
 	files := http.FileServer(http.FS(sub))
+	legacyFiles := http.StripPrefix("/legacy", files)
+	mux.HandleFunc("GET /legacy/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/legacy/" {
+			http.NotFound(w, r)
+			return
+		}
+		legacyFiles.ServeHTTP(w, r)
+	})
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/" {
+			http.Redirect(w, r, "/console/", http.StatusTemporaryRedirect)
+			return
+		}
 		if r.URL.Path != "/" && r.URL.Path != "/app.js" && r.URL.Path != "/style.css" && r.URL.Path != "/ui.css" && r.URL.Path != "/leibox-ui.js" && r.URL.Path != "/leibox-loader.css" && r.URL.Path != "/icons.svg" && r.URL.Path != "/sunpanel-admin.js" && r.URL.Path != "/mcp-admin.js" && r.URL.Path != "/backup-admin.js" && r.URL.Path != "/mcp-sdk-license.txt" && r.URL.Path != "/context-help.js" && r.URL.Path != "/dashboard.js" && r.URL.Path != "/china-outline.svg" {
 			http.NotFound(w, r)
 			return

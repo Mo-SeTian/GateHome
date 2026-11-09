@@ -1,7 +1,7 @@
 <template>
   <transition name="cmdk-fade">
     <div v-if="isCmdkOpen" class="cmdk-backdrop" @click.self="closeCmdk">
-      <div class="cmdk-dialog">
+      <div class="cmdk-dialog" role="dialog" aria-modal="true" aria-label="全局命令面板">
         <!-- Search Input Bar -->
         <div class="cmdk-input-wrapper">
           <Search class="cmdk-search-icon" :size="18" />
@@ -9,7 +9,7 @@
             ref="inputRef"
             v-model="query"
             type="text"
-            placeholder="搜索反代服务、路由、防火墙规则或快速操作..."
+            placeholder="搜索页面或常用操作..."
             class="cmdk-input"
             @keydown.down.prevent="navigateList(1)"
             @keydown.up.prevent="navigateList(-1)"
@@ -79,6 +79,7 @@ import { useRouter } from 'vue-router'
 import { useAppStore } from '@/composables/useAppStore'
 import { useLogout, useSession } from '@/composables/useSession'
 import { useToast } from '@/composables/useToast'
+import { adminApi } from '@/api/admin'
 import { 
   Search, AlertCircle, LayoutDashboard, Network, ArrowLeftRight, Compass,
   Globe, Lock, Download, ShieldAlert, FileSearch, ScrollText, Ban,
@@ -90,7 +91,19 @@ const router = useRouter()
 const { isCmdkOpen, closeCmdk, toggleTheme, theme } = useAppStore()
 const { openAccountModal } = useSession()
 const logout = useLogout()
-const { success } = useToast()
+const toast = useToast()
+const { success } = toast
+const syncingDDNS = ref(false)
+
+async function syncDDNS() {
+  if (syncingDDNS.value) return
+  syncingDDNS.value = true
+  try {
+    const result = await adminApi.runJobs('ddns')
+    toast.info(result.message || '同步任务已加入队列，请在动态域名页面查看执行结果')
+  } catch (err) { toast.error(err.message) }
+  finally { syncingDDNS.value = false }
+}
 
 const inputRef = ref(null)
 const query = ref('')
@@ -123,7 +136,7 @@ const actions = [
   { id: 'act_theme', title: '切换 深色 / 浅色 主题', icon: Moon, run: () => { toggleTheme(); success(`已切换为 ${theme.value === 'dark' ? 'Obsidian 深色' : 'VisionOS 浅色'} 主题`) } },
   { id: 'act_account', title: '修改管理员账户密码', icon: KeyRound, run: () => { closeCmdk(); openAccountModal() } },
   { id: 'act_new_route', title: '新建反向代理路由', icon: PlusCircle, shortcut: '⌘N', run: () => { closeCmdk(); router.push({ path: '/routes', query: { new: '1' } }) } },
-  { id: 'act_ddns_sync', title: '立即同步全部 DDNS 动态域名', icon: RefreshCw, run: () => { success('已向各 DNS 服务商发出刷新同步指令') } },
+  { id: 'act_ddns_sync', title: '立即同步全部 DDNS 动态域名', icon: RefreshCw, run: syncDDNS },
   { id: 'act_logout', title: '退出登录 (Logout)', icon: LogOut, run: () => { closeCmdk(); return logout() } }
 ]
 

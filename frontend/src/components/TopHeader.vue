@@ -18,7 +18,7 @@
     <div class="header-center">
       <button class="cmdk-trigger-btn" @click="openCmdk">
         <Search :size="15" class="search-icon" />
-        <span class="search-placeholder">全局检索反代路由、证书、防火墙规则...</span>
+        <span class="search-placeholder">搜索页面与快捷操作...</span>
         <kbd class="shortcut-pill">⌘K</kbd>
       </button>
     </div>

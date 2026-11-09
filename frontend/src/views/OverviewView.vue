@@ -1,726 +1,757 @@
 <template>
-  <div class="overview-page animate-fade-in">
-    <div class="page-topbar">
+  <div class="report-page overview-page animate-fade-in">
+    <header class="report-heading">
       <div>
-        <h1 class="page-title">系统概览</h1>
-        <p class="page-subtitle">GateHome 网关状态、资源遥测与访问统计</p>
+        <h1>系统概览</h1>
+        <p>网关状态、资源遥测与访问统计 · 每 5 秒采样</p>
       </div>
-      <div class="header-actions">
-        <button class="btn btn-secondary" :disabled="isRefreshing" @click="refresh(true)">
-          <RefreshCw :size="14" :class="{ 'spin-icon': isRefreshing }" />
-          {{ isRefreshing ? '刷新中…' : '刷新数据' }}
-        </button>
-        <router-link to="/routes" class="btn btn-primary"><Plus :size="14" /> 管理反向代理</router-link>
+      <div class="report-actions">
+        <button class="btn btn-secondary" :disabled="isRefreshing || isSavingConfig" @click="refresh(true)">
+          {{ isRefreshing ? '刷新中…' : '刷新数据' }}</button
+        ><button
+          class="btn btn-secondary"
+          :disabled="!gatewayConfigSnapshot || isSavingConfig"
+          @click="configure"
+        >
+          配置组件与顺序</button
+        ><RouterLink class="btn btn-primary" to="/routes">管理反向代理</RouterLink>
       </div>
-    </div>
-
-    <p v-if="loadError" class="overview-message" role="alert">{{ loadError }}{{ dashboard ? '，当前显示最近一次采样。' : '。' }}</p>
-    <p v-else-if="!dashboard" class="overview-message" role="status">正在读取网关遥测…</p>
-    <p v-else class="overview-message">最近采样 {{ sampledAt }} · {{ resources.platform }}</p>
-
-    <div class="bento-grid">
-      <SpotlightCard v-for="metric in resourceCards" :key="metric.label" class="metric-card">
-        <div class="card-header">
-          <div class="metric-info">
-            <span class="metric-label">{{ metric.label }}</span>
-            <div class="metric-value">
-              {{ metric.percent == null ? '—' : metric.percent.toFixed(1) }}<span v-if="metric.percent != null" class="metric-unit">%</span>
+    </header>
+    <p v-if="loadError" class="report-error" role="alert">
+      {{ loadError }}{{ dashboard ? '，保留上次采样' : '' }}
+    </p>
+    <p v-else class="report-note">
+      {{
+        dashboard
+          ? `最近采样 ${reportDate(dashboard.sampled_at)} · ${resources.platform}`
+          : '正在读取网关遥测…'
+      }}
+    </p>
+    <div class="dashboard-grid">
+      <SpotlightCard
+        v-for="id in widgetIDs"
+        :key="id"
+        class="report-panel dashboard-widget"
+        :class="{ wide: !compact.includes(id) }"
+        :data-widget="id"
+      >
+        <div class="report-heading">
+          <h2>{{ titles[id] }}</h2>
+          <RouterLink v-if="id === 'services'" class="btn btn-ghost btn-sm" to="/routes">管理服务</RouterLink>
+        </div>
+        <template v-if="id === 'server'"
+          ><div class="metric-value">{{ gatewayState.label }}</div>
+          <p class="report-note">
+            {{ gatewayVersion }} · {{ resources.platform || '等待采样' }} · {{ resources.cpus || '—' }} 个逻辑
+            CPU
+          </p>
+          <p class="report-note">
+            已运行
+            {{
+              gatewayStatus
+                ? Math.floor(gatewayStatus.uptime_seconds / 3600) +
+                  ' 小时 ' +
+                  Math.floor((gatewayStatus.uptime_seconds % 3600) / 60) +
+                  ' 分钟'
+                : '—'
+            }}
+          </p>
+          <p class="report-note">资源来自程序运行环境；Docker 的 /proc 可能反映宿主机资源。</p></template
+        >
+        <template v-else-if="id === 'cpu' || id === 'memory'"
+          ><div class="metric-value">
+            {{ metrics[id].percent == null ? '—' : metrics[id].percent.toFixed(1) + '%' }}
+          </div>
+          <progress
+            v-if="metrics[id].percent != null"
+            :value="metrics[id].percent"
+            max="100"
+            :aria-label="titles[id]"
+          />
+          <p class="report-note">{{ metrics[id].detail }}</p></template
+        >
+        <template v-else-if="id === 'storage'"
+          ><div v-for="disk in resources.storage || []" :key="disk.name" class="storage-row">
+            <strong>{{ disk.name }}文件系统</strong
+            ><span>{{
+              percent(disk.used, disk.total) == null ? '—' : percent(disk.used, disk.total).toFixed(1) + '%'
+            }}</span
+            ><progress
+              v-if="disk.total"
+              :value="disk.used"
+              :max="disk.total"
+              :aria-label="disk.name + '空间占用'"
+            />
+            <p class="report-note">
+              {{ disk.error || `已用 ${bytes(disk.used)} · 可用 ${bytes(disk.available)}` }}
+            </p>
+          </div>
+          <p v-if="!resources.storage?.length" class="report-note">等待存储采样</p></template
+        >
+        <template v-else-if="id === 'traffic' || id === 'transfer'"
+          ><div class="transfer-pair">
+            <div>
+              <span>上传 TX</span
+              ><strong>{{
+                resources.network_error
+                  ? '—'
+                  : id === 'traffic'
+                    ? rate(resources.tx_rate)
+                    : bytes(resources.tx_bytes)
+              }}</strong>
+            </div>
+            <div>
+              <span>下载 RX</span
+              ><strong>{{
+                resources.network_error
+                  ? '—'
+                  : id === 'traffic'
+                    ? rate(resources.rx_rate)
+                    : bytes(resources.rx_bytes)
+              }}</strong>
             </div>
           </div>
-          <div class="metric-icon-box" :class="metric.kind"><component :is="metric.icon" :size="20" /></div>
-        </div>
-        <div class="progress-track">
-          <div v-if="metric.percent != null" class="progress-fill" :class="metric.fill" :style="{ width: metric.percent + '%' }" />
-        </div>
-        <div class="metric-footer"><span>{{ metric.detail }}</span><span>{{ metric.total }}</span></div>
-      </SpotlightCard>
-
-      <SpotlightCard class="metric-card">
-        <div class="card-header">
-          <div class="metric-info">
-            <span class="metric-label">运行期请求</span>
-            <div class="metric-value">{{ count(gatewayStatus?.requests) }}</div>
-          </div>
-          <div class="metric-icon-box net"><Zap :size="20" /></div>
-        </div>
-        <div class="metric-extra-badges">
-          <span class="badge badge-brand">24 小时访问 {{ count(access?.total) }}</span>
-        </div>
-        <div class="metric-footer"><span>拦截 {{ count(gatewayStatus?.blocked) }}</span><span>失败 {{ count(gatewayStatus?.failures) }}</span></div>
-      </SpotlightCard>
-    </div>
-
-    <div class="middle-grid">
-      <SpotlightCard class="chart-card">
-        <div class="section-title-bar">
-          <div class="title-with-icon"><Radio :size="17" class="brand-text" /><span class="section-title">实时网卡流量</span></div>
-          <div class="chart-legend">
-            <span class="legend-item"><span class="legend-dot rx" />下行 {{ rate(resources.rx_rate) }}</span>
-            <span class="legend-item"><span class="legend-dot tx" />上行 {{ rate(resources.tx_rate) }}</span>
-          </div>
-        </div>
-
-        <div class="chart-container">
-          <svg v-if="samples.length >= 2" viewBox="0 0 700 160" class="traffic-svg" preserveAspectRatio="none" aria-hidden="true">
-            <line v-for="y in [40, 80, 120]" :key="y" x1="0" :y1="y" x2="700" :y2="y" stroke="var(--line)" stroke-dasharray="4 4" />
+          <p class="report-note">
+            {{
+              resources.network_error ||
+              `采集网卡 ${resources.interface || '自动选择'} · ${id === 'traffic' ? '两次采样间的实际速率，首次采样后显示' : '网卡启动以来的全部累计数据量'}`
+            }}
+          </p>
+          <svg
+            v-if="id === 'traffic' && samples.length > 1"
+            viewBox="0 0 700 160"
+            class="trend"
+            role="img"
+            aria-label="最近网卡速率趋势"
+          >
             <polyline :points="networkLines.rx" fill="none" stroke="var(--brand-cyan)" stroke-width="2" />
-            <polyline :points="networkLines.tx" fill="none" stroke="var(--brand-light)" stroke-width="2.5" />
-          </svg>
-          <p v-else class="chart-empty">{{ resources.network_error || '等待连续的流量采样' }}</p>
-        </div>
-        <div class="chart-footer-stats">
-          <div class="stat-pill"><span class="label">累计接收 (RX)</span><span class="val mono-text">{{ bytes(networkAvailable ? resources.rx_bytes : null) }}</span></div>
-          <div class="stat-pill"><span class="label">累计发送 (TX)</span><span class="val mono-text">{{ bytes(networkAvailable ? resources.tx_bytes : null) }}</span></div>
-          <div class="stat-pill"><span class="label">采集网卡</span><span class="val">{{ resources.interface || '—' }}</span></div>
-        </div>
-      </SpotlightCard>
-
-      <SpotlightCard class="status-summary-card">
-        <div class="section-title-bar">
-          <span class="section-title">网关与服务</span>
-          <span class="badge" :class="gatewayState.tone === 'ok' ? 'badge-ok' : 'badge-warn'">{{ gatewayState.label }}</span>
-        </div>
-        <div class="status-rows">
-          <router-link to="/routes" class="status-item">
-            <span class="item-name">反向代理上游</span>
-            <span class="item-val">{{ healthLabel }}</span>
-          </router-link>
-          <router-link to="/access" class="status-item">
-            <span class="item-name">24 小时防火墙拦截</span>
-            <span class="item-val">{{ count(access?.firewall_blocked) }} 次</span>
-          </router-link>
-          <router-link to="/certificates" class="status-item">
-            <span class="item-name">已就绪证书</span>
-            <span class="item-val">{{ count(certificateCount) }}</span>
-          </router-link>
-          <div class="status-item listener-row">
-            <span class="item-name">当前反代监听</span>
-            <span class="item-val">{{ listenerLabel }}</span>
+            <polyline
+              :points="networkLines.tx"
+              fill="none"
+              stroke="var(--brand-light)"
+              stroke-width="2"
+            /></svg
+        ></template>
+        <template v-else-if="id === 'requests'"
+          ><div class="metric-value">{{ count(gatewayStatus?.requests) }}</div>
+          <p class="report-note">本次启动后的业务请求；失败 {{ count(gatewayStatus?.failures) }}</p>
+          <RouterLink class="report-note" to="/statistics"
+            >24 小时保留记录 {{ count(access?.total) }} 次 · {{ count(regions.unique_ips) }} 个来源
+            IP</RouterLink
+          ></template
+        >
+        <template v-else-if="id === 'blocked'"
+          ><div class="metric-value">{{ count(gatewayStatus?.blocked) }}</div>
+          <p class="report-note">本次启动后的拦截数量</p>
+          <RouterLink class="report-note" to="/firewall-logs"
+            >保留记录：防火墙 {{ count(access?.firewall_blocked) }} · 冻结
+            {{ count(access?.frozen_blocked) }} · 账号失败 {{ count(access?.auth_failed) }}</RouterLink
+          ></template
+        >
+        <template v-else-if="id === 'trend'"
+          ><div class="report-actions" role="group" aria-label="访问趋势时间范围">
+            <button
+              v-for="hours in [24, 6]"
+              :key="hours"
+              class="btn btn-secondary btn-sm"
+              :aria-pressed="trendHours === hours"
+              @click="trendHours = hours"
+            >
+              近 {{ hours }} 小时
+            </button>
           </div>
-          <router-link to="/forwards" class="status-item">
-            <span class="item-name">端口转发监听</span>
-            <span class="item-val">{{ count(forwardListenerCount) }}</span>
-          </router-link>
-        </div>
-        <div class="quick-links-bar">
-          <router-link to="/logs" class="btn btn-secondary btn-sm"><ScrollText :size="13" /> 访问明细</router-link>
-          <router-link to="/firewall-logs" class="btn btn-secondary btn-sm"><ShieldAlert :size="13" /> 拦截审计</router-link>
-          <router-link to="/backups" class="btn btn-secondary btn-sm"><HardDriveDownload :size="13" /> 备份快照</router-link>
-        </div>
-      </SpotlightCard>
-    </div>
-
-    <div class="middle-grid">
-      <SpotlightCard class="chart-card">
-        <div class="section-title-bar">
-          <span class="section-title">24 小时访问趋势</span>
-          <span class="item-val">共 {{ count(access?.total) }} 次</span>
-        </div>
-        <div class="chart-container">
-          <svg v-if="access?.total" viewBox="0 0 700 160" class="traffic-svg" preserveAspectRatio="none" aria-hidden="true">
-            <line v-for="y in [40, 80, 120]" :key="y" x1="0" :y1="y" x2="700" :y2="y" stroke="var(--line)" stroke-dasharray="4 4" />
+          <svg v-if="access?.total" class="trend" viewBox="0 0 700 160" role="img" aria-label="访问数量趋势">
+            <line v-for="y in [40, 80, 120]" :key="y" x1="0" :y1="y" x2="700" :y2="y" stroke="var(--line)" />
             <polyline :points="accessLine" fill="none" stroke="var(--brand-light)" stroke-width="2.5" />
           </svg>
-          <p v-else class="chart-empty">{{ access ? '最近 24 小时暂无访问记录' : '等待访问统计' }}</p>
-        </div>
-      </SpotlightCard>
-      <SpotlightCard class="chart-card">
-        <div class="section-title-bar">
-          <span class="section-title">24 小时访问地区</span>
-          <span class="item-val">{{ count(dashboard?.regions?.unique_ips) }} 个来源 IP</span>
-        </div>
-        <ul v-if="provinces.length" class="region-list">
-          <li v-for="province in provinces" :key="province.name">
-            <span>{{ province.name }}</span><span>{{ count(province.requests) }} 次访问</span>
-          </li>
-        </ul>
-        <p v-else class="overview-message">{{ dashboard ? '暂无可归属省份的访问记录' : '等待地区统计' }}</p>
-        <p v-if="dashboard?.regions?.unmapped" class="overview-message">{{ count(dashboard.regions.unmapped) }} 次访问未归属省份</p>
+          <p v-else class="report-empty">{{ access ? '最近 24 小时暂无访问记录' : '等待访问统计' }}</p>
+          <p class="report-note">所选时段 {{ count(trendTotal) }} 次访问 · 数据基于保留日志</p></template
+        >
+        <template v-else-if="id === 'provinces'"
+          ><p class="report-note">
+            {{ count(regions.unique_ips) }} 个来源 IP · {{ count(regions.sample) }} 次访问
+          </p>
+          <div class="scroll-list">
+            <div v-for="province in regions.provinces || []" :key="province.name" class="province-row">
+              <strong>{{ province.name }}</strong
+              ><meter
+                min="0"
+                :max="Math.max(1, regions.provinces?.[0]?.requests || 1)"
+                :value="province.requests"
+                :aria-label="province.name + '访问次数'"
+              /><span>{{ count(province.requests) }} 次 / {{ count(province.ips) }} IP</span>
+            </div>
+          </div>
+          <p v-if="!regions.provinces?.length" class="report-empty">暂无可归属省份的访问记录</p>
+          <p class="report-note">
+            IP 离线估算 · 未定位 {{ count(regions.unmapped) }} 次，包含内网及境外地址。
+          </p></template
+        >
+        <template v-else-if="id === 'map'"
+          ><svg class="access-map" viewBox="0 0 520 320" role="img" aria-label="中国访问省份汇聚示意地图">
+            <title>
+              省份示意位置到{{
+                gatewayConfig?.dashboard?.map_province || '示意中心'
+              }}的访问，非精确位置或实际网络线路
+            </title>
+            <image :href="'/china-outline.svg'" width="520" height="320" />
+            <g v-for="visit in mapVisits" :key="visit.id" :class="visit.blocked ? 'blocked' : 'allowed'">
+              <path :d="visit.path" fill="none" stroke-width="1.5" />
+              <circle :cx="visit.point[0]" :cy="visit.point[1]" r="3.5" />
+              <title>
+                {{ visit.ip }} · {{ visit.province }} · {{ reportDate(visit.time) }} ·
+                {{ visit.blocked ? '拦截' : '普通访问' }}
+              </title>
+            </g>
+            <circle :cx="mapHub[0]" :cy="mapHub[1]" r="6" fill="var(--brand)" />
+          </svg>
+          <p class="report-note">
+            {{ gatewayConfig?.dashboard?.map_province || '示意中心' }} · 蓝色为普通访问，红色为拦截 ·
+            {{ mapVisits.length }} 条已定位记录
+          </p>
+          <div class="scroll-list">
+            <div v-for="visit in (regions.visits || []).slice(0, 5)" :key="visit.id" class="event-row">
+              <strong>{{ visit.ip }} · {{ visit.province || visit.region }}</strong
+              ><span>{{ reportDate(visit.time) }}</span>
+            </div>
+          </div>
+          <p v-if="!regions.visits?.length" class="report-note">等待最近访问记录。</p></template
+        >
+        <template v-else-if="id === 'services'"
+          ><p v-if="healthError" class="report-error" role="alert">
+            健康状态读取失败，保留上次结果：{{ healthError }}
+          </p>
+          <div class="scroll-list">
+            <div v-for="route in serviceRoutes" :key="route.id" class="service-row">
+              <strong>{{ route.name || route.host }}</strong
+              ><span class="report-note">{{
+                health?.routes?.[route.id]?.label || (!route.enabled ? '路由已停用' : '等待上游检测')
+              }}</span
+              ><a
+                v-if="serviceURL(route.upstream)"
+                :href="serviceURL(route.upstream)"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="service-link"
+                >内网：{{ route.upstream }}</a
+              ><a
+                v-if="route.publicURL"
+                :href="route.publicURL"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="service-link"
+                >域名：{{ route.publicURL }}</a
+              >
+            </div>
+          </div>
+          <p v-if="!serviceRoutes.length" class="report-empty">暂无反向代理服务</p></template
+        >
+        <template v-else-if="id === 'listeners'"
+          ><div class="scroll-list">
+            <div v-for="group in gatewayConfig?.groups || []" :key="group.id" class="event-row">
+              <strong>{{ group.name }} · {{ group.enabled ? '启用' : '停用' }}</strong
+              ><span>配置 HTTP {{ group.http_port || '关闭' }} / HTTPS {{ group.https_port || '关闭' }}</span>
+            </div>
+            <div
+              v-for="forward in gatewayStatus?.forward_listeners || []"
+              :key="forward.id"
+              class="event-row"
+            >
+              <strong>{{ forward.name }} · {{ forward.protocol.toUpperCase() }}</strong
+              ><span>实际监听 :{{ forward.listen_port }} → {{ forward.upstream }}</span>
+            </div>
+          </div>
+          <p v-if="gatewayStatus?.restart_required" class="report-warning">监听配置待重启，请到设置查看。</p>
+          <RouterLink class="btn btn-secondary btn-sm" to="/settings">监听与服务设置</RouterLink></template
+        >
+        <template v-else-if="id === 'events'"
+          ><div class="scroll-list">
+            <div v-for="(event, index) in gatewayStatus?.events || []" :key="index" class="event-row">
+              <strong :class="{ 'report-error': !event.ok }"
+                >{{ event.kind }} · {{ event.ok ? '成功' : '失败' }}</strong
+              ><span>{{ event.message }}</span
+              ><small>{{ reportDate(event.time) }}</small>
+            </div>
+          </div>
+          <p v-if="!gatewayStatus?.events?.length" class="report-empty">暂无近期任务活动</p>
+          <RouterLink class="btn btn-secondary btn-sm" to="/logs">查看项目日志</RouterLink></template
+        >
       </SpotlightCard>
     </div>
-
-    <div class="bottom-section">
-      <div class="section-title-bar">
-        <span class="section-title">24 小时高频访问服务</span>
-        <router-link to="/routes" class="btn btn-ghost btn-sm">查看反代规则 →</router-link>
-      </div>
-      <p v-if="!topRoutes.length" class="overview-message">{{ routesEmptyLabel }}</p>
-      <div v-else class="recent-routes-grid">
-        <SpotlightCard v-for="route in topRoutes" :key="route.key" class="mini-route-card">
-          <div class="mini-card-top">
-            <div class="mini-card-icon"><Network :size="16" /></div>
-            <span v-if="route.health?.state !== 'disabled' && route.health?.checked_at" class="status-dot"
-              :class="route.health.healthy ? 'ok' : 'warn'" :title="route.health.label" />
+    <p v-if="!widgetIDs.length" class="report-empty">尚未显示组件，请通过「配置组件与顺序」选择。</p>
+    <dialog
+      ref="dialog"
+      class="report-dialog"
+      aria-labelledby="dashboard-title"
+      @cancel="isSavingConfig && $event.preventDefault()"
+      @close="editSnapshot = null"
+    >
+      <header>
+        <h2 id="dashboard-title">概览组件与顺序</h2>
+        <button class="btn btn-secondary btn-sm" :disabled="isSavingConfig" @click="dialog.close()">
+          关闭
+        </button>
+      </header>
+      <form @submit.prevent="saveLayout">
+        <fieldset :disabled="isSavingConfig">
+          <p class="report-note">
+            勾选显示组件。拖动行首按钮，或使用方向键、上下移动按钮排序；保存后在其他设备与重启后沿用。
+          </p>
+          <div
+            v-for="(id, index) in order"
+            :key="id"
+            class="layout-row"
+            :data-layout-id="id"
+            @dragover.prevent
+            @drop.prevent="drop(id)"
+          >
+            <button
+              type="button"
+              draggable="true"
+              class="btn btn-ghost btn-sm"
+              :aria-label="'拖动或方向键排序 ' + titles[id]"
+              @dragstart="startDrag($event, id)"
+              @dragend="dragged = ''"
+              @keydown.up.prevent="move(id, -1)"
+              @keydown.down.prevent="move(id, 1)"
+            >
+              ☰</button
+            ><label
+              ><input v-model="selected" type="checkbox" :value="id" :name="'widget_' + id" />{{
+                titles[id]
+              }}</label
+            ><button
+              type="button"
+              class="btn btn-secondary btn-sm"
+              :aria-label="'上移 ' + titles[id]"
+              :disabled="index === 0"
+              @click="move(id, -1)"
+            >
+              ↑</button
+            ><button
+              type="button"
+              class="btn btn-secondary btn-sm"
+              :aria-label="'下移 ' + titles[id]"
+              :disabled="index === order.length - 1"
+              @click="move(id, 1)"
+            >
+              ↓
+            </button>
           </div>
-          <div class="mini-card-name">{{ route.name || route.host }}</div>
-          <div class="mini-card-domain mono-text">{{ route.host }}</div>
-          <div class="mini-card-footer">
-            <span>{{ count(route.total) }} 次请求</span>
-            <span v-if="route.health?.healthy">上游探测 {{ count(route.health.duration_ms) }} ms</span>
-          </div>
-        </SpotlightCard>
-      </div>
-    </div>
+          <label
+            >流量采集网卡<select
+              v-model="form.network_interface"
+              name="network_interface"
+              class="form-select"
+            >
+              <option value="">自动选择</option>
+              <option v-for="network in resources.networks || []" :key="network.name" :value="network.name">
+                {{ network.name }}
+              </option>
+              <option
+                v-if="
+                  form.network_interface &&
+                  !resources.networks?.some((network) => network.name === form.network_interface)
+                "
+                :value="form.network_interface"
+              >
+                {{ form.network_interface }} · 当前不可用
+              </option>
+            </select></label
+          ><label
+            >地图汇聚省份<select v-model="form.map_province" name="map_province" class="form-select">
+              <option value="">示意中心</option>
+              <option v-for="province in Object.keys(provincePoints)" :key="province" :value="province">
+                {{ province }}
+              </option>
+            </select></label
+          >
+          <p v-if="formError" class="report-error" role="alert">{{ formError }}</p>
+          <footer>
+            <button class="btn btn-secondary" type="button" @click="defaults">恢复默认布局</button
+            ><button class="btn btn-primary" type="submit">
+              {{ isSavingConfig ? '保存中…' : '保存概览布局' }}
+            </button>
+          </footer>
+        </fieldset>
+      </form>
+    </dialog>
   </div>
 </template>
-
 <script setup>
-import { computed, onMounted, onUnmounted, ref, shallowRef } from 'vue'
-import {
-  RefreshCw, Plus, Cpu, Activity, HardDrive, Zap, Radio, Network,
-  ScrollText, ShieldAlert, HardDriveDownload
-} from 'lucide-vue-next'
+import { computed, nextTick, onMounted, onBeforeUnmount, reactive, ref, shallowRef } from 'vue'
 import SpotlightCard from '@/components/SpotlightCard.vue'
 import { adminApi } from '@/api/admin'
+import {
+  dashboardWidgets,
+  dashboardWidgetIDs,
+  dashboardRecord,
+  reorderWidget,
+  provincePoints,
+  mapPoint,
+  serviceURL
+} from '@/api/dashboard'
+import { formatBytes, reportDate } from '@/api/reports'
 import { useGatewayStatus } from '@/composables/useGatewayStatus'
 import { useToast } from '@/composables/useToast'
-
-const { gatewayStatus, gatewayConfig, gatewayState, refreshStatus, refreshConfig } = useGatewayStatus()
-const toast = useToast()
-const dashboard = shallowRef(null)
-const serviceHealth = shallowRef(null)
-const healthUnavailable = ref(false)
-const samples = ref([])
-const isRefreshing = ref(false)
-const loadError = ref('')
-const controller = new AbortController()
-const resources = computed(() => dashboard.value?.resources ?? {})
-const access = computed(() => dashboard.value?.access)
-const provinces = computed(() => (dashboard.value?.regions?.provinces ?? []).slice(0, 5))
-const networkAvailable = computed(() => resources.value.interface && !resources.value.network_error)
-const sampledAt = computed(() => new Date(dashboard.value?.sampled_at).toLocaleTimeString('zh-CN', { hour12: false }))
-const numberFormat = new Intl.NumberFormat('zh-CN')
-
+import '@/styles/reports.css'
+const {
+  gatewayStatus,
+  gatewayConfig,
+  gatewayConfigSnapshot,
+  gatewayState,
+  gatewayVersion,
+  refreshStatus,
+  refreshConfig,
+  saveConfig,
+  isSavingConfig
+} = useGatewayStatus()
+const toast = useToast(),
+  controller = new AbortController(),
+  dialog = ref(null)
+const dashboard = shallowRef(null),
+  health = shallowRef(null),
+  samples = ref([]),
+  isRefreshing = ref(false),
+  loadError = ref(''),
+  healthError = ref(''),
+  trendHours = ref(24)
+const resources = computed(() => dashboard.value?.resources || {}),
+  access = computed(() => dashboard.value?.access),
+  regions = computed(() => dashboard.value?.regions || {})
+const titles = Object.fromEntries(dashboardWidgets.map((item) => [item.id, item.title])),
+  compact = ['cpu', 'memory', 'requests', 'blocked']
+const widgetIDs = computed(() => dashboardWidgetIDs(gatewayConfig.value?.dashboard))
+const form = reactive({ network_interface: '', map_province: '' }),
+  order = ref([]),
+  selected = ref([]),
+  formError = ref(''),
+  dragged = ref('')
+let editSnapshot = null,
+  timer
 function count(value) {
-  return value == null ? '—' : numberFormat.format(value)
+  return value == null ? '—' : value.toLocaleString()
 }
-
 function bytes(value) {
-  if (!Number.isFinite(value) || value < 0) return '—'
-  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB']
-  const index = value < 1 ? 0 : Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1)
-  return `${(value / 1024 ** index).toFixed(index ? 1 : 0)} ${units[index]}`
+  return Number.isFinite(value) ? formatBytes(value) : '—'
 }
-
 function rate(value) {
-  return value == null ? '—' : `${bytes(value)}/s`
+  return Number.isFinite(value) ? bytes(value) + '/s' : '—'
 }
-
-function usage(used, total) {
-  return Number.isFinite(used) && total > 0 ? Math.min(100, used / total * 100) : null
+function percent(used, total) {
+  return Number.isFinite(used) && total > 0 ? Math.max(0, Math.min(100, (used / total) * 100)) : null
 }
-
-const resourceCards = computed(() => {
-  const resource = resources.value
-  const disk = resource.storage?.find(item => item.name === '数据')
-  return [
-    {
-      label: 'CPU 负载率', kind: 'cpu', icon: Cpu, fill: 'brand', percent: resource.cpu_percent,
-      detail: resource.cpu_error || (resource.cpus ? `${resource.cpus} 个逻辑 CPU` : '暂无采样')
-    },
-    {
-      label: '内存占用', kind: 'mem', icon: Activity, fill: 'cyan',
-      percent: resource.memory_error ? null : usage(resource.memory_used, resource.memory_total),
-      detail: resource.memory_error || (resource.memory_total ? `已用 ${bytes(resource.memory_used)}` : '暂无采样'),
-      total: resource.memory_total ? `共 ${bytes(resource.memory_total)}` : ''
-    },
-    {
-      label: '数据盘空间', kind: 'disk', icon: HardDrive, fill: 'ok',
-      percent: disk?.error ? null : usage(disk?.used, disk?.total),
-      detail: disk?.error || (disk?.total ? `已用 ${bytes(disk.used)}` : '暂无采样'),
-      total: disk?.total ? `共 ${bytes(disk.total)}` : ''
-    }
-  ]
-})
-
-const certificateCount = computed(() => gatewayStatus.value
-  ? (gatewayStatus.value.certificates ?? []).filter(cert => cert.ready).length : null)
-const forwardListenerCount = computed(() => gatewayStatus.value
-  ? (gatewayStatus.value.forward_listeners ?? []).filter(listener => listener.enabled).length : null)
-const listenerLabel = computed(() => {
-  if (!gatewayStatus.value) return '—'
-  const listeners = (gatewayStatus.value.listeners ?? []).filter(listener => listener.enabled)
-  return listeners.map(listener => `HTTP ${listener.http_port} / HTTPS ${listener.https_port}`).join(' · ') || '无启用监听'
-})
-
-const healthLabel = computed(() => {
-  if (healthUnavailable.value) return '读取失败'
-  if (!serviceHealth.value) return '—'
-  if (!serviceHealth.value.options?.enabled) return '检测已关闭'
-  const results = Object.values(serviceHealth.value.routes ?? {}).filter(item => item.state !== 'disabled' && item.state !== 'cancelled')
-  if (!results.length) return '暂无探测'
-  return `${results.filter(item => item.healthy).length} / ${results.length} 可达`
-})
-
-const topRoutes = computed(() => {
-  const routes = new Map((gatewayConfig.value?.routes ?? []).map(route => [`${route.group_id}/${route.host}`, route]))
-  return (access.value?.rules ?? []).filter(item => routes.has(item.rule))
-    .sort((a, b) => b.total - a.total)
-    .slice(0, 4)
-    .map(item => {
-      const route = routes.get(item.rule)
-      return { ...route, key: item.rule, total: item.total, health: serviceHealth.value?.routes?.[route.id] }
-    })
-})
-const routesEmptyLabel = computed(() => {
-  if (!access.value) return '等待访问统计'
-  if (!gatewayConfig.value) return '反代配置未加载，请刷新数据'
-  return '暂无可关联到当前反代规则的访问记录'
-})
-
-function linePoints(values, max) {
-  return values.map((value, index) => `${700 * index / Math.max(1, values.length - 1)},${152 - 144 * value / max}`).join(' ')
+const metrics = computed(() => ({
+  cpu: {
+    percent: resources.value.cpu_percent,
+    detail: resources.value.cpu_error || '整体 CPU 使用率，两次采样差值；首次采样后显示。'
+  },
+  memory: {
+    percent: resources.value.memory_error
+      ? null
+      : percent(resources.value.memory_used, resources.value.memory_total),
+    detail:
+      resources.value.memory_error ||
+      `${bytes(resources.value.memory_used)} / ${bytes(resources.value.memory_total)}`
+  }
+}))
+function line(values, max) {
+  return values
+    .map((value, index) => `${(700 * index) / Math.max(1, values.length - 1)},${152 - (144 * value) / max}`)
+    .join(' ')
 }
-
 const networkLines = computed(() => {
-  const rx = samples.value.map(sample => sample.rx)
-  const tx = samples.value.map(sample => sample.tx)
-  const max = Math.max(1, ...rx, ...tx)
-  return { rx: linePoints(rx, max), tx: linePoints(tx, max) }
+  const rx = samples.value.map((item) => item.rx),
+    tx = samples.value.map((item) => item.tx),
+    max = Math.max(1, ...rx, ...tx)
+  return { rx: line(rx, max), tx: line(tx, max) }
 })
+const trend = computed(() => (access.value?.trend || []).slice(-trendHours.value)),
+  trendTotal = computed(() =>
+    access.value ? trend.value.reduce((sum, bucket) => sum + bucket.total, 0) : null
+  )
 const accessLine = computed(() => {
-  const totals = (access.value?.trend ?? []).map(bucket => bucket.total)
-  return linePoints(totals, Math.max(1, ...totals))
+  const values = trend.value.map((item) => item.total)
+  return line(values, Math.max(1, ...values))
 })
-
+const mapHub = computed(() => mapPoint(gatewayConfig.value?.dashboard?.map_province))
+const mapVisits = computed(() =>
+  (regions.value.visits || [])
+    .filter((visit) => provincePoints[visit.province])
+    .map((visit) => {
+      const point = mapPoint(visit.province),
+        [x, y] = point,
+        [hx, hy] = mapHub.value
+      return {
+        ...visit,
+        point,
+        path: `M${x},${y} Q${(x + hx) / 2},${(y + hy) / 2 - Math.min(65, Math.hypot(x - hx, y - hy) / 3)} ${hx},${hy}`
+      }
+    })
+)
+const serviceRoutes = computed(() =>
+  (gatewayConfig.value?.routes || []).map((route) => {
+    const group = gatewayConfig.value.groups.find((item) => item.id === route.group_id),
+      secure = route.tls || !group?.http_port,
+      port = secure ? group?.https_port : group?.http_port
+    return {
+      ...route,
+      publicURL: port ? serviceURL(`${secure ? 'https' : 'http'}://${route.host}:${port}/`) : ''
+    }
+  })
+)
 function recordSample(data) {
   const { interface: iface, rx_rate: rx, tx_rate: tx, network_error: error } = data.resources
-  const last = samples.value.at(-1)
+  const last = samples.value.at(-1),
+    time = Date.parse(data.sampled_at)
   if (error || !Number.isFinite(rx) || !Number.isFinite(tx)) {
     samples.value = []
     return
   }
-  if (last && last.iface !== iface) samples.value = []
-  const time = Date.parse(data.sampled_at)
+  if (last?.iface !== iface) samples.value = []
   if (samples.value.length && time - last.time < 5000) return
   samples.value = [...samples.value.slice(-23), { iface, time, rx, tx }]
 }
-
 async function refresh(manual = false) {
   if (isRefreshing.value) return
   isRefreshing.value = true
   const signal = controller.signal
   try {
     const tasks = [
-      adminApi.dashboard(signal).then(data => {
-        dashboard.value = data
-        recordSample(data)
-        loadError.value = ''
-      }).catch(err => {
-        if (!signal.aborted) loadError.value = err.message
-        throw err
-      }),
-      adminApi.serviceHealth(signal).then(data => {
-        serviceHealth.value = data
-        healthUnavailable.value = false
-      }).catch(err => {
-        if (!signal.aborted) healthUnavailable.value = true
-        throw err
-      })
+      adminApi
+        .dashboard(signal)
+        .then((data) => {
+          if (!signal.aborted) {
+            dashboard.value = data
+            recordSample(data)
+            loadError.value = ''
+          }
+        })
+        .catch((err) => {
+          if (!signal.aborted) loadError.value = err.message
+        }),
+      adminApi
+        .serviceHealth(signal)
+        .then((data) => {
+          if (!signal.aborted) {
+            health.value = data
+            healthError.value = ''
+          }
+        })
+        .catch((err) => {
+          if (!signal.aborted) healthError.value = err.message
+        })
     ]
     if (manual) tasks.push(refreshStatus(signal), refreshConfig(signal))
     const results = await Promise.allSettled(tasks)
-    if (!manual || signal.aborted || results.some(result => result.reason?.status === 401)) return
     const failure = results.find(result => result.status === 'rejected')
-    if (failure) toast.error(`概览刷新失败：${failure.reason.message}`)
-    else toast.success('概览数据已刷新')
+    if (failure && !signal.aborted) loadError.value ||= failure.reason.message
   } finally {
     isRefreshing.value = false
   }
 }
-
-let timer
+async function configure() {
+  editSnapshot = structuredClone(gatewayConfigSnapshot.value)
+  selected.value = [...dashboardWidgetIDs(editSnapshot.config.dashboard)]
+  order.value = [
+    ...selected.value,
+    ...dashboardWidgets.map((item) => item.id).filter((id) => !selected.value.includes(id))
+  ]
+  Object.assign(form, {
+    network_interface: editSnapshot.config.dashboard?.network_interface || '',
+    map_province: editSnapshot.config.dashboard?.map_province || ''
+  })
+  formError.value = ''
+  await nextTick()
+  dialog.value.showModal()
+}
+function defaults() {
+  order.value = dashboardWidgets.map((item) => item.id)
+  selected.value = [...order.value]
+  Object.assign(form, { network_interface: '', map_province: '' })
+}
+async function move(id, direction) {
+  const index = order.value.indexOf(id),
+    target = index + direction
+  if (target < 0 || target >= order.value.length) return
+  const next = [...order.value]
+  ;[next[index], next[target]] = [next[target], next[index]]
+  order.value = next
+  await nextTick()
+  dialog.value.querySelector(`[data-layout-id="${id}"] [draggable]`)?.focus()
+}
+function startDrag(event, id) {
+  dragged.value = id
+  event.dataTransfer.setData('text/plain', id)
+  event.dataTransfer.effectAllowed = 'move'
+}
+function drop(id) {
+  order.value = reorderWidget(order.value, dragged.value, id)
+  dragged.value = ''
+}
+async function saveLayout() {
+  formError.value = ''
+  try {
+    await saveConfig(editSnapshot, dashboardRecord(editSnapshot, form, order.value, selected.value))
+    dialog.value.close()
+    toast.success('概览布局已保存')
+    samples.value = []
+    await refresh(true)
+  } catch (err) {
+    if (!controller.signal.aborted) formError.value = err.message
+  }
+}
 onMounted(() => {
-  refresh()
-  timer = setInterval(refresh, 10000)
+  refresh(true)
+  timer = setInterval(() => refresh(), 5000)
 })
-onUnmounted(() => {
-  clearInterval(timer)
+onBeforeUnmount(() => {
   controller.abort()
+  clearInterval(timer)
+  editSnapshot = null
 })
 </script>
-
 <style scoped>
-.overview-page {
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 18px;
+  align-items: start;
 }
-
-.page-topbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 16px;
+.dashboard-widget {
+  min-width: 0;
 }
-
-.page-title {
-  font-size: 22px;
+.dashboard-widget.wide {
+  grid-column: span 2;
+}
+.dashboard-widget :deep(.card-inner) {
+  display: grid;
+  gap: 14px;
+}
+h2 {
+  margin-bottom: 0;
+}
+.metric-value {
+  font-size: 27px;
   font-weight: 700;
   color: var(--ink);
-  letter-spacing: -0.3px;
 }
-
-.page-subtitle {
-  font-size: 13px;
-  color: var(--muted);
-  margin-top: 3px;
+progress,
+meter {
+  width: 100%;
+  height: 8px;
+  accent-color: var(--brand);
 }
-
-.header-actions {
-  display: flex;
-  align-items: center;
+.transfer-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.transfer-pair > div {
+  display: grid;
   gap: 10px;
 }
-
-.spin-icon {
-  animation: spin 0.8s linear infinite;
-}
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
-/* Bento Grid */
-.bento-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 16px;
-}
-
-.metric-card {
-  padding: 18px 20px;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-}
-
-.card-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-}
-
-.metric-label {
-  font-size: 12px;
-  color: var(--muted);
-  font-weight: 500;
-}
-
-.metric-value {
-  font-size: 26px;
-  font-weight: 700;
-  color: var(--ink);
-  font-family: var(--sans);
-  margin-top: 4px;
-}
-
-.metric-unit {
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--faint);
-  margin-left: 4px;
-}
-
-.metric-icon-box {
-  width: 38px;
-  height: 38px;
-  border-radius: var(--radius-sm);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--line);
-}
-.metric-icon-box.cpu { background: rgba(99, 102, 241, 0.12); color: var(--brand-light); }
-.metric-icon-box.mem { background: rgba(6, 182, 212, 0.12); color: var(--brand-cyan); }
-.metric-icon-box.disk { background: rgba(16, 185, 129, 0.12); color: var(--ok); }
-.metric-icon-box.net { background: rgba(245, 158, 11, 0.12); color: var(--warn); }
-
-.progress-track {
-  width: 100%;
-  height: 6px;
-  background: var(--strip-bg);
-  border-radius: 999px;
-  overflow: hidden;
-  margin: 14px 0 10px 0;
-}
-
-.progress-fill {
-  height: 100%;
-  border-radius: 999px;
-  transition: width 0.5s ease;
-}
-.progress-fill.brand { background: var(--brand-gradient); }
-.progress-fill.cyan { background: linear-gradient(90deg, #06b6d4, #38bdf8); }
-.progress-fill.ok { background: linear-gradient(90deg, #10b981, #34d399); }
-
-.metric-extra-badges {
-  display: flex;
-  gap: 8px;
-  margin: 12px 0 8px 0;
-}
-
-.metric-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  font-size: 11.5px;
-  color: var(--faint);
-}
-
-.mono-text {
-  font-family: var(--mono);
-}
-
-/* Middle Grid */
-.middle-grid {
-  display: grid;
-  grid-template-columns: 2fr 1fr;
-  gap: 16px;
-}
-
-.chart-card {
-  padding: 20px;
-  display: flex;
-  flex-direction: column;
-}
-
-.section-title-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 16px;
-}
-
-.title-with-icon {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.brand-text { color: var(--brand-light); }
-
-.section-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--ink);
-}
-
-.chart-legend {
-  display: flex;
-  gap: 14px;
+.transfer-pair span {
   font-size: 12px;
   color: var(--muted);
 }
-.legend-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+.transfer-pair strong {
+  font-size: 20px;
+  color: var(--ink);
+  overflow-wrap: anywhere;
 }
-.legend-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-}
-.legend-dot.rx { background: #06b6d4; box-shadow: 0 0 8px rgba(6, 182, 212, 0.5); }
-.legend-dot.tx { background: #6366f1; box-shadow: 0 0 8px rgba(99, 102, 241, 0.5); }
-
-.chart-container {
-  height: 160px;
-  width: 100%;
-}
-
-.traffic-svg {
-  width: 100%;
-  height: 100%;
-}
-
-.chart-empty {
+.storage-row {
   display: grid;
-  place-items: center;
-  height: 100%;
-  margin: 0;
-  color: var(--muted);
-  text-align: center;
-}
-
-.overview-message {
-  color: var(--muted);
-  font-size: 13px;
-  margin: 0;
-}
-.overview-message[role="alert"] { color: var(--bad); }
-
-.region-list {
-  list-style: none;
-  padding: 0;
-  margin: 0 0 8px;
-  color: var(--ink-secondary);
-}
-.region-list li {
-  display: flex;
-  justify-content: space-between;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
-  padding: 8px 0;
-  border-bottom: 1px solid var(--line);
+  font-size: 12px;
 }
-
-.chart-footer-stats {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  border-top: 1px solid var(--line);
-  padding-top: 14px;
-  margin-top: 14px;
+.storage-row progress,
+.storage-row p {
+  grid-column: 1/-1;
 }
-
-.stat-pill {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-.stat-pill .label { font-size: 11px; color: var(--faint); }
-.stat-pill .val { font-size: 12.5px; font-weight: 600; color: var(--ink); }
-
-/* Status Summary Card */
-.status-summary-card {
-  padding: 20px;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-}
-
-.status-rows {
-  display: flex;
-  flex-direction: column;
+.scroll-list {
+  display: grid;
   gap: 12px;
-  margin-bottom: 16px;
+  max-height: 350px;
+  overflow: auto;
 }
-
-.status-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 8px 10px;
-  border-radius: var(--radius-sm);
-  background: var(--strip-bg);
-  cursor: pointer;
-  transition: var(--transition-smooth);
-}
-.status-item:hover {
-  background: var(--card-hover-bg);
-  transform: translateX(2px);
-}
-
-.listener-row { cursor: default; }
-.listener-row:hover { transform: none; }
-
-.item-name {
-  font-size: 12.5px;
-  color: var(--ink-secondary);
-  font-weight: 500;
-}
-
-.item-val {
-  font-size: 11.5px;
-  color: var(--muted);
-  font-family: var(--mono);
-  text-align: end;
-}
-
-.quick-links-bar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding-top: 12px;
-  border-top: 1px solid var(--line);
-}
-
-/* Bottom Recent Routes */
-.bottom-section {
-  display: flex;
-  flex-direction: column;
-}
-
-.recent-routes-grid {
+.event-row,
+.service-row {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 16px;
+  gap: 6px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+  overflow-wrap: anywhere;
 }
-
-.mini-route-card {
-  padding: 16px;
-}
-
-.mini-card-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 10px;
-}
-
-.mini-card-icon {
-  width: 30px;
-  height: 30px;
-  border-radius: var(--radius-sm);
-  background: rgba(99, 102, 241, 0.12);
-  color: var(--brand-light);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.mini-card-name {
-  font-size: 13.5px;
-  font-weight: 600;
-  color: var(--ink);
-  margin-bottom: 2px;
-}
-
-.mini-card-domain {
-  font-size: 11.5px;
-  color: var(--faint);
-  margin-bottom: 12px;
-}
-
-.mini-card-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 11px;
+.event-row span,
+.event-row small,
+.service-link {
   color: var(--muted);
-  border-top: 1px solid var(--line);
-  padding-top: 8px;
 }
-
-/* Responsive */
-@media (max-width: 1200px) {
-  .bento-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
-  .middle-grid {
-    grid-template-columns: 1fr;
-  }
-  .recent-routes-grid {
-    grid-template-columns: repeat(2, 1fr);
+.service-link:hover {
+  color: var(--brand-light);
+}
+.province-row {
+  display: grid;
+  grid-template-columns: 46px minmax(30px, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  font-size: 12px;
+}
+.trend {
+  width: 100%;
+  height: 165px;
+}
+.access-map {
+  width: 100%;
+  max-height: 320px;
+}
+.access-map .allowed {
+  stroke: var(--brand-cyan);
+  fill: var(--brand-cyan);
+}
+.access-map .blocked {
+  stroke: var(--bad);
+  fill: var(--bad);
+}
+.layout-row {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) 34px 34px;
+  gap: 8px;
+  align-items: center;
+}
+.layout-row label {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+}
+[draggable] {
+  cursor: grab;
+  touch-action: none;
+}
+.btn[aria-pressed='true'] {
+  border-color: var(--brand);
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+@media (max-width: 1000px) {
+  .dashboard-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
-
-@media (max-width: 767px) {
-  .bento-grid {
-    grid-template-columns: 1fr;
+@media (max-width: 600px) {
+  .dashboard-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
-  .recent-routes-grid {
-    grid-template-columns: 1fr;
+  .dashboard-widget.wide {
+    grid-column: auto;
   }
-  .chart-footer-stats {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 8px;
+  .province-row {
+    grid-template-columns: 40px minmax(24px, 1fr) auto;
   }
 }
 </style>
