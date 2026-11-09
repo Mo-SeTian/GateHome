@@ -21,6 +21,8 @@ services:
       - ${GATEHOME_RUNTIME_DIR:-./runtime}/data:/data
       - ${GATEHOME_RUNTIME_DIR:-./runtime}/sunpanel:/sunpanel
     read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
     cap_drop:
       - ALL
     security_opt:

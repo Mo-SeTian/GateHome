@@ -35,3 +35,43 @@ export function forwardState(rule, listeners) {
     rule.protocol !== 'tcp' && (rule.udp_idle_seconds || 300) !== (running.udp_idle_seconds || 300)
   return changed || timeoutChanged ? { label: '修改待重启', tone: 'warn' } : { label: '正在监听', tone: 'ok' }
 }
+
+export function firewallDraft(firewall) {
+  const draft = structuredClone(firewall)
+  draft.groups = (draft.groups ?? []).map((group) => ({
+    ...group, cidrsText: (group.cidrs ?? []).join('\n'), subscriptions: group.subscriptions ?? []
+  }))
+  const protection = draft.protection ?? {}
+  const waf = protection.waf ?? {}
+  const freeze = protection.freeze ?? {}
+  draft.protection = {
+    ...protection,
+    waf: { ...waf, mode: waf.mode || 'off', level: waf.level || 1, exceptions: waf.exceptions ?? [] },
+    rate: {
+      ...protection.rate, enabled: !!protection.rate?.enabled, requests: protection.rate?.requests || 120,
+      window_seconds: protection.rate?.window_seconds || 60, path: protection.rate?.path || '/'
+    },
+    freeze: { ...freeze, enabled: !!freeze.enabled, failures: freeze.failures || 5, window_seconds: freeze.window_seconds || 300 },
+    rules: protection.rules ?? []
+  }
+  draft.bodyKiB = (waf.body_limit || 1048576) / 1024
+  draft.freezeMinutes = (freeze.seconds || 3600) / 60
+  return draft
+}
+
+export function firewallRecord(draft) {
+  const { bodyKiB, freezeMinutes, ...record } = structuredClone(draft)
+  record.name = record.name.trim()
+  record.groups = record.groups.map(({ cidrsText, ...group }) => ({
+    ...group, name: group.name.trim(), cidrs: cidrsText.split(/[\n,]+/).map((item) => item.trim()).filter(Boolean)
+  }))
+  record.protection.waf.body_limit = Number(bodyKiB) * 1024
+  record.protection.waf.exceptions = record.protection.waf.exceptions.map((exception) => ({
+    ...exception, host: exception.host.trim().toLowerCase(), path: exception.path.trim(),
+    parameter: exception.parameter.trim()
+  }))
+  record.protection.freeze.seconds = Number(freezeMinutes) * 60
+  record.protection.rate.path = record.protection.rate.path.trim()
+  record.protection.rules = record.protection.rules.map((rule) => ({ ...rule, name: rule.name.trim() }))
+  return record
+}

@@ -13,6 +13,9 @@ export const adminApi = {
   restart: () => request('/api/maintenance/restart', { method: 'POST', body: {} }),
   dashboard: (signal) => request('/api/dashboard', { signal }),
   serviceHealth: (signal) => request('/api/service-health', { signal }),
+  ipBlocks: (signal) => request('/api/ip-blocks', { signal }),
+  freezeIP: (body) => request('/api/ip-blocks', { method: 'POST', body }),
+  releaseIP: (body) => request('/api/ip-blocks', { method: 'DELETE', body }),
   uploadRouteImage: (file) => {
     const body = new FormData()
     body.append('file', file)

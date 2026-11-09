@@ -2,281 +2,581 @@
   <div class="ip-blocks-page animate-fade-in">
     <div class="page-topbar">
       <div>
-        <h1 class="page-title">IP 冻结名单</h1>
-        <p class="page-subtitle">达到账号密码验证失败阈值、触发 WAF 防护或管理员手动添加的高危来源 IP，到期自动解除阻断</p>
+        <h1 class="page-title">IP 拦截名单</h1>
+        <p class="page-subtitle">查看账号验证、安全防护及管理员冻结记录，按反代规则独立生效，到期自动解除</p>
       </div>
       <div class="header-actions">
-        <button class="btn btn-primary" @click="openCreateModal">
-          <ShieldAlert :size="15" />
-          手动冻结 IP
+        <button
+          class="btn btn-secondary"
+          :disabled="loading || mutating || isSavingConfig"
+          @click="refresh(true)"
+        >
+          刷新名单
+        </button>
+        <button class="btn btn-primary" :disabled="!routes.length || mutating" @click="openCreate">
+          <ShieldAlert :size="15" /> 手动冻结 IP
         </button>
       </div>
     </div>
-
-    <!-- Filter & Search Controls -->
+    <p v-if="loading && !view" role="status">正在读取冻结记录…</p>
+    <p v-if="loadError" class="error" role="alert">
+      {{ loadError }}{{ view ? '。当前显示上次获取的记录。' : '' }}
+    </p>
+    <p v-if="view?.write_error" class="write-warning" role="alert">
+      冻结记录保存失败。当前进程仍执行拦截，但重启可能丢失最新变更，请检查数据目录权限与磁盘空间。
+    </p>
     <div class="filter-bar">
-      <div class="rule-select-wrap">
-        <label class="filter-label">关联反代规则</label>
-        <select v-model="selectedRule" class="form-select filter-select">
-          <option value="ALL">全部反代规则</option>
-          <option v-for="rt in routes" :key="rt.id" :value="rt.id">
-            {{ rt.name }} ({{ rt.domain }})
-          </option>
-        </select>
-      </div>
-
-      <div class="search-box">
-        <Search :size="14" class="search-icon" />
-        <input v-model="searchQuery" type="text" placeholder="搜索 IPv4 / IPv6 或冻结原因..." class="search-input" />
-      </div>
-    </div>
-
-    <!-- Frozen Records List (Cards & Table) -->
-    <div class="freeze-cards-grid">
-      <SpotlightCard 
-        v-for="item in filteredList" 
-        :key="item.id"
-        class="freeze-card"
+      <label class="rule-select-wrap"
+        >关联反代规则<select v-model="selectedRule" class="form-select" aria-label="筛选反代规则">
+          <option value="">全部反代规则</option>
+          <option v-for="item in ruleOptions" :key="item.key" :value="item.key">{{ item.label }}</option>
+        </select></label
       >
+      <label class="search-box"
+        ><Search :size="14" /><input
+          v-model="searchQuery"
+          class="search-input"
+          aria-label="搜索 IP 或冻结原因"
+          placeholder="搜索 IPv4 / IPv6、规则或冻结原因"
+      /></label>
+    </div>
+    <p v-if="view" class="result-count" role="status">
+      共 {{ filteredList.length }} 条匹配记录 · 第 {{ page }} / {{ totalPages }} 页 · 每 5 秒刷新
+    </p>
+    <div class="freeze-cards-grid">
+      <SpotlightCard v-for="item in paginatedList" :key="item.rule + '|' + item.ip" class="freeze-card">
         <div class="freeze-head">
           <div class="ip-title-group">
-            <span class="mono-text freeze-ip">{{ item.ip }}</span>
-            <span class="badge" :class="item.manual ? 'badge-warn' : 'badge-bad'">
-              {{ item.manual ? '管理员手动' : '安全引擎自动' }}
-            </span>
+            <strong class="mono-text freeze-ip">{{ item.ip }}</strong
+            ><span class="badge" :class="item.source === 'manual' ? 'badge-warn' : 'badge-bad'">{{
+              sourceLabel(item.source)
+            }}</span>
           </div>
-          <button class="btn btn-secondary btn-sm" @click="unblock(item)">
-            <Unlock :size="12" /> 解除冻结
+          <button
+            class="btn btn-secondary btn-sm"
+            :disabled="mutating"
+            :aria-label="`解除 ${item.ip} 在 ${item.rule} 的冻结`"
+            @click="unblock(item)"
+          >
+            <Unlock :size="13" /> 解除冻结
           </button>
         </div>
-
-        <div class="freeze-details-box">
-          <div class="f-detail-row">
-            <span class="f-label">关联业务规则:</span>
-            <span class="f-val">{{ item.ruleName }}</span>
+        <dl class="freeze-details-box">
+          <div>
+            <dt>关联业务规则</dt>
+            <dd>
+              {{ ruleName(item) }}<span class="rule-key mono-text">{{ item.rule }}</span>
+            </dd>
           </div>
-          <div class="f-detail-row">
-            <span class="f-label">冻结触发原因:</span>
-            <span class="f-val reason-text">{{ item.reason }}</span>
+          <div>
+            <dt>冻结原因</dt>
+            <dd class="reason-text">{{ item.reason }}</dd>
           </div>
-          <div class="f-detail-row">
-            <span class="f-label">到期时间:</span>
-            <span class="f-val mono-text">{{ item.until }}</span>
+          <div v-if="item.failures">
+            <dt>触发时累计</dt>
+            <dd>{{ item.failures }} 次</dd>
           </div>
-          <div class="f-detail-row">
-            <span class="f-label">累计阻断请求:</span>
-            <span class="f-val mono-text hits-val">{{ item.hits }} 次</span>
+          <div>
+            <dt>冻结时间</dt>
+            <dd>{{ date(item.started_at) }}</dd>
           </div>
-        </div>
-
+          <div>
+            <dt>到期时间</dt>
+            <dd>{{ date(item.until) }}</dd>
+          </div>
+        </dl>
         <div class="freeze-footer">
-          <span class="remaining-text">
-            <Clock :size="12" />
-            剩余冻结时长: <b class="time-bold">{{ item.remaining }}</b>
-          </span>
-          <span class="auto-release-tag">到期自动解除</span>
+          <span><Clock :size="12" /> 剩余 {{ remaining(item.until) }}</span
+          ><span>到期自动解除</span>
         </div>
       </SpotlightCard>
     </div>
-
-    <div v-if="filteredList.length === 0" class="empty-state">
-      <CheckCircle :size="32" class="empty-icon ok-text" />
-      <div class="empty-title">当前没有被冻结的 IP</div>
-      <div class="empty-desc">达到账号验证失败或 WAF 阈值后，被阻断的来源 IP 将在此处展示与追踪</div>
+    <div v-if="view && !filteredList.length" class="empty-state">
+      <CheckCircle :size="32" /><strong>{{
+        activeEntries.length ? '没有匹配的冻结记录' : '当前没有被冻结的 IP'
+      }}</strong>
+      <p>
+        {{
+          activeEntries.length
+            ? '请调整反代规则或搜索条件。'
+            : '达到账号或防护阈值、或手动冻结后，记录会显示在这里。'
+        }}
+      </p>
     </div>
-
-    <!-- Manual Freeze Modal -->
-    <transition name="modal-fade">
-      <div v-if="isModalOpen" class="modal-backdrop" @click.self="isModalOpen = false">
-        <div class="modal-dialog">
-          <div class="modal-header">
-            <h3 class="modal-title">手动冻结 IP 来源</h3>
-            <button class="close-modal-btn" @click="isModalOpen = false"><X :size="18" /></button>
-          </div>
-          <form class="modal-body" @submit.prevent="createFreeze">
-            <div class="form-group">
-              <label class="form-label">来源 IP 地址 (IPv4 / IPv6)</label>
-              <input v-model="form.ip" type="text" placeholder="例如: 203.0.113.10" class="form-input mono-text" required />
-            </div>
-
-            <div class="form-group">
-              <label class="form-label">关联生效的反代规则</label>
-              <select v-model="form.ruleId" class="form-select">
-                <option value="ALL">全部反代规则 (全局阻断)</option>
-                <option v-for="rt in routes" :key="rt.id" :value="rt.id">
-                  {{ rt.name }} ({{ rt.domain }})
-                </option>
-              </select>
-            </div>
-
-            <div class="form-group">
-              <label class="form-label">冻结持续时长</label>
-              <select v-model="form.duration" class="form-select">
-                <option value="1800">30 分钟</option>
-                <option value="7200">2 小时</option>
-                <option value="86400">24 小时 (1天)</option>
-                <option value="604800">7 天</option>
-                <option value="forever">永久冻结</option>
-              </select>
-            </div>
-
-            <div class="form-group">
-              <label class="form-label">冻结备注原因</label>
-              <input v-model="form.reason" type="text" placeholder="例如: 疑似恶意脚本探测，手动阻断" class="form-input" required />
-            </div>
-
-            <div class="modal-footer">
-              <button type="button" class="btn btn-secondary" @click="isModalOpen = false">取消</button>
-              <button type="submit" class="btn btn-danger">执行冻结</button>
-            </div>
-          </form>
-        </div>
+    <nav v-if="totalPages > 1" class="pagination" aria-label="冻结记录分页">
+      <button class="btn btn-secondary" :disabled="page <= 1" @click="page--">上一页</button
+      ><span>{{ page }} / {{ totalPages }}</span
+      ><button class="btn btn-secondary" :disabled="page >= totalPages" @click="page++">下一页</button>
+    </nav>
+    <dialog ref="dialog" class="modal-dialog" aria-labelledby="freeze-title" @cancel="blockBusyClose">
+      <div class="modal-header">
+        <h2 id="freeze-title">手动冻结 IP 来源</h2>
+        <button class="btn btn-ghost" aria-label="关闭" :disabled="mutating" @click="dialog.close()">
+          <X :size="18" />
+        </button>
       </div>
-    </transition>
+      <form @submit.prevent="createFreeze">
+        <p v-if="formError" ref="errorElement" class="error" role="alert" tabindex="-1">{{ formError }}</p>
+        <fieldset :disabled="mutating" class="freeze-fields">
+          <label
+            >来源 IP 地址<input
+              v-model="form.ip"
+              name="ip"
+              class="form-input mono-text"
+              placeholder="203.0.113.10 或 2001:db8::10"
+              required
+              autofocus
+          /></label>
+          <label
+            >生效的反代规则<select v-model="form.rule" name="rule" class="form-select" required>
+              <option v-for="route in routes" :key="routeKey(route)" :value="routeKey(route)">
+                {{ routeLabel(route) }}
+              </option>
+            </select></label
+          >
+          <label
+            >冻结持续时长 分钟<input
+              v-model.number="form.minutes"
+              name="minutes"
+              class="form-input"
+              type="number"
+              min="1"
+              max="10080"
+              required
+          /></label>
+          <p class="note">范围 1–10080 分钟，最长 7 天。仅对所选反代规则生效，到期自动解除。</p>
+          <label
+            >备注原因（可选，最多 500 字节）<input
+              v-model="form.reason"
+              name="reason"
+              class="form-input"
+              type="text"
+              maxlength="500"
+              placeholder="留空使用管理员手动冻结"
+            />
+          </label>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" @click="dialog.close()">取消</button
+            ><button type="submit" class="btn btn-danger">{{ mutating ? '正在冻结…' : '执行冻结' }}</button>
+          </div>
+        </fieldset>
+      </form>
+    </dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
-import { ShieldAlert, Unlock, Search, CheckCircle, Clock, X } from 'lucide-vue-next'
+import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
+import { CheckCircle, Clock, Search, ShieldAlert, Unlock, X } from 'lucide-vue-next'
 import SpotlightCard from '@/components/SpotlightCard.vue'
-import { useAppStore } from '@/composables/useAppStore'
+import { adminApi } from '@/api/admin'
+import { routeKey } from '@/api/configuration'
+import { useGatewayStatus } from '@/composables/useGatewayStatus'
 import { useToast } from '@/composables/useToast'
 
-const { ipBlocks, routes } = useAppStore()
-const { success, info } = useToast()
-
-const selectedRule = ref('ALL')
+const { gatewayConfig, isSavingConfig, refreshConfig } = useGatewayStatus()
+const toast = useToast()
+const routes = computed(() => gatewayConfig.value?.routes ?? [])
+const view = shallowRef(null)
+const loading = ref(false)
+const mutating = ref(false)
+const loadError = ref('')
+const selectedRule = ref('')
 const searchQuery = ref('')
-const isModalOpen = ref(false)
-
-const form = ref({
-  ip: '',
-  ruleId: 'ALL',
-  duration: '86400',
-  reason: ''
+const page = ref(1)
+const dialog = ref(null)
+const form = ref({})
+const formError = ref('')
+const errorElement = ref(null)
+const serverTime = ref(Date.now())
+const tick = ref(performance.now())
+let receivedAt = tick.value
+let requestVersion = 0
+const controller = new AbortController()
+const now = computed(() => serverTime.value + tick.value - receivedAt)
+const activeEntries = computed(() =>
+  (view.value?.entries ?? []).filter((item) => Date.parse(item.until) > now.value)
+)
+const ruleOptions = computed(() => {
+  const options = new Map(
+    activeEntries.value.map((item) => [
+      item.rule,
+      { key: item.rule, label: `${item.rule_name || '已删除规则'} · ${item.rule}` }
+    ])
+  )
+  for (const route of routes.value)
+    options.set(routeKey(route), {
+      key: routeKey(route),
+      label: routeLabel(route)
+    })
+  return [...options.values()]
 })
-
 const filteredList = computed(() => {
-  return ipBlocks.value.filter(item => {
-    if (searchQuery.value.trim()) {
-      const q = searchQuery.value.toLowerCase()
-      return item.ip.toLowerCase().includes(q) || item.reason.toLowerCase().includes(q)
-    }
-    return true
-  })
+  const query = searchQuery.value.trim().toLowerCase()
+  return activeEntries.value.filter(
+    (item) =>
+      (!selectedRule.value || item.rule === selectedRule.value) &&
+      [item.ip, item.reason, item.rule, ruleName(item)].some((value) => value.toLowerCase().includes(query))
+  )
+})
+const totalPages = computed(() => Math.max(1, Math.ceil(filteredList.value.length / 20)))
+const paginatedList = computed(() => filteredList.value.slice((page.value - 1) * 20, page.value * 20))
+watch([selectedRule, searchQuery], () => {
+  page.value = 1
+})
+watch(totalPages, (count) => {
+  page.value = Math.min(page.value, count)
 })
 
-const openCreateModal = () => {
-  form.value = {
-    ip: '',
-    ruleId: 'ALL',
-    duration: '86400',
-    reason: '管理员手动添加拦截'
+function routeLabel(route) {
+  const group = gatewayConfig.value.groups.find((item) => item.id === route.group_id)
+  return `${group?.name || route.group_id} · ${route.name || route.host} · ${route.host}`
+}
+function ruleName(item) {
+  return routes.value.find((route) => routeKey(route) === item.rule)?.name || item.rule_name || item.rule
+}
+function sourceLabel(source) {
+  return { manual: '管理员手动', automatic: '账号验证失败', security: '安全防护触发' }[source] || source
+}
+function date(value) {
+  return new Date(value).toLocaleString()
+}
+function remaining(until) {
+  const seconds = Math.max(0, Math.ceil((Date.parse(until) - now.value) / 1000))
+  const days = Math.floor(seconds / 86400)
+  const hours = Math.floor((seconds % 86400) / 3600)
+  const minutes = Math.floor((seconds % 3600) / 60)
+  return `${days ? days + ' 天 ' : ''}${hours ? hours + ' 小时 ' : ''}${minutes} 分 ${seconds % 60} 秒`
+}
+function apply(result) {
+  receivedAt = performance.now()
+  serverTime.value = Date.parse(result.now)
+  tick.value = receivedAt
+  view.value = result
+  loadError.value = ''
+}
+async function readBlocks(version) {
+  const result = await adminApi.ipBlocks(controller.signal)
+  if (!controller.signal.aborted && version === requestVersion) apply(result)
+}
+async function refresh(loadConfig = false) {
+  if (loading.value || mutating.value || isSavingConfig.value) return
+  loading.value = true
+  const version = ++requestVersion
+  try {
+    await Promise.all([readBlocks(version), ...(loadConfig ? [refreshConfig(controller.signal)] : [])])
+  } catch (err) {
+    if (!controller.signal.aborted && version === requestVersion) loadError.value = err.message
+  } finally {
+    loading.value = false
   }
-  isModalOpen.value = true
 }
-
-const createFreeze = () => {
-  const selectedRt = routes.value.find(r => r.id === form.value.ruleId)
-  ipBlocks.value.unshift({
-    id: `blk_${Date.now()}`,
-    ip: form.value.ip,
-    rule: form.value.ruleId === 'ALL' ? '全局阻断' : selectedRt?.domain,
-    ruleName: form.value.ruleId === 'ALL' ? '全部反代规则' : selectedRt?.name,
-    reason: form.value.reason,
-    until: form.value.duration === 'forever' ? '永久' : '24 小时后',
-    remaining: form.value.duration === 'forever' ? '永久冻结' : '24 小时',
-    hits: 0,
-    manual: true
-  })
-  success(`已将 IP ${form.value.ip} 冻结，网关将阻断其访问`)
-  isModalOpen.value = false
+function openCreate() {
+  form.value = {
+    rule: routes.value.some((route) => routeKey(route) === selectedRule.value)
+      ? selectedRule.value
+      : routeKey(routes.value[0]),
+    ip: '',
+    minutes: 1440,
+    reason: ''
+  }
+  formError.value = ''
+  dialog.value.showModal()
 }
-
-const unblock = (item) => {
-  ipBlocks.value = ipBlocks.value.filter(i => i.id !== item.id)
-  info(`已解除对 IP ${item.ip} 的冻结`)
+function blockBusyClose(event) {
+  if (mutating.value) event.preventDefault()
 }
+async function createFreeze() {
+  if (mutating.value) return
+  mutating.value = true
+  ++requestVersion
+  formError.value = ''
+  try {
+    const result = await adminApi.freezeIP({
+      ...form.value,
+      ip: form.value.ip.trim(),
+      reason: form.value.reason.trim()
+    })
+    if (controller.signal.aborted) return
+    apply(result)
+    page.value = 1
+    selectedRule.value = form.value.rule
+    searchQuery.value = ''
+    dialog.value.close()
+    if (result.write_error) toast.warn('已冻结，但记录保存失败，请检查磁盘与权限')
+    else toast.success('IP 已加入所选规则的拦截名单')
+  } catch (err) {
+    if (!controller.signal.aborted) {
+      formError.value = err.message
+      await nextTick()
+      errorElement.value?.focus()
+    }
+  } finally {
+    mutating.value = false
+  }
+}
+async function unblock(item) {
+  if (mutating.value || !confirm(`解除 IP ${item.ip} 在「${ruleName(item)}」的冻结？`)) return
+  mutating.value = true
+  ++requestVersion
+  let expired = false
+  try {
+    const result = await adminApi.releaseIP({ rule: item.rule, ip: item.ip })
+    if (controller.signal.aborted) return
+    apply(result)
+    if (result.write_error) toast.warn('当前冻结已解除，但记录保存失败，请检查磁盘与权限')
+    else toast.success('已解除所选规则的 IP 冻结')
+  } catch (err) {
+    if (!controller.signal.aborted) {
+      expired = err.status === 404
+      if (expired) toast.info(err.message)
+      else toast.error(err.message)
+    }
+  } finally {
+    mutating.value = false
+  }
+  if (expired) refresh()
+}
+let refreshTimer, clockTimer
+onMounted(() => {
+  refresh(true)
+  refreshTimer = setInterval(() => refresh(), 5000)
+  clockTimer = setInterval(() => {
+    tick.value = performance.now()
+  }, 1000)
+})
+onUnmounted(() => {
+  clearInterval(refreshTimer)
+  clearInterval(clockTimer)
+  controller.abort()
+})
 </script>
 
 <style scoped>
-.ip-blocks-page { display: flex; flex-direction: column; gap: 20px; }
-.page-topbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; }
-.page-title { font-size: 22px; font-weight: 700; color: var(--ink); }
-.page-subtitle { font-size: 13px; color: var(--muted); margin-top: 3px; }
-
-.filter-bar { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
-.rule-select-wrap { display: flex; align-items: center; gap: 8px; }
-.filter-label { font-size: 12px; color: var(--faint); font-weight: 500; }
-.filter-select { width: 240px; padding: 6px 10px; font-size: 12.5px; }
-
+.ip-blocks-page {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.page-topbar,
+.filter-bar,
+.freeze-head,
+.freeze-footer,
+.modal-header,
+.modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.page-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.page-subtitle {
+  font-size: 13px;
+  color: var(--muted);
+  margin-top: 3px;
+}
+.header-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.rule-select-wrap {
+  display: grid;
+  gap: 6px;
+  max-width: 100%;
+  color: var(--muted);
+  font-size: 12px;
+}
+.rule-select-wrap select {
+  max-width: 420px;
+}
 .search-box {
-  display: flex; align-items: center; gap: 8px; padding: 6px 12px;
-  background: var(--input-bg); border: 1px solid var(--line);
-  border-radius: var(--radius-sm); width: 280px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  background: var(--input-bg);
+  border-radius: var(--radius-sm);
+  width: 300px;
+  max-width: 100%;
+  color: var(--faint);
 }
-.search-icon { color: var(--faint); }
-.search-input { border: none; background: transparent; color: var(--ink); font-size: 12.5px; flex: 1; }
-
-.freeze-cards-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
-.freeze-card { padding: 18px; display: flex; flex-direction: column; gap: 12px; }
-
-.freeze-head { display: flex; align-items: center; justify-content: space-between; }
-.ip-title-group { display: flex; align-items: center; gap: 10px; }
-.freeze-ip { font-size: 16px; font-weight: 700; color: var(--ink); }
-
+.search-input {
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font-size: 12px;
+  flex: 1;
+  min-width: 0;
+}
+.result-count,
+.note {
+  color: var(--muted);
+  font-size: 12px;
+}
+.freeze-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.freeze-card {
+  padding: 18px;
+  min-width: 0;
+}
+.freeze-card :deep(.card-inner) {
+  display: grid;
+  gap: 14px;
+}
+.ip-title-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.freeze-ip {
+  font-size: 16px;
+  overflow-wrap: anywhere;
+}
 .freeze-details-box {
-  background: var(--strip-bg); border: 1px solid var(--line);
-  border-radius: var(--radius-sm); padding: 10px 14px;
-  display: flex; flex-direction: column; gap: 6px; font-size: 12px;
+  padding: 12px;
+  margin: 0;
+  display: grid;
+  gap: 12px;
+  background: var(--strip-bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
 }
-.f-detail-row { display: flex; align-items: center; justify-content: space-between; }
-.f-label { color: var(--faint); }
-.f-val { color: var(--ink); font-weight: 500; }
-.reason-text { color: var(--bad); }
-.hits-val { color: var(--brand-light); font-weight: 700; }
-
+.freeze-details-box div {
+  display: grid;
+  grid-template-columns: 86px minmax(0, 1fr);
+  gap: 10px;
+}
+dt {
+  color: var(--muted);
+}
+dd {
+  margin: 0;
+  color: var(--ink-secondary);
+  overflow-wrap: anywhere;
+}
+.rule-key {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+}
+.reason-text,
+.error {
+  color: var(--bad);
+}
 .freeze-footer {
-  display: flex; align-items: center; justify-content: space-between;
-  border-top: 1px solid var(--line); padding-top: 10px; font-size: 11.5px;
+  color: var(--muted);
+  font-size: 12px;
 }
-.remaining-text { display: flex; align-items: center; gap: 6px; color: var(--muted); }
-.time-bold { color: var(--brand-cyan); }
-.auto-release-tag { color: var(--faint); }
-
+.freeze-footer span:first-child {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--brand-light);
+}
 .empty-state {
-  padding: 60px 20px; text-align: center; color: var(--muted);
-  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  display: grid;
+  justify-items: center;
+  text-align: center;
+  gap: 12px;
+  padding: 48px 16px;
+  color: var(--muted);
 }
-.empty-icon { width: 36px; height: 36px; }
-.ok-text { color: var(--ok); }
-.empty-title { font-size: 15px; font-weight: 600; color: var(--ink); }
-.empty-desc { font-size: 12.5px; color: var(--muted); }
-
-/* Modal */
-.modal-backdrop {
-  position: fixed; inset: 0; background: rgba(0,0,0,0.65);
-  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
-  z-index: 1050; display: flex; align-items: center; justify-content: center; padding: 20px;
+.empty-state svg {
+  color: var(--ok);
+}
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 14px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.write-warning {
+  padding: 14px;
+  border: 1px solid var(--warn);
+  color: var(--warn);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+}
+p {
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 .modal-dialog {
-  width: 100%; max-width: 480px; background: var(--card-bg);
-  border: 1px solid var(--card-border-hover); border-radius: var(--radius-card);
-  backdrop-filter: blur(30px); -webkit-backdrop-filter: blur(30px);
-  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.6), var(--inner-highlight); overflow: hidden;
+  width: min(520px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  margin: auto;
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--canvas);
+  color: var(--ink);
+  overflow-y: auto;
 }
-.modal-header { padding: 18px 20px; border-bottom: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; }
-.modal-title { font-size: 16px; font-weight: 700; color: var(--ink); }
-.close-modal-btn { color: var(--muted); }
-.modal-body { padding: 20px; display: flex; flex-direction: column; gap: 14px; }
-.form-group { display: flex; flex-direction: column; gap: 6px; }
-.form-label { font-size: 12px; font-weight: 600; color: var(--ink-secondary); }
-.modal-footer { display: flex; justify-content: flex-end; gap: 10px; padding-top: 8px; }
-
+.modal-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(8px);
+}
+.modal-header {
+  margin-bottom: 16px;
+}
+.modal-header h2 {
+  font-size: 18px;
+}
+form,
+.freeze-fields,
+.freeze-fields label {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+.freeze-fields {
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+.freeze-fields label {
+  font-size: 13px;
+  color: var(--ink-secondary);
+  gap: 6px;
+}
+.form-input,
+.form-select {
+  min-width: 0;
+}
+.modal-footer {
+  justify-content: flex-end;
+}
 @media (max-width: 900px) {
-  .freeze-cards-grid { grid-template-columns: 1fr; }
-  .filter-bar { flex-direction: column; align-items: stretch; }
-  .filter-select, .search-box { width: 100%; }
+  .freeze-cards-grid {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 600px) {
+  .filter-bar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .search-box {
+    width: 100%;
+    box-sizing: border-box;
+  }
+  .rule-select-wrap select {
+    width: 100%;
+  }
 }
 </style>
