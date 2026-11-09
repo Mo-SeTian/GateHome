@@ -83,4 +83,22 @@ const scopes = [
   font-weight: 600;
   box-shadow: 0 2px 8px rgba(99, 102, 241, 0.4);
 }
+
+@media (max-width: 640px) {
+  .page-topbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+  .scope-segmented {
+    width: 100%;
+    display: flex;
+  }
+  .scope-seg-btn {
+    flex: 1;
+    text-align: center;
+    padding: 7px 10px;
+    font-size: 12px;
+  }
+}
 </style>

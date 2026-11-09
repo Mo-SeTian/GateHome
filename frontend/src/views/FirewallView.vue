@@ -55,9 +55,13 @@
       <p v-if="waiting" class="waiting-note" role="status">
         引用的订阅尚无有效缓存，整个防火墙暂拒访问。更新失败时会保留上次成功列表。
       </p>
-      <details v-if="references.length" class="references">
-        <summary>查看关联服务</summary>
-        <p v-for="item in references" :key="item.key">{{ item.label }}</p>
+      <details v-if="references.length" class="references ref-details">
+        <summary>
+          <span>查看已关联服务（共 {{ references.length }} 项）</span>
+        </summary>
+        <div class="ref-pills-wrap">
+          <span v-for="item in references" :key="item.key" class="ref-pill">{{ item.label }}</span>
+        </div>
       </details>
       <div class="firewall-main-grid">
         <SpotlightCard class="panel-card">

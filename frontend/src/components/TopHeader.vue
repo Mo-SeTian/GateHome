@@ -540,6 +540,14 @@ body.theme-dark .user-dropdown-popover {
     display: none;
   }
 }
+@media (max-width: 480px) {
+  .user-profile-badge .username {
+    display: none;
+  }
+  .user-profile-badge {
+    padding: 3px 6px 3px 3px;
+  }
+}
 @media (max-width: 420px) {
   .crumb-root, .crumb-separator { display: none; }
 }

@@ -65,7 +65,11 @@
                 accept=".zip,application/zip"
                 required
                 @change="selectFile" /></label
-            ><label
+            >
+            <div v-if="file" class="selected-file-pill">
+              <span>已选择备份文件：{{ file.name }}</span>
+            </div>
+            <label
               >导出时的备份密码<input
                 v-model="restorePassword"
                 name="restore_password"

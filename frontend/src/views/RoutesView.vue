@@ -38,35 +38,39 @@
     <p v-if="loadError" class="page-error" role="alert">{{ loadError }}</p>
     <p v-if="loading" role="status">正在读取反代配置…</p>
 
-    <details v-if="gatewayConfig" class="group-panel">
-      <summary>反代组与监听端口</summary>
-      <div v-for="group in proxyGroups" :key="group.id" class="group-row">
-        <div>
-          <strong>{{ group.name }}</strong>
-          <p>
-            HTTP {{ group.http_port || '关闭' }} / HTTPS {{ group.https_port || '关闭' }} ·
-            {{ groupState(group) }}
-          </p>
-          <p v-if="group.domain_suffix">域名后缀 {{ group.domain_suffix }}</p>
+    <details v-if="gatewayConfig" class="group-panel ref-details">
+      <summary>
+        <span>反代组与监听端口（共 {{ proxyGroups.length }} 组）</span>
+      </summary>
+      <div class="group-panel-content">
+        <div v-for="group in proxyGroups" :key="group.id" class="group-row">
+          <div>
+            <strong>{{ group.name }}</strong>
+            <p>
+              HTTP {{ group.http_port || '关闭' }} / HTTPS {{ group.https_port || '关闭' }} ·
+              {{ groupState(group) }}
+            </p>
+            <p v-if="group.domain_suffix">域名后缀 {{ group.domain_suffix }}</p>
+          </div>
+          <div class="action-btn-group">
+            <button class="btn btn-secondary btn-sm" :disabled="isSavingConfig" @click="openGroup(group)">
+              编辑
+            </button>
+            <button class="btn btn-ghost btn-sm" :disabled="isSavingConfig" @click="toggleGroup(group)">
+              {{ group.enabled ? '停用' : '启用' }}
+            </button>
+            <button
+              class="btn btn-ghost btn-sm text-bad"
+              :disabled="isSavingConfig || getGroupCount(group.id) > 0"
+              title="先移走或删除组内路由，再删除此组"
+              @click="deleteGroup(group)"
+            >
+              删除
+            </button>
+          </div>
         </div>
-        <div class="action-btn-group">
-          <button class="btn btn-secondary btn-sm" :disabled="isSavingConfig" @click="openGroup(group)">
-            编辑
-          </button>
-          <button class="btn btn-ghost btn-sm" :disabled="isSavingConfig" @click="toggleGroup(group)">
-            {{ group.enabled ? '停用' : '启用' }}
-          </button>
-          <button
-            class="btn btn-ghost btn-sm text-bad"
-            :disabled="isSavingConfig || getGroupCount(group.id) > 0"
-            title="先移走或删除组内路由，再删除此组"
-            @click="deleteGroup(group)"
-          >
-            删除
-          </button>
-        </div>
+        <p v-if="!proxyGroups.length" class="report-note">尚无反代组，请先新建反代组。</p>
       </div>
-      <p v-if="!proxyGroups.length">尚无反代组，请先新建反代组。</p>
     </details>
 
     <div class="filter-bar">
@@ -833,8 +837,26 @@ onUnmounted(() => {
 .header-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .page-error { color: var(--bad); font-size: 13px; overflow-wrap: anywhere; }
 .form-note { color: var(--muted); font-size: 12px; margin: 0; overflow-wrap: anywhere; }
-.group-panel { padding: 14px; background: var(--strip-bg); border: 1px solid var(--line); border-radius: var(--radius-sm); }
-.group-panel summary { cursor: pointer; color: var(--ink); }
+.group-panel {
+  padding: 0;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.group-panel summary {
+  padding: 10px 16px !important;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  cursor: pointer;
+}
+.group-panel-content {
+  padding: 4px 16px 14px !important;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
 .group-row { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; padding-top: 12px; color: var(--ink); }
 .group-row p { color: var(--muted); font-size: 12px; margin: 4px 0; }
 .health-detail { color: var(--muted); text-align: left; font-size: 12px; margin-bottom: 12px; }
@@ -1045,5 +1067,7 @@ onUnmounted(() => {
   .routes-grid { grid-template-columns: 1fr; }
   .filter-bar { flex-direction: column; align-items: stretch; }
   .search-box { width: 100%; }
+  .header-actions { width: 100%; }
+  .header-actions .btn { flex: 1 1 calc(50% - 6px); justify-content: center; }
 }
 </style>

@@ -849,10 +849,117 @@ onUnmounted(() => controller.abort())
   margin: 0;
 }
 
-@media (max-width: 900px) {
-  .filter-actions-group {
+/* ================= 响应式适配 (Mobile & Tablet) ================= */
+@media (max-width: 768px) {
+  .report-filter-bar {
+    padding: 12px !important;
+    gap: 10px;
+  }
+
+  .filter-primary-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .filter-primary-fields {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
     width: 100%;
-    justify-content: flex-end;
+  }
+
+  .filter-col {
+    min-width: 0 !important;
+    width: 100% !important;
+  }
+
+  .filter-col-sm {
+    max-width: none !important;
+    min-width: 0 !important;
+    width: 100% !important;
+  }
+
+  .filter-col-search {
+    grid-column: 1 / -1;
+    min-width: 0 !important;
+    width: 100% !important;
+  }
+
+  .filter-actions-group {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr auto auto;
+    gap: 8px;
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .filter-actions-group .btn {
+    justify-content: center;
+    padding-inline: 8px;
+  }
+
+  .filter-advanced-drawer {
+    padding-top: 10px;
+  }
+
+  .advanced-grid {
+    grid-template-columns: 1fr !important;
+    gap: 10px;
+  }
+
+  .filter-quick-info {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+  }
+
+  .quick-info-text {
+    font-size: 11px;
+    line-height: 1.4;
+  }
+
+  .report-pagination {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 10px !important;
+  }
+
+  .report-pagination .log-result {
+    text-align: center !important;
+    font-size: 12px !important;
+  }
+
+  .report-pagination label {
+    justify-content: center !important;
+  }
+
+  .report-pagination .report-actions {
+    width: 100% !important;
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 8px !important;
+  }
+
+  .report-pagination .report-actions .btn {
+    width: 100% !important;
+    justify-content: center !important;
+  }
+}
+
+@media (min-width: 480px) and (max-width: 768px) {
+  .advanced-grid {
+    grid-template-columns: 1fr 1fr !important;
+  }
+}
+
+@media (max-width: 400px) {
+  .filter-actions-group {
+    grid-template-columns: 1fr 1fr 36px 36px;
+  }
+  .filter-actions-group .btn span {
+    font-size: 11.5px;
   }
 }
 </style>

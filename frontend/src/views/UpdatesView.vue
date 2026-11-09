@@ -101,6 +101,9 @@
                 required
                 @change="selectFile"
             /></label>
+            <div v-if="file" class="selected-file-pill">
+              <span>已选择更新包：{{ file.name }}</span>
+            </div>
             <p class="report-note">
               只接受项目格式、当前平台且版本更高的可信更新包。先预检，再确认应用；预检不会替换正在运行的程序。
             </p>

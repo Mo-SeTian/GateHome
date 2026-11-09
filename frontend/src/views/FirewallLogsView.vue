@@ -56,4 +56,19 @@ import LogExplorer from '@/components/LogExplorer.vue'
   align-items: center;
   gap: 6px;
 }
+
+@media (max-width: 640px) {
+  .page-topbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+  .topbar-actions {
+    width: 100%;
+  }
+  .topbar-actions .btn {
+    width: 100%;
+    justify-content: center;
+  }
+}
 </style>

@@ -89,9 +89,13 @@
             </tbody>
           </table>
         </div>
-        <details v-if="references(group.id).length">
-          <summary>关联 {{ references(group.id).length }} 个反代组</summary>
-          <p v-for="name in references(group.id)" :key="name" class="report-note">{{ name }}</p>
+        <details v-if="references(group.id).length" class="ref-details">
+          <summary>
+            <span>关联 {{ references(group.id).length }} 个反代组</span>
+          </summary>
+          <div class="ref-pills-wrap">
+            <span v-for="name in references(group.id)" :key="name" class="ref-pill">{{ name }}</span>
+          </div>
         </details>
         <div class="report-actions card-actions">
           <button

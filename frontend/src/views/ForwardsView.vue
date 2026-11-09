@@ -26,13 +26,17 @@
         {{ item.label }}
       </button>
     </div>
-    <details class="live-listeners">
-      <summary>当前实际监听 {{ runningListeners.length }} 条</summary>
-      <p v-for="listener in runningListeners" :key="listener.id">
-        {{ listener.name }} · {{ listener.protocol.toUpperCase() }} :{{ listener.listen_port }} →
-        {{ listener.upstream }}
-      </p>
-      <p v-if="!runningListeners.length">暂无端口转发监听。</p>
+    <details class="live-listeners ref-details">
+      <summary>
+        <span>当前实际系统监听（共 {{ runningListeners.length }} 条）</span>
+      </summary>
+      <div class="listener-list">
+        <p v-for="listener in runningListeners" :key="listener.id" class="listener-item">
+          <strong>{{ listener.name }}</strong>
+          <span>{{ listener.protocol.toUpperCase() }} :{{ listener.listen_port }} → {{ listener.upstream }}</span>
+        </p>
+        <p v-if="!runningListeners.length" class="report-note">暂无端口转发监听。</p>
+      </div>
     </details>
     <div class="forwards-grid">
       <SpotlightCard
@@ -457,5 +461,12 @@ onUnmounted(() => controller.abort())
 
 @media (max-width: 900px) {
   .forwards-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 640px) {
+  .page-topbar { flex-direction: column; align-items: stretch; gap: 12px; }
+  .header-actions { width: 100%; }
+  .header-actions .btn { flex: 1; justify-content: center; }
+  .protocol-filters { width: 100%; display: flex; }
+  .protocol-filters .btn { flex: 1; text-align: center; padding-inline: 6px; }
 }
 </style>

@@ -101,9 +101,13 @@
             <dd>{{ reportDate(status(sub.id)?.last_success) }}</dd>
           </div>
         </dl>
-        <details v-if="references(sub.id).length">
-          <summary>{{ references(sub.id).length }} 个防火墙 IP 组引用</summary>
-          <p v-for="name in references(sub.id)" :key="name" class="report-note">{{ name }}</p>
+        <details v-if="references(sub.id).length" class="ref-details">
+          <summary>
+            <span>{{ references(sub.id).length }} 个防火墙 IP 组引用</span>
+          </summary>
+          <div class="ref-pills-wrap">
+            <span v-for="name in references(sub.id)" :key="name" class="ref-pill">{{ name }}</span>
+          </div>
         </details>
         <p v-else class="report-note">尚未被防火墙引用</p>
         <div class="report-actions sub-footer">
