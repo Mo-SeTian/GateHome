@@ -173,7 +173,7 @@ onUnmounted(() => {
   padding: 0 24px;
   position: sticky;
   top: 0;
-  z-index: 50;
+  z-index: 100;
   gap: 16px;
 }
 

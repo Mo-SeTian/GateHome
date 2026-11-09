@@ -319,7 +319,7 @@ onBeforeUnmount(() => {
 .report-panel h2 {
   margin-bottom: 0;
 }
-label {
+label:not(.toggle-row):not(.check-row) {
   display: grid;
   gap: 7px;
   font-size: 12px;

@@ -11,19 +11,22 @@ select,
   -moz-appearance: none !important;
   box-sizing: border-box !important;
   width: 100% !important;
-  height: 38px !important;
-  padding: 0 32px 0 12px !important;
-  line-height: normal !important;
+  height: 40px !important;
+  min-height: 40px !important;
+  padding: 0 34px 0 12px !important;
+  line-height: 38px !important;
   background-color: var(--input-bg) !important;
   border: 1px solid var(--line) !important;
   border-radius: var(--radius-sm) !important;
   color: var(--ink) !important;
-  font-size: 13px !important;
+  font-size: 13.5px !important;
   cursor: pointer !important;
+  display: block !important;
+  vertical-align: middle !important;
   transition: var(--transition-smooth) !important;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23818cf8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") !important;
   background-repeat: no-repeat !important;
-  background-position: right 10px center !important;
+  background-position: right 12px center !important;
   background-size: 14px 14px !important;
 }
 
@@ -69,14 +72,17 @@ input[type="url"],
 input[type="datetime-local"] {
   box-sizing: border-box !important;
   width: 100% !important;
-  height: 38px !important;
+  height: 40px !important;
+  min-height: 40px !important;
   padding: 0 12px !important;
-  line-height: normal !important;
+  line-height: 38px !important;
   background-color: var(--input-bg) !important;
   border: 1px solid var(--line) !important;
   border-radius: var(--radius-sm) !important;
   color: var(--ink) !important;
-  font-size: 13px !important;
+  font-size: 13.5px !important;
+  display: block !important;
+  vertical-align: middle !important;
   transition: var(--transition-smooth) !important;
 }
 
@@ -181,23 +187,41 @@ textarea.form-input::placeholder {
   flex-direction: row !important;
   align-items: center !important;
   justify-content: space-between !important;
-  padding: 6px 0 !important;
-  background: transparent !important;
-  border: none !important;
+  padding: 8px 12px !important;
+  background: rgba(148, 163, 184, 0.05) !important;
+  border: 1px solid var(--line) !important;
+  border-radius: var(--radius-sm) !important;
   color: var(--ink) !important;
   font-size: 13px !important;
   font-weight: 500 !important;
   cursor: pointer !important;
   user-select: none !important;
   transition: var(--transition-smooth) !important;
-  min-height: 32px !important;
+  min-height: 38px !important;
   margin: 3px 0 !important;
   gap: 12px !important;
 }
 
 .toggle-row:hover {
-  background: transparent !important;
-  color: var(--brand-light) !important;
+  background: var(--card-hover-bg) !important;
+  border-color: var(--card-border-hover) !important;
+  color: var(--ink) !important;
+}
+
+/* 连续开关卡片组包裹容器 */
+.toggles-group {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 6px !important;
+  background: rgba(148, 163, 184, 0.04) !important;
+  border: 1px solid var(--line) !important;
+  border-radius: var(--radius-md) !important;
+  padding: 8px !important;
+  margin: 4px 0 !important;
+}
+.toggles-group .toggle-row {
+  margin: 0 !important;
+  background: var(--input-bg) !important;
 }
 
 /* 赋予 .toggle-row 内部的 input 原生 checkbox 完整的极光滑动开关外观 */
@@ -520,7 +544,7 @@ dialog label:not(.toggle-row):not(.check-row):not(.check-label):not(.switch),
   min-width: 0;
 }
 
-/* 确保弹窗内开关始终是左右单行结构，绝不垂直堆叠 */
+/* 确保弹窗内开关始终是左右单行紧凑结构，绝不垂直堆叠 */
 dialog .toggle-row,
 .modal-dialog .toggle-row,
 .modal-box .toggle-row,
@@ -531,11 +555,13 @@ dialog .toggle-row,
   align-items: center !important;
   justify-content: space-between !important;
   width: 100% !important;
-  padding: 8px 0 !important;
-  margin: 2px 0 !important;
-  background: transparent !important;
-  border: none !important;
+  padding: 8px 12px !important;
+  margin: 3px 0 !important;
+  background: rgba(148, 163, 184, 0.05) !important;
+  border: 1px solid var(--line) !important;
+  border-radius: var(--radius-sm) !important;
   box-shadow: none !important;
+  min-height: 38px !important;
 }
 
 dialog .toggle-row span,

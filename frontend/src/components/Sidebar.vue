@@ -129,7 +129,10 @@
           </div>
           <div class="status-details">
             <span class="admin-addr" :title="`管理入口 ${adminAddress}`">入口 {{ adminAddress }}</span>
-            <button type="button" class="login-link-btn" :disabled="isLoggingOut" @click="handleLogout">退出登录</button>
+            <button type="button" class="login-link-btn" :disabled="isLoggingOut" @click="handleLogout" title="退出当前登录">
+              <LogOut :size="12" class="logout-mini-icon" />
+              <span>退出登录</span>
+            </button>
           </div>
         </div>
       </div>
@@ -142,7 +145,7 @@ import { computed } from 'vue'
 import { 
   X, LayoutDashboard, Network, ArrowLeftRight, Compass,
   Globe, Lock, Download, ShieldAlert, FileSearch, ScrollText, Ban,
-  BarChart3, Activity, Bot, RefreshCw, HardDriveDownload, Settings
+  BarChart3, Activity, Bot, RefreshCw, HardDriveDownload, Settings, LogOut
 } from 'lucide-vue-next'
 import { useAppStore } from '@/composables/useAppStore'
 import { useGatewayStatus } from '@/composables/useGatewayStatus'
@@ -411,19 +414,28 @@ const handleLogout = () => {
 }
 
 .login-link-btn {
-  flex-shrink: 0;
-  white-space: nowrap;
+  flex-shrink: 0 !important;
+  white-space: nowrap !important;
+  word-break: keep-all !important;
   background: transparent;
   border: none;
-  padding: 0;
+  padding: 2px 5px;
+  border-radius: 4px;
   font-size: 11px;
   color: var(--brand-light);
   cursor: pointer;
   transition: var(--transition-smooth);
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
 }
 .login-link-btn:hover {
-  text-decoration: underline;
+  background: rgba(99, 102, 241, 0.12);
   color: var(--ink);
+}
+.logout-mini-icon {
+  flex-shrink: 0;
+  opacity: 0.8;
 }
 
 /* ================= Mobile Breakpoints ================= */

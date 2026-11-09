@@ -236,21 +236,7 @@ input, select, textarea {
   background-color: #ffffff;
 }
 
-/* ================= Form Inputs ================= */
-.form-input, .form-select {
-  width: 100%;
-  padding: 9px 13px;
-  background: var(--input-bg);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  color: var(--ink);
-  font-size: 13px;
-  transition: var(--transition-smooth);
-}
-.form-input:focus, .form-select:focus {
-  border-color: var(--brand);
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.18);
-}
+/* ================= Form Inputs (统一由 form-tokens.css 精确驱动) ================= */
 .form-input::placeholder {
   color: var(--faint);
 }

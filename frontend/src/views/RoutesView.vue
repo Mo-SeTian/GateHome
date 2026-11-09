@@ -235,18 +235,20 @@
             </option>
           </select></label
         >
-        <label class="toggle-row">
-          <span>启用此反代路由</span>
-          <input v-model="routeDraft.enabled" name="enabled" type="checkbox" />
-        </label>
-        <label class="toggle-row">
-          <span>使用 HTTPS 访问（需要匹配证书）</span>
-          <input v-model="routeDraft.tls" name="tls" type="checkbox" />
-        </label>
-        <label class="toggle-row">
-          <span>启用独立访问账户保护</span>
-          <input v-model="routeDraft.auth.enabled" name="auth_enabled" type="checkbox" />
-        </label>
+        <div class="toggles-group">
+          <label class="toggle-row">
+            <span>启用此反代路由</span>
+            <input v-model="routeDraft.enabled" name="enabled" type="checkbox" />
+          </label>
+          <label class="toggle-row">
+            <span>使用 HTTPS 访问（需要匹配证书）</span>
+            <input v-model="routeDraft.tls" name="tls" type="checkbox" />
+          </label>
+          <label class="toggle-row">
+            <span>启用独立访问账户保护</span>
+            <input v-model="routeDraft.auth.enabled" name="auth_enabled" type="checkbox" />
+          </label>
+        </div>
         <fieldset v-if="routeDraft.auth.enabled" class="auth-fields">
           <label class="form-group"
             >访问用户名<input
