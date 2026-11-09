@@ -30,3 +30,4 @@ __pycache__/
 !/sunpanel/service/integration/web/.gitkeep
 
 /.workbuddy/
+*.docx

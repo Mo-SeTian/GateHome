@@ -308,26 +308,26 @@
             <button
               type="button"
               draggable="true"
-              class="btn btn-ghost btn-sm"
+              class="btn btn-ghost btn-sm drag-handle"
               :aria-label="'拖动或方向键排序 ' + titles[id]"
               @dragstart="startDrag($event, id)"
               @dragend="dragged = ''"
               @keydown.up.prevent="move(id, -1)"
               @keydown.down.prevent="move(id, 1)"
             >
-              ☰</button
-            ><label
-              ><input v-model="selected" type="checkbox" :value="id" :name="'widget_' + id" />{{
+              <GripVertical :size="15" /></button
+            ><label class="check-label"
+              ><input v-model="selected" type="checkbox" :value="id" :name="'widget_' + id" /><span>{{
                 titles[id]
-              }}</label
-            ><button
+              }}</span></label
+            ><div class="order-btn-group"><button
               type="button"
               class="btn btn-secondary btn-sm"
               :aria-label="'上移 ' + titles[id]"
               :disabled="index === 0"
               @click="move(id, -1)"
             >
-              ↑</button
+              <ArrowUp :size="13" /></button
             ><button
               type="button"
               class="btn btn-secondary btn-sm"
@@ -335,8 +335,8 @@
               :disabled="index === order.length - 1"
               @click="move(id, 1)"
             >
-              ↓
-            </button>
+              <ArrowDown :size="13" />
+            </button></div>
           </div>
           <label
             >流量采集网卡<select
@@ -380,6 +380,7 @@
 </template>
 <script setup>
 import { computed, nextTick, onMounted, onBeforeUnmount, reactive, ref, shallowRef } from 'vue'
+import { GripVertical, ArrowUp, ArrowDown } from 'lucide-vue-next'
 import SpotlightCard from '@/components/SpotlightCard.vue'
 import { adminApi } from '@/api/admin'
 import {
@@ -616,17 +617,21 @@ onBeforeUnmount(() => {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 18px;
-  align-items: start;
+  align-items: stretch;
 }
 .dashboard-widget {
   min-width: 0;
+  display: flex;
+  flex-direction: column;
 }
 .dashboard-widget.wide {
   grid-column: span 2;
 }
 .dashboard-widget :deep(.card-inner) {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 14px;
+  height: 100%;
 }
 h2 {
   margin-bottom: 0;
@@ -717,15 +722,33 @@ meter {
   fill: var(--bad);
 }
 .layout-row {
-  display: grid;
-  grid-template-columns: 36px minmax(0, 1fr) 34px 34px;
-  gap: 8px;
-  align-items: center;
-}
-.layout-row label {
   display: flex;
-  gap: 9px;
   align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: var(--strip-bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  gap: 10px;
+  transition: var(--transition-smooth);
+}
+.layout-row:hover {
+  background: var(--card-hover-bg);
+  border-color: var(--card-border-hover);
+}
+.drag-handle {
+  color: var(--faint);
+  display: flex;
+  align-items: center;
+  cursor: grab;
+  padding: 4px;
+}
+.drag-handle:hover {
+  color: var(--ink);
+}
+.order-btn-group {
+  display: flex;
+  gap: 4px;
 }
 [draggable] {
   cursor: grab;
@@ -738,12 +761,12 @@ button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
-@media (max-width: 1000px) {
+@media (max-width: 1279px) {
   .dashboard-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
-@media (max-width: 600px) {
+@media (max-width: 767px) {
   .dashboard-grid {
     grid-template-columns: minmax(0, 1fr);
   }

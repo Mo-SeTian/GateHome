@@ -109,7 +109,7 @@
         :class="{ inactive: !route.enabled }"
       >
         <div class="card-head">
-          <div class="app-icon-wrap system">
+          <div class="app-icon-wrap" :class="routeCategoryClass(route)">
             <img
               v-if="route.image"
               :src="`/api/route-images/${route.image}`"
@@ -231,15 +231,18 @@
             </option>
           </select></label
         >
-        <label class="toggle-row"
-          >启用此路由<input v-model="routeDraft.enabled" name="enabled" type="checkbox"
-        /></label>
-        <label class="toggle-row"
-          >使用 HTTPS 访问，需要匹配证书<input v-model="routeDraft.tls" name="tls" type="checkbox"
-        /></label>
-        <label class="toggle-row"
-          >启用独立访问账户<input v-model="routeDraft.auth.enabled" name="auth_enabled" type="checkbox"
-        /></label>
+        <label class="toggle-row">
+          <span>启用此反代路由</span>
+          <input v-model="routeDraft.enabled" name="enabled" type="checkbox" />
+        </label>
+        <label class="toggle-row">
+          <span>使用 HTTPS 访问（需要匹配证书）</span>
+          <input v-model="routeDraft.tls" name="tls" type="checkbox" />
+        </label>
+        <label class="toggle-row">
+          <span>启用独立访问账户保护</span>
+          <input v-model="routeDraft.auth.enabled" name="auth_enabled" type="checkbox" />
+        </label>
         <fieldset v-if="routeDraft.auth.enabled" class="auth-fields">
           <label class="form-group"
             >访问用户名<input
@@ -388,9 +391,10 @@
       </div>
       <form class="modal-body" @submit.prevent="saveHealthSettings">
         <p v-if="formError" class="page-error" role="alert">{{ formError }}</p>
-        <label class="toggle-row"
-          >启用服务器上游检查<input v-model="healthDraft.enabled" type="checkbox" name="enabled"
-        /></label>
+        <label class="toggle-row">
+          <span>启用服务器上游检查</span>
+          <input v-model="healthDraft.enabled" type="checkbox" name="enabled" />
+        </label>
         <label class="form-group"
           >检查间隔 秒<input
             v-model.number="healthDraft.interval"
@@ -401,7 +405,19 @@
             class="form-input"
             required
         /></label>
-        <button type="submit" class="btn btn-primary" :disabled="isSavingConfig">保存检查设置</button>
+        <div class="modal-footer">
+          <button
+            type="button"
+            class="btn btn-secondary"
+            :disabled="isSavingConfig"
+            @click="healthDialog.close()"
+          >
+            取消
+          </button>
+          <button type="submit" class="btn btn-primary" :disabled="isSavingConfig">
+            {{ isSavingConfig ? '保存中…' : '保存检查设置' }}
+          </button>
+        </div>
       </form>
     </dialog>
     <dialog ref="healthDetailDialog" class="modal-dialog" aria-labelledby="health-detail-title">
@@ -412,12 +428,24 @@
         </button>
       </div>
       <div class="modal-body">
-        <p>{{ healthDetail?.label || '等待检测' }}</p>
-        <p>{{ healthDetail?.message }}</p>
-        <p v-if="healthDetail?.checked_at">
-          最近检查 {{ new Date(healthDetail.checked_at).toLocaleString() }} · HTTP
-          {{ healthDetail.status || '—' }} · {{ healthDetail.duration_ms }} ms
-        </p>
+        <div class="health-diagnostic-card">
+          <div class="diagnostic-header">
+            <span class="diagnostic-badge" :class="healthDetail?.status >= 200 && healthDetail?.status < 400 ? 'status-ok' : 'status-bad'">
+              {{ healthDetail?.label || '等待检测' }}
+            </span>
+            <span v-if="healthDetail?.duration_ms" class="diagnostic-latency mono-text">
+              {{ healthDetail.duration_ms }} ms
+            </span>
+          </div>
+          <p v-if="healthDetail?.message" class="diagnostic-msg">{{ healthDetail.message }}</p>
+          <div v-if="healthDetail?.checked_at" class="diagnostic-meta">
+            <span>最近检查：{{ new Date(healthDetail.checked_at).toLocaleString() }}</span>
+            <span v-if="healthDetail.status">HTTP {{ healthDetail.status }}</span>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" @click="healthDetailDialog.close()">关闭</button>
       </div>
     </dialog>
     <dialog
@@ -769,6 +797,16 @@ function discoverySaved() {
   discoveryDialog.value.close()
   saved('已创建所选服务的反代路由')
 }
+function routeCategoryClass(route) {
+  const name = (route.name || route.host || '').toLowerCase()
+  if (name.includes('cloud') || name.includes('nas') || name.includes('storage') || name.includes('pan') || name.includes('drive')) return 'storage'
+  if (name.includes('vault') || name.includes('pass') || name.includes('auth') || name.includes('key') || name.includes('safe')) return 'security'
+  if (name.includes('home') || name.includes('iot') || name.includes('hass') || name.includes('zigbee')) return 'iot'
+  if (name.includes('media') || name.includes('plex') || name.includes('jelly') || name.includes('emby') || name.includes('video') || name.includes('music')) return 'media'
+  if (name.includes('git') || name.includes('code') || name.includes('dev') || name.includes('gitea')) return 'dev'
+  return 'system'
+}
+
 watch(
   [() => currentRoute.query.new, gatewayConfig],
   ([requested, config]) => {
@@ -800,7 +838,62 @@ onUnmounted(() => {
 .group-row { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; padding-top: 12px; color: var(--ink); }
 .group-row p { color: var(--muted); font-size: 12px; margin: 4px 0; }
 .health-detail { color: var(--muted); text-align: left; font-size: 12px; margin-bottom: 12px; }
-.auth-fields { border: 1px solid var(--line); border-radius: var(--radius-sm); display: grid; gap: 12px; padding: 12px; min-width: 0; }
+.auth-fields {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.02);
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  min-width: 0;
+}
+.health-diagnostic-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--line);
+}
+.diagnostic-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.diagnostic-badge {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 999px;
+}
+.diagnostic-badge.status-ok {
+  background: rgba(16, 185, 129, 0.15);
+  color: var(--ok);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+.diagnostic-badge.status-bad {
+  background: rgba(244, 63, 94, 0.15);
+  color: var(--bad);
+  border: 1px solid rgba(244, 63, 94, 0.3);
+}
+.diagnostic-latency {
+  font-size: 13px;
+  color: var(--brand-cyan);
+  font-weight: 600;
+}
+.diagnostic-msg {
+  font-size: 13px;
+  color: var(--ink);
+  line-height: 1.5;
+  margin: 0;
+}
+.diagnostic-meta {
+  display: flex;
+  gap: 12px;
+  font-size: 11.5px;
+  color: var(--faint);
+}
 .routes-page { display: flex; flex-direction: column; gap: 20px; }
 .page-topbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; }
 .page-title { font-size: 22px; font-weight: 700; color: var(--ink); }
@@ -833,8 +926,22 @@ onUnmounted(() => {
 .clear-btn { color: var(--faint); padding: 2px; }
 
 /* Grid */
-.routes-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
-.route-card { padding: 18px; display: flex; flex-direction: column; justify-content: space-between; }
+.routes-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 16px;
+}
+.route-card {
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  min-height: 240px;
+}
+.route-card :deep(.card-inner) {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
 .route-card.inactive { opacity: 0.65; filter: grayscale(0.2); }
 
 .card-head { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
@@ -870,7 +977,7 @@ onUnmounted(() => {
 .target-row { color: var(--muted); }
 .target-arrow { color: var(--brand-cyan); }
 
-.feature-badges { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
+.feature-badges { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
 .feature-badge {
   display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; font-weight: 600;
   padding: 2px 7px; border-radius: 4px;
@@ -881,8 +988,31 @@ onUnmounted(() => {
 .feature-badge.ws { background: rgba(6, 182, 212, 0.12); color: var(--brand-cyan); border: 1px solid rgba(6, 182, 212, 0.2); }
 .feature-badge.hits { background: var(--strip-bg); color: var(--faint); border: 1px solid var(--line); font-family: var(--mono); }
 
+.health-detail {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  background: var(--strip-bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  color: var(--muted);
+  font-size: 11px;
+  margin-bottom: 12px;
+  width: fit-content;
+  cursor: pointer;
+  transition: var(--transition-smooth);
+  text-align: left;
+}
+.health-detail:hover {
+  border-color: var(--card-border-hover);
+  color: var(--ink);
+  background: var(--card-hover-bg);
+}
+
 .card-actions {
-  display: flex; align-items: center; justify-content: space-between; border-top: 1px solid var(--line); padding-top: 10px;
+  margin-top: auto;
+  display: flex; align-items: center; justify-content: space-between; border-top: 1px solid var(--line); padding-top: 12px;
 }
 .latency-indicator { display: flex; align-items: center; gap: 4px; font-size: 11.5px; }
 .latency-label { color: var(--faint); }
@@ -898,40 +1028,20 @@ onUnmounted(() => {
 .empty-title { font-size: 15px; font-weight: 600; color: var(--ink); }
 .empty-desc { font-size: 12.5px; color: var(--muted); }
 
-/* Modal */
-.modal-dialog {
-  width: 100%; max-width: 520px; background: var(--card-hover-bg);
-  border: 1px solid var(--card-border-hover); border-radius: var(--radius-card);
-  backdrop-filter: blur(30px); -webkit-backdrop-filter: blur(30px);
-  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.6), var(--inner-highlight);
-  margin: auto; max-height: calc(100dvh - 40px); overflow: auto; color: var(--ink);
-}
-.modal-dialog::backdrop { background: rgba(0,0,0,0.65); backdrop-filter: blur(8px); }
 .route-card { min-width: 0; }
 .info-text { min-width: 0; overflow-wrap: anywhere; }
 .domain-row { width: 100%; background: transparent; border: 0; text-align: left; }
-.modal-header { padding: 18px 20px; border-bottom: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; }
-.modal-title { font-size: 16px; font-weight: 700; color: var(--ink); }
-.close-modal-btn { color: var(--muted); }
-.modal-body { padding: 20px; display: flex; flex-direction: column; gap: 14px; }
-.form-group { display: flex; flex-direction: column; gap: 6px; }
-.form-label { font-size: 12px; font-weight: 600; color: var(--ink-secondary); }
-.form-row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 
 .toggles-panel {
   background: var(--strip-bg); border: 1px solid var(--line);
   border-radius: var(--radius-sm); padding: 12px 14px; display: flex; flex-direction: column; gap: 10px;
 }
-.toggle-row { display: flex; align-items: center; justify-content: space-between; cursor: pointer; }
 .toggle-info { display: flex; flex-direction: column; }
 .toggle-title { font-size: 12.5px; font-weight: 600; color: var(--ink); }
 .toggle-desc { font-size: 11px; color: var(--faint); }
 .auth-sub-fields { padding: 8px 0; border-top: 1px dashed var(--line); margin-top: 4px; }
-.modal-footer { display: flex; justify-content: flex-end; gap: 10px; padding-top: 8px; }
 
-@media (max-width: 1300px) { .routes-grid { grid-template-columns: repeat(3, 1fr); } }
-@media (max-width: 900px) { .routes-grid { grid-template-columns: repeat(2, 1fr); } }
-@media (max-width: 600px) {
+@media (max-width: 640px) {
   .routes-grid { grid-template-columns: 1fr; }
   .filter-bar { flex-direction: column; align-items: stretch; }
   .search-box { width: 100%; }

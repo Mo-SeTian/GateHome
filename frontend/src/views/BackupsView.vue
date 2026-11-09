@@ -164,13 +164,14 @@
                 max="100"
                 required
             /></label>
-            <label class="check-row"
-              ><input
+            <label class="toggle-row wide">
+              <span>启用定时备份</span>
+              <input
                 v-model="draft.schedule_enabled"
                 name="schedule_enabled"
                 type="checkbox"
-              />启用定时备份</label
-            >
+              />
+            </label>
             <label
               >频率<select v-model="draft.schedule_mode" name="schedule_mode" class="form-select">
                 <option value="daily">每天</option>

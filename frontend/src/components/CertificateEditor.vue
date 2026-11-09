@@ -18,9 +18,10 @@
       <p v-if="error" ref="errorElement" class="report-error" role="alert" tabindex="-1">{{ error }}</p>
       <fieldset :disabled="isSavingConfig">
         <template v-if="settings">
-          <label class="check-label"
-            ><input v-model="draft.enabled" name="acme_enabled" type="checkbox" />启用自动申请与续期</label
-          >
+          <label class="toggle-row">
+            <span>启用自动申请与续期</span>
+            <input v-model="draft.enabled" name="acme_enabled" type="checkbox" />
+          </label>
           <label
             >ACME 联系邮箱<input
               v-model="draft.email"
@@ -91,13 +92,14 @@
           <label class="check-label"
             ><input v-model="clearToken" name="clear_token" type="checkbox" />清除已保存的 Token</label
           >
-          <label class="check-label"
-            ><input
+          <label class="toggle-row">
+            <span>启用此任务自动申请与续期</span>
+            <input
               v-model="draft.enabled"
               name="request_enabled"
               type="checkbox"
-            />启用此任务自动申请与续期</label
-          >
+            />
+          </label>
         </template>
         <footer>
           <button type="button" class="btn btn-secondary" @click="dialog.close()">取消</button

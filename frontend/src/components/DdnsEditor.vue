@@ -87,9 +87,10 @@
               max="86400"
               required
           /></label>
-          <label class="check-label"
-            ><input v-model="draft.enabled" name="enabled" type="checkbox" />启用此组自动同步</label
-          >
+          <label class="toggle-row">
+            <span>启用此组自动同步</span>
+            <input v-model="draft.enabled" name="enabled" type="checkbox" />
+          </label>
           <IPSourceFields :settings="draft" :interfaces="interfaces" endpoints />
           <p class="report-note">
             IPv4 / IPv6 接口各须 1–20 个。仅 DNS /

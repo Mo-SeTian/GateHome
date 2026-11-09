@@ -1,6 +1,9 @@
 <template>
   <div v-if="gatewayStatus?.restart_required" class="restart-notice" role="status">
-    <span>监听配置已保存，重启服务后生效。Docker bridge 部署还需发布对应 TCP / UDP 端口。</span>
+    <div class="notice-main">
+      <AlertTriangle :size="18" class="notice-icon" />
+      <span>监听配置已保存，重启服务后生效。Docker bridge 部署还需发布对应 TCP / UDP 端口。</span>
+    </div>
     <button
       v-if="gatewayStatus.maintenance_available"
       type="button"
@@ -16,6 +19,7 @@
 <script setup>
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { AlertTriangle } from 'lucide-vue-next'
 import { adminApi } from '@/api/admin'
 import { useGatewayStatus } from '@/composables/useGatewayStatus'
 import { useSession } from '@/composables/useSession'
@@ -50,11 +54,24 @@ async function restart() {
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: 12px;
-  padding: 14px 16px;
-  border: 1px solid var(--warn);
-  border-radius: var(--radius-sm);
+  gap: 14px;
+  padding: 14px 18px;
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.28);
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 20px rgba(245, 158, 11, 0.06);
   color: var(--ink);
   font-size: 13px;
+}
+.notice-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 260px;
+}
+.notice-icon {
+  color: var(--warn);
+  flex-shrink: 0;
 }
 </style>

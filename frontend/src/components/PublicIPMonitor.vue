@@ -54,15 +54,15 @@
     >
       <header>
         <h2 id="monitor-title">公网 IP 检测设置</h2>
-        <button class="btn btn-ghost" aria-label="关闭" :disabled="isSavingConfig" @click="dialog.close()">
+        <button class="close-modal-btn" aria-label="关闭" :disabled="isSavingConfig" @click="dialog.close()">
           <X :size="18" />
         </button>
       </header>
-      <form @submit.prevent="save">
+      <form class="modal-body" @submit.prevent="save">
         <p v-if="formError" ref="errorElement" class="report-error" role="alert" tabindex="-1">
           {{ formError }}
         </p>
-        <fieldset :disabled="isSavingConfig">
+        <fieldset :disabled="isSavingConfig" class="dialog-fieldset">
           <label
             >检测配置<select v-model="draft.group_id" name="monitor_group_id" class="form-select">
               <option value="">本机检测</option>
@@ -74,12 +74,15 @@
           <p class="report-note">
             本机检测使用默认 IP 查询接口；指定 DDNS 组时使用该组的网卡和接口。保存后刷新与重新登录会沿用。
           </p>
-          <footer>
-            <button type="button" class="btn btn-secondary" :disabled="loading" @click="preview">
-              预览检测</button
-            ><button type="submit" class="btn btn-primary">保存检测设置</button>
-          </footer>
         </fieldset>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" :disabled="loading" @click="preview">
+            预览检测
+          </button>
+          <button type="submit" class="btn btn-primary" :disabled="isSavingConfig">
+            {{ isSavingConfig ? '保存中…' : '保存检测设置' }}
+          </button>
+        </div>
       </form>
     </dialog>
   </SpotlightCard>

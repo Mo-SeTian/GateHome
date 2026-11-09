@@ -532,36 +532,6 @@ async function handleSubmit() {
 }
 
 /* Modal */
-.modal-box {
-  width: min(480px, calc(100% - 32px));
-  max-height: calc(100dvh - 32px);
-  overflow: auto;
-  margin: auto;
-  background: var(--card-hover-bg);
-  border: 1px solid var(--card-border);
-  color: var(--ink);
-  border-radius: 18px;
-  padding: 24px;
-  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.5);
-}
-
-.modal-box[open] {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-}
-
-.modal-box::backdrop {
-  background: rgba(0, 0, 0, 0.65);
-  backdrop-filter: blur(8px);
-}
-
-.modal-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
 .modal-title-row {
   display: flex;
   align-items: center;

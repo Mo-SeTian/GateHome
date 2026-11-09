@@ -214,18 +214,18 @@
     >
       <header>
         <h2 id="log-detail-title">调用详情 #{{ selected?.id }}</h2>
-        <button class="btn btn-ghost" aria-label="关闭" :disabled="freezing" @click="detailDialog.close()">
+        <button class="close-modal-btn" aria-label="关闭" :disabled="freezing" @click="detailDialog.close()">
           <X :size="18" />
         </button>
       </header>
-      <template v-if="selected">
-        <dl>
-          <div v-for="([label, value], index) in detailRows" :key="index">
+      <div v-if="selected" class="modal-body">
+        <dl class="detail-dl">
+          <div v-for="([label, value], index) in detailRows" :key="index" class="detail-row">
             <dt>{{ label }}</dt>
             <dd>{{ value || '—' }}</dd>
           </div>
         </dl>
-        <section v-if="selected.firewall" class="detail-section">
+        <section v-if="selected.firewall" class="detail-section glass-section">
           <h3>来源 IP 策略</h3>
           <p>
             {{ selected.firewall.name }} · {{ selected.firewall.group || selected.firewall.kind }} ·
@@ -235,7 +235,7 @@
             按此策略查询
           </button>
         </section>
-        <section v-if="selected.security?.length" class="detail-section">
+        <section v-if="selected.security?.length" class="detail-section glass-section">
           <h3>安全规则命中</h3>
           <p v-for="(hit, index) in selected.security" :key="index">
             {{ engineLabel(hit.engine) }} #{{ hit.rule_id }} · {{ hit.name }} ·
@@ -243,21 +243,21 @@
             }}{{ hit.severity ? ' · ' + hit.severity : '' }}
           </p>
         </section>
-        <div class="report-actions detail-section">
+        <div class="report-actions">
           <button v-if="selected.rule" class="btn btn-secondary btn-sm" @click="filterRule">
             按此反代规则查询</button
           ><router-link to="/ip-blocks" class="btn btn-secondary btn-sm">IP 拦截名单</router-link>
         </div>
         <form
           v-if="securityScope && hasRoute(selected.rule) && selected.remote && selected.remote !== '未知'"
-          class="detail-section"
+          class="detail-freeze-form glass-section"
           @submit.prevent="freeze"
         >
           <h3>在此反代规则手动冻结 {{ selected.remote }}</h3>
           <p v-if="freezeError" ref="freezeErrorElement" class="report-error" role="alert" tabindex="-1">
             {{ freezeError }}
           </p>
-          <fieldset :disabled="freezing">
+          <fieldset :disabled="freezing" class="freeze-fieldset">
             <label
               >冻结时长 分钟<input
                 v-model.number="freezeMinutes"
@@ -276,7 +276,10 @@
             ><button type="submit" class="btn btn-danger">{{ freezing ? '正在冻结…' : '冻结此 IP' }}</button>
           </fieldset>
         </form>
-      </template>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" :disabled="freezing" @click="detailDialog.close()">关闭</button>
+      </div>
     </dialog>
   </section>
 </template>
@@ -487,14 +490,55 @@ onUnmounted(() => controller.abort())
   font-size: 16px;
   color: var(--ink);
 }
-.detail-section {
-  display: grid;
-  gap: 12px;
-  margin-top: 20px;
-  font-size: 13px;
-  overflow-wrap: anywhere;
+.detail-dl {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
 }
-.detail-section h3 {
-  font-size: 14px;
+.detail-row {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: 12px;
+  font-size: 13px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+.detail-row dt {
+  color: var(--muted);
+  font-weight: 500;
+}
+.detail-row dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  font-family: var(--mono);
+  color: var(--ink);
+}
+.glass-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--line);
+}
+.glass-section h3 {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ink);
+  margin: 0;
+}
+.detail-freeze-form {
+  margin-top: 6px;
+}
+.freeze-fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border: none;
+  padding: 0;
+  margin: 0;
 }
 </style>

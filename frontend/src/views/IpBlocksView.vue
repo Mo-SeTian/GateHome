@@ -115,7 +115,7 @@
           <X :size="18" />
         </button>
       </div>
-      <form @submit.prevent="createFreeze">
+      <form class="modal-body" @submit.prevent="createFreeze">
         <p v-if="formError" ref="errorElement" class="error" role="alert" tabindex="-1">{{ formError }}</p>
         <fieldset :disabled="mutating" class="freeze-fields">
           <label
@@ -144,7 +144,7 @@
               max="10080"
               required
           /></label>
-          <p class="note">范围 1–10080 分钟，最长 7 天。仅对所选反代规则生效，到期自动解除。</p>
+          <p class="form-note">范围 1–10080 分钟，最长 7 天。仅对所选反代规则生效，到期自动解除。</p>
           <label
             >备注原因（可选，最多 500 字节）<input
               v-model="form.reason"
@@ -155,11 +155,11 @@
               placeholder="留空使用管理员手动冻结"
             />
           </label>
-          <div class="modal-footer">
-            <button type="button" class="btn btn-secondary" @click="dialog.close()">取消</button
-            ><button type="submit" class="btn btn-danger">{{ mutating ? '正在冻结…' : '执行冻结' }}</button>
-          </div>
         </fieldset>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" @click="dialog.close()">取消</button>
+          <button type="submit" class="btn btn-danger">{{ mutating ? '正在冻结…' : '执行冻结' }}</button>
+        </div>
       </form>
     </dialog>
   </div>
@@ -515,27 +515,6 @@ dd {
 p {
   margin: 0;
   overflow-wrap: anywhere;
-}
-.modal-dialog {
-  width: min(520px, calc(100vw - 32px));
-  max-height: calc(100dvh - 32px);
-  margin: auto;
-  padding: 24px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-card);
-  background: var(--canvas);
-  color: var(--ink);
-  overflow-y: auto;
-}
-.modal-dialog::backdrop {
-  background: rgba(0, 0, 0, 0.65);
-  backdrop-filter: blur(8px);
-}
-.modal-header {
-  margin-bottom: 16px;
-}
-.modal-header h2 {
-  font-size: 18px;
 }
 form,
 .freeze-fields,

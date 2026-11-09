@@ -15,13 +15,14 @@
       <fieldset :disabled="loading || isSavingConfig" class="settings-fields">
         <SpotlightCard class="report-panel">
           <h2>管理界面反代访问</h2>
-          <label class="check-row"
-            ><input
+          <label class="toggle-row">
+            <span>允许指定公网来源访问</span>
+            <input
               v-model="draft.admin_access.enabled"
               name="admin_access_enabled"
               type="checkbox"
-            />允许指定公网来源访问</label
-          >
+            />
+          </label>
           <label
             >允许的公网来源（每行一个）<textarea
               v-model="origins"
@@ -37,10 +38,10 @@
         </SpotlightCard>
         <SpotlightCard class="report-panel">
           <h2>出站网络代理</h2>
-          <label class="check-row"
-            ><input v-model="draft.outbound_proxy.enabled" name="proxy_enabled" type="checkbox" />启用 HTTP /
-            HTTPS / SOCKS5 代理</label
-          >
+          <label class="toggle-row">
+            <span>启用 HTTP / HTTPS / SOCKS5 代理</span>
+            <input v-model="draft.outbound_proxy.enabled" name="proxy_enabled" type="checkbox" />
+          </label>
           <label
             >代理地址<input
               v-model.trim="draft.outbound_proxy.url"

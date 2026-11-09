@@ -452,22 +452,6 @@ onMounted(() => dialog.value.showModal())
 </script>
 
 <style scoped>
-.firewall-dialog {
-  width: min(760px, calc(100vw - 32px));
-  max-height: calc(100dvh - 32px);
-  margin: auto;
-  padding: 24px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-card);
-  background: var(--canvas);
-  color: var(--ink);
-  overflow-y: auto;
-  box-shadow: var(--shadow-card);
-}
-.firewall-dialog::backdrop {
-  background: rgba(0, 0, 0, 0.65);
-  backdrop-filter: blur(8px);
-}
 .modal-header,
 .modal-footer,
 .rule-actions {
@@ -476,9 +460,6 @@ onMounted(() => dialog.value.showModal())
   justify-content: space-between;
   gap: 10px;
   flex-wrap: wrap;
-}
-.modal-header {
-  margin-bottom: 18px;
 }
 h2 {
   font-size: 18px;
@@ -489,7 +470,6 @@ h3 {
 form,
 .editor-fields,
 .editor-section,
-label,
 .rule-fields,
 .subscription-choices {
   display: grid;
@@ -502,7 +482,7 @@ label,
   padding: 0;
 }
 .editor-section {
-  padding: 18px 0;
+  padding: 16px 0;
   border-top: 1px solid var(--line);
 }
 .form-row-2 {
@@ -512,8 +492,12 @@ label,
 }
 label,
 .subscription-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   color: var(--ink-secondary);
-  font-size: 13px;
+  font-size: 12.5px;
+  font-weight: 600;
 }
 p {
   color: var(--muted);
@@ -523,21 +507,16 @@ p {
   overflow-wrap: anywhere;
 }
 .rule-fields {
-  padding: 14px;
+  padding: 16px;
+  background: var(--strip-bg);
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
 }
 legend {
-  font-size: 13px;
-  padding: 0 6px;
-}
-.check-label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.check-label input {
-  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--brand-light);
+  padding: 0 4px;
 }
 .modal-footer {
   justify-content: flex-end;
@@ -553,9 +532,6 @@ select {
   min-width: 0;
 }
 @media (max-width: 600px) {
-  .firewall-dialog {
-    padding: 18px;
-  }
   .form-row-2 {
     grid-template-columns: 1fr;
   }

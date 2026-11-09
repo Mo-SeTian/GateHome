@@ -161,9 +161,10 @@
             max="86400"
             required
         /></label>
-        <label class="toggle-row"
-          >启用此规则<input v-model="form.enabled" name="enabled" type="checkbox"
-        /></label>
+        <label class="toggle-row">
+          <span>启用此转发规则</span>
+          <input v-model="form.enabled" name="enabled" type="checkbox" />
+        </label>
         <p class="form-note">保存后重启服务使监听配置生效。Docker bridge 部署需发布对应协议的端口。</p>
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" :disabled="isSavingConfig" @click="dialog.close()">
@@ -342,7 +343,7 @@ onUnmounted(() => controller.abort())
 
 .forwards-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
   gap: 16px;
 }
 
@@ -350,10 +351,15 @@ onUnmounted(() => controller.abort())
   padding: 18px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  min-height: 220px;
 }
 .forward-card, .pipeline-node { min-width: 0; }
-.forward-card :deep(.card-inner) { display: flex; flex-direction: column; gap: 14px; }
+.forward-card :deep(.card-inner) {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  height: 100%;
+}
 .node-val { overflow-wrap: anywhere; }
 .protocol-badge.dual { background: var(--strip-bg); color: var(--brand-light); border: 1px solid var(--brand); }
 .forward-card.inactive {
@@ -410,11 +416,12 @@ onUnmounted(() => controller.abort())
 }
 
 .card-footer {
+  margin-top: auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
   border-top: 1px solid var(--line);
-  padding-top: 10px;
+  padding-top: 12px;
 }
 
 .status-indicator {

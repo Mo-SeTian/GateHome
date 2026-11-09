@@ -171,9 +171,10 @@
               max="604800"
               required
           /></label>
-          <label class="check-label"
-            ><input v-model="form.enabled" name="enabled" type="checkbox" />启用后台自动更新</label
-          >
+          <label class="toggle-row">
+            <span>启用后台自动更新</span>
+            <input v-model="form.enabled" name="enabled" type="checkbox" />
+          </label>
           <footer>
             <button type="button" class="btn btn-secondary" @click="dialog.close()">取消</button
             ><button type="submit" class="btn btn-primary">
@@ -387,16 +388,20 @@ onUnmounted(() => {
 <style scoped>
 .subs-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
   gap: 16px;
 }
 .sub-card {
   padding: 20px;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
 }
 .sub-card :deep(.card-inner) {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 14px;
+  height: 100%;
 }
 .sub-head {
   display: flex;
@@ -413,60 +418,51 @@ onUnmounted(() => {
   margin-top: 6px;
 }
 .source-url {
-  text-align: left;
-  color: var(--ink-secondary);
-  font-size: 12px;
-  overflow-wrap: anywhere;
-}
-.source-url svg {
-  display: inline;
-}
-.sub-card dl {
-  display: grid;
-  gap: 10px;
-  font-size: 12px;
-}
-.sub-card dl div {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-.sub-card dt,
-.sub-card summary {
-  color: var(--muted);
-}
-.sub-card dd {
-  color: var(--ink-secondary);
-  margin: 0;
-}
-.sub-card summary {
-  font-size: 12px;
-  cursor: pointer;
-}
-.sub-footer {
-  justify-content: space-between;
-  border-top: 1px solid var(--line);
-  padding-top: 12px;
-}
-.inactive {
-  opacity: 0.65;
-}
-.text-bad {
-  color: var(--bad);
-}
-.preset-panel :deep(.card-inner) {
-  display: flex;
-  justify-content: space-between;
-  gap: 14px;
-  flex-wrap: wrap;
-}
-.check-label {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
+  padding: 8px 11px;
+  background: var(--strip-bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--ink-secondary);
+  font-size: 11.5px;
+  text-align: left;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+  transition: var(--transition-smooth);
 }
-@media (max-width: 900px) {
+.source-url:hover {
+  border-color: var(--card-border-hover);
+  color: var(--brand-light);
+}
+.sub-footer {
+  margin-top: auto;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  font-size: 12px;
+  background: var(--strip-bg);
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+}
+dt {
+  color: var(--muted);
+  font-size: 11px;
+}
+dd {
+  margin: 2px 0 0;
+  color: var(--ink);
+  font-weight: 600;
+  font-family: var(--mono);
+}
+@media (max-width: 640px) {
   .subs-grid {
     grid-template-columns: 1fr;
   }

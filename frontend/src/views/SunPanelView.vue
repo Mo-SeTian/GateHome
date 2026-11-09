@@ -17,9 +17,10 @@
     <SpotlightCard v-if="draft" class="report-panel home-config">
       <h2>首页服务</h2>
       <form class="report-form" @submit.prevent="save">
-        <label
-          ><span>启用首页服务</span><input v-model="draft.enabled" name="enabled" type="checkbox"
-        /></label>
+        <label class="toggle-row wide">
+          <span>启用首页服务</span>
+          <input v-model="draft.enabled" name="enabled" type="checkbox" />
+        </label>
         <label
           >监听端口<input
             v-model.number="draft.port"
