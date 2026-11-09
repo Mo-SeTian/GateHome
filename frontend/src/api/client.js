@@ -16,7 +16,7 @@ export function markSessionChanged() {
   sessionGeneration++
 }
 
-export async function request(path, { method = 'GET', body, signal, notifyUnauthorized = true } = {}) {
+export async function request(path, { method = 'GET', body, signal, notifyUnauthorized = true, responseType = 'json' } = {}) {
   const generation = sessionGeneration
   const headers = { Accept: 'application/json' }
   const multipart = body instanceof FormData
@@ -46,6 +46,7 @@ export async function request(path, { method = 'GET', body, signal, notifyUnauth
     throw new ApiError(message, response.status)
   }
   if (response.status === 204) return null
+  if (responseType === 'blob') return response.blob()
   if (data === null) throw new ApiError('管理接口返回了无效响应，请检查 API 转发配置', response.status)
   return data
 }

@@ -1,4 +1,4 @@
-import { ref, reactive } from 'vue'
+import { ref } from 'vue'
 
 // Global UI State
 const theme = ref(localStorage.getItem('gh_theme') || 'dark')
@@ -38,19 +38,6 @@ export function useAppStore() {
     isCmdkOpen.value = false
   }
 
-  const backups = ref([
-    { id: 'bk_1', name: 'gatehouse_backup_20261109_0300.zip', size: '14.2 MB', type: 'AUTO', storage: 'Local + WebDAV', createdAt: '2026-11-09 03:00' },
-    { id: 'bk_2', name: 'gatehouse_pre_upgrade_v0.0.67.zip', size: '13.9 MB', type: 'MANUAL', storage: 'Local', createdAt: '2026-11-08 19:40' },
-    { id: 'bk_3', name: 'gatehouse_backup_20261102_0300.zip', size: '13.6 MB', type: 'AUTO', storage: 'Local + WebDAV', createdAt: '2026-11-02 03:00' }
-  ])
-
-  const settings = reactive({
-    autoBackupEnabled: true,
-    webdavUrl: 'https://dav.jianguoyun.com/dav/gatehome/',
-    currentVersion: `v${__GATEHOME_VERSION__}`,
-    channel: 'stable' // 'stable' | 'beta'
-  })
-
   return {
     theme,
     toggleTheme,
@@ -61,8 +48,6 @@ export function useAppStore() {
     isCmdkOpen,
     toggleCmdk,
     openCmdk,
-    closeCmdk,
-    backups,
-    settings
+    closeCmdk
   }
 }
