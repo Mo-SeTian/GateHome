@@ -31,6 +31,7 @@ type Proxy struct {
 	Failures      atomic.Uint64
 	subscriptions *Subscriptions
 	logs          *Logs
+	traffic       *Traffic
 	defense       *IPDefense
 	wafSlots      chan struct{}
 	wafMemory     *semaphore.Weighted
@@ -93,6 +94,9 @@ func (p *Proxy) configurePrepared(c Config, hashes map[string]string, firewalls 
 			ErrorLog: log.New(io.Discard, "", 0),
 			ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 				p.Failures.Add(1)
+				if logged, ok := w.(*loggedResponseWriter); ok {
+					logged.traffic = nil // A gateway-generated error is not an upstream download.
+				}
 				http.Error(w, "后端服务暂不可用", http.StatusBadGateway)
 			},
 		}
@@ -244,6 +248,13 @@ func (p *Proxy) serveGroup(groupID string, w http.ResponseWriter, r *http.Reques
 	}
 	outcome = "forwarded"
 	logged.authResult = ""
+	if p.traffic != nil {
+		logged.traffic, logged.trafficRoute = p.traffic, &route.route
+		if r.Body != nil && r.Body != http.NoBody {
+			// Wrap after WAF inspection so replayed data is counted once.
+			r.Body = trafficRequestBody{ReadCloser: r.Body, traffic: p.traffic, route: &route.route}
+		}
+	}
 	route.handler.ServeHTTP(w, r)
 }
 
@@ -268,3 +279,5 @@ func (r proxyRoute) firewallDecision(remote string) (bool, FirewallHit) {
 }
 
 func (s *Proxy) SetLogs(logs *Logs) { s.logs = logs }
+
+func (p *Proxy) SetTraffic(traffic *Traffic) { p.traffic = traffic }

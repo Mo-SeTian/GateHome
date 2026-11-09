@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -148,6 +149,17 @@ func run() error {
 	admin.SetSunPanel(panel)
 	admin.SetMaintenance(maintenance)
 	proxy.SetLogs(logs)
+	traffic, err := gateway.OpenTraffic(filepath.Join(paths.Data, "route-traffic"))
+	if err != nil {
+		log.Print("无法打开反代流量统计目录，请检查数据目录")
+	} else {
+		proxy.SetTraffic(traffic)
+		defer func() {
+			if err := traffic.Flush(); err != nil {
+				log.Print("反代流量统计保存失败，请检查数据目录")
+			}
+		}()
+	}
 	subscriptions.SetLogs(logs)
 	jobs.SetLogs(logs)
 	certs.SetLogs(logs)
@@ -212,6 +224,9 @@ func run() error {
 	jobs.Start(ctx)
 	subscriptions.Start(ctx)
 	logs.Start(ctx)
+	if traffic != nil {
+		traffic.Start(ctx)
+	}
 	if *managedRoot != "" {
 		if err := gateway.MarkServiceReady(maintenance); err != nil {
 			return errors.New("启动检查状态写入失败")

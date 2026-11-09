@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"net"
 	"net/http"
+	"time"
 )
 
 type loggedResponseWriter struct {
@@ -13,6 +14,8 @@ type loggedResponseWriter struct {
 	authResult    string
 	authMessage   string
 	freezeCreated bool
+	traffic       *Traffic
+	trafficRoute  *Route
 }
 
 func (w *loggedResponseWriter) WriteHeader(status int) {
@@ -30,7 +33,11 @@ func (w *loggedResponseWriter) Write(b []byte) (int, error) {
 	if w.status == 0 {
 		w.WriteHeader(200)
 	}
-	return w.ResponseWriter.Write(b)
+	n, err := w.ResponseWriter.Write(b)
+	if w.traffic != nil {
+		w.traffic.add(w.trafficRoute, 0, n, time.Now())
+	}
+	return n, err
 }
 func (w *loggedResponseWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 func (w *loggedResponseWriter) Flush() {

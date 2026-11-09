@@ -240,6 +240,7 @@ func (l *Logs) Statistics(hours int, rule string, now time.Time) AccessStatistic
 }
 
 func (a *Admin) statisticsRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/statistics/traffic", a.requireAuth(a.routeTrafficReport))
 	mux.HandleFunc("GET /api/statistics", a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
 		hours := 24
 		if raw := r.URL.Query().Get("hours"); raw != "" {
@@ -265,4 +266,44 @@ func (a *Admin) statisticsRoutes(mux *http.ServeMux) {
 		}
 		jsonResponse(w, 200, result)
 	}))
+}
+
+func (a *Admin) routeTrafficReport(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query()
+	id := query.Get("rule")
+	if id != "" && !idPattern.MatchString(id) {
+		apiError(w, 400, "反代规则标识无效")
+		return
+	}
+	now := time.Now().UTC()
+	oldest := now.Add(-trafficRetention).Truncate(time.Hour)
+	from, to := now.Add(-24*time.Hour).Truncate(time.Hour), now
+	if query.Has("from") || query.Has("to") {
+		start, startErr := time.Parse(time.RFC3339, query.Get("from"))
+		end, endErr := time.Parse(time.RFC3339, query.Get("to"))
+		if query.Has("hours") || startErr != nil || endErr != nil || !end.After(start) || !start.Before(now) || start.Before(oldest) {
+			apiError(w, 400, "请选择最近 30 天内有效的起止时间")
+			return
+		}
+		from = start.UTC().Truncate(time.Hour)
+		to = end.UTC().Truncate(time.Hour)
+		if !end.Equal(to) {
+			to = to.Add(time.Hour)
+		}
+		if to.After(now) {
+			to = now
+		}
+	} else if query.Has("hours") {
+		hours, err := strconv.Atoi(query.Get("hours"))
+		if err != nil || (hours != 24 && hours != 168 && hours != 720) {
+			apiError(w, 400, "统计时间范围须为最近 24 小时、7 天或 30 天")
+			return
+		}
+		from = now.Add(-time.Duration(hours) * time.Hour).Truncate(time.Hour)
+	}
+	if a.proxy.traffic == nil {
+		apiError(w, 503, "流量统计存储未能启动，请检查数据目录")
+		return
+	}
+	jsonResponse(w, 200, a.proxy.traffic.report(from, to, id))
 }

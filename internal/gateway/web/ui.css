@@ -265,6 +265,27 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px
 .form-note { font-size: 11.5px; color: var(--faint); line-height: 1.65; }
 .switch input:checked + span { background: var(--primary); }
 
+.traffic-filters, .traffic-dates { display: flex; align-items: end; flex-wrap: wrap; gap: 12px; }
+.traffic-filters > label, .traffic-dates > label { flex: 1 1 170px; min-width: 0; }
+.traffic-filters > label:first-child { flex-grow: 1.6; }
+.traffic-dates { flex: 2 1 350px; border: 0; padding: 0; margin: 0; min-width: 0; }
+.traffic-note { font-size: 12px; color: var(--muted); margin: 12px 0; overflow-wrap: anywhere; }
+.traffic-totals { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; margin: 0 0 12px; }
+.traffic-totals > div { padding: 10px 12px; border-left: 2px solid var(--primary); background: var(--background); min-width: 0; }
+.traffic-totals dt { font-size: 12px; color: var(--muted); }
+.traffic-totals dd { margin: 0; font-size: clamp(18px,3vw,26px); font-weight: 650; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.traffic-table { table-layout: fixed; }
+.traffic-table :is(th,td) { padding: 10px 8px; overflow-wrap: anywhere; }
+.traffic-table :is(th,td):not(:first-child) { width: 24%; text-align: right; font-variant-numeric: tabular-nums; }
+.traffic-table tbody th { background: transparent; color: var(--text); font-size: 13px; }
+.traffic-table th small { display: block; color: var(--muted); font-size: 11px; }
+@media (max-width: 900px) {
+  #traffic-query { min-height: 44px; }
+}
+@media (max-width: 520px) {
+  .traffic-filters > label, .traffic-dates > label, #traffic-query { flex-basis: 100%; }
+}
+
 /* ============ 弹窗 ============ */
 dialog { border: 0; border-radius: 16px; padding: 0; box-shadow: 0 24px 60px -24px rgba(23, 34, 56, .42); }
 dialog::backdrop { background: rgba(23, 33, 51, .34); }

@@ -7,7 +7,7 @@ function newID() {
   const bytes=new Uint8Array(16);crypto.getRandomValues(bytes);bytes[6]=(bytes[6]&15)|64;bytes[8]=(bytes[8]&63)|128;
   const hex=[...bytes].map(b=>b.toString(16).padStart(2,'0')).join('');return hex.slice(0,8)+'-'+hex.slice(8,12)+'-'+hex.slice(12,16)+'-'+hex.slice(16,20)+'-'+hex.slice(20);
 }
-const pages = {sunpanel:'浏览器首页',overview:'概览',routes:'反向代理',forwards:'端口转发',ddns:'动态域名',certificates:'SSL 证书',access:'防火墙管理',subscriptions:'订阅管理',mcp:'AI 管理',updates:'更新',backups:'备份与恢复',settings:'设置',logs:'日志',statistics:'统计','firewall-logs':'防火墙拦截记录','ip-blocks':'IP 拦截名单'};
+const pages = {sunpanel:'浏览器首页',overview:'概览',routes:'反向代理',forwards:'端口转发',ddns:'动态域名',certificates:'SSL 证书',access:'防火墙管理',subscriptions:'订阅管理',mcp:'AI 管理',updates:'更新',backups:'备份与恢复',settings:'设置',logs:'日志',statistics:'统计',traffic:'流量统计','firewall-logs':'防火墙拦截记录','ip-blocks':'IP 拦截名单'};
 const iconNames = new Set(['overview','routes','globe','certificate','shield','download','logs','chart','settings','server','gateway','router','layers','activity','refresh','plus','close','logout','menu','more','back','edit','chevron-down','chevron-up','chevron-left','chevron-right','external-link','trash','play','pause','login','filter','unlock','save','upload','info','check','search']);
 function icon(name) { return `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="/icons.svg#${iconNames.has(name)?name:'layers'}"></use></svg>`; }
 function hydrateIcons(scope=document) {
@@ -104,6 +104,7 @@ let routeImageRequest=0,routeImagePending=false;
 const securityEvents=Object.fromEntries(['firewall','security'].map(kind=>[kind,{filters:emptyEventFilters(),applied:emptyEventFilters(),view:null,size:20,request:0,loading:false,error:''}]));
 let logPage=1,logSize=50;
 let statisticsView=null,statisticsHours='24',statisticsRule='',statisticsRequest=0,statisticsLoading=false,statisticsError='';
+const traffic={rule:'',range:'24',from:'',to:'',view:null,error:'',request:0,loading:false};
 let logView={entries:[],pages:1,total:0,through:0}, logCategory='',logResult='',logScope='project',logRule='',logSearch='',logIP='',logFrom='',logTo='',logMethod='',logStatus='',proxyPasswordConfigured=false,githubTokenConfigured=false;
 let dnsCredentialsConfigured={};
 let certificateCredentialsConfigured={};
@@ -157,7 +158,7 @@ function toast(message) {
   $('#toast').textContent = message; $('#toast').hidden = false; if(!reducedMotion.matches) {$('#toast').getAnimations().forEach(a=>a.cancel());$('#toast').animate([{opacity:0,translate:'0 8px'},{opacity:1,translate:'0 0'}],{duration:180,easing:'ease-out'});}
   clearTimeout(toastTimer); toastTimer = setTimeout(() => { $('#toast').hidden = true; }, 4500);
 }
-function showLogin() { resetMCPSettings(); resetRemoteBackups(); $('#account-menu').open=false;clearAccountPasswords();adminUsername='';$('#account-name').textContent='管理员';$('#account-avatar').textContent='G';resetDashboard();setNavigation(false,false); $('#login').hidden = false; $('#app').hidden = true; clearTimeout(toastTimer);$('#toast').hidden=true; document.querySelectorAll('dialog').forEach(d=>d.close()); config = undefined;routeFilter='';routeSearch='';forwardProtocolFilter='';backupCapacity=null;backupCapacityError='';backupCapacityRequest++;updateBackups.request++;updateBackups.data=null;updateBackups.error='';updateBackups.loading=false; renderedPage='';clearTimeout(onlineUpdate.timer);onlineUpdate.request++;onlineUpdate.phase='';onlineUpdate.job=null;onlineUpdate.release=null;onlineUpdate.error='';abandonDiscovery();for(const state of Object.values(securityEvents)) {state.request++;state.view=null;state.filters=emptyEventFilters();state.applied=emptyEventFilters();state.error='';} }
+function showLogin() { resetMCPSettings(); resetRemoteBackups(); $('#account-menu').open=false;clearAccountPasswords();adminUsername='';$('#account-name').textContent='管理员';$('#account-avatar').textContent='G';resetDashboard();setNavigation(false,false); $('#login').hidden = false; $('#app').hidden = true; clearTimeout(toastTimer);$('#toast').hidden=true; document.querySelectorAll('dialog').forEach(d=>d.close()); config = undefined;routeFilter='';routeSearch='';forwardProtocolFilter='';backupCapacity=null;backupCapacityError='';backupCapacityRequest++;updateBackups.request++;updateBackups.data=null;updateBackups.error='';updateBackups.loading=false; renderedPage='';clearTimeout(onlineUpdate.timer);onlineUpdate.request++;onlineUpdate.phase='';onlineUpdate.job=null;onlineUpdate.release=null;onlineUpdate.error='';abandonDiscovery();Object.assign(traffic,{rule:'',range:'24',from:'',to:'',view:null,error:'',request:traffic.request+1,loading:false});for(const state of Object.values(securityEvents)) {state.request++;state.view=null;state.filters=emptyEventFilters();state.applied=emptyEventFilters();state.error='';} }
 function applyConfig(data) { serviceHealthRequest++; serviceHealthPending=null; serviceHealthData={routes:{}}; config = data.config; revision = data.revision; dnsCredentialsConfigured=data.dns_credentials_configured||{}; certificateCredentialsConfigured=data.certificate_credentials_configured||{};routePasswordsConfigured=data.route_passwords_configured||{}; proxyPasswordConfigured=data.proxy_password_configured; githubTokenConfigured=!!data.github_token_configured; ipRequest++;dnsRecordsRequest++;dnsRecords={};dnsRecordsError=''; if(networkInfo) networkInfo.groups={};const monitor=config.ddns?.ip_monitor||{};ipGroup=monitor.group_id||'';ipInterface=monitor.interface||'';ipIPv4Source=monitor.ipv4_source||'url';ipIPv6Source=monitor.ipv6_source||'url'; }
 async function save(next, dnsTokens, proxyPassword, certificateTokens, routePasswords, githubToken) {
   const current=config;
@@ -361,7 +362,7 @@ function routeCards(groupID = '') {
     const f=config.firewalls.find(x=>x.id===r.firewall_id),waiting=f&&firewallWaiting(f),key=r.group_id+'/'+r.host;
     const failing=routeActive(r)&&serviceHealthSample(r.id)?.healthy===false;
     const image=routeImageHTML(r.image),initial=[...(r.name||r.host||'?')][0].toUpperCase();
-    const menu=objectMenu(r.name||r.host,`<button class="text-button" data-action="edit-route" data-index="${i}">编辑服务</button><button class="text-button" data-action="toggle-route" data-index="${i}">${r.enabled?'停用服务':'启用服务'}</button><button class="text-button" data-action="service-health-details" data-route-id="${esc(r.id)}">健康诊断</button><button class="text-button danger" data-action="delete-route" data-index="${i}">删除服务</button>`);
+    const menu=objectMenu(r.name||r.host,`<button class="text-button" data-action="edit-route" data-index="${i}">编辑服务</button><button class="text-button" data-action="toggle-route" data-index="${i}">${r.enabled?'停用服务':'启用服务'}</button><button class="text-button" data-action="route-traffic" data-route-id="${esc(r.id)}">查看流量</button><button class="text-button" data-action="service-health-details" data-route-id="${esc(r.id)}">健康诊断</button><button class="text-button danger" data-action="delete-route" data-index="${i}">删除服务</button>`);
     return `<article class="route-card${failing?' is-failing':''}" data-route-key="${esc(key)}" data-route-id="${esc(r.id)}">
       <div class="rc-head"><span class="rc-tile">${image||esc(initial)}</span><span class="rc-who"><b class="rc-name">${esc(r.name||r.host)}</b><small class="rc-host">${esc(r.host)}</small></span>${menu}</div>
       <div class="rc-addr">${serviceAddressHTML(r)}</div>
@@ -989,6 +990,79 @@ function downloadStatistics() {
   const url=URL.createObjectURL(new Blob([data],{type:'image/svg+xml;charset=utf-8'}));
   const link=document.createElement('a');link.href=url;link.download='gatehouse-statistics-'+new Date().toLocaleDateString('sv-SE')+'.svg';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
 }
+function trafficHTML() {
+  const custom=traffic.range==='custom';
+  const options=config.routes.map(r=>`<option value="${esc(r.id)}" ${r.id===traffic.rule?'selected':''}>${esc(groupName(r.group_id))} / ${esc(r.name||r.host)} · ${esc(r.host)}</option>`).join('');
+  const ranges=[['24','最近 24 小时'],['168','最近 7 天'],['720','最近 30 天'],['custom','自选起止时间']];
+  const filters=`<form id="traffic-form" class="traffic-filters">
+    <label>反代规则<select name="rule" id="traffic-rule"><option value="">全部反代规则</option>${options}</select></label>
+    <label>时间范围<select name="range" id="traffic-range">${ranges.map(([value,label])=>`<option value="${value}" ${traffic.range===value?'selected':''}>${label}</option>`).join('')}</select></label>
+    <fieldset id="traffic-dates" class="traffic-dates" aria-label="自选时间范围" ${custom?'':'hidden disabled'}>
+      <label>开始时间<input name="from" id="traffic-from" type="datetime-local" value="${esc(traffic.from)}" required></label>
+      <label>结束时间<input name="to" id="traffic-to" type="datetime-local" value="${esc(traffic.to)}" required></label>
+    </fieldset>
+    <button type="submit" id="traffic-query" class="primary" data-no-icon ${traffic.loading?'disabled':''}>查询流量</button>
+  </form>`;
+  return heading('PROXY TRAFFIC','流量统计','按反代规则和时间范围查看上传量与下载量。')+
+    panel('查询反代流量','按小时汇总，保留最近 30 天。自选时间按浏览器时区输入，查询会覆盖所选时间涉及的整小时。',
+      `<div class="panel-body traffic-body">${filters}<div id="traffic-result" aria-live="polite" aria-busy="${traffic.loading}">${trafficResultHTML()}</div></div>`);
+}
+function trafficResultHTML() {
+  if(traffic.loading) return '<p class="traffic-note" role="status">正在查询流量…</p>';
+  if(traffic.error) return `<p class="error" role="alert">${esc(traffic.error)}</p>`;
+  const d=traffic.view;
+  if(!d) return '';
+  const configured=new Map(config.routes.map(r=>[r.id,r]));
+  const rows=d.rules.map(row=>{
+    const r=configured.get(row.id);
+    return `<tr><th scope="row"><strong>${esc(r?.name||r?.host||row.host)}</strong><small>${esc(r?groupName(r.group_id)+' · '+r.host:'已删除规则')}</small></th><td>${esc(bytesLabel(row.upload_bytes))}</td><td>${esc(bytesLabel(row.download_bytes))}</td></tr>`;
+  }).join('');
+  const selected=configured.get(d.rule),scope=selected?(selected.name||selected.host):d.rule?'所选反代规则':'全部反代规则';
+  return `<p class="traffic-note">${esc(scope)} · ${esc(date(d.from))} 至 ${esc(date(d.to))}（按小时汇总）</p>
+    ${d.storage_error?'<p class="hint amber" role="status">部分流量记录读取或保存失败，请检查数据目录。</p>':''}
+    <dl class="traffic-totals"><div><dt>上传量</dt><dd>${esc(bytesLabel(d.upload_bytes))}</dd></div><div><dt>下载量</dt><dd>${esc(bytesLabel(d.download_bytes))}</dd></div></dl>
+    ${rows?`<table class="traffic-table" aria-label="各反代规则的流量"><thead><tr><th scope="col">反代规则</th><th scope="col">上传量</th><th scope="col">下载量</th></tr></thead><tbody>${rows}</tbody></table>`:'<p class="traffic-note">所选范围内暂无流量记录。流量从启用本功能后开始累计。</p>'}
+    <p class="traffic-note">上传为客户端发往上游的 HTTP 请求体，下载为上游发往客户端的 HTTP 响应体。统计不含协议头、拦截响应和 WebSocket 数据。</p>`;
+}
+function updateTrafficRange(form) {
+  traffic.range=form.elements.range.value;
+  const dates=$('#traffic-dates',form),custom=traffic.range==='custom';
+  dates.hidden=dates.disabled=!custom;
+  if(!custom) return;
+  const localTime=value=>new Date(value.getTime()-value.getTimezoneOffset()*60000).toISOString().slice(0,16);
+  const now=new Date();
+  if(!form.elements.from.value) form.elements.from.value=localTime(new Date(now.getTime()-86400000));
+  if(!form.elements.to.value) form.elements.to.value=localTime(now);
+  traffic.from=form.elements.from.value;traffic.to=form.elements.to.value;
+}
+async function loadTraffic() {
+  const form=$('#traffic-form');
+  if(!form||!config) return;
+  const request=++traffic.request,params=new URLSearchParams({rule:form.elements.rule.value});
+  traffic.rule=form.elements.rule.value;
+  updateTrafficRange(form);
+  traffic.view=null;traffic.error='';traffic.loading=true;
+  const repaint=()=>{
+    const result=$('#traffic-result');
+    if(!result||page!=='traffic'||request!==traffic.request) return;
+    result.innerHTML=trafficResultHTML();result.setAttribute('aria-busy',String(traffic.loading));
+    $('#traffic-query').disabled=traffic.loading;
+  };
+  repaint();
+  try {
+    if(traffic.range==='custom') {
+      const start=new Date(traffic.from),end=new Date(traffic.to);
+      if(!Number.isFinite(+start)||!Number.isFinite(+end)||end<=start) throw new Error('请选择有效的开始和结束时间，结束时间应晚于开始时间。');
+      params.set('from',start.toISOString());params.set('to',end.toISOString());
+    } else params.set('hours',traffic.range);
+    const data=await api('statistics/traffic?'+params);
+    if(config&&request===traffic.request) traffic.view=data;
+  } catch(error) {
+    if(config&&request===traffic.request) traffic.error=error.message;
+  } finally {
+    if(config&&request===traffic.request) {traffic.loading=false;repaint();}
+  }
+}
 function render() {
   if (!config) return;
   const content=$('#content'),changed=renderedPage!==page;
@@ -1019,6 +1093,7 @@ function render() {
   if (page==='backups') html=backupsHTML();
   if (page==='logs') html=logsHTML();
   if (page==='statistics') html=statisticsHTML();
+  if (page==='traffic') html=trafficHTML();
   if (page==='ip-blocks') html=ipBlocksHTML();
   content.innerHTML=html;
   content.dataset.page=page;
@@ -1047,6 +1122,7 @@ function render() {
   if(changed&&page==='updates') {loadOnlineUpdateStatus();loadUpdateBackups();loadBackupCapacity();}
   if(changed&&page==='backups') {loadBackupCapacity();loadRemoteBackups();}
   if(changed&&page==='overview') loadDashboard();
+  if(changed&&page==='traffic') loadTraffic();
   if(page==='ddns') {loadIPInfo().catch(e=>{if($('#ip-results')) $('#ip-results').textContent=e.message;});loadDNSRecords();}
 }
 async function refreshStatus() {
@@ -1386,6 +1462,7 @@ document.addEventListener('submit',event=>{
   if(form.id==='sunpanel-form') return;
   if(form.id==='login-form') return submitForm(form,async()=>{ const username=form.elements.username.value,password=form.elements.password.value; form.elements.password.value=''; await api('login','POST',{username,password}); await load(); });
   if(!config) return;
+  if(form.id==='traffic-form') return loadTraffic();
   if(form.id==='account-form') return submitForm(form,()=>saveAdminAccount(form));
   if(form.id==='ip-monitor-form') return submitForm(form,saveIPMonitor);
   if(form.id==='dashboard-form') return submitForm(form,saveDashboardSettings);
@@ -1501,6 +1578,13 @@ document.addEventListener('click',async event=>{
   if(['refresh-remote-backups','list-webdav-backups','test-webdav-backup','run-webdav-backup','download-webdav-backup','inspect-webdav-backup'].includes(action)) return remoteBackupAction(button);
   if(action==='configure-service-health') {const form=$('#service-health-form'),options=config.service_health||{enabled:true,interval:60};form.elements.enabled.checked=options.enabled;form.elements.interval.value=options.interval;$('.error',form).textContent='';openDialog($('#service-health-settings-dialog'));return;}
   if(action==='service-health-details') {openServiceHealthDetails(button.dataset.routeId);return;}
+  if(action==='route-traffic') {
+    if(!leaveRouteEditor()) return;
+    traffic.rule=button.dataset.routeId;
+    traffic.range='24';
+    location.hash='traffic';
+    return;
+  }
   if(action==='refresh-service-health') {
     if(button.getAttribute('aria-disabled')==='true') return;
     button.setAttribute('aria-disabled','true');
@@ -1647,6 +1731,7 @@ document.addEventListener('input',event=>{
 document.addEventListener('error',event=>{if(event.target.matches?.('img[data-discovery-icon],img[data-route-image]')) event.target.hidden=true;},true);
 document.addEventListener('input',event=>{if(event.target.closest('#discovery-results')) updateDiscoveryInput(event.target);const form=event.target.closest('[data-event-filters]');if(form&&event.target.name) securityEvents[form.dataset.eventFilters].filters[event.target.name]=event.target.value;});
 document.addEventListener('change',async event=>{
+  if(event.target.id==='traffic-range') {updateTrafficRange(event.target.form);return;}
   if(event.target.id==='update-channel') {selectUpdateChannel(event.target.value);return;}
   if(event.target.form?.id==='forward-form'&&event.target.name==='protocol') {updateForwardProtocol(event.target.form);return;}
   if(event.target.closest('#discovery-results')) {updateDiscoveryInput(event.target);return;}

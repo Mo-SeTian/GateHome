@@ -2,7 +2,12 @@
 
 一个自托管的反向代理与 DDNS 综合管理工具。Go 主程序内嵌中文管理界面与 Sun-Panel 前后端；启用首页时由主程序管理独立的 Sun-Panel 子进程。运行无需 Node.js、外部数据库或额外 Web 服务器，Sun-Panel 使用内置 SQLite。
 
-当前代码版本为 **0.0.67-beta.3（Beta 测试版）**，安装包见 [v0.0.67-beta.3 Pre-release](https://github.com/Mo-SeTian/GateHome/releases/tag/v0.0.67-beta.3)。最新正式版为 [v0.0.66](https://github.com/Mo-SeTian/GateHome/releases/tag/v0.0.66)。程序和 systemd 服务名为 `gatehouse`。
+当前代码版本为 **0.0.67-beta.4（Beta 测试版）**，安装包见 [v0.0.67-beta.4 Pre-release](https://github.com/Mo-SeTian/GateHome/releases/tag/v0.0.67-beta.4)。最新正式版为 [v0.0.66](https://github.com/Mo-SeTian/GateHome/releases/tag/v0.0.66)。程序和 systemd 服务名为 `gatehouse`。
+
+## v0.0.67-beta.4 更新
+
+- 新增 **流量统计** 页面，查看单条或全部反代规则的上传量和下载量，支持最近 24 小时、7 天、30 天及自选起止时间。
+- 反代服务菜单可直接查看该规则的流量。HTTP/HTTPS 请求体和响应体从本版开始按小时累计，保留最近 30 天，重启后可继续查询。
 
 ## v0.0.67-beta.3 更新
 
@@ -418,6 +423,10 @@ DDNS 组以域名列表分别显示解析到的 IPv4 / A 与 IPv6 / AAAA，可�
 Linux 资源数据来自 `/proc`，上传为 TX、下载为 RX，数据量自网卡启动起累计；存储显示持久化目录所在文件系统。Docker 可能显示宿主机资源，非 Linux 不提供 CPU、内存和网卡采集值。地域分析基于近 24 小时且仍保留在日志查询缓存中的访问记录，地图线条为省份汇聚示意，不代表精确位置或实际网络线路。
 
 统计按时间与反代规则筛选，提供请求、验证、防火墙、冻结指标、趋势、HTTP 状态分布和规则排行，可导出 SVG。查询基于当前保留的最近最多 5000 条日志，不能视为永久历史累计；后端返回 403 不计作 GateHome 防火墙拦截。最近安全事件单独分页筛选，完整防火墙明细在 **防火墙拦截记录** 中查看。
+
+在 **流量统计** 选择单条或全部反代规则，可查最近 24 小时、7 天、30 天，也可自选起止时间。反代服务菜单中的 **查看流量** 会预选该规则。上传计入发送给上游的 HTTP 请求体，下载计入写给客户端的 HTTP 响应体，按整小时汇总。协议头、GateHome 拦截响应、WebSocket 和原生 TCP / UDP 转发不计入。
+
+流量从本功能启用后开始累计，旧访问日志无法补算。统计独立保存在数据目录的 `route-traffic/`，不受访问日志轮转影响，每分钟及正常停机时保存，供最近 30 天查询。它属于本机监测历史，不随整站备份导出或回退。
 
 IP 归属地由内嵌 ip2region 双栈离线库查询，显示在日志 IP 下方，不向外部服务发送访客 IP。归属地为估算，数据库随程序发布更新。详见 [概览组件说明](docs/dashboard-0.0.23.md) 和 [记录查询说明](docs/security-records-0.0.17.md)。
 
