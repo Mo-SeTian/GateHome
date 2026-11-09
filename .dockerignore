@@ -2,6 +2,10 @@
 !go.mod
 !go.sum
 !VERSION
+!frontend/
+!frontend/**
+frontend/node_modules
+frontend/dist
 !scripts/
 !scripts/build_leibox.mjs
 !cmd/

@@ -5,12 +5,15 @@ LDFLAGS := -s -w -X gatehouse/internal/gateway.Version=$(VERSION)
 frontend:
 	node scripts/build_leibox.mjs
 	sh sunpanel/build.sh
+	npm --prefix frontend ci
+	npm --prefix frontend run build
 
 build: frontend
 	mkdir -p dist
 	go build -trimpath -ldflags='$(LDFLAGS)' -o dist/gatehouse ./cmd/gatehouse
 
 test: frontend
+	npm --prefix frontend test
 	go test -race ./...
 	go vet ./...
 

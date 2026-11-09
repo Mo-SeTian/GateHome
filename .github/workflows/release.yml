@@ -42,6 +42,7 @@ jobs:
         run: make frontend
       - name: Verify code and installer
         run: |
+          npm --prefix frontend test
           go test -race ./...
           go vet ./...
           CGO_ENABLED=0 make -o frontend build

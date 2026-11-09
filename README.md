@@ -588,6 +588,8 @@ GateHome 管理台采用浅蓝工作台样式，桌面使用顶栏与侧栏，�
 
 ## 本地开发与验证
 
+`develop` 的 `0.9.0` 迁移版在同一管理端口提供 Aurora Next 控制台 `/console/`，原版 `/` 暂时保留。`make build`、Docker 和发布构建会先构建并嵌入新版、SunPanel 及原版组件；只运行生成的 Go 二进制即可访问新版，无需单独的前端服务。字体也随程序分发，遵循原管理端 CSP；完整说明见 [frontend/README.md](frontend/README.md)。
+
 ```sh
 make test
 node scripts/frontend_checks.mjs

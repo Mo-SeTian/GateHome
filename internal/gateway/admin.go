@@ -89,6 +89,7 @@ func decodeBody(w http.ResponseWriter, r *http.Request, v any) bool {
 
 func (a *Admin) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.Handle("GET /console/", consoleHandler())
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { jsonResponse(w, 200, map[string]bool{"ok": true}) })
 	mux.HandleFunc("POST /api/login", a.login)
 	mux.HandleFunc("POST /api/logout", a.requireAuth(a.logout))

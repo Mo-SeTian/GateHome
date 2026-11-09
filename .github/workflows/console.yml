@@ -1,0 +1,27 @@
+name: Verify embedded console
+on:
+  push:
+    branches: [develop]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  console:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build and test embedded frontends and Go
+        run: make test
+      - name: Build standalone binary
+        run: CGO_ENABLED=0 make -o frontend build
+      - name: Build standalone Docker image
+        run: docker build -t gatehome-console:check .

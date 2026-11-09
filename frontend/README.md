@@ -23,6 +23,12 @@ npm run build
 GATEHOME_API_TARGET=http://127.0.0.1:16666 npm run preview
 ```
 
+在仓库根目录运行 `make build`，会构建 Aurora Next、SunPanel 和原版组件，再将资源嵌入 Go 程序。启动生成的 `dist/gatehouse` 后，在同一管理端口访问 `/console/`，例如本机 `http://127.0.0.1:17666/console/`。原版 `/` 入口继续保留；运行二进制不需要 Node.js、Nginx 或源码目录。
+
+`frontend/embed.go` 中的 `//go:embed all:dist` 相对于该 Go 包，嵌入的就是 `frontend/dist`。从干净源码执行 Go 构建或测试前，先运行 `make frontend`；`make build`、`make test`、`make linux` 和 Docker 构建已包含此步骤。直接运行 `npm run build` 只更新前端产物，需重新编译 Go 才会更新二进制内的界面。
+
+两款字体使用固定版本的 Fontsource 包并随 Vite 产物嵌入，浏览器不访问 Google Fonts；许可证位于 `public/licenses/`，运行时可从 `/console/licenses/` 下的对应文件读取。页面保留 Go 管理端的严格 CSP，不需要放开内联脚本或 `eval`。
+
 ---
 
 ## 页面与联调状态
@@ -37,7 +43,7 @@ GATEHOME_API_TARGET=http://127.0.0.1:16666 npm run preview
 
 备份与恢复支持真实容量预检、加密 ZIP 下载、本地/远程恢复预检、WebDAV 连接与备份、每日/每周时区计划及远程文件列表；密码仅写入，不回显。更新支持正式/Beta 检查、真实下载与安装进度、上传 ZIP 预检、更新前备份和历史回滚。应用恢复、更新或回滚前需明确确认，维护重启后重新登录核对实际版本。ZIP 未包含历史流量，完整迁机需要四个持久化目录副本。
 
-Vite 通过同源路径转发 `/api/`、`/sunpanel/` 和 `/mcp`，浏览器负责管理会话 Cookie；MCP 调试使用独立 Bearer 认证，失败不结束管理会话。逐页验收范围及尚待完成的概览组件配置、Go 嵌入与旧数据升级见[迁移验收清单](../docs/aurora-next-migration-checklist.md)。订阅管理对应防火墙 IP/CIDR 规则源。
+Vite 开发预览通过同源路径转发 `/api/`、`/sunpanel/` 和 `/mcp`；嵌入部署由同一个 Go 管理服务直接处理这些路径。浏览器负责管理会话 Cookie；MCP 调试使用独立 Bearer 认证，失败不结束管理会话。逐页验收范围及尚待完成的概览组件配置与旧数据升级见[迁移验收清单](../docs/aurora-next-migration-checklist.md)。订阅管理对应防火墙 IP/CIDR 规则源。
 
 备份与更新上传沿用后端大小限制（更新 ZIP 128 MiB、备份内容 64 MiB）。如使用 Nginx 预览生产构建，将 `client_max_body_size` 设为至少 `130m`，并为 `/api/` 设置足够的读取超时（本机使用 `180s`），避免有效更新包被代理提前拒绝。
 
