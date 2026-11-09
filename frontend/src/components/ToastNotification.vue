@@ -1,5 +1,5 @@
 <template>
-  <div class="toast-container">
+  <div class="toast-container" aria-live="polite" aria-relevant="additions">
     <transition-group name="toast">
       <div 
         v-for="toast in toasts" 

@@ -1,21 +1,22 @@
 <template>
   <transition name="fade">
     <div v-if="isAccountModalOpen" class="modal-backdrop" @click="closeAccountModal">
-      <div class="account-dialog-card" @click.stop>
+      <div class="account-dialog-card" role="dialog" aria-modal="true" aria-labelledby="account-dialog-title"
+        @click.stop @keydown.esc.stop="closeAccountModal">
         <div class="dialog-header">
           <div class="dialog-title-group">
             <span class="eyebrow">ADMIN SECURITY</span>
-            <h2 class="dialog-title">管理员账户设置</h2>
+            <h2 id="account-dialog-title" class="dialog-title">管理员账户设置</h2>
             <p class="dialog-desc">用于登录 GateHome 管理界面，与反代服务的独立访问账号分开。</p>
           </div>
-          <button class="dialog-close-btn" @click="closeAccountModal">
+          <button type="button" class="dialog-close-btn" aria-label="关闭" @click="closeAccountModal">
             <X :size="16" />
           </button>
         </div>
 
         <!-- Inline Error Banner -->
         <transition name="slide-down">
-          <div v-if="errorMessage" class="error-banner">
+          <div v-if="errorMessage" class="error-banner" role="alert">
             <AlertCircle :size="15" class="error-icon" />
             <span>{{ errorMessage }}</span>
           </div>
@@ -23,11 +24,13 @@
 
         <form class="dialog-form" @submit.prevent="handleSave">
           <div class="form-group">
-            <label class="form-label">
+            <label class="form-label" for="account-username">
               <span>管理员账号</span>
               <span class="required-star">*</span>
             </label>
             <input 
+              id="account-username"
+              autocomplete="username"
               v-model="form.username" 
               type="text" 
               class="form-input" 
@@ -38,11 +41,14 @@
           </div>
 
           <div class="form-group">
-            <label class="form-label">
+            <label class="form-label" for="account-current-password">
               <span>当前管理密码</span>
               <span class="required-star">*</span>
             </label>
             <input 
+              id="account-current-password"
+              ref="currentPasswordInput"
+              autocomplete="current-password"
               v-model="form.currentPassword" 
               type="password" 
               class="form-input" 
@@ -54,10 +60,12 @@
           </div>
 
           <div class="form-group">
-            <label class="form-label">
+            <label class="form-label" for="account-new-password">
               <span>新管理密码（可选）</span>
             </label>
             <input 
+              id="account-new-password"
+              autocomplete="new-password"
               v-model="form.newPassword" 
               type="password" 
               class="form-input" 
@@ -68,11 +76,13 @@
           </div>
 
           <div class="form-group" v-if="form.newPassword">
-            <label class="form-label">
+            <label class="form-label" for="account-confirm-password">
               <span>再次输入新管理密码</span>
               <span class="required-star">*</span>
             </label>
             <input 
+              id="account-confirm-password"
+              autocomplete="new-password"
               v-model="form.confirmPassword" 
               type="password" 
               class="form-input" 
@@ -107,15 +117,15 @@
 import { reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { X, Save, AlertCircle, AlertTriangle } from 'lucide-vue-next'
-import { useAppStore } from '@/composables/useAppStore'
+import { useSession } from '@/composables/useSession'
 import { useToast } from '@/composables/useToast'
 
 const router = useRouter()
-const { isAccountModalOpen, closeAccountModal, adminUser, updateAdminPassword } = useAppStore()
+const { isAccountModalOpen, closeAccountModal, username, updateAdminPassword } = useSession()
 const { success, error: toastError } = useToast()
 
 const form = reactive({
-  username: adminUser.username,
+  username: username.value,
   currentPassword: '',
   newPassword: '',
   confirmPassword: ''
@@ -123,18 +133,19 @@ const form = reactive({
 
 const isSaving = ref(false)
 const errorMessage = ref('')
+const currentPasswordInput = ref(null)
 
 watch(isAccountModalOpen, (open) => {
-  if (open) {
-    form.username = adminUser.username
-    form.currentPassword = ''
-    form.newPassword = ''
-    form.confirmPassword = ''
-    errorMessage.value = ''
-  }
-})
+  form.username = username.value
+  form.currentPassword = ''
+  form.newPassword = ''
+  form.confirmPassword = ''
+  errorMessage.value = ''
+  if (open) currentPasswordInput.value?.focus()
+}, { flush: 'post' })
 
 const handleSave = async () => {
+  if (isSaving.value) return
   errorMessage.value = ''
   isSaving.value = true
   try {
@@ -146,7 +157,7 @@ const handleSave = async () => {
     })
     closeAccountModal()
     success(res.message)
-    router.push('/login')
+    await router.replace({ name: 'Login' })
   } catch (err) {
     errorMessage.value = err.message
     toastError(errorMessage.value)
@@ -172,8 +183,10 @@ const handleSave = async () => {
 .account-dialog-card {
   width: 100%;
   max-width: 480px;
-  background: var(--modal-bg);
-  border: 1px solid var(--modal-border);
+  max-height: calc(100dvh - 40px);
+  overflow: auto;
+  background: var(--card-hover-bg);
+  border: 1px solid var(--card-border);
   border-radius: 20px;
   padding: 26px 28px;
   box-shadow: 0 25px 60px rgba(0, 0, 0, 0.55);

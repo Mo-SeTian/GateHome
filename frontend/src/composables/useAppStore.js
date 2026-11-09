@@ -1,17 +1,9 @@
-import { ref, reactive, computed } from 'vue'
+import { ref, reactive } from 'vue'
 
 // Global UI State
 const theme = ref(localStorage.getItem('gh_theme') || 'dark')
 const isSidebarOpen = ref(false)
 const isCmdkOpen = ref(false)
-const isAccountModalOpen = ref(false)
-
-// Auth State (初次未登录时为 false，触发登录页拦截展示)
-const isAuthenticated = ref(localStorage.getItem('gh_auth') === 'true')
-const adminUser = reactive({
-  username: localStorage.getItem('gh_user') || 'admin',
-  role: '超级管理员 (Root)'
-})
 
 export function useAppStore() {
   const toggleTheme = () => {
@@ -44,61 +36,6 @@ export function useAppStore() {
 
   const closeCmdk = () => {
     isCmdkOpen.value = false
-  }
-
-  const openAccountModal = () => {
-    isAccountModalOpen.value = true
-  }
-
-  const closeAccountModal = () => {
-    isAccountModalOpen.value = false
-  }
-
-  const login = async (username, password) => {
-    if (!username || !username.trim()) {
-      throw new Error('请输入管理员账号')
-    }
-    if (!password) {
-      throw new Error('请输入管理密码')
-    }
-    // 模拟身份验证延迟
-    await new Promise(r => setTimeout(r, 450))
-
-    if (password.length < 6) {
-      throw new Error('管理密码长度不足，请输入正确的密码')
-    }
-
-    isAuthenticated.value = true
-    adminUser.username = username.trim()
-    localStorage.setItem('gh_auth', 'true')
-    localStorage.setItem('gh_user', username.trim())
-    return { ok: true, username: adminUser.username }
-  }
-
-  const logout = () => {
-    isAuthenticated.value = false
-    localStorage.removeItem('gh_auth')
-    isAccountModalOpen.value = false
-  }
-
-  const updateAdminPassword = async ({ currentPassword, newPassword, confirmPassword, username }) => {
-    if (!currentPassword) {
-      throw new Error('请输入当前管理密码以验证身份')
-    }
-    if (newPassword && newPassword !== confirmPassword) {
-      throw new Error('两次输入的新密码不一致')
-    }
-    if (newPassword && (newPassword.length < 12 || newPassword.length > 72)) {
-      throw new Error('新管理密码须为 12–72 字节')
-    }
-    await new Promise(r => setTimeout(r, 500))
-    if (username) {
-      adminUser.username = username
-      localStorage.setItem('gh_user', username)
-    }
-    // 保存后所有管理员会话退出
-    logout()
-    return { ok: true, message: '管理账户已修改，请使用新凭据重新登录' }
   }
 
   // ================= 1. PROXY GROUPS (反代组) =================
@@ -503,28 +440,6 @@ export function useAppStore() {
     { id: 'flog_4', time: '14:15:33', ip: '45.154.255.8', geo: '德国 · 法兰克福', engine: 'CRS', rule: '探测 wp-admin 路径', uri: '/wp-login.php', action: 'BLOCK', severity: 'LOW' }
   ])
 
-  // ================= 11. TELEMETRY STATS =================
-  const telemetry = reactive({
-    cpu: 18.4,
-    memory: 42.1,
-    memoryUsed: '3.37 GB',
-    memoryTotal: '8.00 GB',
-    disk: 38.6,
-    diskUsed: '189 GB',
-    diskTotal: '490 GB',
-    qps: 184,
-    activeConns: 1420,
-    rxRate: '6.84 MB/s',
-    txRate: '14.20 MB/s',
-    rxTotal: '1.42 TB',
-    txTotal: '4.89 TB',
-    uptime: '34d 18h 42m',
-    routesActive: computed(() => routes.value.filter(r => r.status === 'active').length),
-    routesTotal: computed(() => routes.value.length),
-    wafBlockedToday: 1384,
-    certExpiringCount: 1
-  })
-
   // ================= 12. MCP & BACKUPS & SETTINGS =================
   const mcp = reactive({
     enabled: true,
@@ -581,14 +496,6 @@ export function useAppStore() {
     toggleCmdk,
     openCmdk,
     closeCmdk,
-    isAuthenticated,
-    adminUser,
-    isAccountModalOpen,
-    openAccountModal,
-    closeAccountModal,
-    login,
-    logout,
-    updateAdminPassword,
     proxyGroups,
     routes,
     subscriptions,
@@ -600,7 +507,6 @@ export function useAppStore() {
     accessLogs,
     projectLogs,
     firewallLogs,
-    telemetry,
     mcp,
     backups,
     settings

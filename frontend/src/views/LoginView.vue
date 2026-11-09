@@ -48,14 +48,14 @@
 
         <!-- Inline Error Banner -->
         <transition name="slide-down">
-          <div v-if="errorMessage" class="error-banner">
+          <div v-if="errorMessage" class="error-banner" role="alert">
             <AlertCircle :size="15" class="error-icon" />
             <span>{{ errorMessage }}</span>
           </div>
         </transition>
 
         <!-- Login Form -->
-        <form class="login-form" @submit.prevent="handleSubmit">
+        <form class="login-form" :aria-busy="isLoading" @submit.prevent="handleSubmit">
           <div class="form-group">
             <label class="form-label" for="admin-username">
               <span>管理员账号</span>
@@ -68,7 +68,7 @@
                 v-model="username" 
                 type="text" 
                 class="form-input" 
-                placeholder="admin" 
+                placeholder="请输入管理员账号"
                 maxlength="64"
                 autocomplete="username"
                 required 
@@ -86,7 +86,8 @@
               <button 
                 type="button" 
                 class="field-help-btn"
-                @click="showForgotModal = true"
+                ref="forgotTrigger"
+                @click="forgotDialog.showModal()"
               >
                 忘记密码？
               </button>
@@ -106,7 +107,7 @@
               <button 
                 type="button" 
                 class="eye-toggle-btn" 
-                :title="showPassword ? '隐藏密码' : '显示密码'"
+                :aria-label="showPassword ? '隐藏密码' : '显示密码'"
                 @click="showPassword = !showPassword"
               >
                 <EyeOff v-if="showPassword" :size="15" />
@@ -115,150 +116,103 @@
             </div>
           </div>
 
-          <div class="form-options">
-            <label class="checkbox-label">
-              <input type="checkbox" v-model="rememberMe" />
-              <span class="custom-checkbox">
-                <Check v-if="rememberMe" :size="12" />
-              </span>
-              <span class="remember-text">保持 30 天管理会话有效</span>
-            </label>
-          </div>
-
-          <!-- Submit Buttons -->
-          <div class="actions-group">
-            <button 
-              type="submit" 
-              class="btn btn-primary submit-btn" 
-              :disabled="isLoading"
-            >
-              <span v-if="isLoading" class="btn-spinner" />
-              <LogIn v-else :size="16" />
-              <span>{{ isLoading ? '身份凭据校验中...' : '进入控制台' }}</span>
-            </button>
-
-            <!-- Quick Demo Bypass Button -->
-            <button 
-              type="button" 
-              class="btn demo-quick-btn" 
-              :disabled="isLoading"
-              @click="handleDemoLogin"
-            >
-              <Zap :size="14" class="zap-icon" />
-              <span>一键快捷免密进入 (演示模式)</span>
-            </button>
-          </div>
+          <button type="submit" class="btn btn-primary submit-btn" :disabled="isLoading">
+            <span v-if="isLoading" class="btn-spinner" />
+            <LogIn v-else :size="16" />
+            <span>{{ isLoading ? '身份凭据校验中...' : '进入控制台' }}</span>
+          </button>
         </form>
 
         <!-- Official GateHome Helper Note -->
         <div class="login-note-box">
           <p class="login-note">
-            这里使用管理账户，与反代服务的访问账号分开。忘记管理账户？在服务器终端运行 
-            <code class="code-pill">gatehouse init</code>，使用原配置目录重置并重启服务。
+            请使用网关管理账户。管理会话有效期为 12 小时。
           </p>
         </div>
 
         <div class="login-footer">
-          <span>GateHome · {{ settings.currentVersion }} · Aurora Next Console</span>
+          <span>GateHome · {{ gatewayVersion }} · Aurora Next Console</span>
         </div>
       </SpotlightCard>
     </div>
 
-    <!-- Forgot Password Modal -->
-    <transition name="fade">
-      <div v-if="showForgotModal" class="modal-backdrop" @click="showForgotModal = false">
-        <div class="modal-box" @click.stop>
-          <div class="modal-header">
-            <div class="modal-title-row">
-              <KeyRound :size="18" class="modal-icon" />
-              <h3>如何重置管理员账户密码？</h3>
+    <dialog ref="forgotDialog" class="modal-box" aria-labelledby="forgot-title" @close="forgotTrigger?.focus()">
+      <div class="modal-header">
+        <div class="modal-title-row">
+          <KeyRound :size="18" class="modal-icon" />
+          <h3 id="forgot-title">如何重置管理员账户密码？</h3>
+        </div>
+        <button type="button" class="modal-close-btn" aria-label="关闭" autofocus @click="forgotDialog.close()">
+          <X :size="16" />
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="step-card">
+          <div class="step-num">1</div>
+          <div class="step-text">登录服务器终端并停止 GateHome 服务。</div>
+        </div>
+        <div class="step-card">
+          <div class="step-num">2</div>
+          <div class="step-text">
+            沿用现有启动参数，将 <code>init</code> 放在参数末尾。以下为独立部署的命令格式。
+            <div class="code-terminal">
+              <code>gatehouse -config &lt;配置目录&gt; -log &lt;日志目录&gt; -data &lt;数据目录&gt; init</code>
             </div>
-            <button class="modal-close-btn" @click="showForgotModal = false">
-              <X :size="16" />
-            </button>
-          </div>
-          <div class="modal-body">
-            <p>为保障家庭网关的最高安全级别，GateHome 默认不提供未经授权的公网重置通道。</p>
-            <div class="step-card">
-              <div class="step-num">1</div>
-              <div class="step-text">通过 SSH 或终端登入运行 GateHome 的物理宿主机 / NAS。</div>
-            </div>
-            <div class="step-card">
-              <div class="step-num">2</div>
-              <div class="step-text">
-                执行以下初始化命令，沿用原配置目录重置账号密码并重启服务：
-                <div class="code-terminal">
-                  <code>gatehouse init --config /etc/gatehouse</code>
-                </div>
-              </div>
-            </div>
-            <div class="step-card">
-              <div class="step-num">3</div>
-              <div class="step-text">重置完成后，在此页面使用新设定的管理员凭据登录。</div>
-            </div>
-          </div>
-          <div class="modal-footer">
-            <button class="btn btn-primary btn-sm" @click="showForgotModal = false">
-              我知道了
-            </button>
+            Docker Compose 部署请沿用原服务挂载，执行 <code>docker compose run --rm gatehouse init</code>。
           </div>
         </div>
+        <div class="step-card">
+          <div class="step-num">3</div>
+          <div class="step-text">启动服务并使用新的管理员凭据登录。</div>
+        </div>
       </div>
-    </transition>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-primary btn-sm" @click="forgotDialog.close()">我知道了</button>
+      </div>
+    </dialog>
   </div>
 </template>
 
 <script setup>
 import { ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { 
-  User, Lock, Eye, EyeOff, LogIn, AlertCircle, 
-  Zap, Check, Sun, Moon, KeyRound, X 
-} from 'lucide-vue-next'
+import { User, Lock, Eye, EyeOff, LogIn, AlertCircle, Sun, Moon, KeyRound, X } from 'lucide-vue-next'
 import SpotlightCard from '@/components/SpotlightCard.vue'
 import { useAppStore } from '@/composables/useAppStore'
+import { useGatewayStatus } from '@/composables/useGatewayStatus'
+import { useSession } from '@/composables/useSession'
 import { useToast } from '@/composables/useToast'
+import { postLoginPath } from '@/router'
 
 const router = useRouter()
 const route = useRoute()
-const { theme, toggleTheme, login, settings } = useAppStore()
-const { success, error: toastError } = useToast()
+const { theme, toggleTheme } = useAppStore()
+const { login } = useSession()
+const { gatewayVersion } = useGatewayStatus()
+const { success } = useToast()
 
-const username = ref('admin')
+const username = ref('')
 const password = ref('')
 const showPassword = ref(false)
-const rememberMe = ref(true)
 const isLoading = ref(false)
 const errorMessage = ref('')
-const showForgotModal = ref(false)
+const forgotDialog = ref(null)
+const forgotTrigger = ref(null)
 
-const finishLogin = (loggedUser) => {
-  success(`欢迎回来，${loggedUser}！已进入控制中心`)
-  const redirect = route.query.redirect || '/overview'
-  router.push(redirect)
-}
-
-const handleSubmit = async () => {
+async function handleSubmit() {
+  if (isLoading.value) return
   errorMessage.value = ''
-  isLoading.value = true
-  try {
-    const res = await login(username.value, password.value)
-    finishLogin(res.username)
-  } catch (err) {
-    errorMessage.value = err.message || '账号或管理密码错误'
-    toastError(errorMessage.value)
-  } finally {
-    isLoading.value = false
+  if (!username.value.trim()) {
+    errorMessage.value = '请输入管理员账号'
+    return
   }
-}
 
-const handleDemoLogin = async () => {
-  username.value = 'admin'
-  errorMessage.value = ''
   isLoading.value = true
   try {
-    const res = await login('admin', 'DEMO_PASSWORD')
-    finishLogin(res.username)
+    await login(username.value.trim(), password.value)
+    password.value = ''
+    success('已登录 GateHome')
+    await router.replace(postLoginPath(route.query.redirect))
   } catch (err) {
     errorMessage.value = err.message
   } finally {
@@ -443,7 +397,7 @@ const handleDemoLogin = async () => {
   background: rgba(244, 63, 94, 0.12);
   border: 1px solid rgba(244, 63, 94, 0.3);
   border-radius: var(--radius-sm);
-  color: var(--danger);
+  color: var(--ink);
   font-size: 12.5px;
 }
 .error-icon {
@@ -510,73 +464,27 @@ const handleDemoLogin = async () => {
 .input-with-icon .form-input {
   width: 100%;
   padding-left: 36px;
-  padding-right: 36px;
-  height: 40px;
+  padding-right: 44px;
+  height: 44px;
   box-sizing: border-box;
   font-size: 13.5px;
 }
 
 .eye-toggle-btn {
   position: absolute;
-  right: 12px;
+  right: 0;
   color: var(--faint);
   background: transparent;
   border: none;
   cursor: pointer;
-  padding: 4px;
-  display: flex;
-  align-items: center;
-}
-.eye-toggle-btn:hover {
-  color: var(--ink);
-}
-
-/* Checkbox */
-.form-options {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-top: -2px;
-}
-
-.checkbox-label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
-  font-size: 12px;
-  color: var(--muted);
-  user-select: none;
-}
-
-.checkbox-label input[type="checkbox"] {
-  display: none;
-}
-
-.custom-checkbox {
-  width: 16px;
-  height: 16px;
-  border-radius: 4px;
-  border: 1px solid var(--line-bold);
-  background: var(--input-bg);
+  width: 44px;
+  height: 44px;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #fff;
-  transition: var(--transition-smooth);
 }
-
-.checkbox-label input[type="checkbox"]:checked + .custom-checkbox {
-  background: var(--brand);
-  border-color: var(--brand);
-}
-
-/* Buttons */
-.actions-group {
-  display: flex;
-  flex-direction: column;
-  gap: 9px;
-  margin-top: 6px;
+.eye-toggle-btn:hover {
+  color: var(--ink);
 }
 
 .submit-btn {
@@ -601,30 +509,6 @@ const handleDemoLogin = async () => {
   animation: spin 0.75s linear infinite;
 }
 
-.demo-quick-btn {
-  width: 100%;
-  height: 38px;
-  background: var(--strip-bg);
-  border: 1px dashed var(--line-bold);
-  color: var(--muted);
-  font-size: 12.5px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  border-radius: var(--radius-sm);
-  transition: var(--transition-smooth);
-}
-.demo-quick-btn:hover {
-  background: var(--card-hover-bg);
-  border-color: var(--brand-light);
-  color: var(--ink);
-}
-
-.zap-icon {
-  color: var(--warn);
-}
-
 /* Official Note */
 .login-note-box {
   background: var(--strip-bg);
@@ -640,15 +524,6 @@ const handleDemoLogin = async () => {
   margin: 0;
 }
 
-.code-pill {
-  font-family: var(--mono);
-  background: var(--input-bg);
-  border: 1px solid var(--line);
-  padding: 1px 4px;
-  border-radius: 3px;
-  color: var(--ink);
-}
-
 .login-footer {
   text-align: center;
   font-size: 11px;
@@ -657,29 +532,28 @@ const handleDemoLogin = async () => {
 }
 
 /* Modal */
-.modal-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.65);
-  backdrop-filter: blur(8px);
-  z-index: 100;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 20px;
-}
-
 .modal-box {
-  width: 100%;
-  max-width: 480px;
-  background: var(--modal-bg);
-  border: 1px solid var(--modal-border);
+  width: min(480px, calc(100% - 32px));
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
+  margin: auto;
+  background: var(--card-hover-bg);
+  border: 1px solid var(--card-border);
+  color: var(--ink);
   border-radius: 18px;
   padding: 24px;
   box-shadow: 0 25px 60px rgba(0, 0, 0, 0.5);
+}
+
+.modal-box[open] {
   display: flex;
   flex-direction: column;
   gap: 18px;
+}
+
+.modal-box::backdrop {
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(8px);
 }
 
 .modal-header {

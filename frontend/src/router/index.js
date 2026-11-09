@@ -1,5 +1,7 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
-import { useAppStore } from '@/composables/useAppStore'
+import { setUnauthorizedHandler } from '@/api/client'
+import { useSession } from '@/composables/useSession'
+import { useToast } from '@/composables/useToast'
 
 const routes = [
   { path: '/', redirect: '/overview' },
@@ -124,22 +126,37 @@ const router = createRouter({
   routes
 })
 
-router.beforeEach((to, from, next) => {
-  const { isAuthenticated } = useAppStore()
+const { isAuthenticated, restoreSession, endSession } = useSession()
 
-  // 未登录且访问受保护页面时，强制跳转登录页
-  if (to.path !== '/login' && !isAuthenticated.value) {
-    next({ path: '/login', query: { redirect: to.fullPath } })
-    return
+function loginRoute(redirect) {
+  return { name: 'Login', query: { redirect } }
+}
+
+export function postLoginPath(redirect) {
+  if (typeof redirect === 'string' && redirect.startsWith('/') && !redirect.startsWith('//')) {
+    const target = router.resolve(redirect)
+    if (target.matched.length && target.name !== 'Login') return target.fullPath
+  }
+  return '/overview'
+}
+
+setUnauthorizedHandler(message => {
+  if (!isAuthenticated.value) return
+  const current = router.currentRoute.value
+  endSession()
+  useToast().warn(message)
+  if (current.name !== 'Login') router.replace(loginRoute(current.fullPath))
+})
+
+router.beforeEach(async to => {
+  try {
+    await restoreSession()
+  } catch (err) {
+    if (to.name !== 'Login') useToast().error(err.message)
   }
 
-  // 已登录状态访问登录页，直接跳转概览
-  if (to.path === '/login' && isAuthenticated.value) {
-    next('/overview')
-    return
-  }
-
-  next()
+  if (to.name === 'Login' && isAuthenticated.value) return postLoginPath(to.query.redirect)
+  if (to.name !== 'Login' && !isAuthenticated.value) return loginRoute(to.fullPath)
 })
 
 router.afterEach((to) => {

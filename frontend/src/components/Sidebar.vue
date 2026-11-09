@@ -29,7 +29,7 @@
         </div>
         <div class="brand-info">
           <span class="brand-title">GateHome</span>
-          <span class="brand-version">家庭网关 · {{ settings.currentVersion }}</span>
+          <span class="brand-version">家庭网关 · {{ gatewayVersion }}</span>
         </div>
         <button class="mobile-close-btn" @click="closeSidebar">
           <X :size="18" />
@@ -47,7 +47,7 @@
         <router-link to="/routes" class="nav-link" active-class="active" @click="onNavClick">
           <Network :size="17" class="nav-icon" />
           <span class="nav-text">反向代理</span>
-          <span class="nav-badge brand">{{ routes.length }}</span>
+          <span v-if="gatewayConfig" class="nav-badge brand">{{ gatewayConfig.routes?.length ?? 0 }}</span>
         </router-link>
         <router-link to="/forwards" class="nav-link" active-class="active" @click="onNavClick">
           <ArrowLeftRight :size="17" class="nav-icon" />
@@ -64,7 +64,7 @@
         <router-link to="/certificates" class="nav-link" active-class="active" @click="onNavClick">
           <Lock :size="17" class="nav-icon" />
           <span class="nav-text">SSL 证书</span>
-          <span class="nav-badge warn">1</span>
+          <span v-if="certificatesExpiring" class="nav-badge warn" title="30 天内到期或已过期">{{ certificatesExpiring }}</span>
         </router-link>
         <router-link to="/subscriptions" class="nav-link" active-class="active" @click="onNavClick">
           <Download :size="17" class="nav-icon" />
@@ -73,7 +73,7 @@
         <router-link to="/access" class="nav-link" active-class="active" @click="onNavClick">
           <ShieldAlert :size="17" class="nav-icon" />
           <span class="nav-text">防火墙管理</span>
-          <span class="nav-status-dot active" />
+          <span v-if="firewallAttached" class="nav-status-dot active" title="已关联启用的反代规则" />
         </router-link>
 
         <!-- 分组 2: 观察与管理 -->
@@ -89,7 +89,6 @@
         <router-link to="/ip-blocks" class="nav-link" active-class="active" @click="onNavClick">
           <Ban :size="17" class="nav-icon" />
           <span class="nav-text">IP 拦截名单</span>
-          <span class="nav-badge bad">{{ ipBlocks.length }}</span>
         </router-link>
         <router-link to="/statistics" class="nav-link" active-class="active" @click="onNavClick">
           <BarChart3 :size="17" class="nav-icon" />
@@ -123,14 +122,14 @@
         <div class="status-card">
           <div class="status-top">
             <span class="status-indicator">
-              <span class="status-dot ok" />
-              已连接 · 运行正常
+              <span class="status-dot" :class="gatewayState.tone === 'pending' ? 'neutral' : gatewayState.tone" />
+              {{ gatewayState.label }}
             </span>
-            <span class="uptime-text">34d</span>
+            <span class="uptime-text" title="网关运行时长">{{ uptime }}</span>
           </div>
           <div class="status-details">
-            <span>管理入口: :16666</span>
-            <button type="button" class="login-link-btn" @click="handleLogout">退出登录</button>
+            <span>管理入口 {{ adminAddress }}</span>
+            <button type="button" class="login-link-btn" :disabled="isLoggingOut" @click="handleLogout">退出登录</button>
           </div>
         </div>
       </div>
@@ -139,18 +138,35 @@
 </template>
 
 <script setup>
-import { useRouter } from 'vue-router'
+import { computed } from 'vue'
 import { 
   X, LayoutDashboard, Network, ArrowLeftRight, Compass,
   Globe, Lock, Download, ShieldAlert, FileSearch, ScrollText, Ban,
   BarChart3, Activity, Bot, RefreshCw, HardDriveDownload, Settings
 } from 'lucide-vue-next'
 import { useAppStore } from '@/composables/useAppStore'
-import { useToast } from '@/composables/useToast'
+import { useGatewayStatus } from '@/composables/useGatewayStatus'
+import { useLogout, useSession } from '@/composables/useSession'
 
-const router = useRouter()
-const { isSidebarOpen, closeSidebar, routes, ipBlocks, settings, logout } = useAppStore()
-const { info } = useToast()
+const { isSidebarOpen, closeSidebar } = useAppStore()
+const { gatewayConfig, gatewayStatus, gatewayVersion, gatewayState } = useGatewayStatus()
+const { isLoggingOut } = useSession()
+const logout = useLogout()
+const adminAddress = window.location.host
+const firewallAttached = computed(() => gatewayConfig.value?.routes?.some(route => route.enabled && route.firewall_id))
+const certificatesExpiring = computed(() => (gatewayStatus.value?.certificates ?? []).filter(cert =>
+  cert.ready && Date.parse(cert.not_after) <= Date.now() + 30 * 86400000
+).length)
+const uptime = computed(() => {
+  const seconds = gatewayStatus.value?.uptime_seconds
+  if (seconds == null) return '—'
+  const days = Math.floor(seconds / 86400)
+  const hours = Math.floor(seconds / 3600) % 24
+  const minutes = Math.floor(seconds / 60) % 60
+  if (days) return `${days}天 ${hours}小时`
+  if (hours) return `${hours}小时 ${minutes}分`
+  return minutes ? `${minutes}分` : `${seconds}秒`
+})
 
 const onNavClick = () => {
   if (window.innerWidth < 1024) {
@@ -160,9 +176,7 @@ const onNavClick = () => {
 
 const handleLogout = () => {
   closeSidebar()
-  logout()
-  info('已退出管理会话')
-  router.push('/login')
+  return logout()
 }
 </script>
 

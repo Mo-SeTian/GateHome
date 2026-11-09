@@ -6,7 +6,7 @@
     </div>
 
     <!-- Main Application Shell -->
-    <div v-else class="app-layout">
+    <div v-else-if="isAuthenticated" class="app-layout">
       <!-- Left Sidebar (Desktop fixed, Mobile sliding drawer) -->
       <Sidebar />
 
@@ -27,10 +27,10 @@
     </div>
 
     <!-- Command Palette (⌘K) -->
-    <CmdkModal />
+    <CmdkModal v-if="isAuthenticated" />
 
     <!-- Admin Account Security Modal -->
-    <AccountModal />
+    <AccountModal v-if="isAuthenticated" />
 
     <!-- Toast Notifications -->
     <ToastNotification />
@@ -38,7 +38,7 @@
 </template>
 
 <script setup>
-import { onMounted } from 'vue'
+import { onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import Sidebar from '@/components/Sidebar.vue'
 import TopHeader from '@/components/TopHeader.vue'
@@ -46,9 +46,31 @@ import CmdkModal from '@/components/CmdkModal.vue'
 import AccountModal from '@/components/AccountModal.vue'
 import ToastNotification from '@/components/ToastNotification.vue'
 import { useAppStore } from '@/composables/useAppStore'
+import { useGatewayStatus } from '@/composables/useGatewayStatus'
+import { useSession } from '@/composables/useSession'
 
 const route = useRoute()
-const { theme } = useAppStore()
+const { theme, closeCmdk, closeSidebar } = useAppStore()
+const { isAuthenticated } = useSession()
+const { refreshStatus, refreshConfig, resetGatewayStatus } = useGatewayStatus()
+
+watch(isAuthenticated, (authenticated, _, onCleanup) => {
+  if (!authenticated) {
+    closeCmdk()
+    closeSidebar()
+    resetGatewayStatus()
+    return
+  }
+  const controller = new AbortController()
+  const pollStatus = () => refreshStatus(controller.signal).catch(() => {})
+  pollStatus()
+  refreshConfig(controller.signal).catch(() => {})
+  const timer = setInterval(pollStatus, 10000)
+  onCleanup(() => {
+    clearInterval(timer)
+    controller.abort()
+  })
+}, { immediate: true })
 
 onMounted(() => {
   document.body.className = `theme-${theme.value}`

@@ -11,23 +11,23 @@
 cd frontend
 npm ci
 
-# 2. 启动本地开发实时预览 (热重载)
-npm run dev
-# 访问地址: http://localhost:5173
+# 2. 启动本地开发预览，按实际端口指定 Go 管理端
+GATEHOME_API_TARGET=http://127.0.0.1:16666 npm run dev
+# 访问 http://127.0.0.1:5173
 
 # 3. 生产打包构建
 npm run build
 # 产物输出至 dist/，版本读取仓库根目录的 VERSION
 
 # 4. 本地预览生产构建
-npm run preview
+GATEHOME_API_TARGET=http://127.0.0.1:16666 npm run preview
 ```
 
 ---
 
 ## 页面与联调状态
 
-当前 Vue 工程使用模拟登录和业务数据，可预览独立登录页及 17 个控制台页面。现有业务功能和逐页验收项见[迁移验收清单](../docs/aurora-next-migration-checklist.md)。订阅管理对应防火墙 IP/CIDR 规则源。
+登录、账户管理和概览使用 Go API。Vite 通过同源路径转发 `/api/`，浏览器负责管理会话 Cookie。其余业务页面仍使用模拟数据，逐页范围见[迁移验收清单](../docs/aurora-next-migration-checklist.md)。订阅管理对应防火墙 IP/CIDR 规则源。
 
 ---
 

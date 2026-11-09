@@ -26,9 +26,9 @@
     <!-- Right Controls -->
     <div class="header-right">
       <!-- Global Gateway Status Badge -->
-      <div class="gateway-live-pill">
+      <div class="gateway-live-pill" :class="gatewayState.tone" :title="gatewayState.label">
         <span class="pulse-dot" />
-        <span class="live-text">反代网关就绪</span>
+        <span class="live-text">{{ gatewayState.label }}</span>
       </div>
 
       <!-- Theme Switch Button -->
@@ -49,10 +49,10 @@
           :aria-expanded="isDropdownOpen"
         >
           <div class="user-avatar">
-            <span>{{ adminUser.username.slice(0, 1).toUpperCase() }}</span>
+            <span>{{ username.slice(0, 1).toUpperCase() }}</span>
             <span class="avatar-status-dot" />
           </div>
-          <span class="username">{{ adminUser.username }}</span>
+          <span class="username">{{ username }}</span>
           <ChevronDown :size="14" class="chevron-icon" :class="{ 'rotate-180': isDropdownOpen }" />
         </button>
 
@@ -61,11 +61,11 @@
           <div v-if="isDropdownOpen" class="user-dropdown-popover">
             <div class="popover-user-info">
               <div class="popover-avatar">
-                <span>{{ adminUser.username.slice(0, 1).toUpperCase() }}</span>
+                <span>{{ username.slice(0, 1).toUpperCase() }}</span>
               </div>
               <div class="popover-user-meta">
-                <span class="popover-username">{{ adminUser.username }}</span>
-                <span class="popover-role">{{ adminUser.role }}</span>
+                <span class="popover-username">{{ username }}</span>
+                <span class="popover-role">管理员</span>
               </div>
             </div>
 
@@ -104,21 +104,20 @@
 
 <script setup>
 import { computed, ref, onMounted, onUnmounted } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import { 
   Menu, Search, Sun, Moon, ChevronDown, 
   KeyRound, LogOut, Terminal 
 } from 'lucide-vue-next'
 import { useAppStore } from '@/composables/useAppStore'
-import { useToast } from '@/composables/useToast'
+import { useGatewayStatus } from '@/composables/useGatewayStatus'
+import { useLogout, useSession } from '@/composables/useSession'
 
 const route = useRoute()
-const router = useRouter()
-const { 
-  toggleSidebar, openCmdk, theme, toggleTheme, 
-  adminUser, logout, openAccountModal 
-} = useAppStore()
-const { info } = useToast()
+const { toggleSidebar, openCmdk, theme, toggleTheme } = useAppStore()
+const { username, openAccountModal } = useSession()
+const { gatewayState } = useGatewayStatus()
+const logout = useLogout()
 
 const isDropdownOpen = ref(false)
 const menuRef = ref(null)
@@ -143,9 +142,7 @@ const handleOpenCmdkFromMenu = () => {
 
 const handleLogout = () => {
   isDropdownOpen.value = false
-  logout()
-  info('已安全退出管理会话')
-  router.push('/login')
+  return logout()
 }
 
 const handleClickOutside = (e) => {
@@ -296,6 +293,18 @@ onUnmounted(() => {
   background: var(--ok);
   box-shadow: var(--ok-glow);
   animation: pulseDot 2s infinite ease-in-out;
+}
+
+.gateway-live-pill.warn, .gateway-live-pill.pending {
+  background: var(--strip-bg);
+  border-color: var(--line);
+}
+.gateway-live-pill.warn { color: var(--warn); }
+.gateway-live-pill.pending { color: var(--muted); }
+.gateway-live-pill:not(.ok) .pulse-dot {
+  background: currentColor;
+  box-shadow: none;
+  animation: none;
 }
 
 @keyframes pulseDot {
@@ -498,6 +507,16 @@ onUnmounted(() => {
 
 /* Responsive */
 @media (max-width: 1023px) {
+  .top-header {
+    padding-inline: 16px;
+    gap: 8px;
+  }
+  .header-left, .breadcrumb-container { min-width: 0; }
+  .crumb-current {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   .mobile-toggle-btn {
     display: flex;
   }
@@ -507,5 +526,8 @@ onUnmounted(() => {
   .live-text {
     display: none;
   }
+}
+@media (max-width: 420px) {
+  .crumb-root, .crumb-separator { display: none; }
 }
 </style>

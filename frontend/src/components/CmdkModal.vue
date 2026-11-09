@@ -77,6 +77,7 @@
 import { ref, computed, nextTick, watch, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAppStore } from '@/composables/useAppStore'
+import { useLogout, useSession } from '@/composables/useSession'
 import { useToast } from '@/composables/useToast'
 import { 
   Search, AlertCircle, LayoutDashboard, Network, ArrowLeftRight, Compass,
@@ -86,8 +87,10 @@ import {
 } from 'lucide-vue-next'
 
 const router = useRouter()
-const { isCmdkOpen, closeCmdk, toggleTheme, theme, openAccountModal, logout } = useAppStore()
-const { success, info } = useToast()
+const { isCmdkOpen, closeCmdk, toggleTheme, theme } = useAppStore()
+const { openAccountModal } = useSession()
+const logout = useLogout()
+const { success } = useToast()
 
 const inputRef = ref(null)
 const query = ref('')
@@ -121,7 +124,7 @@ const actions = [
   { id: 'act_account', title: '修改管理员账户密码', icon: KeyRound, run: () => { closeCmdk(); openAccountModal() } },
   { id: 'act_new_route', title: '新建反向代理路由', icon: PlusCircle, shortcut: '⌘N', run: () => { closeCmdk(); router.push('/routes'); success('已打开新建反代弹窗') } },
   { id: 'act_ddns_sync', title: '立即同步全部 DDNS 动态域名', icon: RefreshCw, run: () => { success('已向各 DNS 服务商发出刷新同步指令') } },
-  { id: 'act_logout', title: '退出登录 (Logout)', icon: LogOut, run: () => { closeCmdk(); logout(); info('已安全退出管理会话'); router.push('/login') } }
+  { id: 'act_logout', title: '退出登录 (Logout)', icon: LogOut, run: () => { closeCmdk(); return logout() } }
 ]
 
 const filteredPages = computed(() => {

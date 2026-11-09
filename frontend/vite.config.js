@@ -16,6 +16,12 @@ export default defineConfig({
   },
   server: {
     port: 5173,
-    host: '0.0.0.0'
+    host: '127.0.0.1',
+    proxy: {
+      '/api/': {
+        target: process.env.GATEHOME_API_TARGET || 'http://127.0.0.1:16666',
+        changeOrigin: false
+      }
+    }
   }
 })

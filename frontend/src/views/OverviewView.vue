@@ -1,288 +1,162 @@
 <template>
   <div class="overview-page animate-fade-in">
-    <!-- Page Header -->
     <div class="page-topbar">
       <div>
         <h1 class="page-title">系统概览</h1>
-        <p class="page-subtitle">GateHome 实时遥测指标、网关流量雷达与运行状态监控</p>
+        <p class="page-subtitle">GateHome 网关状态、资源遥测与访问统计</p>
       </div>
       <div class="header-actions">
-        <button class="btn btn-secondary" @click="triggerRefresh">
+        <button class="btn btn-secondary" :disabled="isRefreshing" @click="refresh(true)">
           <RefreshCw :size="14" :class="{ 'spin-icon': isRefreshing }" />
-          刷新数据
+          {{ isRefreshing ? '刷新中…' : '刷新数据' }}
         </button>
-        <button class="btn btn-primary" @click="$router.push('/routes')">
-          <Plus :size="14" />
-          新建反代
-        </button>
+        <router-link to="/routes" class="btn btn-primary"><Plus :size="14" /> 管理反向代理</router-link>
       </div>
     </div>
 
-    <!-- Bento Top Row: 4 Metric Cards -->
+    <p v-if="loadError" class="overview-message" role="alert">{{ loadError }}{{ dashboard ? '，当前显示最近一次采样。' : '。' }}</p>
+    <p v-else-if="!dashboard" class="overview-message" role="status">正在读取网关遥测…</p>
+    <p v-else class="overview-message">最近采样 {{ sampledAt }} · {{ resources.platform }}</p>
+
     <div class="bento-grid">
-      <!-- Card 1: CPU -->
-      <SpotlightCard class="metric-card">
+      <SpotlightCard v-for="metric in resourceCards" :key="metric.label" class="metric-card">
         <div class="card-header">
           <div class="metric-info">
-            <span class="metric-label">CPU 负载率</span>
+            <span class="metric-label">{{ metric.label }}</span>
             <div class="metric-value">
-              {{ telemetry.cpu }}<span class="metric-unit">%</span>
+              {{ metric.percent == null ? '—' : metric.percent.toFixed(1) }}<span v-if="metric.percent != null" class="metric-unit">%</span>
             </div>
           </div>
-          <div class="metric-icon-box cpu">
-            <Cpu :size="20" />
-          </div>
+          <div class="metric-icon-box" :class="metric.kind"><component :is="metric.icon" :size="20" /></div>
         </div>
         <div class="progress-track">
-          <div class="progress-fill brand" :style="{ width: `${telemetry.cpu}%` }" />
+          <div v-if="metric.percent != null" class="progress-fill" :class="metric.fill" :style="{ width: metric.percent + '%' }" />
         </div>
-        <div class="metric-footer">
-          <span>4 核心 / 8 线程</span>
-          <span class="mono-text">load: 0.24, 0.18</span>
-        </div>
+        <div class="metric-footer"><span>{{ metric.detail }}</span><span>{{ metric.total }}</span></div>
       </SpotlightCard>
 
-      <!-- Card 2: Memory -->
       <SpotlightCard class="metric-card">
         <div class="card-header">
           <div class="metric-info">
-            <span class="metric-label">内存占用</span>
-            <div class="metric-value">
-              {{ telemetry.memory }}<span class="metric-unit">%</span>
-            </div>
+            <span class="metric-label">运行期请求</span>
+            <div class="metric-value">{{ count(gatewayStatus?.requests) }}</div>
           </div>
-          <div class="metric-icon-box mem">
-            <Activity :size="20" />
-          </div>
-        </div>
-        <div class="progress-track">
-          <div class="progress-fill cyan" :style="{ width: `${telemetry.memory}%` }" />
-        </div>
-        <div class="metric-footer">
-          <span>已用 {{ telemetry.memoryUsed }}</span>
-          <span class="mono-text">共 {{ telemetry.memoryTotal }}</span>
-        </div>
-      </SpotlightCard>
-
-      <!-- Card 3: Storage -->
-      <SpotlightCard class="metric-card">
-        <div class="card-header">
-          <div class="metric-info">
-            <span class="metric-label">磁盘空间</span>
-            <div class="metric-value">
-              {{ telemetry.disk }}<span class="metric-unit">%</span>
-            </div>
-          </div>
-          <div class="metric-icon-box disk">
-            <HardDrive :size="20" />
-          </div>
-        </div>
-        <div class="progress-track">
-          <div class="progress-fill ok" :style="{ width: `${telemetry.disk}%` }" />
-        </div>
-        <div class="metric-footer">
-          <span>已用 {{ telemetry.diskUsed }}</span>
-          <span class="mono-text">共 {{ telemetry.diskTotal }}</span>
-        </div>
-      </SpotlightCard>
-
-      <!-- Card 4: QPS & Traffic -->
-      <SpotlightCard class="metric-card">
-        <div class="card-header">
-          <div class="metric-info">
-            <span class="metric-label">实时 QPS</span>
-            <div class="metric-value">
-              {{ telemetry.qps }}<span class="metric-unit">req/s</span>
-            </div>
-          </div>
-          <div class="metric-icon-box net">
-            <Zap :size="20" />
-          </div>
+          <div class="metric-icon-box net"><Zap :size="20" /></div>
         </div>
         <div class="metric-extra-badges">
-          <span class="badge badge-brand">并发连接 {{ telemetry.activeConns }}</span>
-          <span class="badge badge-ok">正常率 99.98%</span>
+          <span class="badge badge-brand">24 小时访问 {{ count(access?.total) }}</span>
         </div>
-        <div class="metric-footer">
-          <span>今日已处理 1.42M 次</span>
-          <span class="mono-text">平均 2.1ms</span>
-        </div>
+        <div class="metric-footer"><span>拦截 {{ count(gatewayStatus?.blocked) }}</span><span>失败 {{ count(gatewayStatus?.failures) }}</span></div>
       </SpotlightCard>
     </div>
 
-    <!-- Center Section: Network Wave Radar & Status Tiles -->
     <div class="middle-grid">
-      <!-- Traffic Radar Chart Card -->
       <SpotlightCard class="chart-card">
         <div class="section-title-bar">
-          <div class="title-with-icon">
-            <Radio :size="17" class="brand-text" />
-            <span class="section-title">实时网络流量雷达</span>
-          </div>
+          <div class="title-with-icon"><Radio :size="17" class="brand-text" /><span class="section-title">实时网卡流量</span></div>
           <div class="chart-legend">
-            <span class="legend-item"><span class="legend-dot rx" />下行 {{ telemetry.rxRate }}</span>
-            <span class="legend-item"><span class="legend-dot tx" />上行 {{ telemetry.txRate }}</span>
+            <span class="legend-item"><span class="legend-dot rx" />下行 {{ rate(resources.rx_rate) }}</span>
+            <span class="legend-item"><span class="legend-dot tx" />上行 {{ rate(resources.tx_rate) }}</span>
           </div>
         </div>
 
-        <!-- SVG Interactive Waveform -->
         <div class="chart-container">
-          <svg viewBox="0 0 700 160" class="traffic-svg" preserveAspectRatio="none">
-            <defs>
-              <linearGradient id="gradRx" x1="0%" y1="0%" x2="0%" y2="100%">
-                <stop offset="0%" stop-color="#06b6d4" stop-opacity="0.35" />
-                <stop offset="100%" stop-color="#06b6d4" stop-opacity="0.0" />
-              </linearGradient>
-              <linearGradient id="gradTx" x1="0%" y1="0%" x2="0%" y2="100%">
-                <stop offset="0%" stop-color="#6366f1" stop-opacity="0.4" />
-                <stop offset="100%" stop-color="#6366f1" stop-opacity="0.0" />
-              </linearGradient>
-            </defs>
-
-            <!-- Grid Lines -->
-            <line x1="0" y1="40" x2="700" y2="40" stroke="var(--line)" stroke-dasharray="4" />
-            <line x1="0" y1="80" x2="700" y2="80" stroke="var(--line)" stroke-dasharray="4" />
-            <line x1="0" y1="120" x2="700" y2="120" stroke="var(--line)" stroke-dasharray="4" />
-
-            <!-- TX Wave (Violet) -->
-            <path 
-              d="M 0 130 Q 70 80 140 100 T 280 60 T 420 90 T 560 40 T 700 70 L 700 160 L 0 160 Z" 
-              fill="url(#gradTx)" 
-            />
-            <path 
-              d="M 0 130 Q 70 80 140 100 T 280 60 T 420 90 T 560 40 T 700 70" 
-              fill="none" 
-              stroke="#6366f1" 
-              stroke-width="2.5" 
-            />
-
-            <!-- RX Wave (Cyan) -->
-            <path 
-              d="M 0 140 Q 70 120 140 110 T 280 100 T 420 120 T 560 90 T 700 110 L 700 160 L 0 160 Z" 
-              fill="url(#gradRx)" 
-            />
-            <path 
-              d="M 0 140 Q 70 120 140 110 T 280 100 T 420 120 T 560 90 T 700 110" 
-              fill="none" 
-              stroke="#06b6d4" 
-              stroke-width="2" 
-            />
-
-            <!-- Pulse Dots -->
-            <circle cx="560" cy="40" r="4" fill="#6366f1" class="pulse-point" />
-            <circle cx="560" cy="90" r="3.5" fill="#06b6d4" class="pulse-point" />
+          <svg v-if="samples.length >= 2" viewBox="0 0 700 160" class="traffic-svg" preserveAspectRatio="none" aria-hidden="true">
+            <line v-for="y in [40, 80, 120]" :key="y" x1="0" :y1="y" x2="700" :y2="y" stroke="var(--line)" stroke-dasharray="4 4" />
+            <polyline :points="networkLines.rx" fill="none" stroke="var(--brand-cyan)" stroke-width="2" />
+            <polyline :points="networkLines.tx" fill="none" stroke="var(--brand-light)" stroke-width="2.5" />
           </svg>
+          <p v-else class="chart-empty">{{ resources.network_error || '等待连续的流量采样' }}</p>
         </div>
-
         <div class="chart-footer-stats">
-          <div class="stat-pill">
-            <span class="label">累计接收 (RX)</span>
-            <span class="val mono-text">{{ telemetry.rxTotal }}</span>
-          </div>
-          <div class="stat-pill">
-            <span class="label">累计发送 (TX)</span>
-            <span class="val mono-text">{{ telemetry.txTotal }}</span>
-          </div>
-          <div class="stat-pill">
-            <span class="label">网卡状态</span>
-            <span class="val ok-text">eth0 · 10Gbps 全双工</span>
-          </div>
+          <div class="stat-pill"><span class="label">累计接收 (RX)</span><span class="val mono-text">{{ bytes(networkAvailable ? resources.rx_bytes : null) }}</span></div>
+          <div class="stat-pill"><span class="label">累计发送 (TX)</span><span class="val mono-text">{{ bytes(networkAvailable ? resources.tx_bytes : null) }}</span></div>
+          <div class="stat-pill"><span class="label">采集网卡</span><span class="val">{{ resources.interface || '—' }}</span></div>
         </div>
       </SpotlightCard>
 
-      <!-- Services Quick Status Radar -->
       <SpotlightCard class="status-summary-card">
         <div class="section-title-bar">
-          <span class="section-title">核心模块健康度</span>
-          <span class="badge badge-ok">ALL SYSTEMS NORMAL</span>
+          <span class="section-title">网关与服务</span>
+          <span class="badge" :class="gatewayState.tone === 'ok' ? 'badge-ok' : 'badge-warn'">{{ gatewayState.label }}</span>
         </div>
-
         <div class="status-rows">
-          <div class="status-item" @click="$router.push('/routes')">
-            <div class="item-left">
-              <span class="status-dot ok" />
-              <span class="item-name">反向代理矩阵</span>
-            </div>
-            <span class="item-val">{{ telemetry.routesActive }} / {{ telemetry.routesTotal }} 在线</span>
+          <router-link to="/routes" class="status-item">
+            <span class="item-name">反向代理上游</span>
+            <span class="item-val">{{ healthLabel }}</span>
+          </router-link>
+          <router-link to="/access" class="status-item">
+            <span class="item-name">24 小时防火墙拦截</span>
+            <span class="item-val">{{ count(access?.firewall_blocked) }} 次</span>
+          </router-link>
+          <router-link to="/certificates" class="status-item">
+            <span class="item-name">已就绪证书</span>
+            <span class="item-val">{{ count(certificateCount) }}</span>
+          </router-link>
+          <div class="status-item listener-row">
+            <span class="item-name">当前反代监听</span>
+            <span class="item-val">{{ listenerLabel }}</span>
           </div>
-
-          <div class="status-item" @click="$router.push('/firewall')">
-            <div class="item-left">
-              <span class="status-dot ok" />
-              <span class="item-name">WAF 智能防火墙</span>
-            </div>
-            <span class="item-val">已拦截 {{ telemetry.wafBlockedToday }} 次</span>
-          </div>
-
-          <div class="status-item" @click="$router.push('/ddns')">
-            <div class="item-left">
-              <span class="status-dot ok" />
-              <span class="item-name">DDNS 动态域名</span>
-            </div>
-            <span class="item-val ok-text">已全部同步 (4/4)</span>
-          </div>
-
-          <div class="status-item" @click="$router.push('/certificates')">
-            <div class="item-left">
-              <span class="status-dot warn" />
-              <span class="item-name">SSL 证书到期预警</span>
-            </div>
-            <span class="item-val warn-text">1 证书 11天后到期</span>
-          </div>
-
-          <div class="status-item" @click="$router.push('/mcp')">
-            <div class="item-left">
-              <span class="status-dot ok" />
-              <span class="item-name">AI MCP 服务</span>
-            </div>
-            <span class="item-val">3 客户端已连接</span>
-          </div>
+          <router-link to="/forwards" class="status-item">
+            <span class="item-name">端口转发监听</span>
+            <span class="item-val">{{ count(forwardListenerCount) }}</span>
+          </router-link>
         </div>
-
         <div class="quick-links-bar">
-          <button class="btn btn-secondary btn-sm" @click="$router.push('/logs')">
-            <ScrollText :size="13" /> 访问明细
-          </button>
-          <button class="btn btn-secondary btn-sm" @click="$router.push('/firewall-logs')">
-            <ShieldAlert :size="13" /> 拦截审计
-          </button>
-          <button class="btn btn-secondary btn-sm" @click="$router.push('/backups')">
-            <HardDriveDownload :size="13" /> 备份快照
-          </button>
+          <router-link to="/logs" class="btn btn-secondary btn-sm"><ScrollText :size="13" /> 访问明细</router-link>
+          <router-link to="/firewall-logs" class="btn btn-secondary btn-sm"><ShieldAlert :size="13" /> 拦截审计</router-link>
+          <router-link to="/backups" class="btn btn-secondary btn-sm"><HardDriveDownload :size="13" /> 备份快照</router-link>
         </div>
       </SpotlightCard>
     </div>
 
-    <!-- Bottom Row: Recent Routes Snapshot -->
+    <div class="middle-grid">
+      <SpotlightCard class="chart-card">
+        <div class="section-title-bar">
+          <span class="section-title">24 小时访问趋势</span>
+          <span class="item-val">共 {{ count(access?.total) }} 次</span>
+        </div>
+        <div class="chart-container">
+          <svg v-if="access?.total" viewBox="0 0 700 160" class="traffic-svg" preserveAspectRatio="none" aria-hidden="true">
+            <line v-for="y in [40, 80, 120]" :key="y" x1="0" :y1="y" x2="700" :y2="y" stroke="var(--line)" stroke-dasharray="4 4" />
+            <polyline :points="accessLine" fill="none" stroke="var(--brand-light)" stroke-width="2.5" />
+          </svg>
+          <p v-else class="chart-empty">{{ access ? '最近 24 小时暂无访问记录' : '等待访问统计' }}</p>
+        </div>
+      </SpotlightCard>
+      <SpotlightCard class="chart-card">
+        <div class="section-title-bar">
+          <span class="section-title">24 小时访问地区</span>
+          <span class="item-val">{{ count(dashboard?.regions?.unique_ips) }} 个来源 IP</span>
+        </div>
+        <ul v-if="provinces.length" class="region-list">
+          <li v-for="province in provinces" :key="province.name">
+            <span>{{ province.name }}</span><span>{{ count(province.requests) }} 次访问</span>
+          </li>
+        </ul>
+        <p v-else class="overview-message">{{ dashboard ? '暂无可归属省份的访问记录' : '等待地区统计' }}</p>
+        <p v-if="dashboard?.regions?.unmapped" class="overview-message">{{ count(dashboard.regions.unmapped) }} 次访问未归属省份</p>
+      </SpotlightCard>
+    </div>
+
     <div class="bottom-section">
       <div class="section-title-bar">
-        <span class="section-title">高频访问服务 (Top 4)</span>
-        <router-link to="/routes" class="btn btn-ghost btn-sm">
-          查看全部 {{ routes.length }} 个代理路由 →
-        </router-link>
+        <span class="section-title">24 小时高频访问服务</span>
+        <router-link to="/routes" class="btn btn-ghost btn-sm">查看反代规则 →</router-link>
       </div>
-
-      <div class="recent-routes-grid">
-        <SpotlightCard 
-          v-for="rt in routes.slice(0, 4)" 
-          :key="rt.id" 
-          class="mini-route-card"
-          @click="$router.push('/routes')"
-        >
+      <p v-if="!topRoutes.length" class="overview-message">{{ routesEmptyLabel }}</p>
+      <div v-else class="recent-routes-grid">
+        <SpotlightCard v-for="route in topRoutes" :key="route.key" class="mini-route-card">
           <div class="mini-card-top">
-            <div class="mini-card-icon">
-              <Shield v-if="rt.icon === 'shield'" :size="16" />
-              <HardDrive v-else-if="rt.icon === 'hard-drive'" :size="16" />
-              <Key v-else-if="rt.icon === 'key'" :size="16" />
-              <Home v-else :size="16" />
-            </div>
-            <span class="status-dot ok" />
+            <div class="mini-card-icon"><Network :size="16" /></div>
+            <span v-if="route.health?.state !== 'disabled' && route.health?.checked_at" class="status-dot"
+              :class="route.health.healthy ? 'ok' : 'warn'" :title="route.health.label" />
           </div>
-          <div class="mini-card-name">{{ rt.name }}</div>
-          <div class="mini-card-domain mono-text">{{ rt.domain }}</div>
+          <div class="mini-card-name">{{ route.name || route.host }}</div>
+          <div class="mini-card-domain mono-text">{{ route.host }}</div>
           <div class="mini-card-footer">
-            <span class="hits-text">{{ rt.hitCount }} 请求</span>
-            <span class="latency-text">{{ rt.latency }}</span>
+            <span>{{ count(route.total) }} 次请求</span>
+            <span v-if="route.health?.healthy">上游探测 {{ count(route.health.duration_ms) }} ms</span>
           </div>
         </SpotlightCard>
       </div>
@@ -291,27 +165,179 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
-import { 
-  RefreshCw, Plus, Cpu, Activity, HardDrive, Zap, Radio, 
-  ScrollText, ShieldAlert, HardDriveDownload, Shield, Key, Home
+import { computed, onMounted, onUnmounted, ref, shallowRef } from 'vue'
+import {
+  RefreshCw, Plus, Cpu, Activity, HardDrive, Zap, Radio, Network,
+  ScrollText, ShieldAlert, HardDriveDownload
 } from 'lucide-vue-next'
 import SpotlightCard from '@/components/SpotlightCard.vue'
-import { useAppStore } from '@/composables/useAppStore'
+import { adminApi } from '@/api/admin'
+import { useGatewayStatus } from '@/composables/useGatewayStatus'
 import { useToast } from '@/composables/useToast'
 
-const { telemetry, routes } = useAppStore()
-const { success } = useToast()
-
+const { gatewayStatus, gatewayConfig, gatewayState, refreshStatus, refreshConfig } = useGatewayStatus()
+const toast = useToast()
+const dashboard = shallowRef(null)
+const serviceHealth = shallowRef(null)
+const healthUnavailable = ref(false)
+const samples = ref([])
 const isRefreshing = ref(false)
+const loadError = ref('')
+const controller = new AbortController()
+const resources = computed(() => dashboard.value?.resources ?? {})
+const access = computed(() => dashboard.value?.access)
+const provinces = computed(() => (dashboard.value?.regions?.provinces ?? []).slice(0, 5))
+const networkAvailable = computed(() => resources.value.interface && !resources.value.network_error)
+const sampledAt = computed(() => new Date(dashboard.value?.sampled_at).toLocaleTimeString('zh-CN', { hour12: false }))
+const numberFormat = new Intl.NumberFormat('zh-CN')
 
-const triggerRefresh = () => {
-  isRefreshing.value = true
-  setTimeout(() => {
-    isRefreshing.value = false
-    success('系统遥测与流量雷达数据已刷新')
-  }, 600)
+function count(value) {
+  return value == null ? '—' : numberFormat.format(value)
 }
+
+function bytes(value) {
+  if (!Number.isFinite(value) || value < 0) return '—'
+  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB']
+  const index = value < 1 ? 0 : Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1)
+  return `${(value / 1024 ** index).toFixed(index ? 1 : 0)} ${units[index]}`
+}
+
+function rate(value) {
+  return value == null ? '—' : `${bytes(value)}/s`
+}
+
+function usage(used, total) {
+  return Number.isFinite(used) && total > 0 ? Math.min(100, used / total * 100) : null
+}
+
+const resourceCards = computed(() => {
+  const resource = resources.value
+  const disk = resource.storage?.find(item => item.name === '数据')
+  return [
+    {
+      label: 'CPU 负载率', kind: 'cpu', icon: Cpu, fill: 'brand', percent: resource.cpu_percent,
+      detail: resource.cpu_error || (resource.cpus ? `${resource.cpus} 个逻辑 CPU` : '暂无采样')
+    },
+    {
+      label: '内存占用', kind: 'mem', icon: Activity, fill: 'cyan',
+      percent: resource.memory_error ? null : usage(resource.memory_used, resource.memory_total),
+      detail: resource.memory_error || (resource.memory_total ? `已用 ${bytes(resource.memory_used)}` : '暂无采样'),
+      total: resource.memory_total ? `共 ${bytes(resource.memory_total)}` : ''
+    },
+    {
+      label: '数据盘空间', kind: 'disk', icon: HardDrive, fill: 'ok',
+      percent: disk?.error ? null : usage(disk?.used, disk?.total),
+      detail: disk?.error || (disk?.total ? `已用 ${bytes(disk.used)}` : '暂无采样'),
+      total: disk?.total ? `共 ${bytes(disk.total)}` : ''
+    }
+  ]
+})
+
+const certificateCount = computed(() => gatewayStatus.value
+  ? (gatewayStatus.value.certificates ?? []).filter(cert => cert.ready).length : null)
+const forwardListenerCount = computed(() => gatewayStatus.value
+  ? (gatewayStatus.value.forward_listeners ?? []).filter(listener => listener.enabled).length : null)
+const listenerLabel = computed(() => {
+  if (!gatewayStatus.value) return '—'
+  const listeners = (gatewayStatus.value.listeners ?? []).filter(listener => listener.enabled)
+  return listeners.map(listener => `HTTP ${listener.http_port} / HTTPS ${listener.https_port}`).join(' · ') || '无启用监听'
+})
+
+const healthLabel = computed(() => {
+  if (healthUnavailable.value) return '读取失败'
+  if (!serviceHealth.value) return '—'
+  if (!serviceHealth.value.options?.enabled) return '检测已关闭'
+  const results = Object.values(serviceHealth.value.routes ?? {}).filter(item => item.state !== 'disabled' && item.state !== 'cancelled')
+  if (!results.length) return '暂无探测'
+  return `${results.filter(item => item.healthy).length} / ${results.length} 可达`
+})
+
+const topRoutes = computed(() => {
+  const routes = new Map((gatewayConfig.value?.routes ?? []).map(route => [`${route.group_id}/${route.host}`, route]))
+  return (access.value?.rules ?? []).filter(item => routes.has(item.rule))
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 4)
+    .map(item => {
+      const route = routes.get(item.rule)
+      return { ...route, key: item.rule, total: item.total, health: serviceHealth.value?.routes?.[route.id] }
+    })
+})
+const routesEmptyLabel = computed(() => {
+  if (!access.value) return '等待访问统计'
+  if (!gatewayConfig.value) return '反代配置未加载，请刷新数据'
+  return '暂无可关联到当前反代规则的访问记录'
+})
+
+function linePoints(values, max) {
+  return values.map((value, index) => `${700 * index / Math.max(1, values.length - 1)},${152 - 144 * value / max}`).join(' ')
+}
+
+const networkLines = computed(() => {
+  const rx = samples.value.map(sample => sample.rx)
+  const tx = samples.value.map(sample => sample.tx)
+  const max = Math.max(1, ...rx, ...tx)
+  return { rx: linePoints(rx, max), tx: linePoints(tx, max) }
+})
+const accessLine = computed(() => {
+  const totals = (access.value?.trend ?? []).map(bucket => bucket.total)
+  return linePoints(totals, Math.max(1, ...totals))
+})
+
+function recordSample(data) {
+  const { interface: iface, rx_rate: rx, tx_rate: tx, network_error: error } = data.resources
+  const last = samples.value.at(-1)
+  if (error || !Number.isFinite(rx) || !Number.isFinite(tx)) {
+    samples.value = []
+    return
+  }
+  if (last && last.iface !== iface) samples.value = []
+  const time = Date.parse(data.sampled_at)
+  if (samples.value.length && time - last.time < 5000) return
+  samples.value = [...samples.value.slice(-23), { iface, time, rx, tx }]
+}
+
+async function refresh(manual = false) {
+  if (isRefreshing.value) return
+  isRefreshing.value = true
+  const signal = controller.signal
+  try {
+    const tasks = [
+      adminApi.dashboard(signal).then(data => {
+        dashboard.value = data
+        recordSample(data)
+        loadError.value = ''
+      }).catch(err => {
+        if (!signal.aborted) loadError.value = err.message
+        throw err
+      }),
+      adminApi.serviceHealth(signal).then(data => {
+        serviceHealth.value = data
+        healthUnavailable.value = false
+      }).catch(err => {
+        if (!signal.aborted) healthUnavailable.value = true
+        throw err
+      })
+    ]
+    if (manual) tasks.push(refreshStatus(signal), refreshConfig(signal))
+    const results = await Promise.allSettled(tasks)
+    if (!manual || signal.aborted || results.some(result => result.reason?.status === 401)) return
+    const failure = results.find(result => result.status === 'rejected')
+    if (failure) toast.error(`概览刷新失败：${failure.reason.message}`)
+    else toast.success('概览数据已刷新')
+  } finally {
+    isRefreshing.value = false
+  }
+}
+
+let timer
+onMounted(() => {
+  refresh()
+  timer = setInterval(refresh, 10000)
+})
+onUnmounted(() => {
+  clearInterval(timer)
+  controller.abort()
+})
 </script>
 
 <style scoped>
@@ -439,6 +465,7 @@ const triggerRefresh = () => {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
   font-size: 11.5px;
   color: var(--faint);
 }
@@ -464,6 +491,8 @@ const triggerRefresh = () => {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
   margin-bottom: 16px;
 }
 
@@ -509,8 +538,34 @@ const triggerRefresh = () => {
   height: 100%;
 }
 
-.pulse-point {
-  animation: pulse 1.8s infinite;
+.chart-empty {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  margin: 0;
+  color: var(--muted);
+  text-align: center;
+}
+
+.overview-message {
+  color: var(--muted);
+  font-size: 13px;
+  margin: 0;
+}
+.overview-message[role="alert"] { color: var(--bad); }
+
+.region-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 8px;
+  color: var(--ink-secondary);
+}
+.region-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
 }
 
 .chart-footer-stats {
@@ -529,8 +584,6 @@ const triggerRefresh = () => {
 }
 .stat-pill .label { font-size: 11px; color: var(--faint); }
 .stat-pill .val { font-size: 12.5px; font-weight: 600; color: var(--ink); }
-.ok-text { color: var(--ok); }
-.warn-text { color: var(--warn); }
 
 /* Status Summary Card */
 .status-summary-card {
@@ -551,6 +604,7 @@ const triggerRefresh = () => {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
   padding: 8px 10px;
   border-radius: var(--radius-sm);
   background: var(--strip-bg);
@@ -562,11 +616,8 @@ const triggerRefresh = () => {
   transform: translateX(2px);
 }
 
-.item-left {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
+.listener-row { cursor: default; }
+.listener-row:hover { transform: none; }
 
 .item-name {
   font-size: 12.5px;
@@ -578,10 +629,12 @@ const triggerRefresh = () => {
   font-size: 11.5px;
   color: var(--muted);
   font-family: var(--mono);
+  text-align: end;
 }
 
 .quick-links-bar {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   padding-top: 12px;
   border-top: 1px solid var(--line);
@@ -601,7 +654,6 @@ const triggerRefresh = () => {
 
 .mini-route-card {
   padding: 16px;
-  cursor: pointer;
 }
 
 .mini-card-top {
@@ -643,11 +695,6 @@ const triggerRefresh = () => {
   color: var(--muted);
   border-top: 1px solid var(--line);
   padding-top: 8px;
-}
-
-.latency-text {
-  color: var(--ok);
-  font-family: var(--mono);
 }
 
 /* Responsive */
