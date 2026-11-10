@@ -74,8 +74,8 @@ func TestEmbeddedConsoleAssetsAndBoundaries(t *testing.T) {
 	if w := adminRequest(h, "GET", "/", nil, nil, ""); w.Code != http.StatusTemporaryRedirect || w.Header().Get("Location") != "/console/" {
 		t.Fatal("default entry must open the embedded console")
 	}
-	if w := adminRequest(h, "GET", "/legacy/", nil, nil, ""); w.Code != 200 || !strings.Contains(w.Body.String(), `id="login-form"`) {
-		t.Fatal("legacy entry must remain available for fallback")
+	if w := adminRequest(h, "GET", "/legacy/", nil, nil, ""); w.Code != 404 {
+		t.Fatal("legacy entry should return 404 after removal")
 	}
 	if w := adminRequest(h, "GET", "/legacy/state.json", nil, nil, ""); w.Code != 404 {
 		t.Fatal("legacy fallback must not expose unintended files")

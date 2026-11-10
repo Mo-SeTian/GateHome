@@ -158,15 +158,13 @@ func TestLoginRateLimit(t *testing.T) {
 
 func TestStaticAssetsAndSecurityHeaders(t *testing.T) {
 	_, h := testAdmin(t)
-	for _, path := range []string{"/legacy/", "/app.js", "/style.css", "/ui.css", "/leibox-ui.js", "/leibox-loader.css"} {
-		w := adminRequest(h, "GET", path, nil, nil, "")
-		if w.Code != 200 || w.Header().Get("Content-Security-Policy") == "" {
-			t.Fatal("static asset or CSP missing")
-		}
+	w := adminRequest(h, "GET", "/console/", nil, nil, "")
+	if w.Code != 200 || w.Header().Get("Content-Security-Policy") == "" {
+		t.Fatal("console asset or CSP missing")
 	}
-	for _, path := range []string{"/state.json", "/certificates/test.json", "/.env"} {
+	for _, path := range []string{"/legacy/", "/app.js", "/style.css", "/ui.css", "/leibox-ui.js", "/leibox-loader.css", "/state.json", "/certificates/test.json", "/.env"} {
 		if w := adminRequest(h, "GET", path, nil, nil, ""); w.Code != 404 {
-			t.Fatal("unintended static path served")
+			t.Fatalf("unintended or legacy path should be 404: %s", path)
 		}
 	}
 }

@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"io/fs"
 	"net/http"
 	"net/netip"
 	"strconv"
@@ -270,26 +269,12 @@ func (a *Admin) Handler() http.Handler {
 		a.jobs.Trigger(kind)
 		jsonResponse(w, 202, map[string]string{"message": "任务已加入队列"})
 	}))
-	sub, _ := fs.Sub(webFiles, "web")
-	files := http.FileServer(http.FS(sub))
-	legacyFiles := http.StripPrefix("/legacy", files)
-	mux.HandleFunc("GET /legacy/", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/legacy/" {
-			http.NotFound(w, r)
-			return
-		}
-		legacyFiles.ServeHTTP(w, r)
-	})
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/" {
 			http.Redirect(w, r, "/console/", http.StatusTemporaryRedirect)
 			return
 		}
-		if r.URL.Path != "/" && r.URL.Path != "/app.js" && r.URL.Path != "/style.css" && r.URL.Path != "/ui.css" && r.URL.Path != "/leibox-ui.js" && r.URL.Path != "/leibox-loader.css" && r.URL.Path != "/icons.svg" && r.URL.Path != "/sunpanel-admin.js" && r.URL.Path != "/mcp-admin.js" && r.URL.Path != "/backup-admin.js" && r.URL.Path != "/mcp-sdk-license.txt" && r.URL.Path != "/context-help.js" && r.URL.Path != "/dashboard.js" && r.URL.Path != "/china-outline.svg" {
-			http.NotFound(w, r)
-			return
-		}
-		files.ServeHTTP(w, r)
+		http.NotFound(w, r)
 	})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/mcp" {
