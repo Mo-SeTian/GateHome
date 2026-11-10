@@ -15,6 +15,12 @@
         >
           同步全部启用组</button
         ><button
+          v-if="groups.length > 0"
+          class="btn btn-secondary"
+          @click="toggleAllCollapse"
+        >
+          {{ isAllCollapsed ? '展开全部组' : '收起全部组' }}</button
+        ><button
           class="btn btn-primary"
           :disabled="!gatewayConfig || loading || isSavingConfig"
           @click="edit()"
@@ -37,90 +43,112 @@
         class="report-panel ddns-card"
         :data-group-id="group.id"
       >
-        <div class="report-heading">
-          <strong>{{ group.name }}</strong
-          ><span class="badge" :class="state(group).tone">{{ state(group).label }}</span>
-        </div>
-        <p class="mono-text domain-title">{{ group.zone }} · {{ modeLabel(group.mode) }}</p>
-        <p class="report-note">
-          Cloudflare · 每 {{ group.interval.toLocaleString() }} 秒 ·
-          {{
-            gatewayConfigSnapshot.dns_credentials_configured?.[group.id]
-              ? '独立 Token 已配置'
-              : '尚未配置 Token'
-          }}
-        </p>
-        <p class="report-note">{{ job(group.id)?.message || '此组尚未运行' }}</p>
-        <p class="report-note">
-          检查 {{ reportDate(job(group.id)?.last_run) }} · 成功 {{ reportDate(job(group.id)?.last_success) }}
-        </p>
-        <div v-if="network?.groups[group.id]" class="group-ips">
-          <p v-for="family in families(group.mode)" :key="family" class="report-note">
-            {{ family === 'ipv4' ? 'IPv4' : 'IPv6' }} 检测：<span class="mono-text">{{
-              network.groups[group.id][family].address || '未获取'
-            }}</span
-            ><span v-if="network.groups[group.id][family].error" class="report-error">
-              · {{ network.groups[group.id][family].error }}</span
-            >
-          </p>
-        </div>
-        <div class="report-table-wrap" tabindex="0" role="region" :aria-label="`${group.name} DNS 记录，可横向滚动`">
-          <table class="report-table dns-records">
-            <thead>
-              <tr>
-                <th>域名</th>
-                <th>公网解析 A / AAAA</th>
-                <th>最近查询</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="host in group.hosts" :key="host">
-                <td class="mono-text">{{ host }}</td>
-                <td>
-                  <div v-for="family in ['ipv4', 'ipv6']" :key="family">
-                    <span>{{ family === 'ipv4' ? 'A' : 'AAAA' }}: </span
-                    ><span :class="{ 'report-error': record(group.id, host)?.[family + '_error'] }">{{
-                      address(group.id, host, family)
-                    }}</span>
-                  </div>
-                </td>
-                <td>{{ reportDate(record(group.id, host)?.checked_at) }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <details v-if="references(group.id).length" class="ref-details">
-          <summary>
-            <span>关联 {{ references(group.id).length }} 个反代组</span>
-          </summary>
-          <div class="ref-pills-wrap">
-            <span v-for="name in references(group.id)" :key="name" class="ref-pill">{{ name }}</span>
+        <div class="report-heading ddns-header-clickable" @click="toggleCollapse(group.id)">
+          <div class="header-left-title">
+            <button class="collapse-chevron-btn" :title="isCollapsed(group.id) ? '展开此配置' : '收起此配置'">
+              <ChevronDown :size="16" class="chevron-icon" :class="{ 'rotate-minus-90': isCollapsed(group.id) }" />
+            </button>
+            <strong>{{ group.name }}</strong>
+            <span class="mono-text zone-pill">{{ group.zone }}</span>
+            <span class="count-badge">{{ group.hosts?.length || 0 }} 个解析记录</span>
           </div>
-        </details>
-        <div class="report-actions card-actions">
-          <button
-            class="btn btn-secondary btn-sm"
-            :disabled="!group.enabled || queuing || job(group.id)?.running"
-            @click="sync(group.id)"
-          >
-            单独同步</button
-          ><button class="btn btn-secondary btn-sm" :disabled="isSavingConfig" @click="edit(group, true)">
-            编辑域名</button
-          ><button class="btn btn-ghost btn-sm" :disabled="isSavingConfig" @click="edit(group)">编辑组</button
-          ><button class="btn btn-ghost btn-sm" :disabled="isSavingConfig" @click="toggle(group)">
-            {{ group.enabled ? '停用' : '启用' }}</button
-          ><button
-            class="btn btn-ghost btn-sm text-bad"
-            :disabled="
-              isSavingConfig ||
-              references(group.id).length > 0 ||
-              gatewayConfig.ddns.ip_monitor.group_id === group.id
-            "
-            :title="'先解除反代组和公网检测引用，再删除'"
-            @click="remove(group)"
-          >
-            删除
-          </button>
+          <div class="header-right-badges">
+            <span class="badge" :class="state(group).tone">{{ state(group).label }}</span>
+            <span class="collapse-hint-text">{{ isCollapsed(group.id) ? '展开' : '收起' }}</span>
+          </div>
+        </div>
+
+        <div v-show="!isCollapsed(group.id)" class="ddns-card-body">
+          <p class="mono-text domain-title">{{ group.zone }} · {{ modeLabel(group.mode) }}</p>
+          <p class="report-note">
+            Cloudflare · 每 {{ group.interval.toLocaleString() }} 秒 ·
+            {{
+              gatewayConfigSnapshot.dns_credentials_configured?.[group.id]
+                ? '独立 Token 已配置'
+                : '尚未配置 Token'
+            }}
+          </p>
+          <p class="report-note">{{ job(group.id)?.message || '此组尚未运行' }}</p>
+          <p class="report-note">
+            检查 {{ reportDate(job(group.id)?.last_run) }} · 成功 {{ reportDate(job(group.id)?.last_success) }}
+          </p>
+          <div v-if="network?.groups[group.id]" class="group-ips">
+            <p v-for="family in families(group.mode)" :key="family" class="report-note">
+              {{ family === 'ipv4' ? 'IPv4' : 'IPv6' }} 检测：<span class="mono-text">{{
+                network.groups[group.id][family].address || '未获取'
+              }}</span
+              ><span v-if="network.groups[group.id][family].error" class="report-error">
+                · {{ network.groups[group.id][family].error }}</span
+              >
+            </p>
+          </div>
+          <div class="report-table-wrap" tabindex="0" role="region" :aria-label="`${group.name} DNS 记录，可横向滚动`">
+            <table class="report-table dns-records">
+              <thead>
+                <tr>
+                  <th>域名</th>
+                  <th>公网解析 A / AAAA</th>
+                  <th>最近查询</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="host in visibleHosts(group)" :key="host">
+                  <td class="mono-text">{{ host }}</td>
+                  <td>
+                    <div v-for="family in ['ipv4', 'ipv6']" :key="family">
+                      <span>{{ family === 'ipv4' ? 'A' : 'AAAA' }}: </span
+                      ><span :class="{ 'report-error': record(group.id, host)?.[family + '_error'] }">{{
+                        address(group.id, host, family)
+                      }}</span>
+                    </div>
+                  </td>
+                  <td>{{ reportDate(record(group.id, host)?.checked_at) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Table Expand/Collapse Button for groups with > 6 hosts -->
+          <div v-if="group.hosts && group.hosts.length > 6" class="table-fold-bar">
+            <button class="btn btn-ghost btn-xs fold-toggle-btn" @click.stop="toggleTableExpand(group.id)">
+              <ChevronsUpDown :size="13" />
+              <span>{{ isTableExpanded(group.id) ? '收起部分解析记录' : `展开其余 ${group.hosts.length - 5} 条解析记录 (共 ${group.hosts.length} 条)` }}</span>
+            </button>
+          </div>
+
+          <details v-if="references(group.id).length" class="ref-details">
+            <summary>
+              <span>关联 {{ references(group.id).length }} 个反代组</span>
+            </summary>
+            <div class="ref-pills-wrap">
+              <span v-for="name in references(group.id)" :key="name" class="ref-pill">{{ name }}</span>
+            </div>
+          </details>
+          <div class="report-actions card-actions">
+            <button
+              class="btn btn-secondary btn-sm"
+              :disabled="!group.enabled || queuing || job(group.id)?.running"
+              @click="sync(group.id)"
+            >
+              单独同步</button
+            ><button class="btn btn-secondary btn-sm" :disabled="isSavingConfig" @click="edit(group, true)">
+              编辑域名</button
+            ><button class="btn btn-ghost btn-sm" :disabled="isSavingConfig" @click="edit(group)">编辑组</button
+            ><button class="btn btn-ghost btn-sm" :disabled="isSavingConfig" @click="toggle(group)">
+              {{ group.enabled ? '停用' : '启用' }}</button
+            ><button
+              class="btn btn-ghost btn-sm text-bad"
+              :disabled="
+                isSavingConfig ||
+                references(group.id).length > 0 ||
+                gatewayConfig.ddns.ip_monitor.group_id === group.id
+              "
+              :title="'先解除反代组和公网检测引用，再删除'"
+              @click="remove(group)"
+            >
+              删除
+            </button>
+          </div>
         </div>
       </SpotlightCard>
     </div>
@@ -141,7 +169,7 @@
 </template>
 <script setup>
 import { computed, onMounted, onUnmounted, ref, shallowRef } from 'vue'
-import { Plus } from 'lucide-vue-next'
+import { Plus, ChevronDown, ChevronsUpDown } from 'lucide-vue-next'
 import SpotlightCard from '@/components/SpotlightCard.vue'
 import DdnsEditor from '@/components/DdnsEditor.vue'
 import PublicIPMonitor from '@/components/PublicIPMonitor.vue'
@@ -171,6 +199,74 @@ const loading = ref(false),
   records = shallowRef({}),
   network = shallowRef(null),
   editor = shallowRef(null)
+
+const COLLAPSED_STORAGE_KEY = 'gatehome_ddns_collapsed_groups'
+const collapsedGroups = ref(loadCollapsedGroups())
+const expandedTables = ref(new Set())
+
+function loadCollapsedGroups() {
+  try {
+    const raw = localStorage.getItem(COLLAPSED_STORAGE_KEY)
+    if (!raw) return new Set()
+    const parsed = JSON.parse(raw)
+    return new Set(Array.isArray(parsed) ? parsed : [])
+  } catch {
+    return new Set()
+  }
+}
+
+function saveCollapsedGroups() {
+  try {
+    localStorage.setItem(COLLAPSED_STORAGE_KEY, JSON.stringify([...collapsedGroups.value]))
+  } catch {}
+}
+
+function isCollapsed(id) {
+  return collapsedGroups.value.has(id)
+}
+
+function toggleCollapse(id) {
+  if (collapsedGroups.value.has(id)) {
+    collapsedGroups.value.delete(id)
+  } else {
+    collapsedGroups.value.add(id)
+  }
+  saveCollapsedGroups()
+}
+
+const isAllCollapsed = computed(() => {
+  if (!groups.value.length) return false
+  return groups.value.every(g => collapsedGroups.value.has(g.id))
+})
+
+function toggleAllCollapse() {
+  if (isAllCollapsed.value) {
+    collapsedGroups.value.clear()
+  } else {
+    groups.value.forEach(g => collapsedGroups.value.add(g.id))
+  }
+  saveCollapsedGroups()
+}
+
+function isTableExpanded(id) {
+  return expandedTables.value.has(id)
+}
+
+function toggleTableExpand(id) {
+  if (expandedTables.value.has(id)) {
+    expandedTables.value.delete(id)
+  } else {
+    expandedTables.value.add(id)
+  }
+}
+
+function visibleHosts(group) {
+  if (!group?.hosts) return []
+  if (isTableExpanded(group.id) || group.hosts.length <= 6) {
+    return group.hosts
+  }
+  return group.hosts.slice(0, 5)
+}
 const controller = new AbortController()
 let recordsVersion = 0,
   timer
@@ -298,6 +394,80 @@ onUnmounted(() => {
 .ddns-card :deep(.card-inner) {
   display: grid;
   gap: 14px;
+}
+.ddns-header-clickable {
+  cursor: pointer;
+  user-select: none;
+  padding: 4px 6px;
+  border-radius: var(--radius-sm);
+  transition: background 0.15s ease;
+  margin: -4px -6px 0;
+}
+.ddns-header-clickable:hover {
+  background: var(--strip-bg);
+}
+.header-left-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.collapse-chevron-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  padding: 0;
+  cursor: pointer;
+}
+.collapse-chevron-btn .chevron-icon {
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.rotate-minus-90 {
+  transform: rotate(-90deg);
+}
+.zone-pill {
+  font-size: 12px;
+  color: var(--muted);
+}
+.count-badge {
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 10px;
+  background: var(--strip-bg);
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+.header-right-badges {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.collapse-hint-text {
+  font-size: 11px;
+  color: var(--muted);
+  opacity: 0.8;
+}
+.ddns-card-body {
+  display: grid;
+  gap: 14px;
+}
+.table-fold-bar {
+  display: flex;
+  justify-content: center;
+  margin-top: -4px;
+}
+.fold-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--brand, #818cf8);
 }
 .domain-title {
   overflow-wrap: anywhere;

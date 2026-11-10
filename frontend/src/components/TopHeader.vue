@@ -41,6 +41,18 @@
         <Moon v-else :size="18" />
       </button>
 
+      <!-- Notification Center Button -->
+      <button 
+        class="icon-action-btn notification-btn" 
+        :class="{ 'has-unread': unreadCount > 0, active: isCenterOpen }"
+        :title="unreadCount > 0 ? `通知中心 (${unreadCount} 条未读)` : '通知中心'" 
+        @click="toggleCenter"
+        aria-label="打开通知中心"
+      >
+        <Bell :size="18" />
+        <span v-if="unreadCount > 0" class="badge-dot">{{ unreadCount > 99 ? '99+' : unreadCount }}</span>
+      </button>
+
       <!-- User Profile Dropdown Menu -->
       <div class="user-menu-wrapper" ref="menuRef">
         <button 
@@ -107,16 +119,18 @@ import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { 
   Menu, Search, Sun, Moon, ChevronDown, 
-  KeyRound, LogOut, Terminal 
+  KeyRound, LogOut, Terminal, Bell
 } from 'lucide-vue-next'
 import { useAppStore } from '@/composables/useAppStore'
 import { useGatewayStatus } from '@/composables/useGatewayStatus'
 import { useLogout, useSession } from '@/composables/useSession'
+import { useToast } from '@/composables/useToast'
 
 const route = useRoute()
 const { toggleSidebar, openCmdk, theme, toggleTheme } = useAppStore()
 const { username, openAccountModal } = useSession()
 const { gatewayState } = useGatewayStatus()
+const { unreadCount, toggleCenter, isCenterOpen } = useToast()
 const logout = useLogout()
 
 const isDropdownOpen = ref(false)
@@ -328,6 +342,36 @@ onUnmounted(() => {
   color: var(--ink);
   background: var(--card-hover-bg);
   border-color: var(--card-border-hover);
+}
+
+.notification-btn {
+  position: relative;
+}
+.notification-btn.has-unread {
+  color: var(--ink);
+}
+.notification-btn .badge-dot {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  background: var(--bad);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  min-width: 15px;
+  height: 15px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 3px;
+  border: 2px solid var(--canvas);
+  line-height: 1;
+}
+.notification-btn.active {
+  color: var(--brand);
+  border-color: var(--card-border-hover);
+  background: var(--card-hover-bg, var(--strip-bg));
 }
 
 /* Profile Dropdown Wrapper */

@@ -62,10 +62,10 @@
 * **问题分析**：弹窗中使用 `dialog label:not(.toggle-row):not(.check-row):not(.check-label):not(.switch):not(.custom-file-btn):not(.permission-card)` 排除链，规则脆弱。当后续添加新的复合组件且未在此处登记类名时，极易被强制变性为垂直 flex 布局。
 * **整改建议**：推动建立显式类名规范，要求弹窗表单元素明确标注 `.form-group`，逐步退役长串 `:not(...)` 排除选择器。
 
-### UI-5：超窄屏表格横向滑动视觉提示（待优化）
-* **涉及文件**：`DdnsView.vue`、`BackupsView.vue`、`IpBlocksView.vue`
-* **问题分析**：在 320px ~ 360px 窄屏设备上，多列数据表格右侧被裁切，用户较难察觉右侧存在内容。
-* **整改建议**：在 `.report-table-wrap` 两侧添加基于 CSS 背景渐变的动态滚动阴影（Scroll hints），有可滚动内容时呈现微弱侧边渐变。
+### UI-5：超窄屏表格横向滑动视觉提示（已评估移除）
+* **涉及文件**：`frontend/src/styles/reports.css:40-46`
+* **问题分析**：在 320px ~ 360px 窄屏设备上，多列数据表格右侧被裁切。曾尝试通过 CSS 背景渐变（Scroll hints）增加侧边滚动提示。
+* **整改结论**：经真机测试与用户视觉反馈，CSS 滚动背景渐变会在宽屏与卡片内常驻两侧灰暗边缘阴影（破坏卡片通透质感）。因此彻底移除侧边伪阴影，将 `.report-table-wrap` 恢复为纯净透明背景，依靠原生横向滚动条及 `:focus-visible` 键盘焦点环保障易用性与无障碍。
 
 ---
 

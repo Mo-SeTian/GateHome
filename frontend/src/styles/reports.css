@@ -42,11 +42,7 @@
   width: 100%;
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
-  background:
-    linear-gradient(to right, var(--canvas) 30%, transparent) left center / 36px 100% no-repeat local,
-    linear-gradient(to left, var(--canvas) 30%, transparent) right center / 36px 100% no-repeat local,
-    radial-gradient(farthest-side at 0 50%, color-mix(in srgb, var(--brand) 24%, transparent), transparent) left center / 10px 100% no-repeat scroll,
-    radial-gradient(farthest-side at 100% 50%, color-mix(in srgb, var(--brand) 24%, transparent), transparent) right center / 10px 100% no-repeat scroll;
+  background: transparent;
 }
 .report-table-wrap:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px; }
 .report-table { width: 100%; min-width: 760px; border-collapse: collapse; text-align: left; font-size: 12px; }
