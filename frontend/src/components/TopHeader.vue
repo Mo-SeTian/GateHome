@@ -521,7 +521,7 @@ body.theme-dark .user-dropdown-popover {
 /* Responsive */
 @media (max-width: 1023px) {
   .top-header {
-    padding-inline: 16px;
+    padding-inline: 14px;
     gap: 8px;
   }
   .header-left, .breadcrumb-container { min-width: 0; }
@@ -536,16 +536,45 @@ body.theme-dark .user-dropdown-popover {
   .header-center {
     display: none;
   }
+  .header-right {
+    gap: 8px;
+    flex-shrink: 0;
+  }
   .live-text {
     display: none;
   }
+  .gateway-live-pill {
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .icon-action-btn {
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    flex-shrink: 0;
+  }
+  .user-profile-badge {
+    height: 32px;
+    box-sizing: border-box;
+  }
 }
-@media (max-width: 480px) {
+@media (max-width: 600px) {
   .user-profile-badge .username {
     display: none;
   }
   .user-profile-badge {
     padding: 3px 6px 3px 3px;
+    gap: 4px;
+  }
+  .user-profile-badge .chevron-icon {
+    width: 12px;
+    height: 12px;
   }
 }
 @media (max-width: 420px) {

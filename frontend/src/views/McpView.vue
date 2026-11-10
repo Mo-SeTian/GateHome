@@ -28,15 +28,19 @@
             <p class="report-note">
               关闭服务总开关后全部客户端停止访问；每个专用客户端使用自身权限。首次启用会生成兼容 Token。
             </p>
-            <button class="btn btn-primary" type="submit">保存授权设置</button>
+            <div class="form-actions">
+              <button class="btn btn-primary" type="submit">保存授权设置</button>
+            </div>
           </fieldset>
         </form>
         <p class="report-note">
           兼容 Token：{{ data.token_configured ? '已配置，不能读取原值' : '尚未配置' }}
         </p>
-        <button class="btn btn-secondary" :disabled="busy || loading" @click="rotateLegacy">
-          {{ data.token_configured ? '重新生成兼容 Token' : '创建兼容 Token' }}
-        </button>
+        <div class="form-actions">
+          <button class="btn btn-secondary" :disabled="busy || loading" @click="rotateLegacy">
+            {{ data.token_configured ? '重新生成兼容 Token' : '创建兼容 Token' }}
+          </button>
+        </div>
       </SpotlightCard>
       <SpotlightCard class="report-panel">
         <h2>客户端接入</h2>
@@ -575,6 +579,32 @@ summary {
   cursor: pointer;
   font-size: 13px;
   color: var(--ink-secondary);
+}
+.form-actions {
+  display: flex;
+  align-items: center;
+  margin-top: 4px;
+}
+.form-actions .btn {
+  height: 38px;
+}
+@media (max-width: 640px) {
+  .report-heading .report-actions {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+    width: 100% !important;
+  }
+  .report-heading .report-actions .btn {
+    flex: 1 1 calc(50% - 4px) !important;
+    justify-content: center !important;
+    padding-inline: 8px !important;
+    font-size: 12px !important;
+  }
+  .form-actions .btn {
+    width: 100% !important;
+    justify-content: center !important;
+  }
 }
 @media (max-width: 900px) {
   .mcp-layout {

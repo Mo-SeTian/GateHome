@@ -784,5 +784,20 @@ button:disabled {
   .province-row {
     grid-template-columns: 40px minmax(24px, 1fr) auto;
   }
+  .overview-page .report-actions {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 8px !important;
+    width: 100% !important;
+  }
+  .overview-page .report-actions .btn:last-child {
+    grid-column: 1 / -1 !important;
+  }
+  .overview-page .report-actions .btn {
+    justify-content: center !important;
+    width: 100% !important;
+    padding-inline: 8px !important;
+    font-size: 12px !important;
+  }
 }
 </style>

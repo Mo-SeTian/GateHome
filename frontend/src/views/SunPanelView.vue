@@ -16,42 +16,44 @@
     </p>
     <SpotlightCard v-if="draft" class="report-panel home-config">
       <h2>首页服务</h2>
-      <form class="report-form" @submit.prevent="save">
-        <label class="toggle-row wide">
+      <form class="sunpanel-form" @submit.prevent="save">
+        <label class="toggle-row">
           <span>启用首页服务</span>
           <input v-model="draft.enabled" name="enabled" type="checkbox" />
         </label>
-        <label
-          >监听端口<input
-            v-model.number="draft.port"
-            name="port"
-            class="form-input"
-            type="number"
-            min="1"
-            max="65535"
-            required
-        /></label>
-        <label
-          >内网访问地址<input
-            v-model.trim="draft.launch_url"
-            name="launch_url"
-            class="form-input"
-            placeholder="留空使用当前主机和监听端口"
-            maxlength="2048"
-        /></label>
-        <label
-          >外网访问地址<input
-            v-model.trim="draft.external_url"
-            name="external_url"
-            class="form-input"
-            placeholder="https://home.example.com"
-            maxlength="2048"
-        /></label>
-        <p class="report-note wide">
+        <div class="form-grid">
+          <label class="form-group"
+            >监听端口<input
+              v-model.number="draft.port"
+              name="port"
+              class="form-input"
+              type="number"
+              min="1"
+              max="65535"
+              required
+          /></label>
+          <label class="form-group"
+            >内网访问地址<input
+              v-model.trim="draft.launch_url"
+              name="launch_url"
+              class="form-input"
+              placeholder="留空使用当前主机和监听端口"
+              maxlength="2048"
+          /></label>
+          <label class="form-group"
+            >外网访问地址<input
+              v-model.trim="draft.external_url"
+              name="external_url"
+              class="form-input"
+              placeholder="https://home.example.com"
+              maxlength="2048"
+          /></label>
+        </div>
+        <p class="report-note">
           开关与端口修改需要重启；访问地址保存后即可使用。内网地址支持本站路径（如
           /sunpanel/），外网地址须为完整 HTTP(S) 地址。Docker 部署需发布首页端口。
         </p>
-        <div class="report-actions wide">
+        <div class="form-actions">
           <button class="btn btn-primary" type="submit" :disabled="loading || isSavingConfig">
             {{ isSavingConfig ? '保存中…' : '保存首页设置' }}
           </button>
@@ -191,6 +193,29 @@ onMounted(reload)
 onBeforeUnmount(() => controller.abort())
 </script>
 <style scoped>
+.sunpanel-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+}
+.form-grid {
+  display: grid;
+  grid-template-columns: 160px 1fr 1fr;
+  gap: 12px;
+  width: 100%;
+}
+.form-grid .form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--ink-secondary);
+}
+.form-actions {
+  display: flex;
+  align-items: center;
+}
 .home-frame {
   width: 100%;
   height: 680px;
@@ -205,6 +230,15 @@ onBeforeUnmount(() => controller.abort())
 }
 h2 {
   margin-bottom: 0;
+}
+@media (max-width: 768px) {
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+  .form-actions .btn {
+    width: 100%;
+    justify-content: center;
+  }
 }
 @media (max-width: 600px) {
   .home-frame {

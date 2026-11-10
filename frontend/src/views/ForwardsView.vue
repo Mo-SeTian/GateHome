@@ -118,7 +118,6 @@
             class="form-input"
             required
             maxlength="100"
-            autofocus
         /></label>
         <div class="form-row-2">
           <label class="form-group"

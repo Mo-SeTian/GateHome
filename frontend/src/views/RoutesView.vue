@@ -201,7 +201,7 @@
       <form class="modal-body" @submit.prevent="saveRoute">
         <p v-if="formError" ref="routeError" class="page-error" role="alert" tabindex="-1">{{ formError }}</p>
         <label class="form-group"
-          >服务名称<input v-model="routeDraft.name" name="name" class="form-input" maxlength="100" autofocus
+          >服务名称<input v-model="routeDraft.name" name="name" class="form-input" maxlength="100"
         /></label>
         <label class="form-group"
           >所属反代组<select v-model="routeDraft.group_id" name="group_id" class="form-select" required>
@@ -328,7 +328,6 @@
             class="form-input"
             required
             maxlength="100"
-            autofocus
         /></label>
         <div class="form-row-2">
           <label class="form-group"

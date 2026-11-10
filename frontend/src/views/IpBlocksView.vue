@@ -125,7 +125,6 @@
               class="form-input mono-text"
               placeholder="203.0.113.10 或 2001:db8::10"
               required
-              autofocus
           /></label>
           <label
             >生效的反代规则<select v-model="form.rule" name="rule" class="form-select" required>

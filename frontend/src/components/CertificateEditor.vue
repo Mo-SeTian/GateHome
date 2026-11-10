@@ -61,7 +61,6 @@
               rows="4"
               placeholder="example.com, *.example.com"
               required
-              autofocus
             />
           </label>
           <p class="report-note">

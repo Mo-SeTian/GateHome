@@ -28,7 +28,6 @@
               class="form-input"
               maxlength="100"
               required
-              autofocus
           /></label>
           <label
             >根域名 / DNS Zone<input
@@ -71,7 +70,6 @@
             rows="4"
             placeholder="@, nas, app.home"
             required
-            :autofocus="hostsOnly"
           />
         </label>
         <p class="report-note">@ 表示根域名；支持逗号或换行。绑定此 DDNS 组的反代域名须保留。</p>

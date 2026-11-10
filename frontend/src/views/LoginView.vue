@@ -462,12 +462,13 @@ async function handleSubmit() {
 }
 
 .input-with-icon .form-input {
-  width: 100%;
-  padding-left: 36px;
-  padding-right: 44px;
-  height: 44px;
-  box-sizing: border-box;
-  font-size: 13.5px;
+  width: 100% !important;
+  padding-left: 38px !important;
+  padding-right: 42px !important;
+  height: 44px !important;
+  line-height: 42px !important;
+  box-sizing: border-box !important;
+  font-size: 13.5px !important;
 }
 
 .eye-toggle-btn {

@@ -74,21 +74,22 @@
           </button>
           <button
             type="button"
-            class="btn btn-secondary btn-icon-btn"
+            class="btn btn-secondary filter-reset-btn"
             :disabled="loading"
             title="重置全部筛选"
             aria-label="重置全部筛选"
             @click="reset"
           >
-            <RotateCcw :size="14" />
+            <RotateCcw :size="13" />
+            <span>重置</span>
           </button>
           <button
             type="button"
-            class="btn btn-secondary"
+            class="btn btn-secondary filter-refresh-btn"
             :disabled="loading"
             @click="refresh"
           >
-            <RefreshCw :size="14" :class="{ 'spin-anim': loading }" />
+            <RefreshCw :size="13" :class="{ 'spin-anim': loading }" />
             <span>{{ loading ? '读取中…' : '刷新' }}</span>
           </button>
         </div>
@@ -204,31 +205,33 @@
       <span ref="resultElement" class="log-result" role="status" tabindex="-1"
         >共 {{ data.total }} 条 · 第 {{ data.page }} / {{ data.pages }} 页</span
       >
-      <label
-        >每页条数<select
-          v-model.number="size"
-          name="size"
-          class="form-select"
-          :disabled="loading"
-          @change="changeSize"
+      <div class="pagination-controls-row">
+        <label class="pagination-size-label"
+          >每页<select
+            v-model.number="size"
+            name="size"
+            class="form-select pagination-select"
+            :disabled="loading"
+            @change="changeSize"
+          >
+            <option v-for="value in [20, 50, 100, 200]" :key="value" :value="value">{{ value }} 条</option>
+          </select></label
         >
-          <option v-for="value in [20, 50, 100, 200]" :key="value" :value="value">{{ value }} 条</option>
-        </select></label
-      >
-      <div class="report-actions">
-        <button
-          class="btn btn-secondary btn-sm"
-          :disabled="loading || data.page <= 1"
-          @click="goPage(data.page - 1)"
-        >
-          上一页</button
-        ><button
-          class="btn btn-secondary btn-sm"
-          :disabled="loading || data.page >= data.pages"
-          @click="goPage(data.page + 1)"
-        >
-          下一页
-        </button>
+        <div class="report-actions">
+          <button
+            class="btn btn-secondary btn-sm"
+            :disabled="loading || data.page <= 1"
+            @click="goPage(data.page - 1)"
+          >
+            上一页</button
+          ><button
+            class="btn btn-secondary btn-sm"
+            :disabled="loading || data.page >= data.pages"
+            @click="goPage(data.page + 1)"
+          >
+            下一页
+          </button>
+        </div>
       </div>
     </div>
     <div v-if="data?.entries.length" class="report-table-wrap">
@@ -721,11 +724,36 @@ onUnmounted(() => controller.abort())
   transform: rotate(180deg);
 }
 
-.btn-icon-btn {
-  padding: 0 10px;
-  display: inline-flex;
+.pagination-controls-row {
+  display: flex;
   align-items: center;
-  justify-content: center;
+  gap: 16px;
+}
+
+.pagination-size-label {
+  display: inline-flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  gap: 6px !important;
+  font-size: 12px !important;
+  color: var(--muted) !important;
+  white-space: nowrap !important;
+  width: auto !important;
+  margin: 0 !important;
+  flex: 0 0 auto !important;
+}
+
+.pagination-select {
+  width: 88px !important;
+  height: 32px !important;
+  min-height: 32px !important;
+  padding: 0 24px 0 8px !important;
+  line-height: 30px !important;
+  font-size: 12px !important;
+  border-radius: var(--radius-sm) !important;
+  background-position: right 8px center !important;
+  background-size: 12px 12px !important;
+  flex-shrink: 0 !important;
 }
 
 .spin-anim {
@@ -888,15 +916,16 @@ onUnmounted(() => controller.abort())
 
   .filter-actions-group {
     display: grid !important;
-    grid-template-columns: 1fr 1fr auto auto;
-    gap: 8px;
+    grid-template-columns: repeat(4, 1fr) !important;
+    gap: 6px;
     width: 100%;
     margin-left: 0;
   }
 
   .filter-actions-group .btn {
     justify-content: center;
-    padding-inline: 8px;
+    padding-inline: 6px;
+    font-size: 11.5px;
   }
 
   .filter-advanced-drawer {
@@ -922,28 +951,35 @@ onUnmounted(() => controller.abort())
   .report-pagination {
     display: flex !important;
     flex-direction: column !important;
-    align-items: stretch !important;
+    align-items: center !important;
     gap: 10px !important;
+    padding: 6px 0 !important;
   }
 
   .report-pagination .log-result {
     text-align: center !important;
     font-size: 12px !important;
+    color: var(--muted) !important;
   }
 
-  .report-pagination label {
-    justify-content: center !important;
+  .pagination-controls-row {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    width: 100% !important;
+    gap: 10px !important;
   }
 
   .report-pagination .report-actions {
-    width: 100% !important;
-    display: grid !important;
-    grid-template-columns: 1fr 1fr !important;
-    gap: 8px !important;
+    display: inline-flex !important;
+    gap: 6px !important;
+    width: auto !important;
   }
 
   .report-pagination .report-actions .btn {
-    width: 100% !important;
+    width: auto !important;
+    min-width: 68px !important;
+    padding: 5px 12px !important;
     justify-content: center !important;
   }
 }
@@ -954,12 +990,12 @@ onUnmounted(() => controller.abort())
   }
 }
 
-@media (max-width: 400px) {
+@media (max-width: 420px) {
   .filter-actions-group {
-    grid-template-columns: 1fr 1fr 36px 36px;
+    grid-template-columns: 1fr 1fr !important;
   }
-  .filter-actions-group .btn span {
-    font-size: 11.5px;
+  .filter-actions-group .btn {
+    padding-block: 7px;
   }
 }
 </style>

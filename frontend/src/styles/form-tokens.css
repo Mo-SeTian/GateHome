@@ -86,6 +86,12 @@ input[type="datetime-local"] {
   transition: var(--transition-smooth) !important;
 }
 
+/* 带左侧图标的专用输入框保留左内边距，杜绝图标与文本重叠 */
+.input-with-icon input,
+.search-box input {
+  padding-left: 38px !important;
+}
+
 textarea.form-input {
   box-sizing: border-box !important;
   width: 100% !important;

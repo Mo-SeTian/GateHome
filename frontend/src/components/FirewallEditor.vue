@@ -29,7 +29,6 @@
               class="form-input"
               maxlength="100"
               required
-              autofocus
           /></label>
           <label
             >IP 未命中时<select v-model="draft.default_action" name="default_action" class="form-select">
