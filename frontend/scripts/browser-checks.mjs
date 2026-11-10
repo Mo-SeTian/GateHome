@@ -19,6 +19,18 @@ const upstream = createServer((req, res) => {
 let server, browser
 const listen = (app) => new Promise(resolve => app.listen(0, '127.0.0.1', () => resolve(app.address().port)))
 const pause = (ms) => new Promise(resolve => setTimeout(resolve, ms))
+async function startServer(port) {
+  server = spawn(path.resolve(repository, process.env.GATEHOME_TEST_BINARY || 'dist/gatehouse'), [
+    '-data', root, '-admin', `127.0.0.1:${port}`
+  ], { cwd: root, stdio: ['ignore', 'ignore', 'pipe'] })
+  let startup = ''
+  server.stderr.on('data', data => { startup += data.toString() })
+  for (let attempt = 0; ; attempt++) {
+    try { if ((await fetch(`http://127.0.0.1:${port}/healthz`)).ok) break } catch {}
+    if (attempt === 99) throw new Error('test server did not become healthy: ' + startup)
+    await pause(100)
+  }
+}
 try {
   const initialized = spawnSync(process.env.GO || 'go', ['run', 'scripts/console_fixture.go', root], {
     cwd: repository, input: secret, stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, CGO_ENABLED: '0' }
@@ -37,17 +49,8 @@ try {
   const reservation = createServer()
   const port = await listen(reservation)
   await new Promise(resolve => reservation.close(resolve))
-  server = spawn(path.resolve(repository, process.env.GATEHOME_TEST_BINARY || 'dist/gatehouse'), [
-    '-data', root, '-admin', `127.0.0.1:${port}`
-  ], { cwd: root, stdio: ['ignore', 'ignore', 'pipe'] })
-  let startup = ''
-  server.stderr.on('data', data => { startup += data.toString() })
   const origin = `http://gatehome-console.test:${port}`
-  for (let attempt = 0; ; attempt++) {
-    try { if ((await fetch(`http://127.0.0.1:${port}/healthz`)).ok) break } catch {}
-    if (attempt === 99) throw new Error('test server did not become healthy: ' + startup)
-    await pause(100)
-  }
+  await startServer(port)
   browser = await chromium.launch({
     ...(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : {}),
     args: ['--host-resolver-rules=MAP gatehome-console.test 127.0.0.1', '--no-proxy-server']
@@ -184,6 +187,42 @@ try {
   assert.equal(await trigger.evaluate(el => el === document.activeElement), true, 'Escape did not restore focus to the command trigger')
   console.log('PASS command palette: filtered Enter, native focus boundary and Escape focus restoration')
 
+  await route('settings')
+  const accountTrigger = button('修改账号与密码')
+  await accountTrigger.click()
+  const accountDialog = page.locator('dialog.account-dialog-card[open]')
+  await accountDialog.waitFor()
+  if (process.env.GATEHOME_BROWSER_ARTIFACTS) {
+    await mkdir(process.env.GATEHOME_BROWSER_ARTIFACTS, { recursive: true })
+    await page.screenshot({ path: path.join(process.env.GATEHOME_BROWSER_ARTIFACTS, 'account-desktop.png') })
+  }
+  assert.equal(await page.locator('#account-current-password').evaluate(el => el === document.activeElement), true, 'account current password did not receive focus')
+  for (const key of ['Tab', 'Shift+Tab']) {
+    for (let n = 0; n < 10; n++) {
+      await page.keyboard.press(key)
+      assert.equal(await page.evaluate(() => document.activeElement === document.body || Boolean(document.activeElement.closest('dialog.account-dialog-card[open]'))), true, 'account focus moved to the background')
+    }
+  }
+  await page.locator('.app-sidebar a').first().evaluate(el => el.focus())
+  assert.equal(await page.evaluate(() => !document.activeElement.closest('.app-sidebar')), true, 'modal background was not inert')
+  await page.keyboard.press('Escape')
+  await page.waitForFunction(() => !document.querySelector('dialog[open]'))
+  assert.equal(await accountTrigger.evaluate(el => el === document.activeElement), true, 'account Escape did not restore the settings trigger')
+  await page.locator('.user-profile-badge').click()
+  await button('修改管理账户密码').click()
+  await accountDialog.waitFor()
+  await accountDialog.getByRole('button', { name: '取消', exact: true }).click()
+  await page.waitForFunction(() => !document.querySelector('dialog[open]'))
+  assert.equal(await page.locator('.user-profile-badge').evaluate(el => el === document.activeElement), true, 'account menu close did not restore the profile trigger')
+  await trigger.click()
+  await input.fill('修改管理员账户密码')
+  await input.press('Enter')
+  await accountDialog.waitFor()
+  await page.keyboard.press('Escape')
+  await page.waitForFunction(() => !document.querySelector('dialog[open]'))
+  assert.equal(await trigger.evaluate(el => el === document.activeElement), true, 'account command action did not restore the command trigger')
+  console.log('PASS administrator modal: Tab/Shift+Tab boundary, inert background and focus restoration from settings/menu/command palette')
+
   await route('mcp')
   await button('创建客户端').click()
   await dialog().waitFor()
@@ -214,6 +253,30 @@ try {
   assert.equal(scoped.config.write, true)
   assert.equal(scoped.config.security_write, true)
   console.log('PASS MCP scoped client: read-only defaults, independent panel/security grants and real saves')
+
+  const globalGrant = page.locator('.mcp-layout .mcp-permissions').first()
+  await globalGrant.locator('[name=enabled]').check()
+  await globalGrant.locator('[name=read]').uncheck()
+  await globalGrant.locator('[name=write]').uncheck()
+  await globalGrant.locator('[name=maintenance]').uncheck()
+  await globalGrant.locator('[name=sunpanel_write]').check()
+  const panelOnlySaved = page.waitForResponse(response => response.url().endsWith('/api/mcp') && response.request().method() === 'PUT')
+  await button('保存授权设置').click()
+  assert.equal((await panelOnlySaved).status(), 200)
+  const globalSettings = await api('mcp')
+  assert.equal(globalSettings.config.sunpanel_write, true)
+  assert.equal(globalSettings.config.read, false)
+  await page.goto('about:blank')
+  const stopped = new Promise(resolve => server.once('exit', resolve))
+  server.kill('SIGTERM')
+  await stopped
+  await startServer(port)
+  await page.goto(origin + '/console/#/settings')
+  await page.locator('#admin-username').fill('admin')
+  await page.locator('#admin-password').fill(secret)
+  await page.locator('.login-form button[type=submit]').click()
+  await page.locator('.settings-layout').waitFor()
+  console.log('PASS panel-only global grant: real form save, process shutdown/startup and original account login')
 
   await route('settings')
   const proxyField = page.locator('[name=trusted_proxies]')
@@ -288,8 +351,18 @@ try {
       if (view === 'mcp') {
         const gridColumns = await dialog().locator('.permission-grid').evaluate(el => getComputedStyle(el).gridTemplateColumns.split(' ').length)
         assert.equal(gridColumns, 2)
+        assert.equal(await dialog().locator('.permission-card').first().evaluate(el => el.getBoundingClientRect().height), 44)
       }
-      if (process.env.GATEHOME_BROWSER_ARTIFACTS && ['routes', 'access', 'mcp'].includes(view)) {
+      if (view === 'ddns') {
+        const sourceFields = await dialog().evaluate(el =>
+          ['interface', 'ipv4_source', 'ipv6_source', 'ipv4_urls', 'ipv6_urls'].map(name => {
+            const label = el.querySelector(`[name="${name}"]`).closest('label')
+            const style = getComputedStyle(label)
+            return { explicit: label.classList.contains('form-field'), display: style.display, gap: style.gap }
+          }))
+        assert.ok(sourceFields.every(item => item.explicit && item.display === 'flex' && item.gap !== 'normal'))
+      }
+      if (process.env.GATEHOME_BROWSER_ARTIFACTS && ['routes', 'access', 'mcp', 'ddns'].includes(view)) {
         await mkdir(process.env.GATEHOME_BROWSER_ARTIFACTS, { recursive: true })
         await page.screenshot({ path: path.join(process.env.GATEHOME_BROWSER_ARTIFACTS, `${view}-${width}.png`) })
       }
@@ -327,6 +400,24 @@ try {
   await button('关闭侧边栏导航').click()
   await pause(350)
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth === innerWidth), true)
+
+  await route('settings')
+  await button('修改账号与密码').click()
+  await accountDialog.waitFor()
+  if (process.env.GATEHOME_BROWSER_ARTIFACTS) {
+    await page.screenshot({ path: path.join(process.env.GATEHOME_BROWSER_ARTIFACTS, 'account-mobile.png') })
+  }
+  await page.locator('#account-username').fill('test-admin-renamed')
+  await page.locator('#account-current-password').fill(secret)
+  await accountDialog.getByRole('button', { name: '保存管理账户', exact: true }).click()
+  await page.locator('#admin-username').waitFor()
+  await page.locator('#admin-username').fill('test-admin-renamed')
+  await page.locator('#admin-password').fill(secret)
+  await page.locator('.login-form button[type=submit]').click()
+  await page.locator('.app-layout').waitFor()
+  assert.equal((await api('account')).username, 'test-admin-renamed')
+  console.log('PASS administrator account save: original password retained, session revoked and new username can log in')
+
   assert.deepEqual(errors, [], 'browser emitted errors during regression')
   console.log('PASS mobile layout and zero browser errors; disposable fixture cleaned')
 } catch (error) {

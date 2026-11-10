@@ -10,6 +10,7 @@
 - 例如修改一个反代网址：先读取 config.routes，按持久化 id 找到目标，在完整 routes 数组中仅改指定字段，再调用 section="routes"、value=修改后的完整数组，并传本次读取的 revision。
 - 保留已有脱敏值以沿用原凭据，不把 <REDACTED> 用于新增配置。不读取、输出或尝试修改密码、API Token、私钥和其他凭据；新增凭据及授权变更由用户在网页完成。
 - 版本冲突时重新读取并检查用户要求的差异，再生成修改；不要原样重试旧 payload 或覆盖其他人的修改。成功后重新查询配置和状态，核对实际结果。
+- 没有查询权限时，配置写入只返回 ok 与保存后的 revision；所需配置值和最新 revision 须由管理员提供，不通过写入读取其他分区。
 
 三、编辑 Sun-Panel
 - 仅管理绑定账号。创建分组或网站时省略 id；编辑时先读取目标完整内容，保留未要求变更的字段，传原 id 和最新 updatedAt，再调用 sunpanel_save_group 或 sunpanel_save_website。

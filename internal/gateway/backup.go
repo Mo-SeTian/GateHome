@@ -232,7 +232,7 @@ func decodeBackup(data []byte, password string) (backupPayload, backupManifest, 
 		return payload, m, errors.New("备份凭据格式无效")
 	}
 	if err := validateCredentials(payload.State); err != nil {
-		return payload, m, errors.New("备份中的 DNS 凭据缺失或格式错误")
+		return payload, m, errors.New("备份凭据或授权配置无效，无法恢复")
 	}
 	for name, data := range payload.Certificates {
 		if !safeCertificateName(name) || len(data) > 1<<20 || !json.Valid(data) {

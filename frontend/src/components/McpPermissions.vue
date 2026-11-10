@@ -72,16 +72,6 @@ legend {
   gap: 8px;
   width: 100%;
 }
-@media (max-width: 640px) {
-  .permission-grid {
-    grid-template-columns: repeat(2, 1fr);
-    gap: 8px;
-  }
-  .permission-card {
-    height: 44px !important;
-    min-height: 44px !important;
-  }
-}
 .permission-card {
   display: flex !important;
   flex-direction: row !important;
@@ -99,6 +89,16 @@ legend {
   user-select: none !important;
   box-sizing: border-box !important;
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+@media (max-width: 640px) {
+  .permission-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+  }
+  .permission-card {
+    height: 44px !important;
+    min-height: 44px !important;
+  }
 }
 .permission-card:hover {
   background: rgba(255, 255, 255, 0.06) !important;

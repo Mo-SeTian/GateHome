@@ -1,15 +1,13 @@
 <template>
-  <transition name="fade">
-    <div v-if="isAccountModalOpen" class="modal-backdrop" @click="closeAccountModal">
-      <div class="account-dialog-card" role="dialog" aria-modal="true" aria-labelledby="account-dialog-title"
-        @click.stop @keydown.esc.stop="closeAccountModal">
+  <dialog ref="dialogRef" class="account-dialog-card" aria-labelledby="account-dialog-title"
+    @click="onDialogClick" @cancel.prevent="requestClose" @close="closeAccountModal">
         <div class="dialog-header">
           <div class="dialog-title-group">
             <span class="eyebrow">ADMIN SECURITY</span>
             <h2 id="account-dialog-title" class="dialog-title">管理员账户设置</h2>
             <p class="dialog-desc">用于登录 GateHome 管理界面，与反代服务的独立访问账号分开。</p>
           </div>
-          <button type="button" class="dialog-close-btn" aria-label="关闭" @click="closeAccountModal">
+          <button type="button" class="dialog-close-btn" aria-label="关闭" :disabled="isSaving" @click="requestClose">
             <X :size="16" />
           </button>
         </div>
@@ -98,7 +96,7 @@
           </div>
 
           <div class="dialog-actions">
-            <button type="button" class="btn btn-secondary" @click="closeAccountModal">
+            <button type="button" class="btn btn-secondary" :disabled="isSaving" @click="requestClose">
               取消
             </button>
             <button type="submit" class="btn btn-primary" :disabled="isSaving">
@@ -108,13 +106,11 @@
             </button>
           </div>
         </form>
-      </div>
-    </div>
-  </transition>
+  </dialog>
 </template>
 
 <script setup>
-import { reactive, ref, watch } from 'vue'
+import { nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { X, Save, AlertCircle, AlertTriangle } from 'lucide-vue-next'
 import { useSession } from '@/composables/useSession'
@@ -134,15 +130,42 @@ const form = reactive({
 const isSaving = ref(false)
 const errorMessage = ref('')
 const currentPasswordInput = ref(null)
+const dialogRef = ref(null)
+let returnFocus
 
-watch(isAccountModalOpen, (open) => {
+function requestClose() {
+  if (!isSaving.value) closeAccountModal()
+}
+
+function onDialogClick(event) {
+  if (event.target !== event.currentTarget) return
+  const bounds = dialogRef.value.getBoundingClientRect()
+  if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) requestClose()
+}
+
+watch(isAccountModalOpen, async (open) => {
   form.username = username.value
   form.currentPassword = ''
   form.newPassword = ''
   form.confirmPassword = ''
   errorMessage.value = ''
-  if (open) currentPasswordInput.value?.focus()
+  if (open) {
+    const active = document.activeElement
+    returnFocus = active.closest('.user-menu-wrapper')?.querySelector('.user-profile-badge') || active
+    await nextTick()
+    if (!isAccountModalOpen.value) return
+    dialogRef.value.showModal()
+    currentPasswordInput.value?.focus()
+  } else {
+    dialogRef.value?.close()
+    const target = returnFocus?.isConnected && returnFocus !== document.body && !returnFocus.closest('dialog')
+      ? returnFocus : document.querySelector('.user-profile-badge')
+    target?.focus()
+    returnFocus = undefined
+  }
 }, { flush: 'post' })
+
+onBeforeUnmount(() => dialogRef.value?.close())
 
 const handleSave = async () => {
   if (isSaving.value) return
@@ -168,27 +191,15 @@ const handleSave = async () => {
 </script>
 
 <style scoped>
-.modal-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.65);
-  backdrop-filter: blur(10px);
-  z-index: 120;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 20px;
-}
-
 .account-dialog-card {
-  width: 100%;
+  width: min(480px, calc(100vw - 40px)) !important;
   max-width: 480px;
-  max-height: calc(100dvh - 40px);
-  overflow: auto;
+  max-height: calc(100dvh - 40px) !important;
+  overflow: auto !important;
   background: var(--card-hover-bg);
   border: 1px solid var(--card-border);
   border-radius: 20px;
-  padding: 26px 28px;
+  padding: 26px 28px !important;
   box-shadow: 0 25px 60px rgba(0, 0, 0, 0.55);
   display: flex;
   flex-direction: column;
@@ -246,9 +257,12 @@ const handleSave = async () => {
 }
 
 .dialog-form {
+  padding: 0 !important;
+  overflow: visible !important;
+  flex: 0 0 auto !important;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 14px !important;
 }
 
 .form-group {

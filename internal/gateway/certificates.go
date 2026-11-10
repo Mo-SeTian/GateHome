@@ -300,7 +300,7 @@ func (m *Certificates) obtainACME(state State, request CertificateRequest) (save
 		resource, err = client.Certificate.Obtain(certificate.ObtainRequest{Domains: request.Domains, Bundle: true})
 	}
 	if err != nil {
-		return savedCertificate{}, errors.New("证书签发失败，请检查独立 Token 的 Zone:Read / DNS:Edit 权限、权威 DNS 可达性及 CA 限流；5 分钟后可手动重试")
+		return savedCertificate{}, errors.New("证书签发失败，请检查独立 Token 的 Zone:Read / DNS:Edit 权限、权威 DNS 可达性及 CA 限流；可重试时间以任务状态为准")
 	}
 	return savedCertificate{Certificate: resource.Certificate, PrivateKey: resource.PrivateKey}, nil
 }

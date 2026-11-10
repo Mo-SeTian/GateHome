@@ -104,7 +104,7 @@ func validateCredentials(s State) error {
 			return errors.New("MCP 令牌摘要格式无效")
 		}
 	}
-	if s.MCP.Enabled && (s.MCPTokenHash == "" || (!s.MCP.Read && !s.MCP.Write && !s.MCP.Maintenance)) {
+	if s.MCP.Enabled && (s.MCPTokenHash == "" || !s.MCP.hasPermissions()) {
 		return errors.New("MCP 授权配置无效")
 	}
 	if err := validateGitHubToken(s.GitHubToken); err != nil {

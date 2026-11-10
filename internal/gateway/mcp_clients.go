@@ -95,7 +95,7 @@ func (s *Store) saveMCPClient(client MCPClient, rotate, revoke bool, revision in
 		}
 		client.ID, client.CreatedAt, rotate = hex.EncodeToString(id), time.Now().UTC(), true
 	}
-	if !revoke && !client.Config.Read && !client.Config.Write && !client.Config.Maintenance && !client.Config.canWritePanel() {
+	if !revoke && !client.Config.hasPermissions() {
 		return "", errors.New("请至少授权一项权限")
 	}
 	token := ""

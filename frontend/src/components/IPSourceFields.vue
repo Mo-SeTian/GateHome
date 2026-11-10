@@ -1,5 +1,5 @@
 <template>
-  <label
+  <label class="form-field"
     >来源网卡<select v-model="settings.interface" name="interface" class="form-select">
       <option value="">自动路由</option>
       <option v-for="item in interfaces" :key="item.name" :value="item.name">
@@ -14,7 +14,7 @@
     </select></label
   >
   <template v-for="family in ['ipv4', 'ipv6']" :key="family">
-    <label
+    <label class="form-field"
       >{{ family === 'ipv4' ? 'IPv4' : 'IPv6' }} 获取方式<select
         v-model="settings[family + '_source']"
         :name="family + '_source'"
@@ -24,7 +24,7 @@
         <option value="interface">读取网卡公网 IP</option>
       </select></label
     >
-    <label v-if="endpoints"
+    <label v-if="endpoints" class="form-field"
       >{{ family === 'ipv4' ? 'IPv4' : 'IPv6' }} 接口列表<textarea
         v-model="settings[family + 'Text']"
         :name="family + '_urls'"

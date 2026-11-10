@@ -30,6 +30,10 @@ func (c MCPConfig) canWriteSecurity() bool {
 	return c.Write && (c.SecurityWrite == nil || *c.SecurityWrite)
 }
 
+func (c MCPConfig) hasPermissions() bool {
+	return c.Read || c.Write || c.Maintenance || c.canWritePanel()
+}
+
 type mcpInternalKey struct{}
 
 func validMCPToken(state State, header string) bool {
@@ -49,7 +53,7 @@ func (s *Store) saveMCP(config MCPConfig, rotate bool, revision int) (string, er
 	if config.SecurityWrite == nil {
 		config.SecurityWrite = s.state.MCP.SecurityWrite
 	}
-	if config.Enabled && !config.Read && !config.Write && !config.Maintenance && !config.canWritePanel() {
+	if config.Enabled && !config.hasPermissions() {
 		return "", errors.New("启用 MCP 时请至少授权一项权限")
 	}
 	next := s.state

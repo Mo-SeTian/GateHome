@@ -253,7 +253,19 @@ func (a *Admin) mcpRoutes(mux *http.ServeMux) http.Handler {
 		if decoder.Decode(&config) != nil {
 			return nil, errors.New("配置包含未知字段或类型不正确")
 		}
-		return a.mcpAPI(ctx, mux, "PUT", "/api/config", map[string]any{"config": config, "revision": args.Revision})
+		result, err := a.mcpAPI(ctx, mux, "PUT", "/api/config", map[string]any{"config": config, "revision": args.Revision})
+		if err != nil {
+			return nil, err
+		}
+		grants, _ := ctx.Value(mcpGrantsKey{}).(MCPConfig)
+		if grants.Read {
+			return result, nil
+		}
+		reply, ok := result.(map[string]any)
+		if !ok {
+			return nil, errors.New("配置保存响应无效")
+		}
+		return map[string]any{"ok": true, "revision": reply["revision"]}, nil
 	})
 	type jobArgs struct {
 		Kind string `json:"kind" jsonschema:"ddns 或 acme"`
