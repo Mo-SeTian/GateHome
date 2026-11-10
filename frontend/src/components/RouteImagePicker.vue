@@ -5,39 +5,25 @@
       <span class="picker-hint">用于反代卡片、SunPanel 与导航快捷方式</span>
     </div>
 
-    <div class="picker-body">
-      <!-- 预览区 -->
-      <div class="picker-preview-col">
-        <div class="preview-box">
-          <img
-            v-if="modelValue"
-            :src="`/api/route-images/${modelValue}`"
-            class="route-icon-img"
-            width="48"
-            height="48"
-            alt="所选服务图片"
-          />
-          <div v-else class="preview-fallback">
-            <ImageIcon :size="24" class="fallback-icon" />
-          </div>
-        </div>
-        <button
+    <!-- 上半部分：预览图标 + 本地上传按钮与格式说明 -->
+    <div class="picker-top-row">
+      <div class="preview-box" :title="modelValue ? '当前已设置自定义图片' : '默认图标占位'">
+        <img
           v-if="modelValue"
-          type="button"
-          class="btn btn-ghost btn-xs text-bad"
-          :disabled="busy"
-          @click="emit('update:modelValue', '')"
-        >
-          恢复默认
-        </button>
+          :src="`/api/route-images/${modelValue}`"
+          class="route-icon-img"
+          width="44"
+          height="44"
+          alt="所选服务图片"
+        />
+        <div v-else class="preview-fallback">
+          <ImageIcon :size="22" class="fallback-icon" />
+        </div>
       </div>
-
-      <!-- 操作区 -->
-      <div class="picker-controls-col">
-        <!-- 本地上传 -->
-        <div class="file-upload-row">
-          <label class="custom-file-btn" :class="{ disabled: busy }">
-            <Upload :size="14" />
+      <div class="upload-btn-group">
+        <div class="btn-with-clear">
+          <label class="custom-file-btn" :class="{ disabled: busy }" title="从本地上传 PNG、JPG、SVG、WebP 或 ICO 格式图片">
+            <Upload :size="13" class="btn-icon" />
             <span>{{ busy ? '正在上传…' : '选择本地图片' }}</span>
             <input
               type="file"
@@ -47,33 +33,44 @@
               @change="upload"
             />
           </label>
-          <span class="file-format-tip">支持 PNG / JPG / SVG / WebP / ICO</span>
-        </div>
-
-        <!-- 在线导入 -->
-        <div class="image-url-row">
-          <div class="url-input-wrap">
-            <Link2 :size="13" class="url-icon" />
-            <input
-              v-model="url"
-              class="form-input url-input"
-              type="url"
-              placeholder="或输入在线图片地址 (https://...)"
-              aria-label="图片地址"
-              :disabled="busy"
-              @keydown.enter.prevent="importImage"
-            />
-          </div>
           <button
+            v-if="modelValue"
             type="button"
-            class="btn btn-secondary btn-sm"
-            :disabled="!url.trim() || busy"
-            @click="importImage"
+            class="clear-img-btn"
+            :disabled="busy"
+            title="移除自定义图片，恢复系统默认分类图标"
+            @click="emit('update:modelValue', '')"
           >
-            导入
+            <RotateCcw :size="11" />
+            <span>恢复默认</span>
           </button>
         </div>
+        <span class="file-format-tip">支持 PNG / JPG / SVG / WebP / ICO</span>
       </div>
+    </div>
+
+    <!-- 下半部分：在线图片地址输入 + 导入按钮 -->
+    <div class="picker-url-row">
+      <div class="url-input-wrap">
+        <Link2 :size="13" class="url-icon" />
+        <input
+          v-model="url"
+          class="form-input url-input"
+          type="url"
+          placeholder="输入在线图片 URL (https://...)"
+          aria-label="图片地址"
+          :disabled="busy"
+          @keydown.enter.prevent="importImage"
+        />
+      </div>
+      <button
+        type="button"
+        class="btn btn-secondary import-btn"
+        :disabled="!url.trim() || busy"
+        @click="importImage"
+      >
+        导入
+      </button>
     </div>
 
     <!-- 状态反馈 -->
@@ -95,6 +92,7 @@ import {
   Check,
   Image as ImageIcon,
   Link2,
+  RotateCcw,
   Upload
 } from 'lucide-vue-next'
 import { adminApi } from '@/api/admin'
@@ -145,13 +143,15 @@ function importImage() {
 
 <style scoped>
 .image-picker-panel {
+  box-sizing: border-box;
+  width: 100%;
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
   background: rgba(255, 255, 255, 0.02);
-  padding: 14px 16px;
+  padding: 12px 14px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
   min-width: 0;
   transition: var(--transition-smooth);
 }
@@ -163,92 +163,109 @@ function importImage() {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 8px;
+  gap: 6px;
   flex-wrap: wrap;
+  min-width: 0;
 }
 .picker-title {
-  font-size: 12.5px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--ink);
 }
 .picker-hint {
   font-size: 11px;
   color: var(--faint);
+  line-height: 1.4;
 }
 
-.picker-body {
+/* 上半部分：头像与本地上传行 */
+.picker-top-row {
   display: flex;
-  align-items: flex-start;
-  gap: 16px;
-}
-
-.picker-preview-col {
-  display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
 }
+
 .preview-box {
-  width: 54px;
-  height: 54px;
-  border-radius: var(--radius-md);
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
   background: var(--strip-bg);
   border: 1px solid var(--line);
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
   overflow: hidden;
-  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.2);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.15);
 }
 .route-icon-img {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
+  padding: 2px;
 }
 .fallback-icon {
   color: var(--faint);
+  opacity: 0.8;
 }
 
-.picker-controls-col {
-  flex: 1;
+.upload-btn-group {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 4px;
+  flex: 1;
   min-width: 0;
 }
 
-.file-upload-row {
+.btn-with-clear {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   flex-wrap: wrap;
 }
 
+/* 自定义上传按钮：强制锁死为水平单行结构，杜绝任何外部 label 样式污染为纵向方块 */
 .custom-file-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 14px;
-  background: var(--brand-gradient);
-  color: #ffffff;
-  border-radius: var(--radius-sm);
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.35);
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-  position: relative;
-  user-select: none;
+  display: inline-flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 6px !important;
+  height: 32px !important;
+  min-height: 32px !important;
+  padding: 0 12px !important;
+  line-height: 32px !important;
+  white-space: nowrap !important;
+  word-break: keep-all !important;
+  background: var(--brand-gradient) !important;
+  color: #ffffff !important;
+  border-radius: var(--radius-sm) !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  cursor: pointer !important;
+  box-shadow: 0 2px 6px rgba(99, 102, 241, 0.35) !important;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  position: relative !important;
+  user-select: none !important;
+  margin: 0 !important;
+  flex-shrink: 0 !important;
+  align-self: flex-start;
 }
 .custom-file-btn:hover:not(.disabled) {
   opacity: 0.92;
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.5);
+  box-shadow: 0 4px 10px rgba(99, 102, 241, 0.45);
 }
 .custom-file-btn.disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.btn-icon {
+  flex-shrink: 0;
 }
 
 .hidden-file-input {
@@ -262,48 +279,89 @@ function importImage() {
   border: 0;
 }
 
-.file-format-tip {
+.clear-img-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-size: 11px;
-  color: var(--faint);
+  color: var(--bad);
+  background: rgba(244, 63, 94, 0.1);
+  border: 1px solid rgba(244, 63, 94, 0.2);
+  padding: 0 8px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: var(--transition-smooth);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.clear-img-btn:hover:not(:disabled) {
+  background: rgba(244, 63, 94, 0.18);
+  border-color: rgba(244, 63, 94, 0.35);
 }
 
-.image-url-row {
+.file-format-tip {
+  font-size: 10.5px;
+  color: var(--faint);
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+/* 下半部分：在线导入整行自适应 */
+.picker-url-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   width: 100%;
+  min-width: 0;
 }
+
 .url-input-wrap {
   position: relative;
-  flex: 1;
+  flex: 1 1 0%;
+  min-width: 0;
   display: flex;
   align-items: center;
 }
 .url-icon {
   position: absolute;
-  left: 10px;
+  left: 9px;
   color: var(--muted);
   pointer-events: none;
+  z-index: 2;
 }
 .url-input {
-  padding-left: 30px !important;
-  height: 34px !important;
+  box-sizing: border-box !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  padding-left: 28px !important;
+  padding-right: 8px !important;
+  height: 32px !important;
+  min-height: 32px !important;
+  line-height: 30px !important;
+  font-size: 11.5px !important;
+  border-radius: var(--radius-sm) !important;
+}
+
+.import-btn {
+  height: 32px !important;
+  min-height: 32px !important;
+  padding: 0 12px !important;
   font-size: 12px !important;
-  width: 100%;
+  font-weight: 500 !important;
+  white-space: nowrap !important;
+  flex: 0 0 auto !important;
+  border-radius: var(--radius-sm) !important;
 }
 
-.btn-xs {
-  font-size: 11px !important;
-  padding: 2px 6px !important;
-}
-
+/* 状态与错误提示 */
 .picker-status-msg,
 .picker-error-msg {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
-  padding: 6px 10px;
+  font-size: 11.5px;
+  padding: 5px 9px;
   border-radius: var(--radius-sm);
 }
 .picker-status-msg {
@@ -315,14 +373,17 @@ function importImage() {
   color: var(--bad);
 }
 
-@media (max-width: 520px) {
-  .picker-body {
-    flex-direction: column;
-    align-items: stretch;
+@media (max-width: 480px) {
+  .image-picker-panel {
+    padding: 10px 12px;
   }
-  .picker-preview-col {
-    flex-direction: row;
-    gap: 12px;
+  .picker-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+  }
+  .file-format-tip {
+    font-size: 10px;
   }
 }
 </style>
