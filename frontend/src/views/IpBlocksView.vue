@@ -118,7 +118,7 @@
       <form class="modal-body" @submit.prevent="createFreeze">
         <p v-if="formError" ref="errorElement" class="error" role="alert" tabindex="-1">{{ formError }}</p>
         <fieldset :disabled="mutating" class="freeze-fields">
-          <label
+          <label class="form-field"
             >来源 IP 地址<input
               v-model="form.ip"
               name="ip"
@@ -126,14 +126,14 @@
               placeholder="203.0.113.10 或 2001:db8::10"
               required
           /></label>
-          <label
+          <label class="form-field"
             >生效的反代规则<select v-model="form.rule" name="rule" class="form-select" required>
               <option v-for="route in routes" :key="routeKey(route)" :value="routeKey(route)">
                 {{ routeLabel(route) }}
               </option>
             </select></label
           >
-          <label
+          <label class="form-field"
             >冻结持续时长 分钟<input
               v-model.number="form.minutes"
               name="minutes"
@@ -144,7 +144,7 @@
               required
           /></label>
           <p class="form-note">范围 1–10080 分钟，最长 7 天。仅对所选反代规则生效，到期自动解除。</p>
-          <label
+          <label class="form-field"
             >备注原因（可选，最多 500 字节）<input
               v-model="form.reason"
               name="reason"
@@ -169,6 +169,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, watch } fr
 import { CheckCircle, Clock, Search, ShieldAlert, Unlock, X } from 'lucide-vue-next'
 import SpotlightCard from '@/components/SpotlightCard.vue'
 import { adminApi } from '@/api/admin'
+import { startPolling } from '@/api/polling'
 import { routeKey } from '@/api/configuration'
 import { useGatewayStatus } from '@/composables/useGatewayStatus'
 import { useToast } from '@/composables/useToast'
@@ -339,13 +340,13 @@ async function unblock(item) {
 let refreshTimer, clockTimer
 onMounted(() => {
   refresh(true)
-  refreshTimer = setInterval(() => refresh(), 5000)
+  refreshTimer = startPolling(() => refresh(), 5000)
   clockTimer = setInterval(() => {
     tick.value = performance.now()
   }, 1000)
 })
 onUnmounted(() => {
-  clearInterval(refreshTimer)
+  refreshTimer?.()
   clearInterval(clockTimer)
   controller.abort()
 })

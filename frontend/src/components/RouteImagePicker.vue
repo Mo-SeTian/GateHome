@@ -25,14 +25,14 @@
         <label
           class="custom-file-btn"
           :class="{ disabled: busy }"
-          title="从本地上传 PNG、JPG、SVG、WebP 或 ICO 格式图片"
+          title="从本地上传 PNG、JPG、GIF、WebP 或 ICO 格式图片"
         >
           <Upload :size="13" class="btn-icon" />
           <span>{{ busy ? '正在上传…' : '选择本地图片' }}</span>
           <input
             type="file"
             class="hidden-file-input"
-            accept="image/png,image/jpeg,image/gif,image/webp,image/x-icon,image/svg+xml"
+            accept="image/png,image/jpeg,image/gif,image/webp,image/x-icon"
             :disabled="busy"
             @change="upload"
           />
@@ -77,7 +77,7 @@
 
     <!-- 底部格式提示 -->
     <div class="picker-footer">
-      <span class="file-format-tip">支持 PNG / JPG / SVG / WebP / ICO 格式（建议 1:1 比例）</span>
+      <span class="file-format-tip">支持 PNG / JPG / GIF / WebP / ICO 格式（建议 1:1 比例）</span>
     </div>
 
     <!-- 状态反馈 -->

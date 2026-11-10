@@ -148,10 +148,10 @@
           {{ formError }}
         </p>
         <fieldset :disabled="isSavingConfig">
-          <label
+          <label class="form-field"
             >名称<input v-model="form.name" name="name" class="form-input" required maxlength="100" autofocus
           /></label>
-          <label
+          <label class="form-field"
             >HTTPS 规则地址<input
               v-model="form.url"
               name="url"
@@ -165,7 +165,7 @@
             支持
             IPv4、IPv6、CIDR、空行和注释。新来源首次成功前，关联防火墙会暂拒访问；更新失败保留同一来源上次成功的缓存。
           </p>
-          <label
+          <label class="form-field"
             >更新周期 秒<input
               v-model.number="form.interval"
               name="interval"
@@ -199,7 +199,7 @@ import SpotlightCard from '@/components/SpotlightCard.vue'
 import { adminApi } from '@/api/admin'
 import { replaceConfigItem } from '@/api/configuration'
 import { reportDate, subscriptionState } from '@/api/reports'
-import { useGatewayStatus } from '@/composables/useGatewayStatus'
+import { useGatewayStatus, useStatusPolling } from '@/composables/useGatewayStatus'
 import { useToast } from '@/composables/useToast'
 import '@/styles/reports.css'
 
@@ -207,6 +207,7 @@ const {
   gatewayConfig,
   gatewayConfigSnapshot,
   gatewayStatus,
+  statusError,
   isSavingConfig,
   refreshConfig,
   refreshStatus,
@@ -216,7 +217,6 @@ const toast = useToast()
 const subscriptions = computed(() => gatewayConfig.value?.subscriptions ?? [])
 const loading = ref(false),
   error = ref(''),
-  statusError = ref(''),
   queuingAll = ref(false),
   queued = ref(new Set())
 const dialog = ref(null),
@@ -243,7 +243,6 @@ async function reload() {
   if (loading.value || isSavingConfig.value) return
   loading.value = true
   error.value = ''
-  statusError.value = ''
   try {
     await Promise.all([refreshConfig(controller.signal), refreshStatus(controller.signal)])
   } catch (err) {
@@ -372,22 +371,9 @@ async function copy(url) {
     toast.error('复制失败，请手动复制地址')
   }
 }
-let timer
-onMounted(() => {
-  reload()
-  timer = setInterval(async () => {
-    try {
-      await refreshStatus(controller.signal)
-      if (!controller.signal.aborted) statusError.value = ''
-    } catch (err) {
-      if (!controller.signal.aborted) statusError.value = err.message
-    }
-  }, 5000)
-})
-onUnmounted(() => {
-  clearInterval(timer)
-  controller.abort()
-})
+useStatusPolling()
+onMounted(reload)
+onUnmounted(() => controller.abort())
 </script>
 
 <style scoped>

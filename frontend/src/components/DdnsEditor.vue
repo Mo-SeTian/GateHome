@@ -16,12 +16,12 @@
       <p v-if="error" ref="errorElement" class="report-error" role="alert" tabindex="-1">{{ error }}</p>
       <fieldset :disabled="isSavingConfig">
         <template v-if="!hostsOnly">
-          <label
+          <label class="form-field"
             >DNS 服务商<select v-model="draft.provider" name="provider" class="form-select">
               <option value="cloudflare">Cloudflare</option>
             </select></label
           >
-          <label
+          <label class="form-field"
             >组名称<input
               v-model="draft.name"
               name="name"
@@ -29,7 +29,7 @@
               maxlength="100"
               required
           /></label>
-          <label
+          <label class="form-field"
             >根域名 / DNS Zone<input
               v-model="draft.zone"
               name="zone"
@@ -37,7 +37,7 @@
               placeholder="example.com"
               required
           /></label>
-          <label
+          <label class="form-field"
             >独立 API Token<input
               v-model="token"
               name="token"
@@ -54,7 +54,7 @@
             Token（需先停用同步）</label
           >
           <p class="report-note">需要此 Zone 的 Zone:Read / DNS:Edit 权限。凭据不回显、不与证书任务共用。</p>
-          <label
+          <label class="form-field"
             >同步类型<select v-model="draft.mode" name="mode" class="form-select">
               <option value="ipv4">IPv4 · A</option>
               <option value="ipv6">IPv6 · AAAA</option>
@@ -62,7 +62,7 @@
             </select></label
           >
         </template>
-        <label
+        <label class="form-field"
           >子域名前缀<textarea
             v-model="hostsText"
             name="hosts"
@@ -75,7 +75,7 @@
         <p class="report-note">@ 表示根域名；支持逗号或换行。绑定此 DDNS 组的反代域名须保留。</p>
         <p class="domain-preview mono-text">{{ preview }}</p>
         <template v-if="!hostsOnly">
-          <label
+          <label class="form-field"
             >检查间隔 秒<input
               v-model.number="draft.interval"
               name="interval"

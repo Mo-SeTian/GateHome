@@ -21,7 +21,7 @@ func localAdminAddresses() map[netip.Addr]bool {
 }
 
 func isAdminUpstream(u *url.URL, adminPort int, addresses map[netip.Addr]bool) bool {
-	if adminPort < 1 || u.Port() != strconv.Itoa(adminPort) {
+	if u == nil || adminPort < 1 || u.Port() != strconv.Itoa(adminPort) {
 		return false
 	}
 	if strings.EqualFold(u.Hostname(), "localhost") {

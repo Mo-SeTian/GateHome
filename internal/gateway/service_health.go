@@ -313,9 +313,11 @@ func (a *Admin) authenticatedPanelUser(r *http.Request) (uint, error) {
 	if a.sunPanel == nil || r.Header.Get("token") == "" {
 		return 0, errors.New("请先登录 Sun-Panel")
 	}
-	a.sunPanel.mu.Lock()
+	if !a.sunPanel.mu.TryRLock() {
+		return 0, errors.New("Sun-Panel 正在启动或备份，请稍后重试")
+	}
 	address := a.sunPanel.bridgeURL
-	a.sunPanel.mu.Unlock()
+	a.sunPanel.mu.RUnlock()
 	if address == "" {
 		return 0, errors.New("Sun-Panel 未运行")
 	}

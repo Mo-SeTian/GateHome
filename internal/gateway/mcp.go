@@ -27,13 +27,16 @@ type mcpScope string
 var mcpManagementGuide string
 
 const (
-	mcpRead        mcpScope = "read"
-	mcpWrite       mcpScope = "write"
-	mcpMaintenance mcpScope = "maintenance"
+	mcpRead          mcpScope = "read"
+	mcpWrite         mcpScope = "write"
+	mcpMaintenance   mcpScope = "maintenance"
+	mcpPanelWrite    mcpScope = "sunpanel_write"
+	mcpSecurityWrite mcpScope = "security_write"
 )
 
 type mcpEmpty struct{}
 type mcpOwnerKey struct{}
+type mcpGrantsKey struct{}
 type mcpID struct {
 	ID string `json:"id" jsonschema:"配置中的持久化标识"`
 }
@@ -47,7 +50,7 @@ func (a *Admin) mcpPermission(req *mcp.CallToolRequest, scope mcpScope) error {
 	if !valid {
 		return errors.New("MCP 令牌失效或服务已关闭，请重新连接")
 	}
-	allowed := (scope == mcpRead && client.Config.Read) || (scope == mcpWrite && client.Config.Write) || (scope == mcpMaintenance && client.Config.Maintenance)
+	allowed := (scope == mcpRead && client.Config.Read) || (scope == mcpWrite && client.Config.Write) || (scope == mcpMaintenance && client.Config.Maintenance) || (scope == mcpPanelWrite && client.Config.canWritePanel()) || (scope == mcpSecurityWrite && client.Config.canWriteSecurity())
 	if !allowed {
 		return errors.New("此 MCP 令牌未获该类操作权限，请在 GateHome 设置中授权")
 	}
@@ -62,6 +65,7 @@ func addMCPTool[In any](a *Admin, server *mcp.Server, name, description string, 
 		if err == nil {
 			client, _ := mcpClientForToken(a.store.Snapshot(), req.Extra.Header.Get("Authorization"))
 			ctx = context.WithValue(ctx, mcpOwnerKey{}, client.Config.SunPanelUserID)
+			ctx = context.WithValue(ctx, mcpGrantsKey{}, client.Config)
 			output, err = call(ctx, args)
 		}
 		// Store the client identity and safe operation identifiers, never credentials.
@@ -142,7 +146,7 @@ func (a *Admin) mcpPanel(ctx context.Context, action string, data any) (any, err
 		userID = owner
 	}
 	if userID == 0 {
-		return nil, errors.New("请在 GateHome 的 MCP 设置中绑定 Sun-Panel 账号")
+		return nil, errors.New("当前 MCP Token 未绑定 Sun-Panel 账号，请编辑此客户端的账号授权")
 	}
 	if a.sunPanel == nil {
 		return nil, errors.New("Sun-Panel 未运行")
@@ -215,12 +219,18 @@ func (a *Admin) mcpRoutes(mux *http.ServeMux) http.Handler {
 	})
 	type configArgs struct {
 		Revision int    `json:"revision"`
-		Section  string `json:"section" jsonschema:"groups routes forwards ddns acme firewalls subscriptions sunpanel outbound_proxy admin_access log_retention dashboard service_health 之一"`
+		Section  string `json:"section" jsonschema:"groups routes forwards ddns acme firewalls subscriptions sunpanel outbound_proxy admin_access trusted_proxies log_retention dashboard service_health 之一"`
 		Value    any    `json:"value" jsonschema:"该配置分区的完整 JSON 值；修改前先读取配置，保留其他字段"`
 	}
 	addMCPTool(a, server, "gatehome_update_config", "替换一个配置分区，保留其他分区和已保存凭据。须先读取配置并提供最新 revision；沿用网页校验和热加载，监听或 TCP / UDP 转发变更需单独重启。不接受密码或令牌字段。", mcpWrite, func(ctx context.Context, args configArgs) (any, error) {
+		if args.Section == "firewalls" || args.Section == "admin_access" || args.Section == "trusted_proxies" {
+			grants, _ := ctx.Value(mcpGrantsKey{}).(MCPConfig)
+			if !grants.canWriteSecurity() {
+				return nil, errors.New("此 MCP Token 未获安全策略修改权限")
+			}
+		}
 		switch args.Section {
-		case "groups", "routes", "forwards", "ddns", "acme", "firewalls", "subscriptions", "sunpanel", "outbound_proxy", "admin_access", "log_retention", "dashboard", "service_health":
+		case "groups", "routes", "forwards", "ddns", "acme", "firewalls", "subscriptions", "sunpanel", "outbound_proxy", "admin_access", "trusted_proxies", "log_retention", "dashboard", "service_health":
 		default:
 			return nil, errors.New("不支持的配置分区")
 		}
@@ -274,7 +284,7 @@ func (a *Admin) mcpRoutes(mux *http.ServeMux) http.Handler {
 		Minutes int    `json:"minutes"`
 		Reason  string `json:"reason"`
 	}
-	addMCPTool(a, server, "gatehome_block_ip", "冻结某条反代规则的来源 IP，minutes 为 1–10080；rule 使用组标识/域名。", mcpWrite, func(ctx context.Context, args blockArgs) (any, error) {
+	addMCPTool(a, server, "gatehome_block_ip", "冻结某条反代规则的来源 IP，minutes 为 1–10080；rule 使用组标识/域名。", mcpSecurityWrite, func(ctx context.Context, args blockArgs) (any, error) {
 		return a.mcpAPI(ctx, mux, "POST", "/api/ip-blocks", args)
 	})
 	type unblockArgs struct {
@@ -282,7 +292,7 @@ func (a *Admin) mcpRoutes(mux *http.ServeMux) http.Handler {
 		IP      string `json:"ip"`
 		Confirm bool   `json:"confirm"`
 	}
-	addMCPTool(a, server, "gatehome_unblock_ip", "解除来源 IP 冻结。确认用户授权后传 confirm=true。", mcpWrite, func(ctx context.Context, args unblockArgs) (any, error) {
+	addMCPTool(a, server, "gatehome_unblock_ip", "解除来源 IP 冻结。确认用户授权后传 confirm=true。", mcpSecurityWrite, func(ctx context.Context, args unblockArgs) (any, error) {
 		if !args.Confirm {
 			return nil, errors.New("请先确认解除冻结")
 		}
@@ -321,10 +331,10 @@ func (a *Admin) mcpRoutes(mux *http.ServeMux) http.Handler {
 		return a.mcpAPI(ctx, mux, "POST", path, input)
 	})
 	addMCPTool(a, server, "sunpanel_get_desktop", "读取绑定账号的分组、网站、内网/默认网址、来源关联和桌面偏好，不返回其他账号数据。", mcpRead, func(ctx context.Context, _ mcpEmpty) (any, error) { return a.mcpPanel(ctx, "desktop", nil) })
-	addMCPTool(a, server, "sunpanel_save_group", "创建或修改绑定账号的分组。创建时省略 id；修改先读取完整分组并传最新 updatedAt。", mcpWrite, func(ctx context.Context, args panel.MCPGroup) (any, error) {
+	addMCPTool(a, server, "sunpanel_save_group", "创建或修改绑定账号的分组。创建时省略 id；修改先读取完整分组并传最新 updatedAt。", mcpPanelWrite, func(ctx context.Context, args panel.MCPGroup) (any, error) {
 		return a.mcpPanelWrite(ctx, "save_group", args, -1)
 	})
-	addMCPTool(a, server, "sunpanel_save_website", "创建或修改绑定账号的网站，groupId 为目标分组；openMethod 1/2/3 为当前页/新窗口/内嵌。修改前先读取完整网站并传最新 updatedAt；省略 icon 保留原图标，原 GateHome 关联也保留。", mcpWrite, func(ctx context.Context, args panel.MCPWebsite) (any, error) {
+	addMCPTool(a, server, "sunpanel_save_website", "创建或修改绑定账号的网站，groupId 为目标分组；openMethod 1/2/3 为当前页/新窗口/内嵌。修改前先读取完整网站并传最新 updatedAt；省略 icon 保留原图标，原 GateHome 关联也保留。", mcpPanelWrite, func(ctx context.Context, args panel.MCPWebsite) (any, error) {
 		if args.ID != 0 {
 			desktop, err := a.mcpDesktop(ctx)
 			if err != nil {
@@ -353,7 +363,7 @@ func (a *Admin) mcpRoutes(mux *http.ServeMux) http.Handler {
 		return a.mcpPanelWrite(ctx, "save_website", args, -1)
 	})
 	for _, operation := range []string{"group", "website"} {
-		addMCPTool(a, server, "sunpanel_delete_"+operation, "删除绑定账号的分组或网站，分组删除包含其中网站且须至少保留一个分组。先读取最新 updatedAt，确认用户授权后传 confirm=true。", mcpWrite, func(ctx context.Context, args panel.MCPDelete) (any, error) {
+		addMCPTool(a, server, "sunpanel_delete_"+operation, "删除绑定账号的分组或网站，分组删除包含其中网站且须至少保留一个分组。先读取最新 updatedAt，确认用户授权后传 confirm=true。", mcpPanelWrite, func(ctx context.Context, args panel.MCPDelete) (any, error) {
 			return a.mcpPanelWrite(ctx, "delete_"+operation, args, -1)
 		})
 	}

@@ -22,7 +22,7 @@
       <p v-if="error" ref="errorElement" class="error" role="alert" tabindex="-1">{{ error }}</p>
       <fieldset class="editor-fields" :disabled="isSavingConfig">
         <div class="form-row-2">
-          <label
+          <label class="form-field"
             >策略名称<input
               v-model="draft.name"
               name="name"
@@ -30,7 +30,7 @@
               maxlength="100"
               required
           /></label>
-          <label
+          <label class="form-field"
             >IP 未命中时<select v-model="draft.default_action" name="default_action" class="form-select">
               <option value="deny">禁止访问</option>
               <option value="allow">允许访问</option>
@@ -67,7 +67,7 @@
                 移除组
               </button>
             </div>
-            <label
+            <label class="form-field"
               >组名称<input
                 v-model="group.name"
                 name="group_name"
@@ -76,20 +76,20 @@
                 required
             /></label>
             <div class="form-row-2">
-              <label
+              <label class="form-field"
                 >匹配方式<select v-model="group.match" name="match" class="form-select">
                   <option value="include">包含：匹配组内 IP</option>
                   <option value="exclude">排除：匹配组外 IP</option>
                 </select></label
               >
-              <label
+              <label class="form-field"
                 >命中动作<select v-model="group.action" name="action" class="form-select">
                   <option value="allow">允许访问</option>
                   <option value="deny">禁止访问</option>
                 </select></label
               >
             </div>
-            <label
+            <label class="form-field"
               >手动 IPv4 / IPv6 / CIDR<textarea
                 v-model="group.cidrsText"
                 name="cidrs"
@@ -130,14 +130,14 @@
         <section class="editor-section">
           <h3>Web 攻击防护 · Coraza / OWASP CRS</h3>
           <div class="form-row-2">
-            <label
+            <label class="form-field"
               >WAF 模式<select v-model="draft.protection.waf.mode" name="waf_mode" class="form-select">
                 <option value="off">关闭</option>
                 <option value="detect">仅记录</option>
                 <option value="block">拦截攻击</option>
               </select></label
             >
-            <label
+            <label class="form-field"
               >检测等级<select
                 v-model.number="draft.protection.waf.level"
                 name="waf_level"
@@ -149,7 +149,7 @@
               </select></label
             >
           </div>
-          <label
+          <label class="form-field"
             >请求体检查上限 KiB<input
               v-model.number="draft.bodyKiB"
               name="waf_body_kib"
@@ -161,7 +161,7 @@
               required
           /></label>
           <p>
-            建议先仅记录，再按误报调整例外。拦截模式超限返回 413；仅记录模式超限记录未完成检查并转发。响应及
+            建议先仅记录，再按误报调整例外。拦截模式超限返回 413；仅记录模式检查可用前缀，提示未完成完整检查并转发全部正文。响应及
             WebSocket 消息不检查。
           </p>
           <fieldset
@@ -178,7 +178,7 @@
               移除例外
             </button>
             <div class="form-row-2">
-              <label
+              <label class="form-field"
                 >CRS 规则编号<input
                   v-model.number="exception.rule_id"
                   name="exception_id"
@@ -188,14 +188,14 @@
                   class="form-input"
                   required
               /></label>
-              <label
+              <label class="form-field"
                 >服务域名（可选）<input
                   v-model="exception.host"
                   name="exception_host"
                   class="form-input"
                   placeholder="留空适用于本策略所有域名"
               /></label>
-              <label
+              <label class="form-field"
                 >路径前缀<input
                   v-model="exception.path"
                   name="exception_path"
@@ -203,7 +203,7 @@
                   maxlength="256"
                   required
               /></label>
-              <label
+              <label class="form-field"
                 >参数名（可选）<input
                   v-model="exception.parameter"
                   name="exception_parameter"
@@ -262,7 +262,7 @@
                 移除规则
               </button>
             </div>
-            <label
+            <label class="form-field"
               >规则名称<input
                 v-model="rule.name"
                 name="http_name"
@@ -271,21 +271,21 @@
                 required
             /></label>
             <div class="form-row-2">
-              <label
+              <label class="form-field"
                 >检查目标<select v-model="rule.target" name="http_target" class="form-select">
                   <option value="user_agent">User-Agent</option>
                   <option value="path">请求路径</option>
                   <option value="method">请求方法</option>
                 </select></label
               >
-              <label
+              <label class="form-field"
                 >动作<select v-model="rule.action" name="http_action" class="form-select">
                   <option value="block">拦截</option>
                   <option value="detect">仅记录</option>
                 </select></label
               >
             </div>
-            <label
+            <label class="form-field"
               >正则表达式<input
                 v-model="rule.pattern"
                 name="http_pattern"
@@ -315,7 +315,7 @@
             />启用每个服务、每个来源 IP 的限速</label
           >
           <div class="form-row-2">
-            <label
+            <label class="form-field"
               >时间窗口 秒<input
                 v-model.number="draft.protection.rate.window_seconds"
                 name="rate_window"
@@ -325,7 +325,7 @@
                 class="form-input"
                 required
             /></label>
-            <label
+            <label class="form-field"
               >窗口内允许次数<input
                 v-model.number="draft.protection.rate.requests"
                 name="rate_requests"
@@ -336,7 +336,7 @@
                 required
             /></label>
           </div>
-          <label
+          <label class="form-field"
             >路径前缀<input
               v-model="draft.protection.rate.path"
               name="rate_path"
@@ -356,7 +356,7 @@
             />多次被防护拦截后冻结来源 IP</label
           >
           <div class="form-row-2">
-            <label
+            <label class="form-field"
               >累计窗口 秒<input
                 v-model.number="draft.protection.freeze.window_seconds"
                 name="security_freeze_window"
@@ -366,7 +366,7 @@
                 class="form-input"
                 required
             /></label>
-            <label
+            <label class="form-field"
               >触发次数<input
                 v-model.number="draft.protection.freeze.failures"
                 name="security_freeze_failures"
@@ -376,7 +376,7 @@
                 class="form-input"
                 required
             /></label>
-            <label
+            <label class="form-field"
               >冻结时长 分钟<input
                 v-model.number="draft.freezeMinutes"
                 name="security_freeze_minutes"

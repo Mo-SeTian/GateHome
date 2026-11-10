@@ -63,7 +63,7 @@
           {{ formError }}
         </p>
         <fieldset :disabled="isSavingConfig" class="dialog-fieldset">
-          <label
+          <label class="form-field"
             >检测配置<select v-model="draft.group_id" name="monitor_group_id" class="form-select">
               <option value="">本机检测</option>
               <option v-for="group in gatewayConfig?.ddns.groups" :key="group.id" :value="group.id">

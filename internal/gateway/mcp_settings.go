@@ -9,11 +9,25 @@ import (
 )
 
 type MCPConfig struct {
-	Enabled        bool `json:"enabled"`
-	Read           bool `json:"read"`
-	Write          bool `json:"write"`
-	Maintenance    bool `json:"maintenance"`
-	SunPanelUserID uint `json:"sunpanel_user_id"`
+	Enabled     bool `json:"enabled"`
+	Read        bool `json:"read"`
+	Write       bool `json:"write"`
+	Maintenance bool `json:"maintenance"`
+	// Missing flags preserve the grants of tokens issued before scoped writes.
+	SunPanelWrite  *bool `json:"sunpanel_write,omitempty"`
+	SecurityWrite  *bool `json:"security_write,omitempty"`
+	SunPanelUserID uint  `json:"sunpanel_user_id"`
+}
+
+func (c MCPConfig) canWritePanel() bool {
+	if c.SunPanelWrite != nil {
+		return *c.SunPanelWrite
+	}
+	return c.Write
+}
+
+func (c MCPConfig) canWriteSecurity() bool {
+	return c.Write && (c.SecurityWrite == nil || *c.SecurityWrite)
 }
 
 type mcpInternalKey struct{}
@@ -24,13 +38,19 @@ func validMCPToken(state State, header string) bool {
 }
 
 func (s *Store) saveMCP(config MCPConfig, rotate bool, revision int) (string, error) {
-	if config.Enabled && !config.Read && !config.Write && !config.Maintenance {
-		return "", errors.New("启用 MCP 时请至少授权一项权限")
-	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.state.Revision != revision {
 		return "", errors.New("配置已变化，请刷新后重试")
+	}
+	if config.SunPanelWrite == nil {
+		config.SunPanelWrite = s.state.MCP.SunPanelWrite
+	}
+	if config.SecurityWrite == nil {
+		config.SecurityWrite = s.state.MCP.SecurityWrite
+	}
+	if config.Enabled && !config.Read && !config.Write && !config.Maintenance && !config.canWritePanel() {
+		return "", errors.New("启用 MCP 时请至少授权一项权限")
 	}
 	next := s.state
 	next.MCP = config

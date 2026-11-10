@@ -164,9 +164,10 @@ func (c Config) CertificateRequest(id string) (CertificateRequest, bool) {
 }
 
 type Config struct {
-	Forwards      []PortForward       `json:"forwards,omitempty"`
-	ServiceHealth ServiceHealthConfig `json:"service_health"`
-	SunPanel      SunPanelConfig      `json:"sunpanel"`
+	TrustedProxies []string            `json:"trusted_proxies,omitempty"`
+	Forwards       []PortForward       `json:"forwards,omitempty"`
+	ServiceHealth  ServiceHealthConfig `json:"service_health"`
+	SunPanel       SunPanelConfig      `json:"sunpanel"`
 	// Read-only compatibility fields for migrating the original on-disk format.
 	HTTPPort      int                 `json:"http_port,omitempty"`
 	HTTPSPort     int                 `json:"https_port,omitempty"`
@@ -765,6 +766,9 @@ func Validate(c Config) error {
 		return err
 	}
 	if err := validateAdminAccess(c.AdminAccess); err != nil {
+		return err
+	}
+	if _, err := parseTrustedProxies(c.TrustedProxies); err != nil {
 		return err
 	}
 	if c.HTTPPort != 0 || c.HTTPSPort != 0 {

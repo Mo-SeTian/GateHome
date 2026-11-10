@@ -50,7 +50,7 @@ func (a *Admin) mcpPanelTools(server *mcp.Server) {
 		GroupID  int      `json:"groupId"`
 		RouteIDs []string `json:"routeIds"`
 	}
-	addMCPTool(a, server, "sunpanel_import_gatehome_routes", "把 1–100 个已启用的 GateHome 反代项导入绑定账号的指定分组，自动填写默认/内网网址及来源关联，跳过已有网址或关联项。先查询分组和可导入反代列表。", mcpWrite, func(ctx context.Context, args importArgs) (any, error) {
+	addMCPTool(a, server, "sunpanel_import_gatehome_routes", "把 1–100 个已启用的 GateHome 反代项导入绑定账号的指定分组，自动填写默认/内网网址及来源关联，跳过已有网址或关联项。先查询分组和可导入反代列表。", mcpPanelWrite, func(ctx context.Context, args importArgs) (any, error) {
 		if len(args.RouteIDs) == 0 || len(args.RouteIDs) > 100 {
 			return nil, errors.New("请选择 1–100 个反代项")
 		}
@@ -99,7 +99,7 @@ func (a *Admin) mcpPanelTools(server *mcp.Server) {
 		} `json:"items"`
 		Confirm bool `json:"confirm"`
 	}
-	addMCPTool(a, server, "sunpanel_apply_route_sync", "应用已预览的关联更新，保留用户自定义标题和网址。传预览中的 configRevision、网站 id/updatedAt，确认后 confirm=true。停用或删除的源规则不自动删除首页网站。", mcpWrite, func(ctx context.Context, args syncArgs) (any, error) {
+	addMCPTool(a, server, "sunpanel_apply_route_sync", "应用已预览的关联更新，保留用户自定义标题和网址。传预览中的 configRevision、网站 id/updatedAt，确认后 confirm=true。停用或删除的源规则不自动删除首页网站。", mcpPanelWrite, func(ctx context.Context, args syncArgs) (any, error) {
 		if !args.Confirm || len(args.Items) == 0 || len(args.Items) > 100 {
 			return nil, errors.New("请先预览并确认 1–100 个关联更新")
 		}
@@ -129,7 +129,7 @@ func (a *Admin) mcpPanelTools(server *mcp.Server) {
 		}
 		return a.mcpPanelWrite(ctx, "sync_routes", map[string]any{"items": rows}, args.ConfigRevision)
 	})
-	addMCPTool(a, server, "sunpanel_set_preferences", "替换绑定账号的桌面和搜索偏好；先读取首页完整 panel/searchEngine 及 preferencesRevision，保留其他偏好字段。", mcpWrite, func(ctx context.Context, args panel.MCPPreferences) (any, error) {
+	addMCPTool(a, server, "sunpanel_set_preferences", "替换绑定账号的桌面和搜索偏好；先读取首页完整 panel/searchEngine 及 preferencesRevision，保留其他偏好字段。", mcpPanelWrite, func(ctx context.Context, args panel.MCPPreferences) (any, error) {
 		desktop, err := a.mcpDesktop(ctx)
 		if err != nil {
 			return nil, err

@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"crypto/sha256"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -9,6 +10,44 @@ import (
 	"testing"
 	"time"
 )
+
+func TestSunPanelRequiresParentSessionAndIndependentToken(t *testing.T) {
+	a, _ := testAdmin(t)
+	a.sunPanel = &SunPanel{}
+	h := a.Handler()
+	cookie := loginForTest(t, h)
+	for _, test := range []struct {
+		origin, fetchSite string
+		session           bool
+		status            int
+	}{
+		{"https://evil.example.test", "", true, 403},
+		{"", "cross-site", true, 403},
+		{"", "", false, 401},
+	} {
+		r := httptest.NewRequest("POST", "http://localhost:16666/sunpanel/api/file/importImg", strings.NewReader(`{}`))
+		r.Header.Set("Origin", test.origin)
+		r.Header.Set("Sec-Fetch-Site", test.fetchSite)
+		if test.session {
+			r.AddCookie(cookie)
+		}
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Code != test.status {
+			t.Fatal("Sun-Panel request crossed the parent authentication boundary")
+		}
+	}
+	r := httptest.NewRequest("POST", "http://localhost:16666/sunpanel/api/file/importImg", strings.NewReader(`{}`))
+	r.AddCookie(cookie)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	var result struct {
+		Code int `json:"code"`
+	}
+	if json.Unmarshal(w.Body.Bytes(), &result) != nil || result.Code != 1000 {
+		t.Fatal("parent session replaced the independent Sun-Panel token")
+	}
+}
 
 func TestSecurityAuditAllAdminEndpointsRequireSession(t *testing.T) {
 	a, h := testAdmin(t)

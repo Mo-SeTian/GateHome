@@ -105,10 +105,11 @@ type protectionWindow struct {
 	count   int
 }
 type protectionCounters struct {
-	mu        sync.Mutex
-	windows   map[string]protectionWindow
-	lastSweep time.Time
-	now       func() time.Time
+	mu             sync.Mutex
+	windows        map[string]protectionWindow
+	lastSweep      time.Time
+	earliestExpiry time.Time
+	now            func() time.Time
 }
 
 func newProtectionCounters() *protectionCounters {
@@ -120,10 +121,18 @@ func (c *protectionCounters) increment(key string, seconds, limit int) (bool, in
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	now := c.now()
-	if now.Sub(c.lastSweep) >= time.Minute {
+	_, exists := c.windows[key]
+	// Bound full-map scans under a stream of unique clients. Empty expiry
+	// metadata is initialized immediately; subsequent pressure sweeps wait at
+	// most one second instead of keeping expired slots for a full minute.
+	fullSweep := !exists && len(c.windows) >= 32768 && !now.Before(c.earliestExpiry) && (c.earliestExpiry.IsZero() || now.Sub(c.lastSweep) >= time.Second)
+	if now.Sub(c.lastSweep) >= time.Minute || fullSweep {
+		c.earliestExpiry = time.Time{}
 		for k, v := range c.windows {
 			if !now.Before(v.expires) {
 				delete(c.windows, k)
+			} else if c.earliestExpiry.IsZero() || v.expires.Before(c.earliestExpiry) {
+				c.earliestExpiry = v.expires
 			}
 		}
 		c.lastSweep = now
@@ -139,6 +148,9 @@ func (c *protectionCounters) increment(key string, seconds, limit int) (bool, in
 		v.count++
 	}
 	c.windows[key] = v
+	if c.earliestExpiry.IsZero() || v.expires.Before(c.earliestExpiry) {
+		c.earliestExpiry = v.expires
+	}
 	return v.count > limit, max(1, int(v.expires.Sub(now).Seconds())+1), true
 }
 func (c *protectionCounters) clear(route, ip string) {

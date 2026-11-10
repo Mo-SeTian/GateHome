@@ -22,7 +22,7 @@
             <span>启用自动申请与续期</span>
             <input v-model="draft.enabled" name="acme_enabled" type="checkbox" />
           </label>
-          <label
+          <label class="form-field"
             >ACME 联系邮箱<input
               v-model="draft.email"
               name="email"
@@ -30,7 +30,7 @@
               type="email"
               :required="draft.enabled"
           /></label>
-          <label
+          <label class="form-field"
             >签发环境<select v-model="draft.staging" name="staging" class="form-select">
               <option :value="true">Let's Encrypt 测试环境</option>
               <option :value="false">Let's Encrypt 正式环境</option>
@@ -53,7 +53,7 @@
           >
         </template>
         <template v-else>
-          <label
+          <label class="form-field"
             >证书域名<textarea
               v-model="domainsText"
               name="domains"
@@ -66,7 +66,7 @@
           <p class="report-note">
             逗号或换行分隔；多个域名申请为同一张证书。泛域名只覆盖一级子域名，根域名须单独填写。域名无需已有反代。
           </p>
-          <label
+          <label class="form-field"
             >DNS 验证服务商<select v-model="draft.provider" name="provider" class="form-select">
               <option value="cloudflare">Cloudflare · DNS-01</option>
             </select></label
@@ -74,7 +74,7 @@
           <p class="report-note">
             使用 ECDSA P-256。独立 Token 需要相应 Zone 的 Zone:Read / DNS:Edit 权限，与 DDNS 组的凭据分开。
           </p>
-          <label
+          <label class="form-field"
             >独立 API Token<input
               v-model="token"
               name="token"

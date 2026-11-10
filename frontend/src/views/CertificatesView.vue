@@ -21,7 +21,7 @@
         </button>
       </div>
     </div>
-    <p v-if="error || pollError" class="report-error" role="alert">{{ error || pollError }}</p>
+    <p v-if="error || statusError" class="report-error" role="alert">{{ error || statusError }}</p>
     <p v-if="acme?.staging" class="report-warning" role="status">
       当前为测试环境，签发的证书不被浏览器信任。正式环境切换会加载各自独立的证书。
     </p>
@@ -121,20 +121,21 @@
   </div>
 </template>
 <script setup>
-import { computed, onMounted, onUnmounted, ref, shallowRef } from 'vue'
+import { computed, onMounted, watch, onUnmounted, ref, shallowRef } from 'vue'
 import { Lock, Plus } from 'lucide-vue-next'
 import SpotlightCard from '@/components/SpotlightCard.vue'
 import CertificateEditor from '@/components/CertificateEditor.vue'
 import { adminApi } from '@/api/admin'
 import { jobState, replaceCertificate } from '@/api/dns'
 import { reportDate } from '@/api/reports'
-import { useGatewayStatus } from '@/composables/useGatewayStatus'
+import { useGatewayStatus, useStatusPolling } from '@/composables/useGatewayStatus'
 import { useToast } from '@/composables/useToast'
 import '@/styles/reports.css'
 const {
   gatewayConfig,
   gatewayConfigSnapshot,
   gatewayStatus,
+  statusError,
   isSavingConfig,
   refreshConfig,
   refreshStatus,
@@ -145,12 +146,10 @@ const toast = useToast(),
   job = computed(() => gatewayStatus.value?.jobs?.acme)
 const loading = ref(false),
   error = ref(''),
-  pollError = ref(''),
   queuing = ref(false),
   editor = shallowRef(null),
   now = ref(Date.now())
 const controller = new AbortController()
-let timer
 function certificate(id) {
   return gatewayStatus.value?.certificates.find((item) => item.id === id)
 }
@@ -235,22 +234,10 @@ async function run() {
     queuing.value = false
   }
 }
-onMounted(() => {
-  reload()
-  timer = setInterval(async () => {
-    now.value = Date.now()
-    try {
-      await refreshStatus(controller.signal)
-      if (!controller.signal.aborted) pollError.value = ''
-    } catch (err) {
-      if (!controller.signal.aborted) pollError.value = err.message
-    }
-  }, 5000)
-})
-onUnmounted(() => {
-  clearInterval(timer)
-  controller.abort()
-})
+useStatusPolling()
+watch(gatewayStatus, () => { now.value = Date.now() })
+onMounted(reload)
+onUnmounted(() => controller.abort())
 </script>
 <style scoped>
 .certs-grid {

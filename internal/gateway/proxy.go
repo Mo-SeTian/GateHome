@@ -24,23 +24,25 @@ type proxyRoute struct {
 }
 
 type Proxy struct {
-	routes        atomic.Value
-	firewalls     atomic.Value
-	Requests      atomic.Uint64
-	Blocked       atomic.Uint64
-	Failures      atomic.Uint64
-	subscriptions *Subscriptions
-	logs          *Logs
-	traffic       *Traffic
-	defense       *IPDefense
-	wafSlots      chan struct{}
-	wafMemory     *semaphore.Weighted
-	adminPort     int
+	routes         atomic.Value
+	firewalls      atomic.Value
+	trustedProxies atomic.Value
+	Requests       atomic.Uint64
+	Blocked        atomic.Uint64
+	Failures       atomic.Uint64
+	subscriptions  *Subscriptions
+	logs           *Logs
+	traffic        *Traffic
+	defense        *IPDefense
+	wafSlots       chan struct{}
+	wafMemory      *semaphore.Weighted
+	adminPort      int
 }
 
 func NewProxy(c Config, subscriptions *Subscriptions) *Proxy {
 	p := &Proxy{subscriptions: subscriptions, defense: newIPDefense(nil), wafSlots: make(chan struct{}, 16), wafMemory: semaphore.NewWeighted(128 << 20)}
 	p.routes.Store(map[string]proxyRoute{})
+	p.trustedProxies.Store([]netip.Prefix(nil))
 	p.Configure(c)
 	return p
 }
@@ -50,6 +52,18 @@ func (p *Proxy) Configure(c Config) error { return p.configure(c, nil) }
 func (p *Proxy) ConfigureState(s State) error { return p.configure(s.Config, s.RoutePasswordHashes) }
 
 func (p *Proxy) configure(c Config, hashes map[string]string) error {
+	if _, err := parseTrustedProxies(c.TrustedProxies); err != nil {
+		return err
+	}
+	for _, route := range c.Routes {
+		if !c.RouteActive(route) {
+			continue
+		}
+		u, err := url.Parse(route.Upstream)
+		if err != nil || u.Hostname() == "" || (u.Scheme != "http" && u.Scheme != "https") {
+			return fmt.Errorf("反代服务「%s」后端地址无效，原运行配置未修改", route.Name)
+		}
+	}
 	firewalls, err := p.prepareFirewalls(c)
 	if err != nil {
 		return err
@@ -58,6 +72,8 @@ func (p *Proxy) configure(c Config, hashes map[string]string) error {
 	return nil
 }
 func (p *Proxy) configurePrepared(c Config, hashes map[string]string, firewalls map[string]*compiledFirewall) {
+	trusted, _ := parseTrustedProxies(c.TrustedProxies)
+	p.trustedProxies.Store(trusted)
 	previous, _ := p.routes.Load().(map[string]proxyRoute)
 	routes := make(map[string]proxyRoute)
 	adminAddresses := localAdminAddresses()
@@ -130,6 +146,8 @@ func (p *Proxy) Handler(groupID string) http.Handler {
 }
 
 func (p *Proxy) serveGroup(groupID string, w http.ResponseWriter, r *http.Request) {
+	trusted, _ := p.trustedProxies.Load().([]netip.Prefix)
+	r = proxySourceRequest(r, trusted)
 	started := time.Now()
 	logged := &loggedResponseWriter{ResponseWriter: w}
 	w = logged

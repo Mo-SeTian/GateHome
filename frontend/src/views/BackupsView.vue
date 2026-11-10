@@ -265,7 +265,7 @@
             @input="preview = null"
         /></label>
       </div>
-      <div v-if="files.length" class="report-table-wrap">
+      <div v-if="files.length" class="report-table-wrap" tabindex="0" role="region" aria-label="WebDAV 备份列表，可横向滚动">
         <table class="report-table">
           <thead>
             <tr>

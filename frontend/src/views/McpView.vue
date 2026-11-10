@@ -222,14 +222,14 @@
       </header>
       <form v-if="editor" @submit.prevent="saveClient">
         <fieldset :disabled="busy">
-          <label
+          <label class="form-field"
             >客户端名称<input
               v-model.trim="editor.client.name"
               name="name"
               class="form-input"
               maxlength="40"
               required /></label
-          ><label
+          ><label class="form-field"
             >到期时间（留空长期有效）<input
               v-model="editor.expires"
               name="expires_at"
@@ -314,7 +314,12 @@ function apply(response, label = '') {
   data.value = { ...safe, clients: safe.clients || [] }
 }
 function defaults(config) {
-  return { ...config, read: config.read || (!config.enabled && !config.write && !config.maintenance) }
+  return {
+    ...config,
+    sunpanel_write: config.sunpanel_write ?? Boolean(config.write),
+    security_write: config.security_write ?? Boolean(config.write),
+    read: config.read || (!config.enabled && !config.write && !config.maintenance && !config.sunpanel_write)
+  }
 }
 async function load() {
   if (loading.value || busy.value) return
@@ -389,13 +394,16 @@ function clientState(client) {
         : '已暂停'
 }
 function permissionText(config) {
+  const grants = defaults(config)
   return (
     [
       ['read', '查询'],
       ['write', '修改'],
+      ['sunpanel_write', '首页修改'],
+      ['security_write', '安全策略'],
       ['maintenance', '维护']
     ]
-      .filter(([key]) => config[key])
+      .filter(([key]) => grants[key] && (key !== 'security_write' || grants.write))
       .map(([, label]) => label)
       .join(' / ') || '无权限'
   )
@@ -412,10 +420,10 @@ async function editClient(client) {
     revision: data.value.revision,
     expires,
     client: client
-      ? JSON.parse(JSON.stringify(client))
+      ? { ...JSON.parse(JSON.stringify(client)), config: defaults(client.config) }
       : {
           name: '',
-          config: { enabled: true, read: true, write: false, maintenance: false, sunpanel_user_id: 0 }
+          config: { enabled: true, read: true, write: false, sunpanel_write: false, security_write: false, maintenance: false, sunpanel_user_id: 0 }
         }
   }
   clientError.value = ''

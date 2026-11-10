@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { randomBytes } from 'node:crypto'
-import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, writeFile, rm } from 'node:fs/promises'
 import { networkInterfaces, tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -183,6 +183,145 @@ try {
   await page.waitForFunction(() => !document.querySelector('dialog[open]'))
   assert.equal(await trigger.evaluate(el => el === document.activeElement), true, 'Escape did not restore focus to the command trigger')
   console.log('PASS command palette: filtered Enter, native focus boundary and Escape focus restoration')
+
+  await route('mcp')
+  await button('创建客户端').click()
+  await dialog().waitFor()
+  assert.equal(await dialog().locator('.permission-grid input[type=checkbox]').count(), 6)
+  assert.equal(await dialog().locator('[name=read]').isChecked(), true)
+  assert.equal(await dialog().locator('[name=write]').isChecked(), false)
+  assert.equal(await dialog().locator('[name=security_write]').isDisabled(), true)
+  await dialog().locator('[name=name]').fill('Console scoped client')
+  await dialog().locator('[name=sunpanel_write]').check()
+  await dialog().getByRole('button', { name: '保存客户端', exact: true }).click()
+  await page.waitForFunction(() => !document.querySelector('dialog[open]'))
+  let clients = await api('mcp')
+  let scoped = clients.clients.find(row => row.name === 'Console scoped client')
+  assert.equal(scoped.config.sunpanel_write, true)
+  assert.equal(scoped.config.write, false)
+  assert.equal(scoped.config.security_write, false)
+  await button('关闭凭据').click()
+  const clientRow = () => page.locator(`[data-client-id="${scoped.id}"]`)
+  await clientRow().getByRole('button', { name: '编辑', exact: true }).click()
+  await dialog().locator('[name=write]').check()
+  await dialog().locator('[name=security_write]').check()
+  await dialog().locator('[name=sunpanel_write]').uncheck()
+  await dialog().getByRole('button', { name: '保存客户端', exact: true }).click()
+  await page.waitForFunction(() => !document.querySelector('dialog[open]'))
+  clients = await api('mcp')
+  scoped = clients.clients.find(row => row.id === scoped.id)
+  assert.equal(scoped.config.sunpanel_write, false)
+  assert.equal(scoped.config.write, true)
+  assert.equal(scoped.config.security_write, true)
+  console.log('PASS MCP scoped client: read-only defaults, independent panel/security grants and real saves')
+
+  await route('settings')
+  const proxyField = page.locator('[name=trusted_proxies]')
+  await proxyField.fill('192.0.2.10/32\n2001:db8:1::/64')
+  const proxySaved = page.waitForResponse(response => response.url().endsWith('/api/config') && response.request().method() === 'PUT')
+  await button('保存全局配置').click()
+  assert.equal((await proxySaved).status(), 200)
+  saved = await api('config')
+  assert.deepEqual(saved.config.trusted_proxies, ['192.0.2.10/32', '2001:db8:1::/64'])
+  await proxyField.fill('')
+  const proxyCleared = page.waitForResponse(response => response.url().endsWith('/api/config') && response.request().method() === 'PUT')
+  await button('保存全局配置').click()
+  assert.equal((await proxyCleared).status(), 200)
+  assert.deepEqual((await api('config')).config.trusted_proxies || [], [])
+  console.log('PASS trusted proxy settings: IPv4/IPv6 save and clear use the real config API')
+
+  await route('subscriptions')
+  await button('添加 IP 订阅').waitFor()
+  await pause(250)
+  let statusCalls = 0
+  const pendingStatus = new Set()
+  const countStatus = request => {
+    if (new URL(request.url()).pathname === '/api/status') {
+      statusCalls++
+      pendingStatus.add(request)
+    }
+  }
+  const finishStatus = request => pendingStatus.delete(request)
+  page.on('request', countStatus)
+  page.on('requestfinished', finishStatus)
+  page.on('requestfailed', finishStatus)
+  await pause(11000)
+  assert.ok(statusCalls >= 1 && statusCalls <= 2, 'App and page duplicated status polling')
+  for (let attempt = 0; pendingStatus.size && attempt < 150; attempt++) await pause(100)
+  assert.equal(pendingStatus.size, 0, 'status request did not settle')
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' })
+    document.dispatchEvent(new Event('visibilitychange'))
+  })
+  const beforeHidden = statusCalls
+  await pause(5500)
+  assert.equal(statusCalls, beforeHidden, 'hidden page continued polling')
+  await page.evaluate(() => {
+    delete document.visibilityState
+    document.dispatchEvent(new Event('visibilitychange'))
+  })
+  await pause(250)
+  assert.equal(statusCalls, beforeHidden + 1, 'visible page did not refresh immediately')
+  page.off('request', countStatus)
+  page.off('requestfinished', finishStatus)
+  page.off('requestfailed', finishStatus)
+  console.log('PASS shared status polling: at most two requests in 11 seconds, hidden pause and visible refresh')
+
+  for (const width of [320, 390]) {
+    await page.setViewportSize({ width, height: 844 })
+    for (const [view, label] of [
+      ['routes', '新建反代服务'], ['forwards', '添加转发规则'],
+      ['subscriptions', '添加 IP 订阅'], ['ddns', '添加 DDNS 组'],
+      ['certificates', '添加证书任务'], ['access', '添加防火墙策略'], ['mcp', '创建客户端']
+    ]) {
+      await route(view)
+      await button(label).click()
+      await dialog().waitFor()
+      assert.equal(await dialog().evaluate(el => {
+        const bounds = el.getBoundingClientRect()
+        return bounds.left >= 0 && bounds.right <= innerWidth + 1
+      }), true, `${view} dialog overflowed ${width}px viewport`)
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true)
+      if (view === 'routes') {
+        assert.equal((await dialog().locator('input[type=file]').getAttribute('accept')).includes('svg'), false)
+      }
+      if (view === 'mcp') {
+        const gridColumns = await dialog().locator('.permission-grid').evaluate(el => getComputedStyle(el).gridTemplateColumns.split(' ').length)
+        assert.equal(gridColumns, 2)
+      }
+      if (process.env.GATEHOME_BROWSER_ARTIFACTS && ['routes', 'access', 'mcp'].includes(view)) {
+        await mkdir(process.env.GATEHOME_BROWSER_ARTIFACTS, { recursive: true })
+        await page.screenshot({ path: path.join(process.env.GATEHOME_BROWSER_ARTIFACTS, `${view}-${width}.png`) })
+      }
+      await closeEditor()
+    }
+  }
+  console.log('PASS 320px/390px editors: explicit field layouts, single checkboxes, image formats and no overflow')
+
+  await page.setViewportSize({ width: 320, height: 844 })
+  await route('mcp')
+  const emulation = await context.newCDPSession(page)
+  await emulation.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 44, bottom: 34, left: 12, right: 12 } })
+  await button('保存授权设置').click()
+  const toastItem = page.locator('.toast-item').filter({ hasText: 'MCP 设置已保存' }).last()
+  await toastItem.waitFor()
+  await page.waitForFunction(() => {
+    const toast = document.querySelector('.toast-item:last-child')
+    return toast && Number(getComputedStyle(toast).opacity) === 1
+  })
+  // Stress the real toast's text box without storing artificial content.
+  await toastItem.locator('.toast-text').evaluate(el => { el.textContent = 'TEST_ONLY_LONG_NOTIFICATION_'.repeat(80) })
+  const toastBounds = await page.locator('.toast-container').boundingBox()
+  assert.ok(toastBounds.x >= 24 && toastBounds.x + toastBounds.width <= 296 + 1)
+  assert.ok(toastBounds.y >= 56 && toastBounds.y + toastBounds.height <= 798 + 1)
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
+  if (process.env.GATEHOME_BROWSER_ARTIFACTS) {
+    await page.screenshot({ path: path.join(process.env.GATEHOME_BROWSER_ARTIFACTS, 'toast-safe-area-320.png') })
+  }
+  await emulation.send('Emulation.setSafeAreaInsetsOverride', { insets: {} })
+  await emulation.detach()
+  console.log('PASS mobile toast: emulated notch/gesture insets, long text wrapping and bounded scroll area')
+
   await page.setViewportSize({ width: 390, height: 844 })
   await button('打开侧边栏导航').click()
   await button('关闭侧边栏导航').click()

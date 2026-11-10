@@ -339,7 +339,7 @@
             {{ freezeError }}
           </p>
           <fieldset :disabled="freezing" class="freeze-fieldset">
-            <label
+            <label class="form-field"
               >冻结时长 分钟<input
                 v-model.number="freezeMinutes"
                 name="freeze_minutes"
@@ -348,7 +348,7 @@
                 max="10080"
                 class="form-input"
                 required /></label
-            ><label
+            ><label class="form-field"
               >备注原因<input
                 v-model="freezeReason"
                 name="freeze_reason"

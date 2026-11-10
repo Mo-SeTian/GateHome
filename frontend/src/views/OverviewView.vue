@@ -338,7 +338,7 @@
               <ArrowDown :size="13" />
             </button></div>
           </div>
-          <label
+          <label class="form-field"
             >流量采集网卡<select
               v-model="form.network_interface"
               name="network_interface"
@@ -358,7 +358,7 @@
                 {{ form.network_interface }} · 当前不可用
               </option>
             </select></label
-          ><label
+          ><label class="form-field"
             >地图汇聚省份<select v-model="form.map_province" name="map_province" class="form-select">
               <option value="">示意中心</option>
               <option v-for="province in Object.keys(provincePoints)" :key="province" :value="province">
@@ -383,6 +383,7 @@ import { computed, nextTick, onMounted, onBeforeUnmount, reactive, ref, shallowR
 import { GripVertical, ArrowUp, ArrowDown } from 'lucide-vue-next'
 import SpotlightCard from '@/components/SpotlightCard.vue'
 import { adminApi } from '@/api/admin'
+import { startPolling } from '@/api/polling'
 import {
   dashboardWidgets,
   dashboardWidgetIDs,
@@ -604,11 +605,11 @@ async function saveLayout() {
 }
 onMounted(() => {
   refresh(true)
-  timer = setInterval(() => refresh(), 5000)
+  timer = startPolling(() => refresh(), 5000)
 })
 onBeforeUnmount(() => {
   controller.abort()
-  clearInterval(timer)
+  timer?.()
   editSnapshot = null
 })
 </script>

@@ -90,6 +90,8 @@ func inspectWAF(waf coraza.WAF, p Protection, r *http.Request, consumed func()) 
 		tx.AddRequestHeader("Transfer-Encoding", v)
 	}
 	status := 0
+	hits := []SecurityHit{}
+	partial := false
 	if tx.ProcessRequestHeaders() == nil {
 		if r.Body != nil && r.Body != http.NoBody {
 			original := r.Body
@@ -99,18 +101,18 @@ func inspectWAF(waf coraza.WAF, p Protection, r *http.Request, consumed func()) 
 				return []SecurityHit{{Engine: "waf", RuleID: 1001, Name: "请求体读取失败", Action: "block"}}, http.StatusBadRequest
 			}
 			if len(body) > p.bodyLimit() {
-				action := "detect"
 				if p.WAF.Mode == "block" {
-					action = "block"
-					status = http.StatusRequestEntityTooLarge
+					return []SecurityHit{{Engine: "waf", RuleID: 1002, Name: "请求体超出检查上限，未完成内容检查", Action: "block"}}, http.StatusRequestEntityTooLarge
 				}
-				return []SecurityHit{{Engine: "waf", RuleID: 1002, Name: "请求体超出检查上限，未完成内容检查", Action: action}}, status
+				hits = append(hits, SecurityHit{Engine: "waf", RuleID: 1002, Name: "请求体超出检查上限，仅检查前缀", Action: "detect"})
+				body = body[:p.bodyLimit()]
+				partial = true
 			}
-			if _, _, err := tx.WriteRequestBody(body); err != nil {
+			if _, _, err := tx.WriteRequestBody(body); err != nil && !partial {
 				return []SecurityHit{{Engine: "waf", RuleID: 1003, Name: "请求体检测失败", Action: "block"}}, http.StatusBadRequest
 			}
 		}
-		if _, err := tx.ProcessRequestBody(); err != nil {
+		if _, err := tx.ProcessRequestBody(); err != nil && !partial {
 			return []SecurityHit{{Engine: "waf", RuleID: 1003, Name: "请求体检测失败", Action: "block"}}, http.StatusBadRequest
 		}
 	}
@@ -126,7 +128,6 @@ func inspectWAF(waf coraza.WAF, p Protection, r *http.Request, consumed func()) 
 			}
 		}
 	}
-	hits := []SecurityHit{}
 	seen := map[int]bool{}
 	for _, m := range tx.MatchedRules() {
 		id := m.Rule().ID()

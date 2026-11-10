@@ -534,12 +534,8 @@ dialog fieldset,
   min-width: 0;
 }
 
-/* 弹窗内标签与提示字统一（排除开关、复选框行、自定义上传按钮及权限卡片） */
-dialog label:not(.toggle-row):not(.check-row):not(.check-label):not(.switch):not(.custom-file-btn):not(.permission-card),
-.modal-dialog label:not(.toggle-row):not(.check-row):not(.check-label):not(.switch):not(.custom-file-btn):not(.permission-card),
-.modal-box label:not(.toggle-row):not(.check-row):not(.check-label):not(.switch):not(.custom-file-btn):not(.permission-card),
-.report-dialog label:not(.toggle-row):not(.check-row):not(.check-label):not(.switch):not(.custom-file-btn):not(.permission-card),
-.firewall-dialog label:not(.toggle-row):not(.check-row):not(.check-label):not(.switch):not(.custom-file-btn):not(.permission-card),
+/* 普通字段显式声明，复合组件不再自动继承标签布局。 */
+:is(dialog, .modal-dialog, .modal-box, .report-dialog, .firewall-dialog) .form-field,
 .form-group {
   display: flex;
   flex-direction: column;

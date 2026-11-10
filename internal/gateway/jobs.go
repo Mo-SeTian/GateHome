@@ -25,22 +25,23 @@ type Event struct {
 }
 
 type Jobs struct {
-	mu        sync.Mutex
-	store     *Store
-	certs     *Certificates
-	ddnsKick  chan string
-	logs      *Logs
-	provider  func(State, DDNSGroup, *Logs) (dnsProvider, error)
-	discover  func(context.Context, DDNSGroup, string) (DetectedIP, error)
-	ipContext context.Context
-	ips       map[string]*ipCheck
-	certKick  chan struct{}
-	status    map[string]JobStatus
-	events    []Event
+	mu          sync.Mutex
+	store       *Store
+	certs       *Certificates
+	ddnsKick    chan string
+	ddnsPending map[string]bool
+	logs        *Logs
+	provider    func(State, DDNSGroup, *Logs) (dnsProvider, error)
+	discover    func(context.Context, DDNSGroup, string) (DetectedIP, error)
+	ipContext   context.Context
+	ips         map[string]*ipCheck
+	certKick    chan struct{}
+	status      map[string]JobStatus
+	events      []Event
 }
 
 func NewJobs(store *Store, certs *Certificates) *Jobs {
-	return &Jobs{store: store, certs: certs, ddnsKick: make(chan string, 100), certKick: make(chan struct{}, 1), status: map[string]JobStatus{}, events: []Event{}, provider: newDNSProvider, discover: detectIP, ipContext: context.Background(), ips: map[string]*ipCheck{}}
+	return &Jobs{store: store, certs: certs, ddnsKick: make(chan string, 100), ddnsPending: map[string]bool{}, certKick: make(chan struct{}, 1), status: map[string]JobStatus{}, events: []Event{}, provider: newDNSProvider, discover: detectIP, ipContext: context.Background(), ips: map[string]*ipCheck{}}
 }
 
 func (j *Jobs) Trigger(kind string) {
@@ -55,8 +56,14 @@ func (j *Jobs) Trigger(kind string) {
 }
 
 func (j *Jobs) TriggerDDNS(id string) bool {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if j.ddnsPending[id] {
+		return true
+	}
 	select {
 	case j.ddnsKick <- id:
+		j.ddnsPending[id] = true
 		return true
 	default:
 		return false
@@ -113,13 +120,19 @@ func (j *Jobs) ddnsLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case id = <-j.ddnsKick:
+			j.mu.Lock()
+			delete(j.ddnsPending, id)
+			j.mu.Unlock()
 			force = true
 		case <-ticker.C:
 		}
 		s := j.store.Snapshot()
+		slots := make(chan struct{}, 4)
+		var running sync.WaitGroup
+	groups:
 		for _, g := range s.Config.DDNS.Groups {
 			if ctx.Err() != nil {
-				return
+				break
 			}
 			if !g.Enabled || (id != "" && id != g.ID) {
 				continue
@@ -127,8 +140,22 @@ func (j *Jobs) ddnsLoop(ctx context.Context) {
 			if time.Since(last[g.ID]) < 5*time.Second || (!force && time.Since(last[g.ID]) < time.Duration(g.Interval)*time.Second) {
 				continue
 			}
+			select {
+			case slots <- struct{}{}:
+			case <-ctx.Done():
+				break groups
+			}
 			last[g.ID] = time.Now()
-			j.runDDNS(ctx, s, g)
+			running.Add(1)
+			go func(group DDNSGroup) {
+				defer running.Done()
+				defer func() { <-slots }()
+				j.runDDNS(ctx, s, group)
+			}(g)
+		}
+		running.Wait()
+		if ctx.Err() != nil {
+			return
 		}
 		j.ddnsSummary(j.store.Snapshot().Config)
 	}
@@ -250,10 +277,26 @@ func (j *Jobs) syncDNS(ctx context.Context, s State, g DDNSGroup) (string, error
 	return fmt.Sprintf("已检查 %d 条记录，更新 %d 条", checked, changed), nil
 }
 
+type certificateRetry struct {
+	failures int
+	next     time.Time
+}
+
+func (r *certificateRetry) failed(now time.Time) {
+	r.failures++
+	delay := 5 * time.Minute
+	if r.failures == 2 {
+		delay = 15 * time.Minute
+	} else if r.failures >= 3 {
+		delay = time.Hour
+	}
+	r.next = now.Add(delay)
+}
+
 func (j *Jobs) certLoop(ctx context.Context) {
 	ticker := time.NewTicker(time.Hour)
 	defer ticker.Stop()
-	lastAttempt := map[string]time.Time{}
+	retries := map[string]certificateRetry{}
 	for {
 		select {
 		case <-ctx.Done():
@@ -271,6 +314,7 @@ func (j *Jobs) certLoop(ctx context.Context) {
 		j.record("acme", true, false, "正在检查证书有效期")
 		var failures []error
 		issued, pending := 0, 0
+		var nextRetry time.Time
 		for _, request := range s.Config.ACME.Requests {
 			if !request.Enabled {
 				continue
@@ -283,11 +327,14 @@ func (j *Jobs) certLoop(ctx context.Context) {
 				continue
 			}
 			key := environment(s.Config.ACME.Staging) + "/" + request.ID + "/" + host
-			if time.Since(lastAttempt[key]) < 5*time.Minute {
+			retry := retries[key]
+			if time.Now().Before(retry.next) {
 				pending++
+				if nextRetry.IsZero() || retry.next.Before(nextRetry) {
+					nextRetry = retry.next
+				}
 				continue
 			}
-			lastAttempt[key] = time.Now()
 			j.record("acme", true, false, "正在为 "+host+" 申请证书，DNS 验证可能需要数分钟")
 			started := time.Now()
 			err := j.certs.Issue(s, request)
@@ -297,15 +344,21 @@ func (j *Jobs) certLoop(ctx context.Context) {
 			}
 			j.logs.Add(LogEntry{Category: "certificates", Action: "证书申请 / 续期", Target: host, OK: err == nil, DurationMS: time.Since(started).Milliseconds(), Message: message})
 			if err != nil {
+				retry.failed(time.Now())
+				retries[key] = retry
+				if nextRetry.IsZero() || retry.next.Before(nextRetry) {
+					nextRetry = retry.next
+				}
 				failures = append(failures, fmt.Errorf("%s：%w", host, err))
 			} else {
+				delete(retries, key)
 				issued++
 			}
 		}
 		if len(failures) > 0 {
-			j.record("acme", false, false, errors.Join(failures...).Error())
+			j.record("acme", false, false, fmt.Sprintf("%s；本次检查时，最早 %d 秒后可重试", errors.Join(failures...).Error(), max(1, int(time.Until(nextRetry).Seconds())+1)))
 		} else if pending > 0 {
-			j.record("acme", false, false, fmt.Sprintf("%d 个域名正在重试冷却期，请 5 分钟后再试", pending))
+			j.record("acme", false, false, fmt.Sprintf("%d 个任务处于冷却期；本次检查时，最早 %d 秒后可重试", pending, max(1, int(time.Until(nextRetry).Seconds())+1)))
 		} else {
 			j.record("acme", false, true, fmt.Sprintf("检查完成，申请或续期 %d 张证书；每小时自动检查", issued))
 		}

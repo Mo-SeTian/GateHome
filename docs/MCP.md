@@ -39,7 +39,9 @@ GateHome 内置 MCP 服务端，使用官方 [MCP Go SDK](https://github.com/mod
 
 ## 权限与工具
 
-三类权限分别生效，授予修改或维护不会自动授予查询。通常保留查询权限，按需要开启另外两项。工具发现会列出全部工具，未授权的调用会被服务端拒绝。
+查询、配置修改、首页修改、安全策略和维护分别控制对应操作；授予修改或维护不会自动授予查询。新建客户端默认只读，其他权限均需明确勾选。工具发现会列出全部工具，未授权的调用会被服务端拒绝。
+
+从 1.0.0-beta.11 起，可只勾选查询和首页修改并绑定首页账号，允许整理桌面而不允许修改网关。安全策略权限依赖配置修改，控制 `firewalls`、`admin_access`、`trusted_proxies` 分区及 IP 冻结/解冻；配置修改本身仍可改变路由和流量路径，因此不应授予只需管理桌面的客户端。
 
 | 权限 | 工具 | 用途 |
 | --- | --- | --- |
@@ -52,14 +54,16 @@ GateHome 内置 MCP 服务端，使用官方 [MCP Go SDK](https://github.com/mod
 | 查询 | `sunpanel_get_desktop`、`sunpanel_preview_route_sync` | 绑定账号桌面和关联更新差异 |
 | 修改 | `gatehome_update_config` | 替换一个配置分区，复用网页校验及热加载 |
 | 修改 | `gatehome_run_job`、`gatehome_refresh_subscription` | DDNS / 证书任务及 IP 订阅刷新 |
-| 修改 | `gatehome_block_ip`、`gatehome_unblock_ip` | 冻结及解除来源 IP |
-| 修改 | `sunpanel_save_group`、`sunpanel_delete_group` | 创建、修改、删除分组 |
-| 修改 | `sunpanel_save_website`、`sunpanel_delete_website` | 创建、修改、删除网站 |
-| 修改 | `sunpanel_import_gatehome_routes`、`sunpanel_apply_route_sync` | 批量导入反代、应用关联更新 |
-| 修改 | `sunpanel_set_preferences` | 修改桌面及搜索偏好 |
+| 安全策略 + 配置修改 | `gatehome_block_ip`、`gatehome_unblock_ip` | 冻结及解除来源 IP |
+| 首页修改 | `sunpanel_save_group`、`sunpanel_delete_group` | 创建、修改、删除分组 |
+| 首页修改 | `sunpanel_save_website`、`sunpanel_delete_website` | 创建、修改、删除网站 |
+| 首页修改 | `sunpanel_import_gatehome_routes`、`sunpanel_apply_route_sync` | 批量导入反代、应用关联更新 |
+| 首页修改 | `sunpanel_set_preferences` | 修改桌面及搜索偏好 |
 | 维护 | `gatehome_maintenance` | 重启、下载更新、应用已检查的更新包、恢复已检查的备份 |
 
-配置工具仅允许修改 `groups`、`routes`、`ddns`、`acme`、`firewalls`、`subscriptions`、`sunpanel`、`outbound_proxy`、`admin_access`、`log_retention`、`dashboard`、`service_health`。已有凭据会保留，新增凭据、访问密码及授权变更需在网页设置。更改监听端口后仍须重启，重启和更新会同时处理 Sun-Panel。
+配置工具仅允许修改 `groups`、`routes`、`forwards`、`ddns`、`acme`、`firewalls`、`subscriptions`、`sunpanel`、`outbound_proxy`、`admin_access`、`trusted_proxies`、`log_retention`、`dashboard`、`service_health`。其中安全策略分区还需对应权限。已有凭据会保留，新增凭据、访问密码及授权变更需在网页设置。更改监听端口后仍须重启，重启和更新会同时处理 Sun-Panel。
+
+兼容规则：旧配置中缺失 `sunpanel_write` / `security_write` 时，保留原 `write` 的权限范围；独立客户端仍不继承兼容 Token 的首页账号。新版界面保存显式布尔值，旧客户端更新已有限制的授权时，即使省略新增字段，服务端也保留原限制。当前版本备份会保存这些字段。手动退回 beta.10 或更早程序时，旧程序不识别新增限制，应先停用受限客户端；内置回滚还会恢复当时的配置与授权，不应当作仅替换程序文件。
 
 ## 修改与维护流程
 

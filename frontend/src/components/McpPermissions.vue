@@ -12,6 +12,7 @@
           v-model="model[item.key]"
           :name="item.key"
           type="checkbox"
+          :disabled="item.key === 'security_write' && !model.write"
         />
         <span class="permission-label">{{ item.label }}</span>
       </label>
@@ -35,6 +36,7 @@
       </select></label
     >
     <p class="report-note">绑定后仅管理该账号的桌面。未绑定账号的 Token 无法访问 SunPanel 内容。</p>
+    <p class="report-note">仅整理首页时，勾选查询与首页修改即可。安全策略修改依赖配置修改，控制防火墙、管理来源和 IP 冻结操作；配置修改仍可改变反代流量路径。</p>
   </fieldset>
 </template>
 <script setup>
@@ -44,6 +46,8 @@ const permissions = [
   { key: 'enabled', label: '启用' },
   { key: 'read', label: '查询' },
   { key: 'write', label: '配置修改' },
+  { key: 'sunpanel_write', label: '首页修改' },
+  { key: 'security_write', label: '安全策略' },
   { key: 'maintenance', label: '维护操作' }
 ]
 </script>
@@ -64,7 +68,7 @@ legend {
 }
 .permission-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 8px;
   width: 100%;
 }
@@ -72,6 +76,10 @@ legend {
   .permission-grid {
     grid-template-columns: repeat(2, 1fr);
     gap: 8px;
+  }
+  .permission-card {
+    height: 44px !important;
+    min-height: 44px !important;
   }
 }
 .permission-card {

@@ -270,17 +270,7 @@ func (g *routeGate) login(w http.ResponseWriter, r *http.Request, route Route) {
 	token := hex.EncodeToString(secret)
 	g.mu.Lock()
 	now := time.Now()
-	for key, expires := range g.sessions {
-		if !now.Before(expires) {
-			delete(g.sessions, key)
-		}
-	}
-	if len(g.sessions) >= 256 {
-		for key := range g.sessions {
-			delete(g.sessions, key)
-			break
-		}
-	}
+	pruneSessions(g.sessions, 256, now)
 	g.sessions[sha256.Sum256([]byte(token))] = now.Add(12 * time.Hour)
 	g.mu.Unlock()
 	http.SetCookie(w, &http.Cookie{Name: g.cookieName, Value: token, Path: "/", HttpOnly: true, Secure: r.TLS != nil, SameSite: http.SameSiteStrictMode, MaxAge: 43200})

@@ -409,17 +409,7 @@ func (a *Admin) login(w http.ResponseWriter, r *http.Request) {
 	token := hex.EncodeToString(secret)
 	a.mu.Lock()
 	now := time.Now()
-	for k, exp := range a.sessions {
-		if !now.Before(exp) {
-			delete(a.sessions, k)
-		}
-	}
-	if len(a.sessions) >= 32 {
-		for k := range a.sessions {
-			delete(a.sessions, k)
-			break
-		}
-	}
+	pruneSessions(a.sessions, 32, now)
 	a.sessions[sha256.Sum256([]byte(token))] = now.Add(12 * time.Hour)
 	a.mu.Unlock()
 	http.SetCookie(w, &http.Cookie{Name: "gatehouse_session", Value: token, Path: "/", HttpOnly: true, Secure: a.secureSession(r), SameSite: http.SameSiteStrictMode, MaxAge: 43200})

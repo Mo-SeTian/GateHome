@@ -50,7 +50,7 @@ func publicMCPClients(state State) []MCPClient {
 
 func (s *Store) saveMCPClient(client MCPClient, rotate, revoke bool, revision int) (string, error) {
 	client.Name = strings.TrimSpace(client.Name)
-	if !revoke && (client.Name == "" || len([]rune(client.Name)) > 40 || strings.ContainsAny(client.Name, "\r\n") || strings.Contains(client.Name, "ghmcp_") || (!client.Config.Read && !client.Config.Write && !client.Config.Maintenance)) {
+	if !revoke && (client.Name == "" || len([]rune(client.Name)) > 40 || strings.ContainsAny(client.Name, "\r\n") || strings.Contains(client.Name, "ghmcp_")) {
 		return "", errors.New("请填写客户端名称并至少授权一项权限")
 	}
 	if !revoke && client.ExpiresAt != nil && !client.ExpiresAt.After(time.Now()) {
@@ -79,6 +79,12 @@ func (s *Store) saveMCPClient(client MCPClient, rotate, revoke bool, revision in
 			return "", errors.New("已撤销的客户端不可重新启用，请创建新 Token")
 		}
 		client.Hash, client.CreatedAt = prior.Hash, prior.CreatedAt
+		if client.Config.SunPanelWrite == nil {
+			client.Config.SunPanelWrite = prior.Config.SunPanelWrite
+		}
+		if client.Config.SecurityWrite == nil {
+			client.Config.SecurityWrite = prior.Config.SecurityWrite
+		}
 	} else {
 		if revoke || len(next.MCPClients) >= 100 {
 			return "", errors.New("无法创建更多客户端")
@@ -88,6 +94,9 @@ func (s *Store) saveMCPClient(client MCPClient, rotate, revoke bool, revision in
 			return "", errors.New("客户端创建失败")
 		}
 		client.ID, client.CreatedAt, rotate = hex.EncodeToString(id), time.Now().UTC(), true
+	}
+	if !revoke && !client.Config.Read && !client.Config.Write && !client.Config.Maintenance && !client.Config.canWritePanel() {
+		return "", errors.New("请至少授权一项权限")
 	}
 	token := ""
 	if revoke {

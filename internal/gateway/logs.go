@@ -168,7 +168,7 @@ func (l *Logs) Add(e LogEntry) {
 	}
 	if l.store != nil {
 		s := l.store.Snapshot()
-		secrets := []string{s.CloudflareToken, s.ProxyPassword, s.PasswordHash}
+		secrets := []string{s.CloudflareToken, s.ProxyPassword, s.PasswordHash, s.GitHubToken, s.WebDAVBackup.Password, s.WebDAVBackup.BackupPassword}
 		for _, hash := range s.RoutePasswordHashes {
 			secrets = append(secrets, hash)
 		}

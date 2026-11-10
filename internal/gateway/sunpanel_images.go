@@ -19,9 +19,12 @@ func (a *Admin) sunPanelImageImport(w http.ResponseWriter, r *http.Request) {
 		reply(1000, "请先登录 Sun-Panel")
 		return
 	}
-	a.sunPanel.mu.Lock()
+	if !a.sunPanel.mu.TryRLock() {
+		reply(-1, "Sun-Panel 正在启动或备份，请稍后重试")
+		return
+	}
 	address := a.sunPanel.bridgeURL
-	a.sunPanel.mu.Unlock()
+	a.sunPanel.mu.RUnlock()
 	if address == "" {
 		reply(-1, "Sun-Panel 未运行，请稍后重试")
 		return

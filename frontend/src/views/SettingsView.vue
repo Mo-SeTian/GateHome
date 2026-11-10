@@ -35,6 +35,19 @@
           <p class="report-note">
             填写 HTTP(S) 协议、主机和可选端口，不包含路径、账号或密码。启用时至少填写一个，最多 20 个。
           </p>
+          <p class="report-note">管理入口应使用独立主机名和 HTTPS。同主机名不同端口不能隔离浏览器 Cookie，请勿与不可信服务共用管理主机名。</p>
+        </SpotlightCard>
+        <SpotlightCard class="report-panel">
+          <h2>可信前置代理</h2>
+          <label>代理 IP / CIDR（每行一个）<textarea
+            v-model="trustedProxies"
+            name="trusted_proxies"
+            class="form-input"
+            rows="3"
+            placeholder="例如 192.0.2.10/32"
+          /></label>
+          <p class="report-note">默认留空，使用实际连接 IP。仅填写您控制的前置代理地址；收到该代理的请求时，从 X-Forwarded-For 右侧逐级确定客户端。前置代理须追加或覆盖此请求头。</p>
+          <p class="report-note">仅影响 HTTP 反代的日志、防火墙、限速与冻结；管理登录和端口转发仍使用实际连接 IP。私网地址不会自动免除防护。</p>
         </SpotlightCard>
         <SpotlightCard class="report-panel">
           <h2>出站网络代理</h2>
@@ -213,6 +226,7 @@ const snapshot = ref(null),
   draft = ref(null),
   maintenance = ref(null),
   origins = ref(''),
+  trustedProxies = ref(''),
   loading = ref(false),
   error = ref(''),
   restarting = ref(false),
@@ -222,6 +236,7 @@ function apply(config) {
   snapshot.value = config
   draft.value = structuredClone(config.config)
   origins.value = (config.config.admin_access?.origins || []).join('\n')
+  trustedProxies.value = (config.config.trusted_proxies || []).join('\n')
   passwordAction.value = 'keep'
   proxyPassword.value = ''
 }
@@ -252,6 +267,7 @@ async function save() {
   error.value = ''
   const config = {
     ...snapshot.value.config,
+    trusted_proxies: trustedProxies.value.split('\n').map(value => value.trim()).filter(Boolean),
     admin_access: {
       ...draft.value.admin_access,
       origins: origins.value

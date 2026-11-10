@@ -46,7 +46,7 @@ import CmdkModal from '@/components/CmdkModal.vue'
 import AccountModal from '@/components/AccountModal.vue'
 import ToastNotification from '@/components/ToastNotification.vue'
 import { useAppStore } from '@/composables/useAppStore'
-import { useGatewayStatus } from '@/composables/useGatewayStatus'
+import { useGatewayStatus, subscribeStatus } from '@/composables/useGatewayStatus'
 import { useSession } from '@/composables/useSession'
 
 const route = useRoute()
@@ -65,9 +65,9 @@ watch(isAuthenticated, (authenticated, _, onCleanup) => {
   const pollStatus = () => refreshStatus(controller.signal).catch(() => {})
   pollStatus()
   refreshConfig(controller.signal).catch(() => {})
-  const timer = setInterval(pollStatus, 10000)
+  const stopPolling = subscribeStatus(10000)
   onCleanup(() => {
-    clearInterval(timer)
+    stopPolling()
     controller.abort()
   })
 }, { immediate: true })

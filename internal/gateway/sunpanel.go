@@ -76,7 +76,7 @@ func validateSunPanelListener(c SunPanelConfig, groups []ProxyGroup) error {
 // The worker shares the release binary, but isolates upstream globals and cwd.
 type SunPanel struct {
 	failure   chan error
-	mu        sync.Mutex
+	mu        sync.RWMutex
 	dir       string
 	cmd       *exec.Cmd
 	done      chan error
@@ -201,9 +201,13 @@ func (s *SunPanel) Handler() http.Handler {
 			http.NotFound(w, r)
 			return
 		}
-		s.mu.Lock()
+		if !s.mu.TryRLock() {
+			w.Header().Set("Retry-After", "1")
+			http.Error(w, "Sun-Panel 正在启动或备份，请稍后重试", http.StatusServiceUnavailable)
+			return
+		}
 		proxy := s.proxy
-		s.mu.Unlock()
+		s.mu.RUnlock()
 		if proxy == nil {
 			http.Error(w, "Sun-Panel 未运行或正在备份", 503)
 			return
@@ -218,9 +222,11 @@ func (s *SunPanel) Handler() http.Handler {
 }
 
 func (s *SunPanel) bridgeCall(ctx context.Context, action string, userID uint, data any) (json.RawMessage, error) {
-	s.mu.Lock()
+	if !s.mu.TryRLock() {
+		return nil, errors.New("Sun-Panel 正在启动或备份，请稍后重试")
+	}
 	address, key := s.bridgeURL, hex.EncodeToString(s.bridgeKey)
-	s.mu.Unlock()
+	s.mu.RUnlock()
 	if address == "" || len(key) != 64 {
 		return nil, errors.New("Sun-Panel 未运行或正在备份，请稍后重试")
 	}

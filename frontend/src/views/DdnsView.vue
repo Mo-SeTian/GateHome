@@ -24,7 +24,7 @@
       </div>
     </div>
     <p v-if="error" class="report-error" role="alert">{{ error }}</p>
-    <p v-if="pollError" class="report-error" role="alert">{{ pollError }}</p>
+    <p v-if="pollError || statusError" class="report-error" role="alert">{{ pollError || statusError }}</p>
     <PublicIPMonitor v-if="gatewayConfig" @network="network = $event" />
     <p class="report-note">
       公网 IP 查询保持直连。保存后立即生效；同一 A / AAAA 记录不可跨组重复。删除组或域名不会删除托管商已有的
@@ -64,7 +64,7 @@
             >
           </p>
         </div>
-        <div class="report-table-wrap">
+        <div class="report-table-wrap" tabindex="0" role="region" :aria-label="`${group.name} DNS 记录，可横向滚动`">
           <table class="report-table dns-records">
             <thead>
               <tr>
@@ -146,15 +146,17 @@ import SpotlightCard from '@/components/SpotlightCard.vue'
 import DdnsEditor from '@/components/DdnsEditor.vue'
 import PublicIPMonitor from '@/components/PublicIPMonitor.vue'
 import { adminApi } from '@/api/admin'
+import { startPolling } from '@/api/polling'
 import { jobState, replaceDDNS } from '@/api/dns'
 import { reportDate } from '@/api/reports'
-import { useGatewayStatus } from '@/composables/useGatewayStatus'
+import { useGatewayStatus, useStatusPolling } from '@/composables/useGatewayStatus'
 import { useToast } from '@/composables/useToast'
 import '@/styles/reports.css'
 const {
   gatewayConfig,
   gatewayConfigSnapshot,
   gatewayStatus,
+  statusError,
   isSavingConfig,
   refreshConfig,
   refreshStatus,
@@ -269,11 +271,12 @@ async function sync(id) {
     queuing.value = false
   }
 }
+useStatusPolling()
 onMounted(() => {
   reload()
-  timer = setInterval(async () => {
+  timer = startPolling(async () => {
     try {
-      await Promise.all([refreshStatus(controller.signal), readRecords()])
+      await readRecords()
       if (!controller.signal.aborted) pollError.value = ''
     } catch (err) {
       if (!controller.signal.aborted) pollError.value = err.message
@@ -281,7 +284,7 @@ onMounted(() => {
   }, 5000)
 })
 onUnmounted(() => {
-  clearInterval(timer)
+  timer?.()
   controller.abort()
 })
 </script>
