@@ -78,14 +78,7 @@ func snapshotBackupPaths(paths StoragePaths, state State) (backupPayload, error)
 		total += len(data)
 		b.Certificates[e.Name()] = data
 	}
-	logNames, err := logFileNames(paths.Log)
-	if err != nil {
-		return b, errors.New("日志目录读取失败")
-	}
 	names := []string{}
-	for _, name := range logNames {
-		names = append(names, "logs/"+name)
-	}
 	for _, subscription := range state.Config.Subscriptions {
 		names = append(names, "subscriptions/"+subscription.ID+".json")
 	}
@@ -259,6 +252,16 @@ type restoreTarget struct {
 	directory  bool
 }
 
+func logBackupFileCount(files map[string][]byte) int {
+	count := 0
+	for name := range files {
+		if strings.HasPrefix(name, "logs/") {
+			count++
+		}
+	}
+	return count
+}
+
 func restoreTargets(paths StoragePaths, full bool, incoming map[string][]byte) []restoreTarget {
 	targets := []restoreTarget{{"certificates", paths.directory("certificates"), true}}
 	if full {
@@ -270,30 +273,32 @@ func restoreTargets(paths StoragePaths, full bool, incoming map[string][]byte) [
 		for _, name := range []string{"route-images", "subscriptions"} {
 			targets = append(targets, restoreTarget{name, paths.directory(name), true})
 		}
-		if paths.splitLogs() {
-			names := map[string]bool{"logs/calls.jsonl": true, "logs/calls.jsonl.1": true}
-			entries, _ := os.ReadDir(paths.Log)
-			for _, entry := range entries {
-				name := strings.TrimSuffix(entry.Name(), ".restore-old")
-				if _, ok := logFileNumber(name); ok {
-					names["logs/"+name] = true
+		if logBackupFileCount(incoming) > 0 {
+			if paths.splitLogs() {
+				names := map[string]bool{"logs/calls.jsonl": true, "logs/calls.jsonl.1": true}
+				entries, _ := os.ReadDir(paths.Log)
+				for _, entry := range entries {
+					name := strings.TrimSuffix(entry.Name(), ".restore-old")
+					if _, ok := logFileNumber(name); ok {
+						names["logs/"+name] = true
+					}
 				}
-			}
-			for name := range incoming {
-				if strings.HasPrefix(name, "logs/") && safeBackupFile(name) {
-					names[name] = true
+				for name := range incoming {
+					if strings.HasPrefix(name, "logs/") && safeBackupFile(name) {
+						names[name] = true
+					}
 				}
+				ordered := make([]string, 0, len(names))
+				for name := range names {
+					ordered = append(ordered, name)
+				}
+				sort.Strings(ordered)
+				for _, name := range ordered {
+					targets = append(targets, restoreTarget{name, paths.file(name), false})
+				}
+			} else {
+				targets = append(targets, restoreTarget{"logs", paths.Log, true})
 			}
-			ordered := make([]string, 0, len(names))
-			for name := range names {
-				ordered = append(ordered, name)
-			}
-			sort.Strings(ordered)
-			for _, name := range ordered {
-				targets = append(targets, restoreTarget{name, paths.file(name), false})
-			}
-		} else {
-			targets = append(targets, restoreTarget{"logs", paths.Log, true})
 		}
 	}
 	return targets
@@ -313,7 +318,7 @@ func restoreFilesPaths(paths StoragePaths, state []byte, certificates, files map
 	}
 	defer os.RemoveAll(stage)
 	logStage := ""
-	if files != nil && paths.splitLogs() {
+	if files != nil && paths.splitLogs() && logBackupFileCount(files) > 0 {
 		if err := os.MkdirAll(paths.Log, 0700); err != nil {
 			return err
 		}

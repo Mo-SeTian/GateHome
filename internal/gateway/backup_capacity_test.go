@@ -60,6 +60,48 @@ func TestCapacityEstimateCoversActualEncodedSnapshot(t *testing.T) {
 	}
 }
 
+func TestCapacityEstimateDecoupledFromLargeLogs(t *testing.T) {
+	a, _ := testAdmin(t)
+	// Create a 70 MiB log file on disk (exceeds the 64 MiB snapshot limit)
+	if err := os.MkdirAll(a.store.paths.Log, 0700); err != nil {
+		t.Fatal(err)
+	}
+	logFile, err := os.Create(filepath.Join(a.store.paths.Log, "calls.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := logFile.Truncate(70 << 20); err != nil {
+		t.Fatal(err)
+	}
+	logFile.Close()
+
+	state := a.store.Snapshot()
+	c, err := inspectBackupCapacity(a.store.paths, state)
+	if err != nil {
+		t.Fatal("capacity inspection failed:", err)
+	}
+	if c.LogBytes != 70<<20 {
+		t.Fatalf("expected LogBytes to be 70 MiB, got %d", c.LogBytes)
+	}
+	if !c.CanProceed || c.SnapshotBytes > 1<<20 {
+		t.Fatalf("large log blocked snapshot or inflated SnapshotBytes: canProceed=%v, snapshotBytes=%d", c.CanProceed, c.SnapshotBytes)
+	}
+	actual, err := snapshotBackupPaths(a.store.paths, state)
+	if err != nil {
+		t.Fatal("snapshot creation failed:", err)
+	}
+	if len(actual.Files) != 0 {
+		t.Fatalf("expected 0 files in snapshot, got %d", len(actual.Files))
+	}
+	encoded, _ := json.MarshalIndent(actual, "", "  ")
+	if c.SnapshotBytes != int64(len(encoded)) {
+		t.Fatalf("expected SnapshotBytes %d to match encoded actual %d", c.SnapshotBytes, len(encoded))
+	}
+	if err := checkBackupCapacity(a.store.paths, state); err != nil {
+		t.Fatalf("checkBackupCapacity should pass with large logs, got %v", err)
+	}
+}
+
 func TestRouteAssociationIDSurvivesEditsAndReload(t *testing.T) {
 	a, _ := testAdmin(t)
 	s := a.store.Snapshot()

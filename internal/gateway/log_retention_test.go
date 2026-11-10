@@ -240,7 +240,7 @@ func TestBackupRecognizesOnlySafeLogArchives(t *testing.T) {
 	}
 }
 
-func TestBackupIncludesAllLogArchivesAndRetentionSettings(t *testing.T) {
+func TestBackupExcludesLogsAndLeavesThemOnDiskAndRestoresRetentionSettings(t *testing.T) {
 	dir, original := fullBackupFixture(t)
 	original.State.Config.LogRetention = LogRetentionConfig{MaxSizeMB: 32, KeepDays: 90}
 	writeRetentionEntries(t, filepath.Join(dir, "logs", "calls.jsonl.100"), 2, 1, time.Now())
@@ -249,8 +249,11 @@ func TestBackupIncludesAllLogArchivesAndRetentionSettings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, logs, _ := backupFileCounts(payload); logs != 3 || payload.Files["logs/calls.jsonl.100"] == nil {
-		t.Fatal("backup omitted a rotated archive")
+	if _, logs, _ := backupFileCounts(payload); logs != 0 || payload.Files["logs/calls.jsonl.100"] != nil {
+		t.Fatal("snapshot must omit log files to decouple from snapshot limits")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "logs", "calls.jsonl.100")); err != nil {
+		t.Fatal("original rotated archive was lost from disk")
 	}
 	dest := t.TempDir()
 	if err := restorePayload(dest, payload); err != nil {
@@ -259,6 +262,32 @@ func TestBackupIncludesAllLogArchivesAndRetentionSettings(t *testing.T) {
 	store, err := OpenStore(dest)
 	if err != nil || store.Snapshot().Config.LogRetention != original.State.Config.LogRetention {
 		t.Fatal("restoration omitted retention settings")
+	}
+}
+
+func TestRestoreBackwardCompatibleWithLegacyLogArchives(t *testing.T) {
+	dir, original := fullBackupFixture(t)
+	original.State.Config.LogRetention = LogRetentionConfig{MaxSizeMB: 32, KeepDays: 90}
+	now := time.Now().UTC()
+	rule := "default/nas.example.test"
+	var logBuf bytes.Buffer
+	for i := 0; i < 3; i++ {
+		e := LogEntry{ID: int64(i + 1), Time: now, Category: "access", Action: "request", Remote: "192.0.2.20:50000", Rule: rule, Status: 200, Message: "旧日志"}
+		data, _ := json.Marshal(e)
+		logBuf.Write(append(data, '\n'))
+	}
+	payload, err := snapshotBackup(dir, original.State)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload.Files["logs/calls.jsonl"] = logBuf.Bytes()
+	dest := t.TempDir()
+	if err := restorePayload(dest, payload); err != nil {
+		t.Fatal(err)
+	}
+	store, err := OpenStore(dest)
+	if err != nil {
+		t.Fatal(err)
 	}
 	l, err := NewLogs(dest, store)
 	if err != nil || l.Page(LogFilter{}, 1, 20, 0).Total != 3 {

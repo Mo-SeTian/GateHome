@@ -57,8 +57,8 @@ func fullBackupFixture(t *testing.T) (string, backupPayload) {
 	return dir, payload
 }
 func TestBackupAllPersistentDataRoundTrip(t *testing.T) {
-	_, payload := fullBackupFixture(t)
-	if images, logs, caches := backupFileCounts(payload); images != 1 || logs != 2 || caches != 1 || len(payload.Files) != 4 || len(payload.Certificates) != 2 {
+	sourceDir, payload := fullBackupFixture(t)
+	if images, logs, caches := backupFileCounts(payload); images != 1 || logs != 0 || caches != 1 || len(payload.Files) != 2 || len(payload.Certificates) != 2 {
 		t.Fatal("snapshot omitted persistent data or included temporary data")
 	}
 	encrypted, err := encodeBackup(payload, "TEST_ONLY_BACKUP_PASSWORD")
@@ -105,14 +105,17 @@ func TestBackupAllPersistentDataRoundTrip(t *testing.T) {
 			t.Fatal("certificate or account private key lost or changed")
 		}
 	}
-	for _, name := range []string{"certificates", "logs", "subscriptions", "route-images"} {
+	for _, name := range []string{"certificates", "subscriptions", "route-images"} {
 		if _, err := os.Stat(filepath.Join(dest, name, "stale-file")); !os.IsNotExist(err) {
 			t.Fatal("stale runtime file was retained in a complete restore")
 		}
 	}
-	logs, err := NewLogs(dest, store)
-	if err != nil || len(logs.entries) != 2 || !logs.entries[1].FreezeCreated {
-		t.Fatal("security logs did not reopen")
+	// Logs directory is retained on disk and untouched by snapshots without logs
+	if _, err := os.Stat(filepath.Join(dest, "logs", "stale-file")); err != nil {
+		t.Fatal("logs on disk were unexpectedly modified by restore")
+	}
+	if _, err := NewLogs(dest, store); err != nil {
+		t.Fatal("fresh logs failed to initialize")
 	}
 	subs, err := NewSubscriptions(dest, store)
 	if err != nil || len(subs.Status()) != 1 || !subs.Status()[0].Ready || subs.Status()[0].Count != 2 {
@@ -120,6 +123,26 @@ func TestBackupAllPersistentDataRoundTrip(t *testing.T) {
 	}
 	if _, err := readRouteImage(dest, store.Snapshot().Config.Routes[0].Image); err != nil {
 		t.Fatal("restored image cannot be displayed")
+	}
+	// Verify backward-compatibility when restoring a legacy backup that contains logs
+	legacyPayload := decoded
+	legacyPayload.Files = map[string][]byte{}
+	for k, v := range decoded.Files {
+		legacyPayload.Files[k] = v
+	}
+	legacyLog, _ := os.ReadFile(filepath.Join(sourceDir, "logs", "calls.jsonl"))
+	legacyPayload.Files["logs/calls.jsonl"] = legacyLog
+	destLegacy := t.TempDir()
+	if err := restorePayload(destLegacy, legacyPayload); err != nil {
+		t.Fatal("legacy restore failed:", err)
+	}
+	legacyStore, err := OpenStore(destLegacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restoredLogs, err := NewLogs(destLegacy, legacyStore)
+	if err != nil || len(restoredLogs.entries) == 0 {
+		t.Fatal("legacy security logs did not reopen")
 	}
 }
 func TestBackupUnsafeFilesAndLegacyCompatibility(t *testing.T) {

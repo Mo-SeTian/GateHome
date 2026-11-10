@@ -41,16 +41,23 @@ func inspectBackupCapacity(paths StoragePaths, state State) (backupCapacity, err
 	}
 	c.ConfigBytes = int64(len(config))
 	skeleton := backupPayload{State: state, Certificates: map[string][]byte{}, Files: map[string][]byte{}}
-	names, err := sunPanelBackupNames(paths)
-	if err != nil {
-		return c, err
-	}
 	logs, err := logFileNames(paths.Log)
 	if err != nil {
 		return c, errors.New("日志容量检查失败")
 	}
 	for _, name := range logs {
-		names = append(names, "logs/"+name)
+		info, err := os.Lstat(paths.file("logs/" + name))
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil || !info.Mode().IsRegular() {
+			return c, errors.New("容量检查发现缺失或非普通日志文件")
+		}
+		c.LogBytes += info.Size()
+	}
+	names, err := sunPanelBackupNames(paths)
+	if err != nil {
+		return c, err
 	}
 	for _, subscription := range state.Config.Subscriptions {
 		names = append(names, "subscriptions/"+subscription.ID+".json")
@@ -88,8 +95,6 @@ func inspectBackupCapacity(paths StoragePaths, state State) (backupCapacity, err
 		c.RawBytes += size
 		encodedBytes += 4 * ((size + 2) / 3)
 		switch {
-		case strings.HasPrefix(name, "logs/"):
-			c.LogBytes += size
 		case strings.HasPrefix(name, "sunpanel/"):
 			c.SunPanelBytes += size
 		case strings.HasPrefix(name, "route-images/"):
@@ -119,7 +124,7 @@ func checkBackupCapacity(paths StoragePaths, state State) error {
 		return err
 	}
 	if !c.CanProceed {
-		return fmt.Errorf("备份与回滚快照预计 %.1f MiB，超过 64 MiB 上限；请先在设置中检查容量并减少保留日志或迁出不需要的文件", float64(c.SnapshotBytes)/(1<<20))
+		return fmt.Errorf("备份与回滚快照预计 %.1f MiB，超过 64 MiB 上限；请先在设置中检查容量并迁出不需要的大文件或图片", float64(c.SnapshotBytes)/(1<<20))
 	}
 	return nil
 }

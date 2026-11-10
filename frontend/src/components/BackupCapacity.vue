@@ -15,13 +15,13 @@
       <progress :value="capacity.snapshot_bytes" :max="capacity.limit_bytes" aria-label="预计快照容量" />
       <div class="capacity-parts">
         <span>配置 {{ formatBytes(capacity.config_bytes) }}</span
-        ><span>日志 {{ formatBytes(capacity.log_bytes) }}</span
+        ><span>日志 {{ formatBytes(capacity.log_bytes) }}（磁盘保留）</span
         ><span>首页 {{ formatBytes(capacity.sunpanel_bytes) }}</span
         ><span>图片 {{ formatBytes(capacity.image_bytes) }}</span
         ><span>其他 {{ formatBytes(capacity.other_bytes) }}</span>
       </div>
       <p class="report-note">
-        检查时间：{{ reportDate(capacity.checked_at) }}。按当前数据估算，执行时后端会再次检查。
+        检查时间：{{ reportDate(capacity.checked_at) }}。日志原地保存在磁盘中不占快照配额，快照仅包含配置、证书与应用数据。
       </p></template
     >
     <p v-else-if="!error" class="report-note">正在检查持久化数据容量…</p>
