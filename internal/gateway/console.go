@@ -30,3 +30,19 @@ func consoleHandler() http.Handler {
 		files.ServeHTTP(w, r)
 	}))
 }
+
+func serveFrontendDistFile(name, contentType string) http.HandlerFunc {
+	root, _ := fs.Sub(frontend.Dist, "dist")
+	return func(w http.ResponseWriter, r *http.Request) {
+		data, err := fs.ReadFile(root, name)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		if contentType != "" {
+			w.Header().Set("Content-Type", contentType)
+		}
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		_, _ = w.Write(data)
+	}
+}

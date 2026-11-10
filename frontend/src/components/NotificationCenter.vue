@@ -92,13 +92,15 @@
               :class="[`type-${item.type}`, { unread: item.unread, clickable: !!item.path }]"
               @click="handleCardClick(item)"
             >
-              <!-- Unread status glow bar -->
+              <!-- Unread status left edge accent strip -->
               <div v-if="item.unread" class="unread-indicator" />
 
               <div class="card-top-row">
                 <div class="card-category">
-                  <span class="category-dot" :class="`dot-${item.category}`" />
-                  <span class="category-name">{{ categoryName(item.category) }}</span>
+                  <span class="category-pill" :class="`pill-${item.category || 'system'}`">
+                    <span class="pill-dot" />
+                    {{ categoryName(item.category) }}
+                  </span>
                   <span class="time-ago">{{ formatTime(item.createdAt) }}</span>
                 </div>
 
@@ -438,55 +440,121 @@ onUnmounted(() => {
 
 .unread-indicator {
   position: absolute;
-  left: 5px;
-  top: 14px;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
+  left: 0;
+  top: 10px;
+  bottom: 10px;
+  width: 3.5px;
+  border-radius: 0 4px 4px 0;
   background: var(--brand, #6366f1);
-  box-shadow: 0 0 6px var(--brand, #6366f1);
+  box-shadow: 0 0 8px rgba(99, 102, 241, 0.45);
+}
+
+.notification-card.unread {
+  background: rgba(99, 102, 241, 0.035);
+  border-color: rgba(99, 102, 241, 0.22);
 }
 
 .card-top-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding-left: 6px;
 }
 
 .card-category {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 11px;
+  gap: 7px;
 }
 
-.category-dot {
-  width: 6px;
-  height: 6px;
+.category-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1.5px 7.5px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  border: 1px solid transparent;
+  transition: all 0.15s ease;
+}
+
+.pill-dot {
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
   flex-shrink: 0;
 }
-.dot-waf { background: var(--bad); box-shadow: 0 0 6px var(--bad); }
-.dot-ddns { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
-.dot-backup { background: var(--brand-cyan, #06b6d4); box-shadow: 0 0 6px rgba(6, 182, 212, 0.6); }
-.dot-cert { background: var(--brand-cyan, #06b6d4); }
-.dot-mcp { background: var(--brand, #6366f1); }
-.dot-system { background: var(--muted); }
 
-.category-name {
-  font-weight: 700;
-  color: var(--muted);
+.pill-system {
+  background: rgba(99, 102, 241, 0.08);
+  border-color: rgba(99, 102, 241, 0.2);
+  color: var(--brand, #6366f1);
 }
+.pill-system .pill-dot {
+  background: var(--brand, #6366f1);
+  box-shadow: 0 0 5px rgba(99, 102, 241, 0.5);
+}
+
+.pill-waf {
+  background: rgba(239, 68, 68, 0.08);
+  border-color: rgba(239, 68, 68, 0.2);
+  color: var(--bad, #ef4444);
+}
+.pill-waf .pill-dot {
+  background: var(--bad, #ef4444);
+  box-shadow: 0 0 5px rgba(239, 68, 68, 0.5);
+}
+
+.pill-ddns {
+  background: rgba(16, 185, 129, 0.08);
+  border-color: rgba(16, 185, 129, 0.2);
+  color: var(--ok, #10b981);
+}
+.pill-ddns .pill-dot {
+  background: var(--ok, #10b981);
+  box-shadow: 0 0 5px rgba(16, 185, 129, 0.5);
+}
+
+.pill-backup {
+  background: rgba(6, 182, 212, 0.08);
+  border-color: rgba(6, 182, 212, 0.2);
+  color: var(--brand-cyan, #06b6d4);
+}
+.pill-backup .pill-dot {
+  background: var(--brand-cyan, #06b6d4);
+  box-shadow: 0 0 5px rgba(6, 182, 212, 0.5);
+}
+
+.pill-cert {
+  background: rgba(6, 182, 212, 0.08);
+  border-color: rgba(6, 182, 212, 0.2);
+  color: var(--brand-cyan, #06b6d4);
+}
+.pill-cert .pill-dot {
+  background: var(--brand-cyan, #06b6d4);
+  box-shadow: 0 0 5px rgba(6, 182, 212, 0.5);
+}
+
+.pill-mcp {
+  background: rgba(139, 92, 246, 0.08);
+  border-color: rgba(139, 92, 246, 0.2);
+  color: #8b5cf6;
+}
+.pill-mcp .pill-dot {
+  background: #8b5cf6;
+  box-shadow: 0 0 5px rgba(139, 92, 246, 0.5);
+}
+
 .time-ago {
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--muted);
-  opacity: 0.8;
+  opacity: 0.85;
 }
 
 .card-delete-btn {
-  width: 18px;
-  height: 18px;
+  width: 22px;
+  height: 22px;
   border-radius: 50%;
   background: transparent;
   border: none;
@@ -507,10 +575,9 @@ onUnmounted(() => {
 }
 
 .card-message {
-  font-size: 12px;
+  font-size: 12.5px;
   color: var(--ink);
   line-height: 1.45;
-  padding-left: 6px;
   overflow-wrap: anywhere;
 }
 

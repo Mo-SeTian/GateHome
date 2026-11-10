@@ -80,4 +80,10 @@ func TestEmbeddedConsoleAssetsAndBoundaries(t *testing.T) {
 	if w := adminRequest(h, "GET", "/legacy/state.json", nil, nil, ""); w.Code != 404 {
 		t.Fatal("legacy fallback must not expose unintended files")
 	}
+	if w := adminRequest(h, "GET", "/china-outline.svg", nil, nil, ""); w.Code != 200 || !strings.Contains(w.Header().Get("Content-Type"), "image/svg+xml") {
+		t.Fatalf("china-outline.svg must be served: %d %s", w.Code, w.Header().Get("Content-Type"))
+	}
+	if w := adminRequest(h, "GET", "/favicon.svg", nil, nil, ""); w.Code != 200 || !strings.Contains(w.Header().Get("Content-Type"), "image/svg+xml") {
+		t.Fatalf("favicon.svg must be served: %d %s", w.Code, w.Header().Get("Content-Type"))
+	}
 }
