@@ -12,11 +12,7 @@
           v-model="model[item.key]"
           :name="item.key"
           type="checkbox"
-          class="sr-only-input"
         />
-        <span class="custom-checkbox" aria-hidden="true">
-          <Check v-if="model[item.key]" :size="11" class="check-icon" :stroke-width="3" />
-        </span>
         <span class="permission-label">{{ item.label }}</span>
       </label>
     </div>
@@ -42,8 +38,6 @@
   </fieldset>
 </template>
 <script setup>
-import { Check } from 'lucide-vue-next'
-
 const model = defineModel({ required: true })
 defineProps({ users: { type: Array, default: () => [] }, title: { type: String, default: '权限范围' } })
 const permissions = [
@@ -106,39 +100,9 @@ legend {
   background: rgba(99, 102, 241, 0.12) !important;
   border-color: rgba(99, 102, 241, 0.4) !important;
 }
-.sr-only-input {
-  position: absolute !important;
-  width: 1px !important;
-  height: 1px !important;
-  padding: 0 !important;
-  margin: -1px !important;
-  overflow: hidden !important;
-  clip: rect(0, 0, 0, 0) !important;
-  border: 0 !important;
-}
-.custom-checkbox {
-  width: 16px;
-  height: 16px;
-  border-radius: 4px;
-  border: 1px solid rgba(148, 163, 184, 0.4);
-  background: rgba(15, 23, 42, 0.7);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  transition: all 0.15s ease;
-}
-.permission-card.checked .custom-checkbox {
-  background: var(--brand-gradient);
-  border-color: transparent;
-  box-shadow: 0 0 6px rgba(99, 102, 241, 0.5);
-}
 .permission-card:has(input:focus-visible) {
   outline: 2px solid var(--brand);
   outline-offset: 3px;
-}
-.check-icon {
-  color: #ffffff;
 }
 .permission-label {
   font-size: 12.5px !important;
