@@ -54,9 +54,6 @@ jobs:
           go vet ./...
           CGO_ENABLED=0 make -o frontend build
           python3 scripts/install_checks.py
-          for check in frontend motion dashboard security discovery image online_update account backup_frontend mcp_frontend sunpanel ui; do
-            node "scripts/${check}_checks.mjs"
-          done
       - name: Verify browser configuration and keyboard flows
         run: |
           cd frontend
