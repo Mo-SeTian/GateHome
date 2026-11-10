@@ -29,6 +29,8 @@ GATEHOME_API_TARGET=http://127.0.0.1:16666 npm run preview
 
 两款字体使用固定版本的 Fontsource 包并随 Vite 产物嵌入，浏览器不访问 Google Fonts；许可证位于 `public/licenses/`，运行时可从 `/console/licenses/` 下的对应文件读取。页面保留 Go 管理端的严格 CSP，不需要放开内联脚本或 `eval`。
 
+浏览器回归需要先在仓库根目录运行 `make build`，再在本目录运行 `npx playwright install chromium` 和 `npm run test:browser`。测试会启动独立临时目录和随机回环端口，生成仅供测试的账号，通过普通 HTTP 域名验证新增、保存、并发冲突、发现服务、流量跳转和命令面板键盘行为；结束后停止程序并删除临时数据，不使用本机主服务的配置和密码。可用 `CHROME_PATH` 指定已安装的 Chrome，`GATEHOME_TEST_BINARY` 指定相对仓库根目录的测试程序路径。
+
 ---
 
 ## 页面与联调状态

@@ -192,6 +192,7 @@
 </template>
 
 <script setup>
+import { newID } from '@/api/ids'
 import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef } from 'vue'
 import { Copy, Edit3, ExternalLink, Plus, RefreshCw, Trash2, X } from 'lucide-vue-next'
 import SpotlightCard from '@/components/SpotlightCard.vue'
@@ -256,7 +257,7 @@ function open(sub, defaults = {}) {
   originalId.value = sub?.id ?? null
   form.value = sub
     ? structuredClone(sub)
-    : { id: crypto.randomUUID(), name: '', url: '', enabled: true, interval: 86400, ...defaults }
+    : { id: newID(), name: '', url: '', enabled: true, interval: 86400, ...defaults }
   formError.value = ''
   dialog.value.showModal()
 }

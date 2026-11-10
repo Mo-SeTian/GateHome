@@ -1,6 +1,8 @@
 name: Publish GateHome
 on:
   push:
+    branches: [main]
+    paths: [VERSION]
     tags:
       - 'v*'
 permissions:
@@ -19,7 +21,8 @@ jobs:
       - name: Validate release version
         id: version
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_REF: ${{ github.ref_name }}
+          RELEASE_REF_TYPE: ${{ github.ref_type }}
         run: |
           python3 - <<'PY'
           import os, re
@@ -27,9 +30,13 @@ jobs:
           version = Path('VERSION').read_text().strip()
           pattern = r'(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})(?:-beta\.[1-9][0-9]{0,5})?'
           assert re.fullmatch(pattern, version), 'Invalid release version'
-          assert os.environ['RELEASE_TAG'] == 'v' + version, 'Tag must match VERSION'
+          if os.environ['RELEASE_REF_TYPE'] == 'tag':
+              assert os.environ['RELEASE_REF'] == 'v' + version, 'Tag must match VERSION'
+          else:
+              assert os.environ['RELEASE_REF'] == 'main' and '-beta.' in version, 'Branch publication is limited to main prereleases'
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
               output.write('version=' + version + '\n')
+              output.write('tag=v' + version + '\n')
               output.write('prerelease=' + str('-beta.' in version).lower() + '\n')
           PY
       - uses: actions/setup-node@v4
@@ -50,6 +57,11 @@ jobs:
           for check in frontend motion dashboard security discovery image online_update account backup_frontend mcp_frontend sunpanel ui; do
             node "scripts/${check}_checks.mjs"
           done
+      - name: Verify browser configuration and keyboard flows
+        run: |
+          cd frontend
+          npx playwright install --with-deps chromium
+          npm run test:browser
       - name: Package release
         run: |
           make -o frontend release
@@ -59,7 +71,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
           PRERELEASE: ${{ steps.version.outputs.prerelease }}
         run: |
@@ -71,7 +83,13 @@ jobs:
             "更新版本/gatehouse-$RELEASE_VERSION-update.zip"
           )
           target_commit=$(git rev-parse HEAD)
-          test "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")" = "$target_commit"
+          tag_ref=$(gh api "repos/$GH_REPO/git/matching-refs/tags/$RELEASE_TAG" \
+            --jq ".[] | select(.ref == \"refs/tags/$RELEASE_TAG\") | .object.sha")
+          if [ -z "$tag_ref" ]; then
+            gh api --method POST "repos/$GH_REPO/git/refs" \
+              -f ref="refs/tags/$RELEASE_TAG" -f sha="$target_commit" --silent
+          fi
+          test "$(gh api "repos/$GH_REPO/commits/$RELEASE_TAG" --jq '.sha')" = "$target_commit"
           find_release() {
             gh api --paginate -H 'Cache-Control: no-cache' "repos/$GH_REPO/releases?per_page=100" |
               jq -cs --arg tag "$RELEASE_TAG" '
@@ -101,7 +119,12 @@ jobs:
             exit 0
           fi
           if [ "$metadata" = null ]; then
-            args=(--verify-tag --target "$target_commit" --draft --title "GateHome $RELEASE_TAG" --generate-notes)
+            args=(--verify-tag --target "$target_commit" --draft --title "GateHome $RELEASE_TAG")
+            if [ -f "docs/releases/$RELEASE_VERSION.md" ]; then
+              args+=(--notes-file "docs/releases/$RELEASE_VERSION.md")
+            else
+              args+=(--generate-notes)
+            fi
             if [ "$PRERELEASE" = true ]; then args+=(--prerelease); fi
             gh release create "$RELEASE_TAG" "${args[@]}"
             for attempt in {1..10}; do

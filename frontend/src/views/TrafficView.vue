@@ -106,7 +106,8 @@
   </div>
 </template>
 <script setup>
-import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import SpotlightCard from '@/components/SpotlightCard.vue'
 import { adminApi } from '@/api/admin'
 import { formatBytes, reportDate, trafficQuery } from '@/api/reports'
@@ -114,7 +115,9 @@ import { useGatewayStatus } from '@/composables/useGatewayStatus'
 import '@/styles/reports.css'
 
 const { gatewayConfig, refreshConfig } = useGatewayStatus()
-const form = ref({ rule: '', range: '24', from: '', to: '' }),
+const currentRoute = useRoute()
+const requestedRule = () => typeof currentRoute.query.rule === 'string' ? currentRoute.query.rule : ''
+const form = ref({ rule: requestedRule(), range: '24', from: '', to: '' }),
   applied = shallowRef({ ...form.value })
 const data = shallowRef(null),
   loading = ref(false),
@@ -169,6 +172,10 @@ async function load() {
     if (request === version) loading.value = false
   }
 }
+watch(() => currentRoute.query.rule, () => {
+  form.value.rule = requestedRule()
+  load()
+})
 onMounted(() => {
   load()
   refreshConfig(controller.signal).catch((err) => {

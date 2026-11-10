@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { firewallDraft, firewallRecord, forwardState, replaceConfigItem, routeHost } from './configuration.js'
+import { defaultRouteTLS, firewallDraft, firewallRecord, forwardState, replaceConfigItem, routeHost, routeUsesFullHost } from './configuration.js'
 
 test('editing a route from a captured revision preserves unrelated data and the original draft', () => {
   const route = { group_id: 'default', host: 'old.example.com', auth: { enabled: true }, image: 'kept-image' }
@@ -54,7 +54,17 @@ test('route prefixes support group suffixes while existing complete domains reta
   const group = { domain_suffix: 'example.com' }
   assert.equal(routeHost('@', group), 'example.com')
   assert.equal(routeHost('NAS', group), 'nas.example.com')
-  assert.equal(routeHost('Other.EXAMPLE.NET.', group), 'other.example.net')
+  assert.equal(routeHost('app.home', group), 'app.home.example.com')
+  assert.equal(routeHost('app.home.example.com', group), 'app.home.example.com')
+  assert.equal(routeHost('Other.EXAMPLE.NET.', group, true), 'other.example.net')
+  assert.equal(routeUsesFullHost('other.example.net', group), true)
+  assert.equal(routeUsesFullHost('app.home.example.com', group), false)
+})
+
+test('route defaults prefer the configured HTTPS listener without changing HTTP-only groups', () => {
+  assert.equal(defaultRouteTLS({ http_port: 18080, https_port: 18443 }), true)
+  assert.equal(defaultRouteTLS({ http_port: 0, https_port: 18443 }), true)
+  assert.equal(defaultRouteTLS({ http_port: 18080, https_port: 0 }), false)
 })
 
 test('firewall edits preserve unknown fields and group order while converting input units', () => {

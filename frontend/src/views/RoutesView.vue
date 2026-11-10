@@ -158,6 +158,7 @@
         <div class="card-actions">
           <span class="latency-label">{{ route.tls ? 'HTTPS' : 'HTTP' }}</span>
           <div class="action-btn-group">
+            <RouterLink class="btn btn-ghost btn-sm" :to="{ path: '/traffic', query: { rule: route.id } }">查看流量</RouterLink>
             <button class="btn btn-ghost btn-sm" :disabled="isSavingConfig" @click="openRoute(route)">
               <Edit3 :size="13" /> 编辑
             </button>
@@ -204,20 +205,23 @@
           >服务名称<input v-model="routeDraft.name" name="name" class="form-input" maxlength="100"
         /></label>
         <label class="form-group"
-          >所属反代组<select v-model="routeDraft.group_id" name="group_id" class="form-select" required>
+          >所属反代组<select v-model="routeDraft.group_id" name="group_id" class="form-select" required @change="changeRouteGroup">
             <option v-for="group in editSnapshot.config.groups" :key="group.id" :value="group.id">
               {{ group.name }}
             </option>
           </select></label
         >
         <label class="form-group"
-          >访问域名<input
+          >{{ fullHost || !editSnapshot.config.groups.find(group => group.id === routeDraft.group_id)?.domain_suffix ? '访问域名' : '子域名前缀' }}<input
             v-model="routeDraft.host"
             name="host"
             class="form-input mono-text"
             required
             placeholder="完整域名，或本组的子域名前缀"
         /></label>
+        <label v-if="editSnapshot.config.groups.find(group => group.id === routeDraft.group_id)?.domain_suffix" class="check-label">
+          <input v-model="fullHost" name="full_host" type="checkbox" />填写完整域名（不自动补全后缀）
+        </label>
         <p class="form-note">保存为 {{ resolvedHost || '—' }}</p>
         <label class="form-group"
           >上游地址<input
@@ -249,6 +253,9 @@
             <input v-model="routeDraft.auth.enabled" name="auth_enabled" type="checkbox" />
           </label>
         </div>
+        <label class="check-label">
+          <input v-model="clearRoutePassword" name="clear_route_password" type="checkbox" />清除已保存的访问密码（须关闭独立访问验证）
+        </label>
         <fieldset v-if="routeDraft.auth.enabled" class="auth-fields">
           <label class="form-group"
             >访问用户名<input
@@ -479,6 +486,7 @@
 </template>
 
 <script setup>
+import { newID } from '@/api/ids'
 import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
@@ -500,7 +508,7 @@ import RestartNotice from '@/components/RestartNotice.vue'
 import RouteImagePicker from '@/components/RouteImagePicker.vue'
 import ServiceDiscovery from '@/components/ServiceDiscovery.vue'
 import { adminApi } from '@/api/admin'
-import { replaceConfigItem, routeHost, routeKey } from '@/api/configuration'
+import { defaultRouteTLS, replaceConfigItem, routeHost, routeKey, routeUsesFullHost } from '@/api/configuration'
 import { useGatewayStatus } from '@/composables/useGatewayStatus'
 import { useToast } from '@/composables/useToast'
 
@@ -541,7 +549,9 @@ const routeDraft = ref({ auth: {} })
 const groupDraft = ref({})
 const healthDraft = ref({})
 const routePassword = ref('')
-const freezeMinutes = ref(30)
+const clearRoutePassword = ref(false)
+const fullHost = ref(false)
+const freezeMinutes = ref(60)
 const imageBusy = ref(false)
 const routeError = ref(null)
 const filteredRoutes = computed(() =>
@@ -558,7 +568,8 @@ const filteredRoutes = computed(() =>
 const resolvedHost = computed(() =>
   routeHost(
     routeDraft.value.host || '',
-    editSnapshot.value.config.groups.find((group) => group.id === routeDraft.value.group_id)
+    editSnapshot.value.config.groups.find((group) => group.id === routeDraft.value.group_id),
+    fullHost.value
   )
 )
 const passwordRequired = computed(() => {
@@ -626,7 +637,7 @@ function openRoute(route) {
   routeDraft.value = route
     ? structuredClone(route)
     : {
-        id: crypto.randomUUID(),
+        id: newID(),
         name: '',
         group_id: proxyGroups.value.some((group) => group.id === selectedGroup.value)
           ? selectedGroup.value
@@ -637,13 +648,16 @@ function openRoute(route) {
         enabled: true,
         firewall_id: '',
         image: '',
-        auth: { enabled: false, username: '', failure_limit: 5, freeze_seconds: 1800 }
+        auth: { enabled: false, username: '', failure_limit: 5, freeze_seconds: 3600 }
       }
   routeDraft.value.auth = {
     ...routeDraft.value.auth,
     failure_limit: routeDraft.value.auth.failure_limit || 5
   }
-  freezeMinutes.value = (routeDraft.value.auth.freeze_seconds || 1800) / 60
+  fullHost.value = routeUsesFullHost(route?.host, proxyGroups.value.find((group) => group.id === routeDraft.value.group_id))
+  if (!route) routeDraft.value.tls = defaultRouteTLS(proxyGroups.value.find((group) => group.id === routeDraft.value.group_id))
+  clearRoutePassword.value = false
+  freezeMinutes.value = (routeDraft.value.auth.freeze_seconds || 3600) / 60
   routePassword.value = ''
   imageBusy.value = false
   routeOpen.value = true
@@ -652,6 +666,7 @@ function openRoute(route) {
 function closeRoute() {
   routeOpen.value = false
   routePassword.value = ''
+  clearRoutePassword.value = false
   imageBusy.value = false
 }
 function blockBusyClose(event) {
@@ -679,6 +694,11 @@ async function saveRoute() {
       auth: { ...routeDraft.value.auth, freeze_seconds: Number(freezeMinutes.value) * 60 }
     }
     const credentials = {}
+    if (clearRoutePassword.value) {
+      if (record.auth.enabled) throw new Error('请先关闭独立访问验证，再清除已保存密码')
+      if (routePassword.value) throw new Error('填写新密码和清除密码不能同时选择')
+      credentials.route_passwords = { [routeKey(record)]: '' }
+    }
     if (record.auth.enabled) {
       if (passwordRequired.value && !routePassword.value)
         throw new Error('域名、所属组或访问账号变化后，请重新设置独立访问密码')
@@ -703,7 +723,7 @@ function openGroup(group) {
   groupDraft.value = group
     ? structuredClone(group)
     : {
-        id: crypto.randomUUID(),
+        id: newID(),
         name: '',
         http_port: 0,
         https_port: 0,
@@ -810,6 +830,11 @@ function routeCategoryClass(route) {
   if (name.includes('media') || name.includes('plex') || name.includes('jelly') || name.includes('emby') || name.includes('video') || name.includes('music')) return 'media'
   if (name.includes('git') || name.includes('code') || name.includes('dev') || name.includes('gitea')) return 'dev'
   return 'system'
+}
+
+function changeRouteGroup() {
+  const group = proxyGroups.value.find((item) => item.id === routeDraft.value.group_id)
+  routeDraft.value.tls = defaultRouteTLS(group)
 }
 
 watch(

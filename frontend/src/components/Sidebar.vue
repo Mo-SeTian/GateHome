@@ -31,7 +31,7 @@
           <span class="brand-title">GateHome</span>
           <span class="brand-version">家庭网关 · {{ gatewayVersion }}</span>
         </div>
-        <button class="mobile-close-btn" @click="closeSidebar">
+        <button class="mobile-close-btn" aria-label="关闭侧边栏导航" @click="closeSidebar">
           <X :size="18" />
         </button>
       </div>

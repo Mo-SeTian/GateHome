@@ -404,6 +404,7 @@
 </template>
 
 <script setup>
+import { newID } from '@/api/ids'
 import { nextTick, onMounted, ref, toRaw } from 'vue'
 import { Plus, X } from 'lucide-vue-next'
 import { firewallDraft, firewallRecord, replaceConfigItem } from '@/api/configuration'
@@ -414,7 +415,7 @@ const emit = defineEmits(['close', 'saved'])
 const { saveConfig, isSavingConfig } = useGatewayStatus()
 const dialog = ref(null)
 const draft = ref(
-  firewallDraft(props.firewall || { id: crypto.randomUUID(), name: '', default_action: 'deny', groups: [] })
+  firewallDraft(props.firewall || { id: newID(), name: '', default_action: 'deny', groups: [] })
 )
 const error = ref('')
 const errorElement = ref(null)

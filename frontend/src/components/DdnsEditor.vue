@@ -106,6 +106,7 @@
   </dialog>
 </template>
 <script setup>
+import { newID } from '@/api/ids'
 import { computed, nextTick, onMounted, onUnmounted, ref, toRaw } from 'vue'
 import { X } from 'lucide-vue-next'
 import IPSourceFields from '@/components/IPSourceFields.vue'
@@ -124,7 +125,7 @@ const draft = ref(
   props.group
     ? structuredClone(props.group)
     : {
-        id: crypto.randomUUID(),
+        id: newID(),
         name: '',
         provider: 'cloudflare',
         zone: '',

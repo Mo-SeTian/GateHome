@@ -111,6 +111,7 @@
   </dialog>
 </template>
 <script setup>
+import { newID } from '@/api/ids'
 import { nextTick, onMounted, onUnmounted, ref, toRaw } from 'vue'
 import { X } from 'lucide-vue-next'
 import { domainList, replaceCertificate, tokenChange } from '@/api/dns'
@@ -122,7 +123,7 @@ const draft = ref(
   structuredClone(
     props.settings
       ? props.snapshot.config.acme
-      : props.request || { id: crypto.randomUUID(), provider: 'cloudflare', domains: [], enabled: true }
+      : props.request || { id: newID(), provider: 'cloudflare', domains: [], enabled: true }
   )
 )
 const domainsText = ref(props.request?.domains.join('\n') || ''),

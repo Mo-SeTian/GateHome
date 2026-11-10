@@ -133,6 +133,10 @@ legend {
   border-color: transparent;
   box-shadow: 0 0 6px rgba(99, 102, 241, 0.5);
 }
+.permission-card:has(input:focus-visible) {
+  outline: 2px solid var(--brand);
+  outline-offset: 3px;
+}
 .check-icon {
   color: #ffffff;
 }

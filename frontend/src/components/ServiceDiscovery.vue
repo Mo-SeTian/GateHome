@@ -26,12 +26,19 @@
     <form v-if="rows.length" @submit.prevent="createRoutes">
       <label
         >导入到反代组
-        <select v-model="groupId" class="form-select" :disabled="pending">
+        <select v-model="groupId" name="group_id" class="form-select" :disabled="pending">
           <option v-for="group in snapshot.config.groups" :key="group.id" :value="group.id">
             {{ group.name }}
           </option>
         </select>
       </label>
+      <label>来源 IP 防火墙
+        <select v-model="firewallID" name="firewall_id" class="form-select" :disabled="pending">
+          <option value="">不限制来源 IP</option>
+          <option v-for="firewall in snapshot.config.firewalls" :key="firewall.id" :value="firewall.id">{{ firewall.name }}</option>
+        </select>
+      </label>
+      <p class="report-note">此策略应用到本次导入的全部路由；不选择时允许所有来源。</p>
       <div v-for="row in rows" :key="row.port" class="scan-result">
         <label
           ><input v-model="row.selected" type="checkbox" :disabled="scanning || pending" />
@@ -40,18 +47,24 @@
         <p>{{ row.upstream }} · HTTP {{ row.status }}</p>
         <p v-if="row.tls_untrusted">上游证书不受信任，实际反代连接仍须使用可信证书。</p>
         <label v-if="row.selected"
+          >服务名称<input v-model="row.name" name="service_name" class="form-input" required maxlength="100" :disabled="pending" />
+        </label>
+        <label v-if="row.selected"
           >访问域名
           <input
             v-model="row.host"
             class="form-input"
             required
             :disabled="pending"
-            :placeholder="group?.domain_suffix ? '子域名前缀或完整域名' : '完整域名'"
+            :placeholder="group?.domain_suffix && !row.fullHost ? '子域名前缀，如 app.home' : '完整域名'"
           />
         </label>
+        <label v-if="row.selected && group?.domain_suffix"><input v-model="row.fullHost" type="checkbox" :disabled="pending" />填写完整域名</label>
+        <p v-if="row.selected" class="report-note">保存为 {{ routeHost(row.host, group, row.fullHost) || '—' }}</p>
+        <label v-if="row.selected && row.icon"><input v-model="row.useImage" type="checkbox" :disabled="pending" />使用服务图片</label>
       </div>
       <label
-        ><input v-model="tls" type="checkbox" :disabled="pending" /> 使用 HTTPS 访问，需已有匹配证书</label
+        ><input v-model="tls" name="tls" type="checkbox" :disabled="pending" /> 使用 HTTPS 访问，需已有匹配证书</label
       >
       <button
         type="submit"
@@ -66,9 +79,10 @@
 </template>
 
 <script setup>
-import { computed, onUnmounted, ref } from 'vue'
+import { newID } from '@/api/ids'
+import { computed, onUnmounted, ref, watch } from 'vue'
 import { adminApi } from '@/api/admin'
-import { routeHost } from '@/api/configuration'
+import { defaultRouteTLS, routeHost } from '@/api/configuration'
 import { useGatewayStatus } from '@/composables/useGatewayStatus'
 
 const props = defineProps({ snapshot: { type: Object, required: true } })
@@ -80,9 +94,11 @@ const scan = ref(null)
 const rows = ref([])
 const error = ref('')
 const pending = ref(false)
-const tls = ref(false)
+const firewallID = ref('')
 const groupId = ref(props.snapshot.config.groups[0]?.id ?? '')
 const group = computed(() => props.snapshot.config.groups.find((item) => item.id === groupId.value))
+const tls = ref(defaultRouteTLS(group.value))
+watch(groupId, () => { tls.value = defaultRouteTLS(group.value) })
 const scanning = computed(() => ['running', 'stopping'].includes(scan.value?.state))
 const scanLabel = computed(() => ({
   running: '扫描中', stopping: '正在停止', completed: '已完成', cancelled: '已取消',
@@ -97,7 +113,10 @@ function applyScan(value) {
   rows.value = value.services.map((row) => ({
     ...row,
     selected: previous.get(row.port)?.selected ?? false,
-    host: previous.get(row.port)?.host ?? ''
+    name: previous.get(row.port)?.name ?? (row.name || row.upstream),
+    host: previous.get(row.port)?.host ?? '',
+    fullHost: previous.get(row.port)?.fullHost ?? false,
+    useImage: previous.get(row.port)?.useImage ?? true
   }))
   if (scanning.value) timer = setTimeout(poll, 750)
 }
@@ -152,20 +171,22 @@ async function createRoutes() {
   error.value = ''
   try {
     const config = structuredClone(props.snapshot.config)
+    if (rows.value.some((row) => row.selected && row.tls_untrusted))
+      throw new Error('所选 HTTPS 上游证书不受信任，请配置可信证书或改用 HTTP 端口后重新扫描')
     for (const row of rows.value.filter((row) => row.selected)) {
       let image = ''
-      if (row.icon) image = (await adminApi.importRouteImage({ scan_id: scan.value.id, port: row.port })).id
+      if (row.useImage && row.icon) image = (await adminApi.importRouteImage({ scan_id: scan.value.id, port: row.port })).id
       config.routes.push({
-        id: crypto.randomUUID(),
+        id: newID(),
         group_id: groupId.value,
-        name: row.name || row.upstream,
-        host: routeHost(row.host, group.value),
+        name: row.name.trim(),
+        host: routeHost(row.host, group.value, row.fullHost),
         upstream: row.upstream,
         image,
         tls: tls.value,
         enabled: true,
-        firewall_id: '',
-        auth: { enabled: false, username: '' }
+        firewall_id: firewallID.value,
+        auth: { enabled: false, username: '', failure_limit: 5, freeze_seconds: 3600 }
       })
     }
     if (controller.signal.aborted) return

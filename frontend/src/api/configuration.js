@@ -2,11 +2,21 @@ export function routeKey(route) {
   return `${route.group_id}/${route.host}`
 }
 
-export function routeHost(value, group) {
+export function routeHost(value, group, full = false) {
   const host = value.trim().toLowerCase().replace(/\.$/, '')
   const suffix = group?.domain_suffix
-  if (!suffix || host.includes('.')) return host
-  return host === '@' ? suffix : `${host}.${suffix}`
+  if (!suffix || full) return host
+  if (host === '@') return suffix
+  return host === suffix || host.endsWith('.' + suffix) ? host : `${host}.${suffix}`
+}
+
+export function routeUsesFullHost(host, group) {
+  const suffix = group?.domain_suffix
+  return Boolean(host && suffix && host !== suffix && !host.endsWith('.' + suffix))
+}
+
+export function defaultRouteTLS(group) {
+  return Boolean(group?.https_port)
 }
 
 export function replaceConfigItem(snapshot, collection, item, originalId) {

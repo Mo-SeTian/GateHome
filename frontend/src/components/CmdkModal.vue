@@ -1,7 +1,6 @@
 <template>
-  <transition name="cmdk-fade">
-    <div v-if="isCmdkOpen" class="cmdk-backdrop" @click.self="closeCmdk">
-      <div class="cmdk-dialog" role="dialog" aria-modal="true" aria-label="全局命令面板">
+    <dialog ref="dialogRef" class="cmdk-backdrop" aria-label="全局命令面板" @click.self="closeCmdk" @cancel.prevent="closeCmdk" @close="closeCmdk">
+      <div class="cmdk-dialog">
         <!-- Search Input Bar -->
         <div class="cmdk-input-wrapper">
           <Search class="cmdk-search-icon" :size="18" />
@@ -11,16 +10,21 @@
             type="text"
             placeholder="搜索页面或常用操作..."
             class="cmdk-input"
+            role="combobox"
+            aria-autocomplete="list"
+            aria-expanded="true"
+            aria-controls="cmdk-results"
+            :aria-activedescendant="totalItemsCount ? `cmdk-option-${selectedIndex}` : undefined"
             @keydown.down.prevent="navigateList(1)"
             @keydown.up.prevent="navigateList(-1)"
             @keydown.enter.prevent="selectActive"
             @keydown.esc.prevent="closeCmdk"
           />
-          <kbd class="cmdk-esc-badge" @click="closeCmdk">ESC</kbd>
+          <button type="button" class="cmdk-esc-badge" aria-label="关闭命令面板" @click="closeCmdk">ESC</button>
         </div>
 
         <!-- Filtered Results List -->
-        <div class="cmdk-results">
+        <div id="cmdk-results" class="cmdk-results" role="listbox" aria-label="页面与常用操作">
           <!-- Views Section -->
           <div v-if="filteredPages.length" class="cmdk-group">
             <div class="cmdk-group-title">快捷页面导航</div>
@@ -28,6 +32,9 @@
               v-for="(item, idx) in filteredPages" 
               :key="item.path"
               class="cmdk-item"
+              :id="`cmdk-option-${idx}`"
+              role="option"
+              :aria-selected="selectedIndex === idx"
               :class="{ active: selectedIndex === idx }"
               @mouseenter="selectedIndex = idx"
               @click="handleSelectPage(item.path)"
@@ -45,6 +52,9 @@
               v-for="(action, idx) in filteredActions" 
               :key="action.id"
               class="cmdk-item"
+              :id="`cmdk-option-${filteredPages.length + idx}`"
+              role="option"
+              :aria-selected="selectedIndex === filteredPages.length + idx"
               :class="{ active: selectedIndex === filteredPages.length + idx }"
               @mouseenter="selectedIndex = filteredPages.length + idx"
               @click="handleSelectAction(action)"
@@ -69,8 +79,7 @@
           <span><kbd>ESC</kbd> 关闭面板</span>
         </div>
       </div>
-    </div>
-  </transition>
+    </dialog>
 </template>
 
 <script setup>
@@ -106,6 +115,7 @@ async function syncDDNS() {
 }
 
 const inputRef = ref(null)
+const dialogRef = ref(null)
 const query = ref('')
 const selectedIndex = ref(0)
 
@@ -154,15 +164,23 @@ const filteredActions = computed(() => {
 
 const totalItemsCount = computed(() => filteredPages.value.length + filteredActions.value.length)
 
-watch(isCmdkOpen, (open) => {
+watch(isCmdkOpen, async (open) => {
   if (open) {
     query.value = ''
     selectedIndex.value = 0
-    nextTick(() => {
-      inputRef.value?.focus()
-    })
+    await nextTick()
+    if (!isCmdkOpen.value) return
+    dialogRef.value.showModal()
+    inputRef.value?.focus()
+  } else {
+    dialogRef.value?.close()
   }
 })
+
+watch(query, () => { selectedIndex.value = 0 })
+watch([query, selectedIndex], () => {
+  dialogRef.value?.querySelector('.cmdk-item.active')?.scrollIntoView({ block: 'nearest' })
+}, { flush: 'post' })
 
 const navigateList = (direction) => {
   if (totalItemsCount.value === 0) return
@@ -186,9 +204,10 @@ const handleSelectPage = (path) => {
   closeCmdk()
 }
 
-const handleSelectAction = (action) => {
-  action.run()
+const handleSelectAction = async (action) => {
   closeCmdk()
+  await nextTick()
+  action.run()
 }
 
 // Global ⌘K / Ctrl+K listener
@@ -216,14 +235,23 @@ onUnmounted(() => {
 .cmdk-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.65);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  margin: 0;
+  border: 0;
+  width: 100vw;
+  height: 100dvh;
+  max-width: none;
+  max-height: none;
+  background: transparent;
   z-index: 999;
   display: flex;
   align-items: flex-start;
   justify-content: center;
   padding-top: 12vh;
+}
+.cmdk-backdrop:not([open]) { display: none; }
+.cmdk-backdrop::backdrop {
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(8px);
 }
 
 .cmdk-dialog {
@@ -259,6 +287,7 @@ onUnmounted(() => {
 
 .cmdk-input {
   flex: 1;
+  min-width: 0;
   background: transparent;
   border: none;
   font-size: 14px;

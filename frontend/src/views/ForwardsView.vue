@@ -182,6 +182,7 @@
 </template>
 
 <script setup>
+import { newID } from '@/api/ids'
 import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef } from 'vue'
 import { ArrowRight, Edit3, Plus, Trash2, X } from 'lucide-vue-next'
 import SpotlightCard from '@/components/SpotlightCard.vue'
@@ -250,7 +251,7 @@ function openForward(forward) {
   form.value = forward
     ? structuredClone(forward)
     : {
-        id: crypto.randomUUID(),
+        id: newID(),
         name: '',
         protocol: 'tcp',
         listen_port: '',
