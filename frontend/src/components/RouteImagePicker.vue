@@ -5,52 +5,54 @@
       <span class="picker-hint">用于反代卡片、SunPanel 与导航快捷方式</span>
     </div>
 
-    <!-- 上半部分：预览图标 + 本地上传按钮与格式说明 -->
-    <div class="picker-top-row">
+    <!-- 第一通道：本地上传通道（预览槽 + 满宽上传按钮 + 可选恢复默认） -->
+    <div class="picker-channel-row">
       <div class="preview-box" :title="modelValue ? '当前已设置自定义图片' : '默认图标占位'">
         <img
           v-if="modelValue"
           :src="`/api/route-images/${modelValue}`"
           class="route-icon-img"
-          width="44"
-          height="44"
+          width="40"
+          height="40"
           alt="所选服务图片"
         />
         <div v-else class="preview-fallback">
-          <ImageIcon :size="22" class="fallback-icon" />
+          <ImageIcon :size="20" class="fallback-icon" />
         </div>
       </div>
-      <div class="upload-btn-group">
-        <div class="btn-with-clear">
-          <label class="custom-file-btn" :class="{ disabled: busy }" title="从本地上传 PNG、JPG、SVG、WebP 或 ICO 格式图片">
-            <Upload :size="13" class="btn-icon" />
-            <span>{{ busy ? '正在上传…' : '选择本地图片' }}</span>
-            <input
-              type="file"
-              class="hidden-file-input"
-              accept="image/png,image/jpeg,image/gif,image/webp,image/x-icon,image/svg+xml"
-              :disabled="busy"
-              @change="upload"
-            />
-          </label>
-          <button
-            v-if="modelValue"
-            type="button"
-            class="clear-img-btn"
+
+      <div class="upload-action-wrap">
+        <label
+          class="custom-file-btn"
+          :class="{ disabled: busy }"
+          title="从本地上传 PNG、JPG、SVG、WebP 或 ICO 格式图片"
+        >
+          <Upload :size="13" class="btn-icon" />
+          <span>{{ busy ? '正在上传…' : '选择本地图片' }}</span>
+          <input
+            type="file"
+            class="hidden-file-input"
+            accept="image/png,image/jpeg,image/gif,image/webp,image/x-icon,image/svg+xml"
             :disabled="busy"
-            title="移除自定义图片，恢复系统默认分类图标"
-            @click="emit('update:modelValue', '')"
-          >
-            <RotateCcw :size="11" />
-            <span>恢复默认</span>
-          </button>
-        </div>
-        <span class="file-format-tip">支持 PNG / JPG / SVG / WebP / ICO</span>
+            @change="upload"
+          />
+        </label>
+        <button
+          v-if="modelValue"
+          type="button"
+          class="clear-img-btn"
+          :disabled="busy"
+          title="移除自定义图片，恢复系统默认分类图标"
+          @click="emit('update:modelValue', '')"
+        >
+          <RotateCcw :size="11" />
+          <span>恢复默认</span>
+        </button>
       </div>
     </div>
 
-    <!-- 下半部分：在线图片地址输入 + 导入按钮 -->
-    <div class="picker-url-row">
+    <!-- 第二通道：在线图片导入通道（满宽输入框 + 导入按钮） -->
+    <div class="picker-channel-row">
       <div class="url-input-wrap">
         <Link2 :size="13" class="url-icon" />
         <input
@@ -71,6 +73,11 @@
       >
         导入
       </button>
+    </div>
+
+    <!-- 底部格式提示 -->
+    <div class="picker-footer">
+      <span class="file-format-tip">支持 PNG / JPG / SVG / WebP / ICO 格式（建议 1:1 比例）</span>
     </div>
 
     <!-- 状态反馈 -->
@@ -178,28 +185,32 @@ function importImage() {
   line-height: 1.4;
 }
 
-/* 上半部分：头像与本地上传行 */
-.picker-top-row {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  min-width: 0;
+/* 核心通道行：保证每一行都是 100% 充满，两端严格对齐 */
+.picker-channel-row {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  gap: 8px !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  box-sizing: border-box !important;
 }
 
 .preview-box {
-  width: 44px;
-  height: 44px;
-  border-radius: 10px;
-  background: var(--strip-bg);
-  border: 1px solid var(--line);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  overflow: hidden;
-  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.15);
+  width: 40px !important;
+  height: 40px !important;
+  min-width: 40px !important;
+  min-height: 40px !important;
+  border-radius: var(--radius-sm) !important;
+  background: var(--strip-bg) !important;
+  border: 1px solid var(--line) !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  flex-shrink: 0 !important;
+  overflow: hidden !important;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.15) !important;
+  box-sizing: border-box !important;
 }
 .route-icon-img {
   width: 100%;
@@ -212,38 +223,34 @@ function importImage() {
   opacity: 0.8;
 }
 
-.upload-btn-group {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  flex: 1;
-  min-width: 0;
+.upload-action-wrap {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  gap: 6px !important;
+  flex: 1 1 0% !important;
+  min-width: 0 !important;
 }
 
-.btn-with-clear {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-/* 自定义上传按钮：强制锁死为水平单行结构，杜绝任何外部 label 样式污染为纵向方块 */
+/* 自定义上传按钮：充满剩余区域，两端对齐 */
 .custom-file-btn {
-  display: inline-flex !important;
+  display: flex !important;
   flex-direction: row !important;
   align-items: center !important;
   justify-content: center !important;
   gap: 6px !important;
-  height: 32px !important;
-  min-height: 32px !important;
+  flex: 1 1 0% !important;
+  min-width: 0 !important;
+  height: 40px !important;
+  min-height: 40px !important;
   padding: 0 12px !important;
-  line-height: 32px !important;
+  line-height: 40px !important;
   white-space: nowrap !important;
   word-break: keep-all !important;
   background: var(--brand-gradient) !important;
   color: #ffffff !important;
   border-radius: var(--radius-sm) !important;
-  font-size: 12px !important;
+  font-size: 12.5px !important;
   font-weight: 600 !important;
   cursor: pointer !important;
   box-shadow: 0 2px 6px rgba(99, 102, 241, 0.35) !important;
@@ -251,8 +258,7 @@ function importImage() {
   position: relative !important;
   user-select: none !important;
   margin: 0 !important;
-  flex-shrink: 0 !important;
-  align-self: flex-start;
+  box-sizing: border-box !important;
 }
 .custom-file-btn:hover:not(.disabled) {
   opacity: 0.92;
@@ -280,78 +286,78 @@ function importImage() {
 }
 
 .clear-img-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 11px;
-  color: var(--bad);
-  background: rgba(244, 63, 94, 0.1);
-  border: 1px solid rgba(244, 63, 94, 0.2);
-  padding: 0 8px;
-  height: 32px;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  transition: var(--transition-smooth);
-  white-space: nowrap;
-  flex-shrink: 0;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 4px !important;
+  font-size: 11.5px !important;
+  color: var(--bad) !important;
+  background: rgba(244, 63, 94, 0.1) !important;
+  border: 1px solid rgba(244, 63, 94, 0.25) !important;
+  padding: 0 10px !important;
+  height: 40px !important;
+  min-height: 40px !important;
+  border-radius: var(--radius-sm) !important;
+  cursor: pointer !important;
+  transition: var(--transition-smooth) !important;
+  white-space: nowrap !important;
+  flex: 0 0 auto !important;
+  box-sizing: border-box !important;
 }
 .clear-img-btn:hover:not(:disabled) {
   background: rgba(244, 63, 94, 0.18);
-  border-color: rgba(244, 63, 94, 0.35);
+  border-color: rgba(244, 63, 94, 0.4);
 }
 
-.file-format-tip {
-  font-size: 10.5px;
-  color: var(--faint);
-  line-height: 1.3;
-  white-space: nowrap;
-}
-
-/* 下半部分：在线导入整行自适应 */
-.picker-url-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: 100%;
-  min-width: 0;
-}
-
+/* 下半部分：在线导入整行两端完全对齐 */
 .url-input-wrap {
-  position: relative;
-  flex: 1 1 0%;
-  min-width: 0;
-  display: flex;
-  align-items: center;
+  position: relative !important;
+  flex: 1 1 0% !important;
+  min-width: 0 !important;
+  display: flex !important;
+  align-items: center !important;
 }
 .url-icon {
-  position: absolute;
-  left: 9px;
-  color: var(--muted);
-  pointer-events: none;
-  z-index: 2;
+  position: absolute !important;
+  left: 10px !important;
+  color: var(--muted) !important;
+  pointer-events: none !important;
+  z-index: 2 !important;
 }
 .url-input {
   box-sizing: border-box !important;
   width: 100% !important;
   min-width: 0 !important;
-  padding-left: 28px !important;
+  padding-left: 30px !important;
   padding-right: 8px !important;
-  height: 32px !important;
-  min-height: 32px !important;
-  line-height: 30px !important;
-  font-size: 11.5px !important;
+  height: 38px !important;
+  min-height: 38px !important;
+  line-height: 36px !important;
+  font-size: 12px !important;
   border-radius: var(--radius-sm) !important;
 }
 
 .import-btn {
-  height: 32px !important;
-  min-height: 32px !important;
-  padding: 0 12px !important;
+  height: 38px !important;
+  min-height: 38px !important;
+  padding: 0 14px !important;
   font-size: 12px !important;
   font-weight: 500 !important;
   white-space: nowrap !important;
   flex: 0 0 auto !important;
   border-radius: var(--radius-sm) !important;
+  box-sizing: border-box !important;
+}
+
+.picker-footer {
+  display: flex;
+  justify-content: flex-start;
+  width: 100%;
+}
+.file-format-tip {
+  font-size: 11px;
+  color: var(--faint);
+  line-height: 1.4;
 }
 
 /* 状态与错误提示 */
@@ -383,7 +389,7 @@ function importImage() {
     gap: 2px;
   }
   .file-format-tip {
-    font-size: 10px;
+    font-size: 10.5px;
   }
 }
 </style>
