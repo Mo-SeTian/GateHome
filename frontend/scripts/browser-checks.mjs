@@ -486,11 +486,31 @@ try {
     await importDialog.getByRole('button', { name: '取消', exact: true }).click()
   }
 
+  const aspectImages = await page.evaluate(() => [[256, 128], [128, 256], [128, 128]].map(([width, height]) => {
+    const canvas = document.createElement('canvas')
+    canvas.width = width
+    canvas.height = height
+    const ctx = canvas.getContext('2d')
+    ctx.fillStyle = '#10b981'
+    ctx.fillRect(0, 0, width, height)
+    for (const [color, x, y, w, h] of [
+      ['#ef4444', 0, 0, 8, height], ['#3b82f6', width - 8, 0, 8, height],
+      ['#facc15', 0, 0, width, 8], ['#d946ef', 0, height - 8, width, 8]
+    ]) {
+      ctx.fillStyle = color
+      ctx.fillRect(x, y, w, h)
+    }
+    return canvas.toDataURL('image/png').split(',')[1]
+  }))
+  const aspectFile = (index, name) => ({ name, mimeType: 'image/png', buffer: Buffer.from(aspectImages[index], 'base64') })
+
   await button('上传本地图标').click()
   const upload = page.getByRole('dialog', { name: '上传本地图标' })
   await upload.getByLabel('选择图标文件').setInputFiles([
     { name: '测试图标.svg', mimeType: 'image/svg+xml', buffer: Buffer.from(fixtureSVG(7)) },
-    { name: 'delete-fixture.svg', mimeType: 'image/svg+xml', buffer: Buffer.from(fixtureSVG(12)) }
+    { name: 'delete-fixture.svg', mimeType: 'image/svg+xml', buffer: Buffer.from(fixtureSVG(12)) },
+    aspectFile(0, 'aspect-wide.png'),
+    aspectFile(2, 'aspect-square.png')
   ])
   await upload.getByRole('button', { name: '上传图标', exact: true }).click()
   await cards.getByText('测试图标', { exact: true }).waitFor()
@@ -529,6 +549,64 @@ try {
   await routeDialog.waitFor({ state: 'hidden' })
   assert.ok((await api('config')).config.routes.some(row => row.image?.startsWith('/icons/uploads/')))
   await page.locator(`.routes-grid img[src="${previewURL}"]`).waitFor()
+
+  async function assertCompleteIcon(image, ratio) {
+    await image.evaluate(img => img.decode())
+    assert.equal(await image.evaluate(img => img.naturalWidth / img.naturalHeight), ratio)
+    const pixels = await image.screenshot({ animations: 'disabled', scale: 'css' })
+    const rendered = await page.evaluate(async base64 => {
+      const image = new Image()
+      image.src = 'data:image/png;base64,' + base64
+      await image.decode()
+      const canvas = document.createElement('canvas')
+      canvas.width = image.width
+      canvas.height = image.height
+      const ctx = canvas.getContext('2d')
+      ctx.drawImage(image, 0, 0)
+      const data = ctx.getImageData(0, 0, image.width, image.height).data
+      const colors = [[239, 68, 68], [59, 130, 246], [250, 204, 21], [217, 70, 239]]
+      const edges = colors.map(() => 0)
+      let left = image.width, right = -1, top = image.height, bottom = -1
+      for (let i = 0; i < data.length; i += 4) {
+        const color = colors.findIndex(color => color.every((value, channel) => Math.abs(value - data[i + channel]) < 30))
+        if (color < 0) continue
+        edges[color]++
+        const x = (i / 4) % image.width, y = Math.floor(i / 4 / image.width)
+        left = Math.min(left, x); right = Math.max(right, x)
+        top = Math.min(top, y); bottom = Math.max(bottom, y)
+      }
+      return { edges, ratio: (right - left + 1) / (bottom - top + 1) }
+    }, pixels.toString('base64'))
+    assert.ok(rendered.edges.every(count => count > 0), 'an icon edge was cropped')
+    assert.ok(Math.abs(rendered.ratio - ratio) < 0.12, 'rendered icon aspect ratio was distorted')
+  }
+
+  for (const [library, name, fixture, ratio] of [
+    [true, 'aspect-wide', 0, 2], [true, 'aspect-square', 2, 1],
+    [false, 'direct-wide.png', 0, 2], [false, 'direct-tall.png', 1, 0.5]
+  ]) {
+    await button('编辑').first().click()
+    if (library) {
+      await routeDialog.getByRole('button', { name: '从图标库选择…' }).click()
+      await pickerSearch.fill(name)
+      await picker.getByRole('option', { name, exact: true }).waitFor()
+      await pickerSearch.press('Enter')
+    } else {
+      const response = page.waitForResponse(response => response.url().endsWith('/api/route-images/upload') && response.request().method() === 'POST')
+      await routeDialog.locator('input[type=file]').setInputFiles(aspectFile(fixture, name))
+      const uploaded = await (await response).json()
+      await page.waitForFunction(id => document.querySelector('.route-icon-img')?.getAttribute('src')?.endsWith(id), uploaded.id)
+    }
+    await assertCompleteIcon(routePreview, ratio)
+    const imageURL = await routePreview.getAttribute('src')
+    assert.match(imageURL, library ? /^\/api\/icons\/file\// : /^\/api\/route-images\//)
+    await routeDialog.getByRole('button', { name: '保存路由', exact: true }).click()
+    await routeDialog.waitFor({ state: 'hidden' })
+    const cardImage = page.locator('.routes-grid img').filter({ visible: true }).first()
+    await page.waitForFunction(url => document.querySelector('.routes-grid img')?.getAttribute('src') === url, imageURL)
+    await assertCompleteIcon(cardImage, ratio)
+  }
+  console.log('PASS route icon proportions: square, wide and tall images keep all four edges in library/upload previews and cards')
 
   await page.setViewportSize({ width: 390, height: 844 })
   await route('icons')

@@ -999,6 +999,7 @@ onUnmounted(() => {
   display: flex; align-items: center; justify-content: center;
   border: 1px solid var(--line); flex-shrink: 0;
 }
+.app-icon-wrap img { display: block; object-fit: contain; flex-shrink: 0; }
 .app-icon-wrap.system { background: rgba(99, 102, 241, 0.12); color: var(--brand-light); }
 .app-icon-wrap.storage { background: rgba(6, 182, 212, 0.12); color: var(--brand-cyan); }
 .app-icon-wrap.security { background: rgba(245, 158, 11, 0.12); color: var(--warn); }

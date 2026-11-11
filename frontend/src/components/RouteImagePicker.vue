@@ -217,6 +217,7 @@ function importImage() {
   height: 40px !important;
   min-width: 40px !important;
   min-height: 40px !important;
+  padding: 3px;
   border-radius: var(--radius-sm) !important;
   background: var(--strip-bg) !important;
   border: 1px solid var(--line) !important;
@@ -229,10 +230,11 @@ function importImage() {
   box-sizing: border-box !important;
 }
 .route-icon-img {
+  display: block;
   width: 100%;
   height: 100%;
   object-fit: contain;
-  padding: 2px;
+  flex-shrink: 0;
 }
 .fallback-icon {
   color: var(--faint);
