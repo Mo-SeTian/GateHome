@@ -57,10 +57,10 @@ try {
   const origin = `http://gatehome-console.test:${port}`
   await startServer(port)
   browser = await chromium.launch({
-    ...(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : {}),
+    ...(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : { channel: 'chromium' }),
     args: ['--host-resolver-rules=MAP gatehome-console.test 127.0.0.1', '--no-proxy-server']
   })
-  const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce', hasTouch: true })
+  const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce' })
   const page = await context.newPage()
   page.setDefaultTimeout(10000)
   const errors = []
@@ -587,8 +587,8 @@ try {
   assert.ok(await notice('安全策略').evaluate(el => el.classList.contains('type-warning')))
   assert.ok(await notice('动态域名任务').evaluate(el => el.classList.contains('type-info')))
 
-  async function checkNotificationColors() {
-    const presentation = await center.evaluate(el => {
+  async function checkNotificationColors(drawer = center) {
+    const presentation = await drawer.evaluate(el => {
       const ctx = document.createElement('canvas').getContext('2d')
       const luminance = ([r, g, b]) => [r, g, b].map(value => value / 255)
         .map(value => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4)
@@ -629,66 +629,91 @@ try {
   assert.equal(await notificationTrigger.evaluate(el => el === document.activeElement), true)
   console.log('PASS notification drawer: four contrast-checked severities, legacy types, native focus and Escape')
 
-  const touchSession = await context.newCDPSession(page)
-  await touchSession.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 44, bottom: 34, left: 18, right: 18 } })
-  async function touch(type, points) {
-    await touchSession.send('Input.dispatchTouchEvent', { type, touchPoints: points })
-  }
-  for (const [width, theme] of [[390, 'dark'], [320, 'light']]) {
-    await page.setViewportSize({ width, height: 844 })
-    if (theme === 'light') await page.getByTitle('切换为浅色模式').click()
-    await notificationTrigger.click()
-    await center.waitFor()
-    const bounds = await center.boundingBox()
-    assert.equal(bounds.x, 0)
-    assert.equal(bounds.width, width)
-    assert.equal(Math.round(bounds.y + bounds.height), 844)
-    const deleteBounds = await noticeCards.first().getByRole('button', { name: '删除此通知' }).boundingBox()
-    assert.ok(deleteBounds.width >= 44 && deleteBounds.height >= 44)
-    assert.ok(deleteBounds.x + deleteBounds.width <= width - 18)
-    assert.equal(await center.locator('.drawer-panel').evaluate(el => getComputedStyle(el).paddingBottom), '34px')
-    assert.ok(await center.locator('.drawer-body').evaluate(el => el.scrollWidth <= el.clientWidth))
-    assert.ok(await notice('诊断记录').locator('.card-content').evaluate(el => el.scrollWidth <= el.clientWidth))
-    await checkNotificationColors()
-    if (process.env.GATEHOME_BROWSER_ARTIFACTS) {
-      await page.screenshot({ path: path.join(process.env.GATEHOME_BROWSER_ARTIFACTS, `notifications-${width}-${theme}.png`) })
+  const mobileContext = await browser.newContext({
+    storageState: await context.storageState(),
+    viewport: { width: 390, height: 844 },
+    isMobile: true,
+    hasTouch: true,
+    deviceScaleFactor: 2,
+    reducedMotion: 'reduce'
+  })
+  {
+    const page = await mobileContext.newPage()
+    page.setDefaultTimeout(10000)
+    page.on('pageerror', () => errors.push('mobile notification page exception'))
+    page.on('console', message => {
+      if (message.type() === 'error') errors.push(message.text().replaceAll(secret, '<REDACTED>'))
+    })
+    await page.goto(origin + '/console/#/routes')
+    const notificationTrigger = page.locator('.notification-btn')
+    const center = page.getByRole('dialog', { name: '通知中心', exact: true })
+    const noticeCards = center.locator('.notification-card')
+    const notice = message => noticeCards.filter({ hasText: message })
+    const centerClose = center.getByRole('button', { name: '关闭通知中心' })
+    const touchSession = await mobileContext.newCDPSession(page)
+    await touchSession.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 44, bottom: 34, left: 18, right: 18 } })
+    async function touch(type, points) {
+      await touchSession.send('Input.dispatchTouchEvent', { type, touchPoints: points })
     }
-    if (theme === 'dark') {
-      const handle = await center.locator('.drawer-handle').boundingBox()
-      const point = { x: handle.x + handle.width / 2, y: handle.y + handle.height / 2 }
-      await touch('touchStart', [point])
-      await touch('touchMove', [{ ...point, y: point.y + 72 }])
-      await touch('touchEnd', [])
-      await center.waitFor({ state: 'hidden' })
+    for (const [width, theme] of [[390, 'dark'], [320, 'light']]) {
+      await page.setViewportSize({ width, height: 844 })
+      if (theme === 'light') await page.getByTitle('切换为浅色模式').click()
+      await notificationTrigger.click()
+      await center.waitFor()
+      const bounds = await center.boundingBox()
+      assert.equal(bounds.x, 0)
+      assert.equal(bounds.width, width)
+      assert.equal(Math.round(bounds.y + bounds.height), 844)
+      const deleteBounds = await noticeCards.first().getByRole('button', { name: '删除此通知' }).boundingBox()
+      assert.ok(deleteBounds.width >= 44 && deleteBounds.height >= 44)
+      assert.ok(deleteBounds.x + deleteBounds.width <= width - 18)
+      assert.equal(await center.locator('.drawer-panel').evaluate(el => getComputedStyle(el).paddingBottom), '34px')
+      assert.ok(await center.locator('.drawer-body').evaluate(el => el.scrollWidth <= el.clientWidth))
+      assert.ok(await notice('诊断记录').locator('.card-content').evaluate(el => el.scrollWidth <= el.clientWidth))
+      await checkNotificationColors(center)
+      if (process.env.GATEHOME_BROWSER_ARTIFACTS) {
+        await page.screenshot({ path: path.join(process.env.GATEHOME_BROWSER_ARTIFACTS, `notifications-${width}-${theme}.png`) })
+      }
+      if (theme === 'dark') {
+        await centerClose.click()
+        await center.waitFor({ state: 'hidden' })
+      }
     }
-  }
-  await notice('网关证书').getByRole('button', { name: '删除此通知' }).tap({ position: { x: 6, y: 6 } })
-  await notice('网关证书').waitFor({ state: 'detached' })
-  assert.ok(await center.isVisible(), 'deletion accidentally activated the notification link')
-  await touchSession.send('Emulation.setSafeAreaInsetsOverride', { insets: {} })
-  await touchSession.detach()
-  console.log('PASS notification sheet: 320px/390px themes, safe-area layout, 44px touch deletion and swipe dismissal')
 
-  const expired = notice('登录已过期')
-  const unreadBackground = await expired.evaluate(el => getComputedStyle(el).backgroundColor)
-  await expired.locator('.card-content').press('Enter')
-  assert.equal(await expired.evaluate(el => el.classList.contains('unread')), false)
-  assert.notEqual(await expired.evaluate(el => getComputedStyle(el).backgroundColor), unreadBackground)
-  await center.getByRole('button', { name: '全部已读', exact: true }).click()
-  assert.equal(await center.locator('.notification-card.unread').count(), 0)
-  assert.equal(await notificationTrigger.locator('.notification-count').count(), 0)
-  await center.getByRole('button', { name: /^备份与系统/ }).click()
-  assert.equal(await noticeCards.count(), 4)
-  await notice('WebDAV 定时备份').locator('.card-content').click()
-  await center.waitFor({ state: 'hidden' })
-  await page.waitForFunction(() => location.hash === '#/backups')
-  await notificationTrigger.click()
-  await center.getByRole('button', { name: '清空', exact: true }).click()
-  await center.getByText('暂无通知记录').waitFor()
-  assert.deepEqual(await page.evaluate(() => JSON.parse(localStorage.getItem('gatehome_notifications_history'))), [])
-  await centerClose.click()
-  await center.waitFor({ state: 'hidden' })
-  console.log('PASS notification history: keyboard mark-read, bulk read, category counts, navigation and clear')
+    await notice('网关证书').getByRole('button', { name: '删除此通知' }).tap({ position: { x: 6, y: 6 } })
+    await notice('网关证书').waitFor({ state: 'detached' })
+    assert.ok(await center.isVisible(), 'deletion accidentally activated the notification link')
+    await touchSession.send('Emulation.setSafeAreaInsetsOverride', { insets: {} })
+    console.log('PASS notification sheet: 320px/390px themes, safe-area layout and 44px touch deletion')
+
+    const expired = notice('登录已过期')
+    const unreadBackground = await expired.evaluate(el => getComputedStyle(el).backgroundColor)
+    await expired.locator('.card-content').press('Enter')
+    assert.equal(await expired.evaluate(el => el.classList.contains('unread')), false)
+    assert.notEqual(await expired.evaluate(el => getComputedStyle(el).backgroundColor), unreadBackground)
+    await center.getByRole('button', { name: '全部已读', exact: true }).click()
+    assert.equal(await center.locator('.notification-card.unread').count(), 0)
+    assert.equal(await notificationTrigger.locator('.notification-count').count(), 0)
+    await center.getByRole('button', { name: /^备份与系统/ }).click()
+    assert.equal(await noticeCards.count(), 4)
+    await notice('WebDAV 定时备份').locator('.card-content').click()
+    await center.waitFor({ state: 'hidden' })
+    await page.waitForFunction(() => location.hash === '#/backups')
+    await notificationTrigger.click()
+    await center.getByRole('button', { name: '清空', exact: true }).click()
+    await center.getByText('暂无通知记录').waitFor()
+    assert.deepEqual(await page.evaluate(() => JSON.parse(localStorage.getItem('gatehome_notifications_history'))), [])
+    // Finish with the synthetic swipe, which can briefly suppress subsequent taps in Chromium.
+    const handle = await center.locator('.drawer-handle').boundingBox()
+    const point = { x: handle.x + handle.width / 2, y: handle.y + handle.height / 2 }
+    await touch('touchStart', [point])
+    await touch('touchMove', [{ ...point, y: point.y + 72 }])
+    await touch('touchEnd', [])
+    await center.waitFor({ state: 'hidden' })
+    await touchSession.detach()
+    console.log('PASS notification history: keyboard mark-read, bulk read, category counts, navigation, clear and swipe dismissal')
+  }
+  await mobileContext.close()
 
   assert.deepEqual(errors, [], 'browser emitted errors during regression')
   console.log('PASS mobile layout and zero browser errors; disposable fixture cleaned')
