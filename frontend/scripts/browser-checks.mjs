@@ -60,7 +60,7 @@ try {
     ...(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : {}),
     args: ['--host-resolver-rules=MAP gatehome-console.test 127.0.0.1', '--no-proxy-server']
   })
-  const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce' })
+  const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce', hasTouch: true })
   const page = await context.newPage()
   page.setDefaultTimeout(10000)
   const errors = []
@@ -630,7 +630,6 @@ try {
   console.log('PASS notification drawer: four contrast-checked severities, legacy types, native focus and Escape')
 
   const touchSession = await context.newCDPSession(page)
-  await touchSession.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 })
   await touchSession.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 44, bottom: 34, left: 18, right: 18 } })
   async function touch(type, points) {
     await touchSession.send('Input.dispatchTouchEvent', { type, touchPoints: points })
@@ -663,13 +662,10 @@ try {
       await center.waitFor({ state: 'hidden' })
     }
   }
-  const warningDelete = await notice('网关证书').getByRole('button', { name: '删除此通知' }).boundingBox()
-  await touch('touchStart', [{ x: warningDelete.x + 6, y: warningDelete.y + 6 }])
-  await touch('touchEnd', [])
+  await notice('网关证书').getByRole('button', { name: '删除此通知' }).tap({ position: { x: 6, y: 6 } })
   await notice('网关证书').waitFor({ state: 'detached' })
   assert.ok(await center.isVisible(), 'deletion accidentally activated the notification link')
   await touchSession.send('Emulation.setSafeAreaInsetsOverride', { insets: {} })
-  await touchSession.send('Emulation.setTouchEmulationEnabled', { enabled: false })
   await touchSession.detach()
   console.log('PASS notification sheet: 320px/390px themes, safe-area layout, 44px touch deletion and swipe dismissal')
 
