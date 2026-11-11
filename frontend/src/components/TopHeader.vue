@@ -46,11 +46,15 @@
         class="icon-action-btn notification-btn" 
         :class="{ 'has-unread': unreadCount > 0, active: isCenterOpen }"
         :title="unreadCount > 0 ? `通知中心 (${unreadCount} 条未读)` : '通知中心'" 
+        type="button"
+        aria-haspopup="dialog"
+        aria-controls="notification-center"
+        :aria-expanded="isCenterOpen"
+        :aria-label="unreadCount ? `打开通知中心，${unreadCount} 条未读` : '打开通知中心'"
         @click="toggleCenter"
-        aria-label="打开通知中心"
       >
-        <Bell :size="18" />
-        <span v-if="unreadCount > 0" class="badge-dot">{{ unreadCount > 99 ? '99+' : unreadCount }}</span>
+        <Bell :size="18" aria-hidden="true" />
+        <span v-if="unreadCount > 0" class="notification-count" aria-hidden="true">{{ unreadCount > 99 ? '99+' : unreadCount }}</span>
       </button>
 
       <!-- User Profile Dropdown Menu -->
@@ -350,22 +354,23 @@ onUnmounted(() => {
 .notification-btn.has-unread {
   color: var(--ink);
 }
-.notification-btn .badge-dot {
+.notification-count {
   position: absolute;
   top: -3px;
   right: -3px;
-  background: var(--bad);
-  color: #fff;
-  font-size: 9px;
+  background: color-mix(in srgb, var(--brand) 18%, var(--popover-bg));
+  color: var(--ink);
+  font-size: 10px;
   font-weight: 700;
-  min-width: 15px;
-  height: 15px;
+  font-variant-numeric: tabular-nums;
+  min-width: 17px;
+  height: 17px;
   border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 0 3px;
-  border: 2px solid var(--canvas);
+  border: 1px solid var(--card-border-hover);
   line-height: 1;
 }
 .notification-btn.active {

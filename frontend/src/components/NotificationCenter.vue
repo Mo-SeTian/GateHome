@@ -1,137 +1,105 @@
 <template>
-  <teleport to="body">
-    <transition name="drawer-mask">
-      <div 
-        v-if="isCenterOpen" 
-        class="notification-backdrop" 
-        @click="closeCenter"
-        aria-hidden="true"
-      />
-    </transition>
-
-    <transition name="drawer-slide">
-      <aside 
-        v-if="isCenterOpen" 
-        class="notification-drawer" 
-        role="dialog" 
-        aria-label="消息通知中心"
-        aria-modal="true"
-        @keydown.esc="closeCenter"
-      >
-        <!-- Mobile Drag Handle -->
-        <div class="mobile-drag-bar" @click="closeCenter">
-          <span class="drag-handle-pill" />
+  <Teleport to="body">
+    <dialog
+      id="notification-center"
+      ref="drawer"
+      class="notification-drawer"
+      aria-labelledby="notification-center-title"
+      @cancel.prevent="closeCenter"
+      @click.self="closeCenter"
+    >
+      <div class="drawer-panel">
+        <div class="drawer-handle" aria-hidden="true" @pointerdown="startDrag" @pointerup="finishDrag">
+          <span />
         </div>
 
-        <!-- Drawer Header -->
-        <header class="drawer-header">
-          <div class="header-title-wrap">
-            <h2 class="drawer-title">通知中心</h2>
-            <span v-if="unreadCount > 0" class="badge-unread">
-              {{ unreadCount }} 条未读
-            </span>
+        <div class="drawer-header">
+          <div class="drawer-heading">
+            <h2 id="notification-center-title">通知中心</h2>
+            <span v-if="unreadCount" class="unread-count">{{ unreadCount }} 条未读</span>
           </div>
-
           <div class="header-actions">
-            <button 
-              v-if="unreadCount > 0" 
-              class="btn-text-action" 
-              @click="markAllAsRead"
-              title="将全部通知标记为已读"
-            >
+            <button type="button" class="header-action" :disabled="!unreadCount" @click="markAllAsRead">
               全部已读
             </button>
-            <button 
-              v-if="notifications.length > 0" 
-              class="btn-text-action action-danger" 
-              @click="clearAllNotifications"
-              title="清空所有通知历史"
-            >
+            <button type="button" class="header-action" :disabled="!notifications.length" @click="clearAllNotifications">
               清空
             </button>
-            <button 
-              class="btn-close-drawer" 
-              @click="closeCenter"
-              title="关闭通知中心 (Esc)"
-              aria-label="关闭通知中心"
-            >
-              <X :size="16" />
+            <button type="button" class="drawer-close" aria-label="关闭通知中心" autofocus @click="closeCenter">
+              <X :size="16" aria-hidden="true" />
             </button>
           </div>
-        </header>
+        </div>
 
-        <!-- Category Filter Tabs -->
-        <div class="category-tabs" role="tablist">
-          <button 
-            v-for="tab in filterTabs" 
+        <div class="category-tabs" role="group" aria-label="通知分类">
+          <button
+            v-for="tab in filterTabs"
             :key="tab.key"
+            type="button"
             class="tab-btn"
-            :class="{ active: currentCategory === tab.key }"
-            role="tab"
-            :aria-selected="currentCategory === tab.key"
+            :aria-pressed="currentCategory === tab.key"
             @click="currentCategory = tab.key"
           >
             {{ tab.label }}
-            <span v-if="tab.count > 0" class="tab-count">{{ tab.count }}</span>
+            <span v-if="tab.count" class="tab-count">{{ tab.count }}</span>
           </button>
         </div>
 
-        <!-- Notification List -->
         <div class="drawer-body">
-          <div v-if="filteredList.length === 0" class="empty-state">
-            <Inbox :size="38" class="empty-icon" />
-            <p class="empty-title">暂无通知记录</p>
-            <p class="empty-desc">当前分类下没有通知消息，系统运行稳定</p>
+          <div v-if="!filteredList.length" class="empty-state">
+            <Inbox :size="30" aria-hidden="true" />
+            <p>暂无通知记录</p>
           </div>
 
-          <div v-else class="notifications-list">
-            <div 
-              v-for="item in filteredList" 
+          <ul v-else class="notifications-list">
+            <li
+              v-for="item in filteredList"
               :key="item.id"
               class="notification-card"
-              :class="[`type-${item.type}`, { unread: item.unread, clickable: !!item.path }]"
-              @click="handleCardClick(item)"
+              :class="[`type-${item.severity}`, { unread: item.unread }]"
             >
-              <!-- Unread status left edge accent strip -->
-              <div v-if="item.unread" class="unread-indicator" />
-
-              <div class="card-top-row">
-                <div class="card-category">
-                  <span class="category-pill" :class="`pill-${item.category || 'system'}`">
-                    <span class="pill-dot" />
-                    {{ categoryName(item.category) }}
+              <button
+                type="button"
+                class="card-content"
+                :aria-disabled="!item.unread && !item.path ? true : undefined"
+                @click="handleCardClick(item)"
+              >
+                <span class="card-meta">
+                  <span class="category-pill">
+                    <component :is="item.categoryDetails.icon" :size="12" aria-hidden="true" />
+                    {{ item.categoryDetails.label }}
                   </span>
-                  <span class="time-ago">{{ formatTime(item.createdAt) }}</span>
-                </div>
+                  <span class="type-label" :class="{ 'screen-reader-only': item.severity === 'info' }">
+                    {{ typeLabels[item.severity] }}
+                  </span>
+                  <time :datetime="item.createdAt" class="time-ago">{{ formatTime(item.createdAt) }}</time>
+                </span>
+                <span class="card-message">{{ item.message }}</span>
+                <span class="screen-reader-only">{{ item.unread ? '未读' : '已读' }}</span>
+                <span v-if="item.path" class="card-link">查看详情 <ArrowUpRight :size="12" aria-hidden="true" /></span>
+              </button>
 
-                <button 
-                  class="card-delete-btn" 
-                  title="删除此通知"
-                  aria-label="删除此通知"
-                  @click.stop="removeNotification(item.id)"
-                >
-                  <X :size="12" />
-                </button>
-              </div>
-
-              <div class="card-message">{{ item.message }}</div>
-
-              <div v-if="item.path" class="card-footer-hint">
-                <span>点击前往相关配置</span>
-                <span class="arrow-hint">&rarr;</span>
-              </div>
-            </div>
-          </div>
+              <button
+                type="button"
+                class="card-delete-btn"
+                aria-label="删除此通知"
+                title="删除此通知"
+                @click="removeNotification(item.id)"
+              >
+                <X :size="14" aria-hidden="true" />
+              </button>
+            </li>
+          </ul>
         </div>
-      </aside>
-    </transition>
-  </teleport>
+      </div>
+    </dialog>
+  </Teleport>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { X, Inbox } from 'lucide-vue-next'
+import { ArrowUpRight, Bell, Bot, Globe, HardDrive, Inbox, Lock, Shield, X } from 'lucide-vue-next'
 import { useToast } from '@/composables/useToast'
 
 const router = useRouter()
@@ -146,511 +114,430 @@ const {
   clearAllNotifications
 } = useToast()
 
+const categories = {
+  system: { label: '系统通知', icon: Bell, tab: 'system' },
+  waf: { label: '安全防护', icon: Shield, tab: 'waf' },
+  ddns: { label: '动态域名', icon: Globe, tab: 'ddns' },
+  backup: { label: '系统备份', icon: HardDrive, tab: 'system' },
+  cert: { label: '证书任务', icon: Lock, tab: 'system' },
+  mcp: { label: 'AI 管理', icon: Bot, tab: 'system' }
+}
+const typeLabels = { info: '信息', success: '成功', warning: '警告', error: '错误' }
+const drawer = ref(null)
 const currentCategory = ref('all')
+let dragStart = 0
+
+watch(isCenterOpen, open => {
+  if (open) drawer.value.showModal()
+  else drawer.value.close()
+}, { flush: 'post' })
+
+const entries = computed(() => notifications.value.map(item => {
+  const type = item.type === 'warn' ? 'warning' : item.type
+  return {
+    ...item,
+    severity: Object.hasOwn(typeLabels, type) ? type : 'info',
+    categoryDetails: Object.hasOwn(categories, item.category) ? categories[item.category] : categories.system
+  }
+}))
 
 const filterTabs = computed(() => {
-  const counts = { all: notifications.value.length, waf: 0, ddns: 0, backup: 0, other: 0 }
-  notifications.value.forEach(item => {
-    if (item.category === 'waf') counts.waf++
-    else if (item.category === 'ddns') counts.ddns++
-    else if (item.category === 'backup') counts.backup++
-    else counts.other++
-  })
-
+  const counts = { waf: 0, ddns: 0, system: 0 }
+  for (const item of entries.value) counts[item.categoryDetails.tab]++
   return [
-    { key: 'all', label: '全部', count: counts.all },
+    { key: 'all', label: '全部', count: entries.value.length },
     { key: 'waf', label: '安全拦截', count: counts.waf },
     { key: 'ddns', label: '动态域名', count: counts.ddns },
-    { key: 'backup', label: '备份/系统', count: counts.backup + counts.other }
+    { key: 'system', label: '备份与系统', count: counts.system }
   ]
 })
 
-const filteredList = computed(() => {
-  if (currentCategory.value === 'all') return notifications.value
-  if (currentCategory.value === 'backup') {
-    return notifications.value.filter(n => n.category === 'backup' || n.category === 'cert' || n.category === 'system' || n.category === 'mcp')
-  }
-  return notifications.value.filter(n => n.category === currentCategory.value)
-})
-
-function categoryName(cat) {
-  switch (cat) {
-    case 'waf': return '安全防护 · WAF'
-    case 'ddns': return '动态域名 · DDNS'
-    case 'backup': return '系统备份 · WebDAV'
-    case 'cert': return '证书任务 · ACME'
-    case 'mcp': return 'AI 管理 · MCP'
-    default: return '系统通知'
-  }
-}
+const filteredList = computed(() => currentCategory.value === 'all'
+  ? entries.value
+  : entries.value.filter(item => item.categoryDetails.tab === currentCategory.value))
 
 function formatTime(isoString) {
   if (!isoString) return '刚刚'
   const date = new Date(isoString)
   const now = new Date()
   const diffSec = Math.floor((now - date) / 1000)
-
   if (diffSec < 60) return '刚刚'
   if (diffSec < 3600) return `${Math.floor(diffSec / 60)} 分钟前`
-  if (diffSec < 86400 && date.getDate() === now.getDate()) {
-    const hh = String(date.getHours()).padStart(2, '0')
-    const mm = String(date.getMinutes()).padStart(2, '0')
-    return `今天 ${hh}:${mm}`
-  }
-  const m = date.getMonth() + 1
-  const d = date.getDate()
   const hh = String(date.getHours()).padStart(2, '0')
   const mm = String(date.getMinutes()).padStart(2, '0')
-  return `${m}月${d}日 ${hh}:${mm}`
+  if (diffSec < 86400 && date.getDate() === now.getDate()) return `今天 ${hh}:${mm}`
+  return `${date.getMonth() + 1}月${date.getDate()}日 ${hh}:${mm}`
 }
 
 function handleCardClick(item) {
-  markAsRead(item.id)
+  if (item.unread) markAsRead(item.id)
   if (item.path) {
     router.push(item.path)
     closeCenter()
   }
 }
 
-// Global keyboard Esc handler
-function onKeydown(e) {
-  if (e.key === 'Escape' && isCenterOpen.value) {
-    closeCenter()
-  }
+function startDrag(event) {
+  if (!event.isPrimary || event.button !== 0) return
+  event.currentTarget.setPointerCapture(event.pointerId)
+  dragStart = event.clientY
 }
 
-onMounted(() => {
-  window.addEventListener('keydown', onKeydown)
-})
-
-onUnmounted(() => {
-  window.removeEventListener('keydown', onKeydown)
-})
+function finishDrag(event) {
+  if (!event.isPrimary || !event.currentTarget.hasPointerCapture(event.pointerId)) return
+  const distance = event.clientY - dragStart
+  if (distance > 48 || Math.abs(distance) < 4) closeCenter()
+}
 </script>
 
 <style scoped>
-/* Backdrop */
-.notification-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
-  z-index: 9990;
+:global(body:has(.notification-drawer[open])) {
+  overflow: hidden;
 }
 
-/* Drawer Shell (Desktop Default) */
-.notification-drawer {
-  position: fixed;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: 360px;
-  background: var(--card-bg);
-  backdrop-filter: blur(36px) saturate(190%);
-  -webkit-backdrop-filter: blur(36px) saturate(190%);
-  border-left: 1px solid var(--card-border);
-  box-shadow: -15px 0 45px rgba(0, 0, 0, 0.5), var(--inner-highlight);
-  z-index: 9995;
+dialog.notification-drawer {
+  --notice-info: #4338ca;
+  --notice-success: #047857;
+  --notice-warning: #92400e;
+  --notice-error: #be123c;
+  --drawer-start: translateX(100%);
+  --drawer-inset-left: 16px;
+  --drawer-inset-right: 16px;
+  inset: 0 0 0 auto;
+  width: min(390px, 100%) !important;
+  max-width: none;
+  height: 100dvh;
+  max-height: none !important;
+  margin: 0 !important;
+  border: 0 !important;
+  border-inline-start: 1px solid var(--line) !important;
+  border-radius: 0 !important;
+  background: var(--popover-bg) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  box-shadow: -10px 0 36px rgb(0 0 0 / 18%) !important;
+}
+
+:global(body.theme-dark #notification-center) {
+  --notice-info: #a5b4fc;
+  --notice-success: #6ee7b7;
+  --notice-warning: #fcd34d;
+  --notice-error: #fda4af;
+}
+
+.notification-drawer::backdrop {
+  background: rgb(4 7 13 / 44%) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.notification-drawer[open] {
+  animation: drawer-enter 220ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes drawer-enter {
+  from { transform: var(--drawer-start); }
+  to { transform: translate(0); }
+}
+
+.drawer-panel {
   display: flex;
   flex-direction: column;
-  color: var(--ink);
+  min-height: 0;
+  flex: 1;
 }
 
-.mobile-drag-bar {
+.drawer-handle {
   display: none;
 }
 
-/* Header */
 .drawer-header {
-  padding: 16px 18px;
-  border-bottom: 1px solid var(--line);
   display: flex;
-  align-items: center;
   justify-content: space-between;
-}
-
-.header-title-wrap {
-  display: flex;
   align-items: center;
   gap: 8px;
+  padding: 10px var(--drawer-inset-right) 10px var(--drawer-inset-left);
+  border-bottom: 1px solid var(--line);
 }
 
-.drawer-title {
-  font-size: 16px;
+.drawer-heading {
+  min-width: 0;
+}
+
+.drawer-heading h2 {
+  font-size: 17px;
+  line-height: 1.3;
   font-weight: 700;
-  margin: 0;
-  color: var(--ink);
-  letter-spacing: -0.2px;
+  white-space: nowrap;
 }
 
-.badge-unread {
+.unread-count {
+  display: block;
+  margin-top: 2px;
+  color: var(--notice-info);
   font-size: 11px;
-  font-weight: 700;
-  padding: 2px 7px;
-  border-radius: 10px;
-  background: rgba(99, 102, 241, 0.18);
-  color: #818cf8;
-  border: 1px solid rgba(99, 102, 241, 0.3);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .header-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
+  flex-shrink: 0;
 }
 
-.btn-text-action {
-  background: transparent;
-  border: none;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--muted);
-  cursor: pointer;
-  padding: 4px 6px;
+.header-action, .drawer-close, .card-delete-btn {
   border-radius: var(--radius-sm);
-  transition: all 0.15s ease;
-}
-.btn-text-action:hover {
-  color: var(--ink);
-  background: var(--strip-bg);
-}
-.btn-text-action.action-danger {
-  color: var(--bad);
-}
-.btn-text-action.action-danger:hover {
-  background: rgba(239, 68, 68, 0.12);
-}
-
-.btn-close-drawer {
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  background: var(--strip-bg);
-  border: 1px solid var(--line);
   color: var(--muted);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-.btn-close-drawer:hover {
-  color: var(--ink);
-  border-color: var(--card-border-hover);
-  transform: scale(1.08);
 }
 
-/* Category Tabs */
+.header-action {
+  min-height: 32px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+.header-action:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.header-action:enabled:hover, .drawer-close:hover, .card-delete-btn:hover {
+  background: var(--spotlight-color);
+  color: var(--ink);
+}
+
+.drawer-close, .card-delete-btn {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+}
+
 .category-tabs {
-  padding: 10px 16px;
   display: flex;
-  gap: 6px;
+  gap: 4px;
+  padding: 6px var(--drawer-inset-right) 6px var(--drawer-inset-left);
   border-bottom: 1px solid var(--line);
   overflow-x: auto;
+  flex-shrink: 0;
 }
 
 .tab-btn {
-  font-size: 11px;
-  font-weight: 600;
-  padding: 4px 10px;
-  border-radius: 14px;
-  background: transparent;
-  border: 1px solid transparent;
-  color: var(--muted);
-  cursor: pointer;
-  white-space: nowrap;
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  transition: all 0.15s ease;
+  min-height: 30px;
+  padding: 0 7px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
 }
-.tab-btn:hover {
+
+.tab-btn:hover, .tab-btn[aria-pressed="true"] {
   color: var(--ink);
   background: var(--strip-bg);
 }
-.tab-btn.active {
-  background: var(--strip-bg);
-  color: var(--ink);
+
+.tab-btn[aria-pressed="true"] {
   border-color: var(--line);
+  font-weight: 600;
 }
 
 .tab-count {
-  font-size: 9.5px;
-  opacity: 0.75;
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }
 
-/* Drawer Body & Cards */
 .drawer-body {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
-  padding: 14px 16px;
+  overscroll-behavior: contain;
+  padding: 10px var(--drawer-inset-right) 12px var(--drawer-inset-left);
 }
 
 .empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  height: 240px;
-  text-align: center;
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  padding: 48px 8px;
   color: var(--muted);
-}
-.empty-icon {
-  margin-bottom: 12px;
-  opacity: 0.4;
-}
-.empty-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--ink);
-  margin: 0 0 4px 0;
-}
-.empty-desc {
-  font-size: 12px;
-  margin: 0;
-  opacity: 0.8;
 }
 
 .notifications-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+  display: grid;
+  gap: 8px;
+  list-style: none;
 }
 
 .notification-card {
-  position: relative;
-  background: var(--strip-bg);
+  --type-ink: var(--notice-info);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 4px;
+  padding: 10px 8px 10px 12px;
   border: 1px solid var(--line);
-  border-radius: 14px;
-  padding: 11px 13px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  transition: all 0.2s ease;
-}
-.notification-card:hover {
-  border-color: var(--card-border-hover);
-  background: var(--card-hover-bg, var(--strip-bg));
-  transform: translateY(-1px);
-}
-.notification-card.clickable {
-  cursor: pointer;
+  border-radius: var(--radius-md);
+  background: var(--strip-bg);
 }
 
-.unread-indicator {
-  position: absolute;
-  left: 0;
-  top: 10px;
-  bottom: 10px;
-  width: 3.5px;
-  border-radius: 0 4px 4px 0;
-  background: var(--brand, #6366f1);
-  box-shadow: 0 0 8px rgba(99, 102, 241, 0.45);
+.type-success { --type-ink: var(--notice-success); }
+.type-warning { --type-ink: var(--notice-warning); }
+.type-error { --type-ink: var(--notice-error); }
+
+.notification-card:is(.type-warning, .type-error, .type-success) {
+  border-color: color-mix(in srgb, var(--type-ink) 20%, var(--line));
 }
 
 .notification-card.unread {
-  background: rgba(99, 102, 241, 0.035);
-  border-color: rgba(99, 102, 241, 0.22);
+  background: color-mix(in srgb, var(--notice-info) 5%, var(--strip-bg));
+  box-shadow: inset 2px 0 color-mix(in srgb, var(--notice-info) 55%, transparent);
 }
 
-.card-top-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+.card-content {
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+  min-width: 0;
+  border-radius: var(--radius-sm);
+  text-align: start;
+  color: var(--ink);
 }
 
-.card-category {
+.card-content[aria-disabled="true"] {
+  cursor: default;
+}
+
+.card-meta {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 7px;
+  gap: 3px 7px;
+  min-height: 22px;
+  max-width: 100%;
 }
 
 .category-pill {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 1.5px 7.5px;
-  border-radius: 6px;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--type-ink) 9%, transparent);
+  color: var(--type-ink);
   font-size: 11px;
   font-weight: 600;
-  line-height: 1.4;
-  border: 1px solid transparent;
-  transition: all 0.15s ease;
+  line-height: 1.45;
+  white-space: nowrap;
 }
 
-.pill-dot {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  flex-shrink: 0;
+.type-label, .time-ago {
+  font-size: 11px;
+  white-space: nowrap;
 }
 
-.pill-system {
-  background: rgba(99, 102, 241, 0.08);
-  border-color: rgba(99, 102, 241, 0.2);
-  color: var(--brand, #6366f1);
-}
-.pill-system .pill-dot {
-  background: var(--brand, #6366f1);
-  box-shadow: 0 0 5px rgba(99, 102, 241, 0.5);
-}
-
-.pill-waf {
-  background: rgba(239, 68, 68, 0.08);
-  border-color: rgba(239, 68, 68, 0.2);
-  color: var(--bad, #ef4444);
-}
-.pill-waf .pill-dot {
-  background: var(--bad, #ef4444);
-  box-shadow: 0 0 5px rgba(239, 68, 68, 0.5);
-}
-
-.pill-ddns {
-  background: rgba(16, 185, 129, 0.08);
-  border-color: rgba(16, 185, 129, 0.2);
-  color: var(--ok, #10b981);
-}
-.pill-ddns .pill-dot {
-  background: var(--ok, #10b981);
-  box-shadow: 0 0 5px rgba(16, 185, 129, 0.5);
-}
-
-.pill-backup {
-  background: rgba(6, 182, 212, 0.08);
-  border-color: rgba(6, 182, 212, 0.2);
-  color: var(--brand-cyan, #06b6d4);
-}
-.pill-backup .pill-dot {
-  background: var(--brand-cyan, #06b6d4);
-  box-shadow: 0 0 5px rgba(6, 182, 212, 0.5);
-}
-
-.pill-cert {
-  background: rgba(6, 182, 212, 0.08);
-  border-color: rgba(6, 182, 212, 0.2);
-  color: var(--brand-cyan, #06b6d4);
-}
-.pill-cert .pill-dot {
-  background: var(--brand-cyan, #06b6d4);
-  box-shadow: 0 0 5px rgba(6, 182, 212, 0.5);
-}
-
-.pill-mcp {
-  background: rgba(139, 92, 246, 0.08);
-  border-color: rgba(139, 92, 246, 0.2);
-  color: #8b5cf6;
-}
-.pill-mcp .pill-dot {
-  background: #8b5cf6;
-  box-shadow: 0 0 5px rgba(139, 92, 246, 0.5);
+.type-label {
+  color: var(--type-ink);
+  font-weight: 600;
 }
 
 .time-ago {
-  font-size: 11px;
   color: var(--muted);
-  opacity: 0.85;
-}
-
-.card-delete-btn {
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  background: transparent;
-  border: none;
-  color: var(--muted);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  opacity: 0.6;
-  transition: all 0.15s ease;
-}
-.notification-card:hover .card-delete-btn {
-  opacity: 1;
-}
-.card-delete-btn:hover {
-  background: rgba(239, 68, 68, 0.15);
-  color: var(--bad);
+  font-variant-numeric: tabular-nums;
 }
 
 .card-message {
-  font-size: 12.5px;
-  color: var(--ink);
+  max-width: 100%;
+  font-size: 13px;
   line-height: 1.45;
   overflow-wrap: anywhere;
 }
 
-.card-footer-hint {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 10.5px;
-  color: var(--brand, #818cf8);
-  padding: 4px 0 0 6px;
-  border-top: 1px solid var(--line);
-  opacity: 0.85;
-}
-.arrow-hint {
-  font-weight: 700;
+.unread .card-message {
+  font-weight: 600;
 }
 
-/* ---------------- MOBILE RESPONSIVE (BOTTOM SHEET) ---------------- */
+.card-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--notice-info);
+  font-size: 11px;
+}
+
+.card-content:hover .card-link {
+  text-decoration: underline;
+}
+
+.screen-reader-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 @media (max-width: 640px) {
-  .notification-drawer {
-    top: auto;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    width: 100%;
-    height: 78%;
-    border-left: none;
-    border-top: 1px solid var(--card-border);
-    border-radius: 24px 24px 0 0;
-    padding-bottom: env(safe-area-inset-bottom, 16px);
+  dialog.notification-drawer {
+    --drawer-start: translateY(100%);
+    --drawer-inset-left: max(12px, env(safe-area-inset-left));
+    --drawer-inset-right: max(12px, env(safe-area-inset-right));
+    inset: auto 0 0;
+    width: 100% !important;
+    height: 80dvh;
+    max-height: calc(100dvh - env(safe-area-inset-top) - 8px) !important;
+    border-inline-start: 0 !important;
+    border-top: 1px solid var(--line) !important;
+    border-radius: 18px 18px 0 0 !important;
   }
 
-  .mobile-drag-bar {
-    display: flex;
-    justify-content: center;
-    padding: 8px 0 4px;
+  .drawer-panel {
+    padding-bottom: max(4px, env(safe-area-inset-bottom));
+  }
+
+  .drawer-handle {
+    display: grid;
+    place-items: center;
+    min-height: 22px;
+    flex-shrink: 0;
+    touch-action: none;
     cursor: pointer;
   }
-  .drag-handle-pill {
-    width: 36px;
+
+  .drawer-handle span {
+    width: 32px;
     height: 4px;
-    border-radius: 2px;
-    background: var(--muted);
-    opacity: 0.4;
+    border-radius: var(--radius-pill);
+    background: var(--faint);
+  }
+
+  .drawer-header {
+    padding-block: 2px 8px;
+  }
+
+  .header-action, .drawer-close, .card-delete-btn {
+    min-height: 44px;
+  }
+
+  .drawer-close, .card-delete-btn {
+    width: 44px;
+  }
+
+  .tab-btn {
+    min-height: 36px;
   }
 }
 
-/* Transitions */
-.drawer-mask-enter-active,
-.drawer-mask-leave-active {
-  transition: opacity 0.25s ease;
-}
-.drawer-mask-enter-from,
-.drawer-mask-leave-to {
-  opacity: 0;
-}
-
-.drawer-slide-enter-active,
-.drawer-slide-leave-active {
-  transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-@media (min-width: 641px) {
-  .drawer-slide-enter-from,
-  .drawer-slide-leave-to {
-    transform: translateX(100%);
-  }
-}
-
-@media (max-width: 640px) {
-  .drawer-slide-enter-from,
-  .drawer-slide-leave-to {
-    transform: translateY(100%);
+@media (prefers-reduced-motion: reduce) {
+  .notification-drawer[open] {
+    animation: none;
   }
 }
 </style>

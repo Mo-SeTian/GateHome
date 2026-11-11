@@ -556,6 +556,144 @@ try {
   await closeEditor()
   console.log('PASS 17 existing views and Icon Library: themes, upload, search, delete, keyboard, route persistence and mobile sheet')
 
+  const notices = [
+    { id: 'expired', type: 'error', category: 'system', message: '登录已过期，请重新登录', unread: true },
+    { id: 'certificate', type: 'warn', category: 'cert', message: '网关证书将在 7 天内到期', unread: true, path: '/certificates' },
+    { id: 'backup', type: 'success', category: 'backup', message: 'WebDAV 定时备份已完成', unread: false, path: '/backups' },
+    { id: 'update', type: 'info', category: 'system', message: '在线更新正在下载安装包', unread: false },
+    { id: 'blocked', type: 'warning', category: 'waf', message: '安全策略已拦截异常请求', unread: true, path: '/access' },
+    { id: 'domain', type: 'system', category: 'ddns', message: '动态域名任务已加入队列', unread: false, path: '/ddns' },
+    { id: 'long', type: 'info', message: '诊断记录' + '界面布局验证'.repeat(36), unread: false }
+  ].map((notice, i) => ({ ...notice, createdAt: new Date(Date.now() - i * 72 * 60000).toISOString() }))
+  await page.evaluate(items => localStorage.setItem('gatehome_notifications_history', JSON.stringify(items)), notices)
+  await page.reload()
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  const notificationTrigger = page.locator('.notification-btn')
+  const center = page.getByRole('dialog', { name: '通知中心', exact: true })
+  const noticeCards = center.locator('.notification-card')
+  const notice = message => noticeCards.filter({ hasText: message })
+  const centerClose = center.getByRole('button', { name: '关闭通知中心' })
+  await page.getByTitle('切换为深色模式').click()
+  await notificationTrigger.click()
+  await center.waitFor()
+  assert.equal(await notificationTrigger.getAttribute('aria-expanded'), 'true')
+  assert.equal(await centerClose.evaluate(el => el === document.activeElement), true)
+  assert.equal(await noticeCards.count(), notices.length)
+  assert.equal(await center.locator('.pill-dot, .unread-indicator').count(), 0)
+  assert.ok((await center.locator('.category-pill').allTextContents()).every(label => !label.includes('·')))
+  assert.equal(await center.locator('.category-pill svg').count(), notices.length)
+  assert.equal(await center.locator('time[datetime]').count(), notices.length)
+  assert.equal(await notice('网关证书').locator('.type-label').textContent().then(value => value.trim()), '警告')
+  assert.ok(await notice('安全策略').evaluate(el => el.classList.contains('type-warning')))
+  assert.ok(await notice('动态域名任务').evaluate(el => el.classList.contains('type-info')))
+
+  async function checkNotificationColors() {
+    const presentation = await center.evaluate(el => {
+      const ctx = document.createElement('canvas').getContext('2d')
+      const luminance = ([r, g, b]) => [r, g, b].map(value => value / 255)
+        .map(value => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4)
+        .reduce((total, value, i) => total + value * [0.2126, 0.7152, 0.0722][i], 0)
+      return [...el.querySelectorAll('.notification-card')].map(card => {
+        const pill = card.querySelector('.category-pill')
+        const pillStyle = getComputedStyle(pill)
+        const cardStyle = getComputedStyle(card)
+        ctx.clearRect(0, 0, 1, 1)
+        for (const layer of [getComputedStyle(el).backgroundColor, cardStyle.backgroundColor, pillStyle.backgroundColor]) {
+          ctx.fillStyle = layer
+          ctx.fillRect(0, 0, 1, 1)
+        }
+        const bg = luminance(ctx.getImageData(0, 0, 1, 1).data)
+        ctx.fillStyle = pillStyle.color
+        ctx.fillRect(0, 0, 1, 1)
+        const fg = luminance(ctx.getImageData(0, 0, 1, 1).data)
+        return { ink: pillStyle.color, contrast: (Math.max(fg, bg) + 0.05) / (Math.min(fg, bg) + 0.05) }
+      })
+    })
+    assert.equal(new Set(presentation.map(row => row.ink)).size, 4, 'notification severity colors are not distinct')
+    assert.ok(presentation.every(row => row.contrast >= 4.5), 'notification badge text contrast fell below 4.5:1')
+  }
+  await checkNotificationColors()
+  if (process.env.GATEHOME_BROWSER_ARTIFACTS) {
+    await page.screenshot({ path: path.join(process.env.GATEHOME_BROWSER_ARTIFACTS, 'notifications-desktop-dark.png') })
+  }
+  for (const key of ['Tab', 'Shift+Tab']) {
+    for (let i = 0; i < 12; i++) {
+      await page.keyboard.press(key)
+      assert.equal(await page.evaluate(() => document.activeElement === document.body ||
+        Boolean(document.activeElement.closest('#notification-center[open]'))), true, 'notification focus left the drawer')
+    }
+  }
+  await page.keyboard.press('Escape')
+  await center.waitFor({ state: 'hidden' })
+  assert.equal(await notificationTrigger.getAttribute('aria-expanded'), 'false')
+  assert.equal(await notificationTrigger.evaluate(el => el === document.activeElement), true)
+  console.log('PASS notification drawer: four contrast-checked severities, legacy types, native focus and Escape')
+
+  const touchSession = await context.newCDPSession(page)
+  await touchSession.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 })
+  await touchSession.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 44, bottom: 34, left: 18, right: 18 } })
+  async function touch(type, points) {
+    await touchSession.send('Input.dispatchTouchEvent', { type, touchPoints: points })
+  }
+  for (const [width, theme] of [[390, 'dark'], [320, 'light']]) {
+    await page.setViewportSize({ width, height: 844 })
+    if (theme === 'light') await page.getByTitle('切换为浅色模式').click()
+    await notificationTrigger.click()
+    await center.waitFor()
+    const bounds = await center.boundingBox()
+    assert.equal(bounds.x, 0)
+    assert.equal(bounds.width, width)
+    assert.equal(Math.round(bounds.y + bounds.height), 844)
+    const deleteBounds = await noticeCards.first().getByRole('button', { name: '删除此通知' }).boundingBox()
+    assert.ok(deleteBounds.width >= 44 && deleteBounds.height >= 44)
+    assert.ok(deleteBounds.x + deleteBounds.width <= width - 18)
+    assert.equal(await center.locator('.drawer-panel').evaluate(el => getComputedStyle(el).paddingBottom), '34px')
+    assert.ok(await center.locator('.drawer-body').evaluate(el => el.scrollWidth <= el.clientWidth))
+    assert.ok(await notice('诊断记录').locator('.card-content').evaluate(el => el.scrollWidth <= el.clientWidth))
+    await checkNotificationColors()
+    if (process.env.GATEHOME_BROWSER_ARTIFACTS) {
+      await page.screenshot({ path: path.join(process.env.GATEHOME_BROWSER_ARTIFACTS, `notifications-${width}-${theme}.png`) })
+    }
+    if (theme === 'dark') {
+      const handle = await center.locator('.drawer-handle').boundingBox()
+      const point = { x: handle.x + handle.width / 2, y: handle.y + handle.height / 2 }
+      await touch('touchStart', [point])
+      await touch('touchMove', [{ ...point, y: point.y + 72 }])
+      await touch('touchEnd', [])
+      await center.waitFor({ state: 'hidden' })
+    }
+  }
+  const warningDelete = await notice('网关证书').getByRole('button', { name: '删除此通知' }).boundingBox()
+  await touch('touchStart', [{ x: warningDelete.x + 6, y: warningDelete.y + 6 }])
+  await touch('touchEnd', [])
+  await notice('网关证书').waitFor({ state: 'detached' })
+  assert.ok(await center.isVisible(), 'deletion accidentally activated the notification link')
+  await touchSession.send('Emulation.setSafeAreaInsetsOverride', { insets: {} })
+  await touchSession.send('Emulation.setTouchEmulationEnabled', { enabled: false })
+  await touchSession.detach()
+  console.log('PASS notification sheet: 320px/390px themes, safe-area layout, 44px touch deletion and swipe dismissal')
+
+  const expired = notice('登录已过期')
+  const unreadBackground = await expired.evaluate(el => getComputedStyle(el).backgroundColor)
+  await expired.locator('.card-content').press('Enter')
+  assert.equal(await expired.evaluate(el => el.classList.contains('unread')), false)
+  assert.notEqual(await expired.evaluate(el => getComputedStyle(el).backgroundColor), unreadBackground)
+  await center.getByRole('button', { name: '全部已读', exact: true }).click()
+  assert.equal(await center.locator('.notification-card.unread').count(), 0)
+  assert.equal(await notificationTrigger.locator('.notification-count').count(), 0)
+  await center.getByRole('button', { name: /^备份与系统/ }).click()
+  assert.equal(await noticeCards.count(), 4)
+  await notice('WebDAV 定时备份').locator('.card-content').click()
+  await center.waitFor({ state: 'hidden' })
+  await page.waitForFunction(() => location.hash === '#/backups')
+  await notificationTrigger.click()
+  await center.getByRole('button', { name: '清空', exact: true }).click()
+  await center.getByText('暂无通知记录').waitFor()
+  assert.deepEqual(await page.evaluate(() => JSON.parse(localStorage.getItem('gatehome_notifications_history'))), [])
+  await centerClose.click()
+  await center.waitFor({ state: 'hidden' })
+  console.log('PASS notification history: keyboard mark-read, bulk read, category counts, navigation and clear')
+
   assert.deepEqual(errors, [], 'browser emitted errors during regression')
   console.log('PASS mobile layout and zero browser errors; disposable fixture cleaned')
 } catch (error) {
