@@ -1,0 +1,78 @@
+.icon-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--input-bg);
+  color: var(--muted);
+}
+.icon-search:focus-within { border-color: var(--brand); outline: 1px solid var(--brand); }
+.icon-search svg { flex-shrink: 0; }
+.icon-search input { background: none; border: 0; width: 100%; min-width: 0; min-height: inherit; color: var(--ink); }
+.icon-search input::placeholder { color: var(--muted); }
+.icon-filters { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; }
+.icon-chip {
+  min-height: 28px;
+  padding: 2px 10px;
+  color: var(--muted);
+  background: var(--strip-bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.icon-chip:hover, .icon-tile:hover { color: var(--ink); border-color: var(--card-border-hover); }
+.icon-chip[aria-pressed="true"], .icon-tile[aria-selected="true"] {
+  color: var(--ink);
+  background: var(--spotlight-color);
+  border-color: var(--brand);
+}
+.icon-tile {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  width: 100%;
+  min-width: 0;
+  color: var(--ink-secondary);
+  background: var(--card-bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  line-height: 1.35;
+}
+.icon-tile img { display: block; object-fit: contain; }
+.icon-tile span { max-width: 100%; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
+.icon-path {
+  display: inline-block;
+  max-width: 100%;
+  padding: 2px 6px;
+  border-radius: 5px;
+  background: var(--spotlight-color);
+  color: var(--brand-light);
+  font: 11px/1.5 var(--mono);
+  overflow-wrap: anywhere;
+}
+.theme-light .icon-path { color: #4f46e5; }
+.icon-empty { color: var(--muted); padding: 22px 8px; text-align: center; }
+.icon-error { color: var(--bad); overflow-wrap: anywhere; }
+dialog .icon-dialog-header { padding: 8px 16px !important; }
+.icon-dialog-header h2 { font-size: 16px; line-height: 1.4; }
+.icon-close {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  color: var(--muted);
+  border-radius: var(--radius-sm);
+}
+.icon-close:hover { background: var(--spotlight-color); color: var(--ink); }
+@media (max-width: 680px) {
+  .icon-chip { min-height: 36px; }
+  .icon-search, .icon-close { min-height: 44px; }
+  .icon-search input { font-size: 16px; }
+  .icon-close { min-width: 44px; }
+}

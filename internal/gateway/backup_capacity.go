@@ -65,7 +65,7 @@ func inspectBackupCapacity(paths StoragePaths, state State) (backupCapacity, err
 	seen := map[string]bool{}
 	for _, route := range state.Config.Routes {
 		if route.Image != "" && !seen[route.Image] {
-			names = append(names, "route-images/"+route.Image+".img")
+			names = append(names, routeImageBackupPath(route.Image))
 			seen[route.Image] = true
 		}
 	}
@@ -84,8 +84,17 @@ func inspectBackupCapacity(paths StoragePaths, state State) (backupCapacity, err
 	}
 	var encodedBytes int64
 	for _, name := range names {
-		info, err := os.Lstat(paths.file(name))
-		if errors.Is(err, os.ErrNotExist) && !strings.HasPrefix(name, "route-images/") {
+		var info os.FileInfo
+		if rel, ok := strings.CutPrefix(name, "icons/"); ok {
+			var file *os.File
+			file, info, err = openIconFile(paths.Data, rel)
+			if err == nil {
+				file.Close()
+			}
+		} else {
+			info, err = os.Lstat(paths.file(name))
+		}
+		if errors.Is(err, os.ErrNotExist) && !isBackupImage(name) {
 			continue
 		}
 		if err != nil || !info.Mode().IsRegular() {
@@ -97,7 +106,7 @@ func inspectBackupCapacity(paths StoragePaths, state State) (backupCapacity, err
 		switch {
 		case strings.HasPrefix(name, "sunpanel/"):
 			c.SunPanelBytes += size
-		case strings.HasPrefix(name, "route-images/"):
+		case isBackupImage(name):
 			c.ImageBytes += size
 		default:
 			c.OtherBytes += size

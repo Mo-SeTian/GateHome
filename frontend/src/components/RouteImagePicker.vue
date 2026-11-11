@@ -10,7 +10,7 @@
       <div class="preview-box" :title="modelValue ? '当前已设置自定义图片' : '默认图标占位'">
         <img
           v-if="modelValue"
-          :src="`/api/route-images/${modelValue}`"
+          :src="routeImageUrl(modelValue)"
           class="route-icon-img"
           width="40"
           height="40"
@@ -22,6 +22,10 @@
       </div>
 
       <div class="upload-action-wrap">
+        <button type="button" class="custom-file-btn" :disabled="busy" @click="libraryOpen = true">
+          <Images :size="13" class="btn-icon" />
+          <span>从图标库选择…</span>
+        </button>
         <label
           class="custom-file-btn"
           :class="{ disabled: busy }"
@@ -75,6 +79,8 @@
       </button>
     </div>
 
+    <IconPickerModal v-if="libraryOpen" :model-value="modelValue" @select="applyLibraryIcon" @close="libraryOpen = false" />
+
     <!-- 底部格式提示 -->
     <div class="picker-footer">
       <span class="file-format-tip">支持 PNG / JPG / GIF / WebP / ICO 格式（建议 1:1 比例）</span>
@@ -98,16 +104,20 @@ import {
   AlertCircle,
   Check,
   Image as ImageIcon,
+  Images,
   Link2,
   RotateCcw,
   Upload
 } from 'lucide-vue-next'
 import { adminApi } from '@/api/admin'
+import { routeImageUrl } from '@/api/icons'
+import IconPickerModal from '@/components/IconPickerModal.vue'
 
 defineProps({ modelValue: String })
 const emit = defineEmits(['update:modelValue', 'busy'])
 const url = ref('')
 const busy = ref(false)
+const libraryOpen = ref(false)
 const error = ref('')
 const message = ref('')
 let active = true
@@ -135,6 +145,12 @@ async function applyImage(operation) {
     busy.value = false
     if (active) emit('busy', false)
   }
+}
+
+function applyLibraryIcon(path) {
+  emit('update:modelValue', path)
+  error.value = ''
+  message.value = '图标已选择，保存路由后生效'
 }
 
 function upload(event) {
@@ -224,6 +240,7 @@ function importImage() {
 }
 
 .upload-action-wrap {
+  flex-wrap: wrap;
   display: flex !important;
   flex-direction: row !important;
   align-items: center !important;

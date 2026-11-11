@@ -589,7 +589,7 @@ func (s *Store) UpdateRouteCredentials(c Config, tokens, certificateTokens map[s
 	}
 	for _, route := range c.Routes {
 		if route.Image != "" {
-			if _, err := readRouteImage(s.paths.Data, route.Image); err != nil {
+			if !routeImageExists(s.paths.Data, route.Image) {
 				return errors.New("反代图片不存在或已失效，请重新选择图片")
 			}
 		}
@@ -883,7 +883,7 @@ func Validate(c Config) error {
 			routeIDs[r.ID] = true
 		}
 		key := r.GroupID + "/" + r.Host
-		if r.Image != "" && !routeImageID.MatchString(r.Image) {
+		if r.Image != "" && !routeImageID.MatchString(r.Image) && !isLibraryImage(r.Image) {
 			return errors.New("反代图片引用无效，请重新选择图片")
 		}
 		if !groups[r.GroupID] {

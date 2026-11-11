@@ -65,6 +65,31 @@ func normalizeRouteImage(data []byte) ([]byte, error) {
 	return out.Bytes(), nil
 }
 
+func isLibraryImage(ref string) bool {
+	return strings.HasPrefix(ref, iconRefPrefix) && safeIconPath(strings.TrimPrefix(ref, iconRefPrefix))
+}
+
+func routeImageExists(dir, ref string) bool {
+	if isLibraryImage(ref) {
+		file, _, err := openIconFile(dir, strings.TrimPrefix(ref, iconRefPrefix))
+		if err != nil {
+			return false
+		}
+		defer file.Close()
+		_, _, err = iconDimensions(file, iconFormat(ref))
+		return err == nil
+	}
+	_, err := readRouteImage(dir, ref)
+	return err == nil
+}
+
+func routeImageBackupPath(ref string) string {
+	if isLibraryImage(ref) {
+		return strings.TrimPrefix(ref, "/")
+	}
+	return "route-images/" + ref + ".img"
+}
+
 func readRouteImage(dir, id string) ([]byte, error) {
 	if !routeImageID.MatchString(id) {
 		return nil, errors.New("图片引用无效")

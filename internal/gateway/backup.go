@@ -9,8 +9,11 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"maps"
 	"os"
+	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -85,7 +88,7 @@ func snapshotBackupPaths(paths StoragePaths, state State) (backupPayload, error)
 	seen := map[string]bool{}
 	for _, route := range state.Config.Routes {
 		if route.Image != "" && !seen[route.Image] {
-			names = append(names, "route-images/"+route.Image+".img")
+			names = append(names, routeImageBackupPath(route.Image))
 			seen[route.Image] = true
 		}
 	}
@@ -95,15 +98,20 @@ func snapshotBackupPaths(paths StoragePaths, state State) (backupPayload, error)
 	}
 	names = append(names, panelNames...)
 	for _, name := range names {
-		path := paths.file(name)
-		info, err := os.Lstat(path)
-		if errors.Is(err, os.ErrNotExist) && !strings.HasPrefix(name, "route-images/") {
-			continue
+		var f *os.File
+		if rel, ok := strings.CutPrefix(name, "icons/"); ok {
+			f, _, err = openIconFile(paths.Data, rel)
+		} else {
+			path := paths.file(name)
+			info, statErr := os.Lstat(path)
+			if errors.Is(statErr, os.ErrNotExist) && !isBackupImage(name) {
+				continue
+			}
+			if statErr != nil || !info.Mode().IsRegular() {
+				return b, errors.New("备份数据文件缺失或不是普通文件")
+			}
+			f, err = os.Open(path)
 		}
-		if err != nil || !info.Mode().IsRegular() {
-			return b, errors.New("备份数据文件缺失或不是普通文件")
-		}
-		f, err := os.Open(path)
 		if err != nil {
 			return b, errors.New("数据文件读取失败")
 		}
@@ -273,6 +281,11 @@ func restoreTargets(paths StoragePaths, full bool, incoming map[string][]byte) [
 		for _, name := range []string{"route-images", "subscriptions"} {
 			targets = append(targets, restoreTarget{name, paths.directory(name), true})
 		}
+		for _, name := range slices.Sorted(maps.Keys(incoming)) {
+			if strings.HasPrefix(name, "icons/") && safeBackupFile(name) {
+				targets = append(targets, restoreTarget{name, paths.file(name), false})
+			}
+		}
 		if logBackupFileCount(incoming) > 0 {
 			if paths.splitLogs() {
 				names := map[string]bool{"logs/calls.jsonl": true, "logs/calls.jsonl.1": true}
@@ -342,7 +355,24 @@ func restoreFilesPaths(paths StoragePaths, state []byte, certificates, files map
 		}
 		defer os.RemoveAll(sunStage)
 	}
+	var iconStage string
+	for name := range files {
+		if strings.HasPrefix(name, "icons/") {
+			if err := prepareIconDirs(paths.Data); err != nil {
+				return err
+			}
+			iconStage, err = stageIcons(paths.Data, ".restore-")
+			if err != nil {
+				return err
+			}
+			defer os.RemoveAll(iconStage)
+			break
+		}
+	}
 	staged := func(name string) string {
+		if iconStage != "" && strings.HasPrefix(name, "icons/") {
+			return filepath.Join(iconStage, strings.TrimPrefix(name, "icons/"))
+		}
 		if sunStage != "" && strings.HasPrefix(name, "sunpanel/") {
 			return filepath.Join(sunStage, strings.TrimPrefix(name, "sunpanel/"))
 		}
@@ -352,7 +382,17 @@ func restoreFilesPaths(paths StoragePaths, state []byte, certificates, files map
 		return filepath.Join(stage, filepath.FromSlash(name))
 	}
 	targets := restoreTargets(paths, files != nil, files)
+	dataRoot, err := os.OpenRoot(paths.Data)
+	if err != nil {
+		return err
+	}
+	defer dataRoot.Close()
 	for _, target := range targets {
+		if strings.HasPrefix(target.name, "icons/") {
+			if _, err := plainIconPath(dataRoot, path.Dir(target.name), true, true); err != nil {
+				return err
+			}
+		}
 		if target.directory {
 			if err := os.Mkdir(staged(target.name), 0700); err != nil {
 				return errors.New("恢复目录准备失败")
@@ -374,7 +414,7 @@ func restoreFilesPaths(paths StoragePaths, state []byte, certificates, files map
 		if !safeBackupFile(name) {
 			return errors.New("无效的备份数据路径")
 		}
-		if strings.HasPrefix(name, "sunpanel/") {
+		if strings.HasPrefix(name, "sunpanel/") || strings.HasPrefix(name, "icons/") {
 			if err := os.MkdirAll(filepath.Dir(staged(name)), 0700); err != nil {
 				return err
 			}

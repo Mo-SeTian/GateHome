@@ -116,7 +116,7 @@
           <div class="app-icon-wrap" :class="routeCategoryClass(route)">
             <img
               v-if="route.image"
-              :src="`/api/route-images/${route.image}`"
+              :src="routeImageUrl(route.image)"
               width="32"
               height="32"
               alt=""
@@ -506,6 +506,7 @@ import {
 import SpotlightCard from '@/components/SpotlightCard.vue'
 import RestartNotice from '@/components/RestartNotice.vue'
 import RouteImagePicker from '@/components/RouteImagePicker.vue'
+import { routeImageUrl } from '@/api/icons'
 import ServiceDiscovery from '@/components/ServiceDiscovery.vue'
 import { adminApi } from '@/api/admin'
 import { defaultRouteTLS, replaceConfigItem, routeHost, routeKey, routeUsesFullHost } from '@/api/configuration'

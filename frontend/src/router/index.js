@@ -19,6 +19,12 @@ const routes = [
     meta: { title: '反向代理', icon: 'Network' }
   },
   {
+    path: '/icons',
+    name: 'Icons',
+    component: () => import('@/views/IconsView.vue'),
+    meta: { title: '图标库', icon: 'Images' }
+  },
+  {
     path: '/forwards',
     name: 'Forwards',
     component: () => import('@/views/ForwardsView.vue'),

@@ -94,6 +94,7 @@ require (
 	github.com/corazawaf/coraza/v3 v3.8.1
 	github.com/go-acme/lego/v4 v4.35.2
 	github.com/lionsoul2014/ip2region/binding/golang v0.0.0-20261008081544-02f04aa559ac
+	github.com/mozillazg/go-pinyin v0.21.0
 	golang.org/x/crypto v0.57.0
 	golang.org/x/image v0.46.0
 	golang.org/x/net v0.58.0

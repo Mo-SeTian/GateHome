@@ -11,7 +11,14 @@ import (
 	"strings"
 )
 
+func isBackupImage(name string) bool {
+	return strings.HasPrefix(name, "route-images/") || strings.HasPrefix(name, "icons/")
+}
+
 func safeBackupFile(name string) bool {
+	if rel, ok := strings.CutPrefix(name, "icons/"); ok {
+		return safeIconPath(rel)
+	}
 	if strings.HasPrefix(name, "sunpanel/") {
 		return safeSunPanelBackupFile(name)
 	}
@@ -55,6 +62,13 @@ func validateBackupFiles(payload backupPayload) error {
 			if !validRouteImage(id, data) {
 				return errors.New("备份中的反代图片损坏或无效")
 			}
+		case strings.HasPrefix(name, "icons/"):
+			if len(data) == 0 || len(data) > maxImageUpload {
+				return errors.New("备份中的图标大小无效")
+			}
+			if _, _, err := iconDimensions(bytes.NewReader(data), iconFormat(name)); err != nil {
+				return errors.New("备份中的图标损坏或无效")
+			}
 		case strings.HasPrefix(name, "logs/"):
 			if len(data) > maxLogBytes {
 				return errors.New("备份日志超过大小限制")
@@ -81,7 +95,7 @@ func validateBackupFiles(payload backupPayload) error {
 		}
 	}
 	for _, r := range payload.State.Config.Routes {
-		if r.Image != "" && payload.Files["route-images/"+r.Image+".img"] == nil {
+		if r.Image != "" && payload.Files[routeImageBackupPath(r.Image)] == nil {
 			return errors.New("备份缺少反代规则使用的图片")
 		}
 	}
@@ -91,7 +105,7 @@ func validateBackupFiles(payload backupPayload) error {
 func backupFileCounts(payload backupPayload) (images, logs, caches int) {
 	for name, data := range payload.Files {
 		switch {
-		case strings.HasPrefix(name, "route-images/"):
+		case isBackupImage(name):
 			images++
 		case strings.HasPrefix(name, "logs/"):
 			logs += bytes.Count(data, []byte("\n"))

@@ -45,6 +45,11 @@ try {
   state.config.firewalls = [{ id: 'test-policy', name: '测试来源策略', default_action: 'allow', groups: [] }]
   state.config.ddns.ip_monitor = { group_id: '', interface: Object.entries(networkInterfaces()).find(([, rows]) => rows.some(row => !row.internal))?.[0] || 'eth0', ipv4_source: 'interface', ipv6_source: 'interface' }
   await writeFile(statePath, JSON.stringify(state), { mode: 0o600 })
+  const iconPack = path.join(root, 'icons', 'imported', 'BrowserFixture', 'svg')
+  await mkdir(iconPack, { recursive: true })
+  const fixtureSVG = i => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><rect width="48" height="48" rx="10" fill="hsl(${i * 23 % 360} 57% 42%)"/><path d="M12 24h24m-12-12v24" stroke="#fff" stroke-width="3"/></svg>`
+  await Promise.all(Array.from({ length: 60 }, (_, i) =>
+    writeFile(path.join(iconPack, `fixture-service-${String(i).padStart(2, '0')}.svg`), fixtureSVG(i))))
   const upstreamPort = await listen(upstream)
   const reservation = createServer()
   const port = await listen(reservation)
@@ -417,6 +422,139 @@ try {
   await page.locator('.app-layout').waitFor()
   assert.equal((await api('account')).username, 'test-admin-renamed')
   console.log('PASS administrator account save: original password retained, session revoked and new username can log in')
+
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  for (const view of [
+    'overview', 'routes', 'forwards', 'sunpanel', 'ddns', 'certificates', 'subscriptions', 'access',
+    'firewall-logs', 'logs', 'ip-blocks', 'statistics', 'traffic', 'mcp', 'updates', 'backups', 'settings'
+  ]) {
+    await route(view)
+    await page.waitForFunction(view => document.querySelector('.sidebar-nav a.active')?.hash === '#/' + view, view)
+  }
+  await page.getByRole('button', { name: '关闭此通知' }).evaluateAll(buttons => buttons.forEach(button => button.click()))
+  await page.getByRole('link', { name: '图标库', exact: true }).click()
+  await page.locator('.icons-page h1').waitFor()
+  const cards = page.locator('.icons-grid .icon-tile')
+  const iconSearch = page.getByRole('searchbox', { name: '搜索图标' })
+  await page.waitForFunction(() => document.querySelectorAll('.icons-grid .icon-tile').length === 72)
+  assert.equal(await page.locator('.icons-grid').evaluate(el => getComputedStyle(el).gridTemplateColumns.split(' ').length), 12)
+  assert.deepEqual(await cards.first().evaluate(el => [...el.children].map(child => child.tagName)), ['IMG', 'SPAN'])
+  await cards.first().locator('img').evaluate(img => img.decode())
+  if (process.env.GATEHOME_BROWSER_ARTIFACTS) {
+    await page.screenshot({ path: path.join(process.env.GATEHOME_BROWSER_ARTIFACTS, 'icons-dark-1440.png') })
+  }
+  await page.getByTitle('切换为浅色模式').click()
+  await page.waitForFunction(() => document.body.classList.contains('theme-light') && getComputedStyle(document.body).backgroundColor === 'rgb(241, 245, 249)')
+  assert.equal(await page.locator('.icons-storage code').evaluate(el => getComputedStyle(el).color), 'rgb(79, 70, 229)')
+  if (process.env.GATEHOME_BROWSER_ARTIFACTS) {
+    await page.screenshot({ path: path.join(process.env.GATEHOME_BROWSER_ARTIFACTS, 'icons-light-1440.png') })
+  }
+  await iconSearch.fill('wangguan')
+  await cards.getByText('gateway', { exact: true }).waitFor()
+  assert.equal(await cards.count(), 1)
+  await cards.first().click()
+  const detail = page.getByRole('dialog', { name: '图标详情' })
+  await detail.getByText('/icons/builtin/gateway.svg', { exact: true }).waitFor()
+  assert.match(await detail.getByLabel('访问 URL').inputValue(), /\/api\/icons\/file\/builtin\/gateway\.svg$/)
+  await detail.getByRole('button', { name: '关闭详情' }).click()
+
+  await button('从 GitHub 导入').click()
+  const importDialog = page.getByRole('dialog', { name: '从 GitHub 导入' })
+  assert.equal(await importDialog.getByLabel('GitHub 仓库').inputValue(), 'https://github.com/xushier/HD-Icons')
+  await importDialog.getByLabel('下载方式').selectOption('ghproxy')
+  if (process.env.GATEHOME_REAL_ICON_IMPORT === '1') {
+    await importDialog.getByLabel('下载方式').selectOption('direct')
+    await importDialog.getByRole('button', { name: '开始导入' }).click()
+    await page.getByText('图标导入完成', { exact: true }).waitFor({ timeout: 180000 })
+    await iconSearch.fill('guodongyingyin')
+    await cards.filter({ hasText: /jellyfin/i }).first().waitFor()
+    const counts = await api('icons/stats')
+    assert.ok(counts.sources.imported > 1000)
+    if (process.env.GATEHOME_BROWSER_ARTIFACTS) {
+      const importedSource = page.getByRole('group', { name: '来源筛选' }).getByRole('button', { name: /^GitHub 导入/ })
+      await importedSource.click()
+      await page.getByRole('button', { name: '圆角方块', exact: true }).click()
+      await iconSearch.fill('')
+      await page.waitForFunction(() => {
+        const images = [...document.querySelectorAll('.icons-grid .icon-tile img')].slice(0, 48)
+        return images.length === 48 && images.every(img => img.src.includes('/HD-Icons/') && img.naturalWidth)
+      })
+      await page.screenshot({ path: path.join(process.env.GATEHOME_BROWSER_ARTIFACTS, 'icons-hd-icons-light-1440.png') })
+    }
+    console.log(`PASS live GitHub import: ${counts.sources.imported - 60} HD-Icons and Chinese aliases`)
+  } else {
+    await importDialog.getByRole('button', { name: '取消', exact: true }).click()
+  }
+
+  await button('上传本地图标').click()
+  const upload = page.getByRole('dialog', { name: '上传本地图标' })
+  await upload.getByLabel('选择图标文件').setInputFiles([
+    { name: '测试图标.svg', mimeType: 'image/svg+xml', buffer: Buffer.from(fixtureSVG(7)) },
+    { name: 'delete-fixture.svg', mimeType: 'image/svg+xml', buffer: Buffer.from(fixtureSVG(12)) }
+  ])
+  await upload.getByRole('button', { name: '上传图标', exact: true }).click()
+  await cards.getByText('测试图标', { exact: true }).waitFor()
+  await iconSearch.fill('delete-fixture')
+  await cards.getByText('delete-fixture', { exact: true }).click()
+  await detail.getByRole('button', { name: '删除图标', exact: true }).click()
+  await detail.getByRole('button', { name: '确认删除', exact: true }).click()
+  await page.getByText('没有符合条件的图标', { exact: true }).waitFor()
+
+  await route('routes')
+  await button('编辑').first().click()
+  const routeDialog = page.getByRole('dialog', { name: '编辑反向代理路由' })
+  await routeDialog.getByRole('button', { name: '从图标库选择…' }).click()
+  const picker = page.getByRole('dialog', { name: '从图标库选择' })
+  const pickerSearch = picker.getByRole('combobox', { name: '搜索图标' })
+  assert.equal(await pickerSearch.evaluate(el => el === document.activeElement), true)
+  await picker.getByRole('option').first().waitFor()
+  assert.equal(await picker.locator('.icon-picker-grid').evaluate(el => getComputedStyle(el).gridTemplateColumns.split(' ').length), 9)
+  const selected = picker.locator('[aria-selected=true]')
+  await pickerSearch.press('ArrowDown')
+  assert.equal(await selected.getAttribute('id'), 'picker-icon-9')
+  await pickerSearch.press('ArrowUp')
+  await pickerSearch.press('ArrowRight')
+  assert.equal(await selected.getAttribute('id'), 'picker-icon-1')
+  await pickerSearch.press('ArrowLeft')
+  assert.equal(await selected.getAttribute('id'), 'picker-icon-0')
+  await pickerSearch.fill('cstb')
+  await picker.getByRole('option', { name: '测试图标', exact: true }).waitFor()
+  await pickerSearch.press('Enter')
+  const routePreview = routeDialog.locator('.route-icon-img')
+  await routePreview.waitFor()
+  const previewURL = await routePreview.getAttribute('src')
+  assert.match(previewURL, /^\/api\/icons\/file\/uploads\//)
+  await routePreview.evaluate(img => img.decode())
+  await routeDialog.getByRole('button', { name: '保存路由', exact: true }).click()
+  await routeDialog.waitFor({ state: 'hidden' })
+  assert.ok((await api('config')).config.routes.some(row => row.image?.startsWith('/icons/uploads/')))
+  await page.locator(`.routes-grid img[src="${previewURL}"]`).waitFor()
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await route('icons')
+  await page.locator('.icons-grid .icon-tile').first().waitFor()
+  await page.waitForFunction(() => getComputedStyle(document.querySelector('.icons-page')).opacity === '1')
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth === innerWidth), true)
+  assert.equal(await page.locator('.icons-grid').evaluate(el => getComputedStyle(el).gridTemplateColumns.split(' ').length), 5)
+  if (process.env.GATEHOME_BROWSER_ARTIFACTS) {
+    await page.getByRole('button', { name: '关闭此通知' }).evaluateAll(buttons => buttons.forEach(button => button.click()))
+    await page.screenshot({ path: path.join(process.env.GATEHOME_BROWSER_ARTIFACTS, 'icons-light-390.png'), animations: 'disabled' })
+  }
+  await route('routes')
+  await button('新建反代服务').click()
+  await page.getByRole('button', { name: '从图标库选择…' }).click()
+  await picker.getByRole('option').first().waitFor()
+  const pickerBounds = await picker.boundingBox()
+  assert.equal(pickerBounds.x, 0)
+  assert.equal(Math.round(pickerBounds.y + pickerBounds.height), 844)
+  assert.equal(await picker.locator('.icon-picker-grid').evaluate(el => getComputedStyle(el).gridTemplateColumns.split(' ').length), 5)
+  if (process.env.GATEHOME_BROWSER_ARTIFACTS) {
+    await page.screenshot({ path: path.join(process.env.GATEHOME_BROWSER_ARTIFACTS, 'icon-picker-light-390.png') })
+  }
+  await pickerSearch.press('Escape')
+  await picker.waitFor({ state: 'hidden' })
+  await closeEditor()
+  console.log('PASS 17 existing views and Icon Library: themes, upload, search, delete, keyboard, route persistence and mobile sheet')
 
   assert.deepEqual(errors, [], 'browser emitted errors during regression')
   console.log('PASS mobile layout and zero browser errors; disposable fixture cleaned')

@@ -57,6 +57,10 @@
           <span class="nav-text">反向代理</span>
           <span v-if="gatewayConfig" class="nav-badge brand">{{ gatewayConfig.routes?.length ?? 0 }}</span>
         </router-link>
+        <router-link to="/icons" class="nav-link" active-class="active" @click="onNavClick">
+          <Images :size="17" class="nav-icon" />
+          <span class="nav-text">图标库</span>
+        </router-link>
         <router-link to="/forwards" class="nav-link" active-class="active" @click="onNavClick">
           <ArrowLeftRight :size="17" class="nav-icon" />
           <span class="nav-text">端口转发</span>
@@ -151,7 +155,7 @@
 <script setup>
 import { computed } from 'vue'
 import { 
-  X, LayoutDashboard, Network, ArrowLeftRight, Compass,
+  X, LayoutDashboard, Network, ArrowLeftRight, Compass, Images,
   Globe, Lock, Download, ShieldAlert, FileSearch, ScrollText, Ban,
   BarChart3, Activity, Bot, RefreshCw, HardDriveDownload, Settings, LogOut
 } from 'lucide-vue-next'

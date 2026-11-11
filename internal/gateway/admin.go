@@ -46,6 +46,7 @@ type Admin struct {
 	domainDNS    *domainDNS
 	discovery    serviceDiscovery
 	health       serviceHealthCache
+	icons        iconLibrary
 }
 
 func NewAdmin(store *Store, proxy *Proxy, certs *Certificates, jobs *Jobs, adminPort int) *Admin {
@@ -111,6 +112,7 @@ func (a *Admin) Handler() http.Handler {
 	a.serviceDiscoveryRoutes(mux)
 	a.serviceHealthRoutes(mux)
 	a.routeImageRoutes(mux)
+	a.iconRoutes(mux)
 	mcpHandler := a.mcpRoutes(mux)
 	mux.HandleFunc("GET /api/logs", a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
 		category, result := r.URL.Query().Get("category"), r.URL.Query().Get("result")
@@ -284,7 +286,7 @@ func (a *Admin) Handler() http.Handler {
 			mcpHandler.ServeHTTP(w, r)
 			return
 		}
-		if strings.HasPrefix(r.URL.Path, "/api/") && r.URL.Path != "/api/status" && r.URL.Path != "/api/dashboard" && r.URL.Path != "/api/service-health" && !(r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/api/backups/")) && r.URL.Path != "/api/logs" && r.URL.Path != "/api/statistics" && r.URL.Path != "/api/ddns/records" && r.URL.Path != "/api/maintenance/online-update-status" && !(r.Method == "GET" && (r.URL.Path == "/api/ip-blocks" || strings.HasPrefix(r.URL.Path, "/api/service-discovery/") || strings.HasPrefix(r.URL.Path, "/api/route-images/"))) {
+		if strings.HasPrefix(r.URL.Path, "/api/") && r.URL.Path != "/api/status" && r.URL.Path != "/api/dashboard" && r.URL.Path != "/api/service-health" && !(r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/api/backups/")) && r.URL.Path != "/api/logs" && r.URL.Path != "/api/statistics" && r.URL.Path != "/api/ddns/records" && r.URL.Path != "/api/maintenance/online-update-status" && !(r.Method == "GET" && (r.URL.Path == "/api/ip-blocks" || strings.HasPrefix(r.URL.Path, "/api/service-discovery/") || strings.HasPrefix(r.URL.Path, "/api/route-images/") || r.URL.Path == "/api/icons" || strings.HasPrefix(r.URL.Path, "/api/icons/"))) {
 			started := time.Now()
 			logged := &loggedResponseWriter{ResponseWriter: w}
 			w = logged
@@ -322,7 +324,7 @@ func (a *Admin) Handler() http.Handler {
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
 		if r.Method != "GET" && r.Method != "HEAD" {
-			isUpload := r.URL.Path == "/api/maintenance/inspect-update" || r.URL.Path == "/api/maintenance/inspect-backup" || r.URL.Path == "/api/route-images/upload"
+			isUpload := r.URL.Path == "/api/maintenance/inspect-update" || r.URL.Path == "/api/maintenance/inspect-backup" || r.URL.Path == "/api/route-images/upload" || r.URL.Path == "/api/icons/upload"
 			contentOK := strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") || (isUpload && strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data;"))
 			if r.Header.Get("X-Gatehouse-Request") != "1" || !contentOK {
 				apiError(w, 403, "请求来源验证失败")
@@ -332,6 +334,10 @@ func (a *Admin) Handler() http.Handler {
 				apiError(w, 403, "请求来源未获允许；通过公网反代访问时，请先在设置中启用反代访问并添加当前公网地址")
 				return
 			}
+		}
+		if strings.HasPrefix(r.URL.Path, iconFilePrefix) && !safeIconPath(strings.TrimPrefix(r.URL.Path, iconFilePrefix)) {
+			http.NotFound(w, r)
+			return
 		}
 		mux.ServeHTTP(w, r)
 	})
