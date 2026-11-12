@@ -3,9 +3,14 @@ import { afterEach, test } from 'node:test'
 import { ApiError, markSessionChanged, request, setUnauthorizedHandler } from './client.js'
 
 const originalFetch = globalThis.fetch
+const originalWindow = globalThis.window
+const originalVersion = globalThis.__GATEHOME_VERSION__
 
 afterEach(() => {
   globalThis.fetch = originalFetch
+  globalThis.window = originalWindow
+  if (originalVersion === undefined) delete globalThis.__GATEHOME_VERSION__
+  else globalThis.__GATEHOME_VERSION__ = originalVersion
   setUnauthorizedHandler(undefined)
 })
 
@@ -83,4 +88,44 @@ test('failed login keeps the server error available to the form without redirect
     message: '管理员账号或密码不正确', status: 401
   })
   assert.equal(notifications, 0)
+})
+
+function versionFixture() {
+  let reloads = 0
+  const values = new Map()
+  globalThis.__GATEHOME_VERSION__ = '1.0.0-beta.19'
+  globalThis.window = {
+    location: { reload() { reloads++ } },
+    sessionStorage: { getItem: key => values.get(key), setItem: (key, value) => values.set(key, value) }
+  }
+  return () => reloads
+}
+
+test('an updated server reloads stale assets once before expiring the old session', async () => {
+  const reloads = versionFixture()
+  let expired = false
+  setUnauthorizedHandler(() => { expired = true })
+  globalThis.fetch = async () => Response.json({ error: '请先登录' }, {
+    status: 401, headers: { 'X-GateHome-Version': '1.0.0-beta.20' }
+  })
+  const results = await Promise.allSettled([request('/api/account'), request('/api/status')])
+  assert.ok(results.every(result => result.status === 'rejected' && result.reason.status === 409))
+  assert.equal(reloads(), 1)
+  assert.equal(expired, false)
+})
+
+test('unchanged, absent and invalid versions leave ordinary API requests alone', async () => {
+  const reloads = versionFixture()
+  for (const version of ['1.0.0-beta.19', '', 'invalid']) {
+    globalThis.fetch = async () => Response.json({ ok: true }, { headers: { 'X-GateHome-Version': version } })
+    assert.deepEqual(await request('/healthz'), { ok: true })
+  }
+  assert.equal(reloads(), 0)
+})
+
+test('rolling back to an older server also reloads and supports legacy status responses', async () => {
+  const reloads = versionFixture()
+  globalThis.fetch = async () => response(200, { version: '1.0.0-beta.18' })
+  await assert.rejects(request('/api/status'), { status: 409 })
+  assert.equal(reloads(), 1)
 })

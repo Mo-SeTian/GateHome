@@ -181,7 +181,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { onMounted, onBeforeUnmount, ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { User, Lock, Eye, EyeOff, LogIn, AlertCircle, Sun, Moon, KeyRound, X } from 'lucide-vue-next'
 import SpotlightCard from '@/components/SpotlightCard.vue'
@@ -190,6 +190,8 @@ import { useGatewayStatus } from '@/composables/useGatewayStatus'
 import { useSession } from '@/composables/useSession'
 import { useToast } from '@/composables/useToast'
 import { postLoginPath } from '@/router'
+import { adminApi } from '@/api/admin'
+import { startPolling } from '@/api/polling'
 
 const router = useRouter()
 const route = useRoute()
@@ -205,6 +207,16 @@ const isLoading = ref(false)
 const errorMessage = ref('')
 const forgotDialog = ref(null)
 const forgotTrigger = ref(null)
+const controller = new AbortController()
+let stopPolling
+
+onMounted(() => {
+  stopPolling = startPolling(() => adminApi.health(controller.signal).catch(() => {}), 3000)
+})
+onBeforeUnmount(() => {
+  stopPolling?.()
+  controller.abort()
+})
 
 async function handleSubmit() {
   if (isLoading.value) return

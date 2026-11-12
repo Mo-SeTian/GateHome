@@ -6,6 +6,7 @@ function queryPath(path, params) {
 }
 
 export const adminApi = {
+  health: (signal) => request('/healthz', { signal }),
   account: () => request('/api/account', { notifyUnauthorized: false }),
   login: (username, password) => request('/api/login', {
     method: 'POST', body: { username, password }, notifyUnauthorized: false

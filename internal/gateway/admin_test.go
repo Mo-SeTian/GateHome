@@ -72,6 +72,34 @@ func loginForTest(t *testing.T, h http.Handler) *http.Cookie {
 	return cookies[0]
 }
 
+func TestAdminVersionAvailableBeforeAndAfterLogin(t *testing.T) {
+	_, h := testAdmin(t)
+	cookie := loginForTest(t, h)
+	for _, tc := range []struct {
+		path   string
+		cookie *http.Cookie
+		status int
+	}{
+		{"/healthz", nil, 200},
+		{"/api/account", nil, 401},
+		{"/api/status", cookie, 200},
+		{"/api/icons/file/builtin/gateway.svg", cookie, 200},
+	} {
+		w := adminRequest(h, "GET", tc.path, nil, tc.cookie, "")
+		if w.Code != tc.status || w.Header().Get("X-GateHome-Version") != Version {
+			t.Fatalf("version missing from %s (HTTP %d)", tc.path, w.Code)
+		}
+	}
+	w := adminRequest(h, "GET", "/healthz", nil, nil, "")
+	var health struct {
+		OK      bool   `json:"ok"`
+		Version string `json:"version"`
+	}
+	if json.Unmarshal(w.Body.Bytes(), &health) != nil || !health.OK || health.Version != Version {
+		t.Fatal("health response must identify the ready program version")
+	}
+}
+
 func TestAdminAuthCSRFAndSecretRedaction(t *testing.T) {
 	a, h := testAdmin(t)
 	for _, path := range []string{"/api/config", "/api/status", "/api/ddns/records"} {

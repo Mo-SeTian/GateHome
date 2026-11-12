@@ -324,7 +324,7 @@ async function poll() {
     if (onlineUpdateActive(result.phase) && ['stable', 'beta'].includes(result.channel))
       channel.value = result.channel
     if (result.phase === 'restarting')
-      await loginAgain('更新包已校验，服务正在重启；重新登录后查看实际版本和维护结果')
+      await loginAgain('更新包已校验，服务正在重启；恢复后将自动载入新界面，请重新登录查看维护结果')
   } catch (err) {
     if (!controller.signal.aborted && generation === pollGeneration) pollError.value = err.message
   } finally {

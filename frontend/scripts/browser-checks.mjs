@@ -793,10 +793,103 @@ try {
   }
   await mobileContext.close()
 
+  await route('routes')
+  await page.getByRole('button', { name: '关闭此通知' }).evaluateAll(buttons => buttons.forEach(button => button.click()))
+  for (const width of [1440, 1024, 390, 320]) {
+    await page.setViewportSize({ width, height: 900 })
+    for (const theme of ['dark', 'light']) {
+      if (!await page.locator('body').evaluate((body, theme) => body.classList.contains('theme-' + theme), theme))
+        await page.getByTitle(theme === 'dark' ? '切换为深色模式' : '切换为浅色模式').click()
+      const sidebar = page.locator('.app-sidebar')
+      const navigation = page.getByRole('navigation', { name: '主导航' })
+      if (width < 1024) {
+        await page.getByRole('button', { name: '打开侧边栏导航' }).click()
+        await page.waitForFunction(() => Math.abs(document.querySelector('.app-sidebar').getBoundingClientRect().x) < 1)
+        const close = await page.getByRole('button', { name: '关闭侧边栏导航' }).boundingBox()
+        assert.ok(close.width >= 44 && close.height >= 44)
+        assert.ok(await navigation.locator('.nav-link').evaluateAll(links => links.every(link => link.getBoundingClientRect().height >= 44)))
+      }
+      assert.equal(await navigation.locator('.nav-group').count(), 2)
+      assert.equal(await navigation.getByRole('link').count(), 18)
+      if (theme === 'light') await page.waitForFunction(() => {
+        const active = document.querySelector('.sidebar-nav .nav-link.active')
+        return active && getComputedStyle(active).color !== 'rgb(255, 255, 255)'
+      })
+      const settings = navigation.getByRole('link', { name: '设置', exact: true })
+      await settings.scrollIntoViewIfNeeded()
+      const bounds = await navigation.boundingBox()
+      const last = await settings.boundingBox()
+      const footer = await sidebar.locator('.sidebar-footer').boundingBox()
+      assert.ok(last.y >= bounds.y && last.y + last.height <= bounds.y + bounds.height + 1, 'last navigation item is clipped')
+      assert.ok(bounds.y + bounds.height <= footer.y + 1, 'navigation overlaps the footer')
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
+      if (process.env.GATEHOME_BROWSER_ARTIFACTS)
+        await page.screenshot({ path: path.join(process.env.GATEHOME_BROWSER_ARTIFACTS, `sidebar-${width}-${theme}.png`) })
+      if (width < 1024) {
+        await settings.click()
+        await page.waitForFunction(() => !document.querySelector('.app-sidebar').classList.contains('mobile-open'))
+        await route('routes')
+      }
+    }
+  }
+  console.log('PASS sidebar: both themes, 18 links, 320px–1440px, scrollable groups and 44px mobile targets')
+
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await route('updates')
+  await page.evaluate(() => { window.upgradeDocumentMarker = 'old document' })
+  const runningStatus = await api('status')
+  let switched = false
+  await page.route('**/api/status', async route => {
+    if (switched) return route.continue()
+    switched = true
+    await route.fulfill({
+      status: 200, contentType: 'application/json',
+      headers: { 'X-GateHome-Version': '99.0.0-beta.1' }, body: JSON.stringify(runningStatus)
+    })
+  })
+  const refreshed = page.waitForEvent('domcontentloaded')
+  await button('刷新维护状态').click()
+  await refreshed
+  await page.locator('.report-heading h1').waitFor()
+  assert.equal(await page.evaluate(() => window.upgradeDocumentMarker), undefined)
+  assert.equal(new URL(page.url()).hash, '#/updates')
+  assert.equal(await page.locator('.brand-version').textContent(), '家庭网关 · v' + (await api('status')).version)
+  await page.unroute('**/api/status')
+  console.log('PASS update resource synchronization: a new server version reloads the document and preserves the current route')
+
+  const loginContext = await browser.newContext({ viewport: { width: 390, height: 844 } })
+  const loginPage = await loginContext.newPage()
+  loginPage.on('pageerror', () => errors.push('login version polling exception'))
+  await loginPage.goto(origin + '/console/#/login?redirect=/updates')
+  await loginPage.locator('#admin-username').fill('test-admin-renamed')
+  await loginPage.evaluate(() => { window.upgradeDocumentMarker = 'waiting for restart' })
+  let healthSwitched = false
+  await loginPage.route('**/healthz', async route => {
+    if (healthSwitched) return route.continue()
+    healthSwitched = true
+    await route.fulfill({
+      status: 200, contentType: 'application/json',
+      headers: { 'X-GateHome-Version': '99.0.0-beta.1' }, body: JSON.stringify({ ok: true, version: '99.0.0-beta.1' })
+    })
+  })
+  await loginPage.waitForEvent('domcontentloaded')
+  await loginPage.locator('#admin-username').waitFor()
+  assert.equal(await loginPage.evaluate(() => window.upgradeDocumentMarker), undefined)
+  assert.equal(new URL(loginPage.url()).hash, '#/login?redirect=/updates')
+  await loginPage.unroute('**/healthz')
+  await loginPage.locator('#admin-username').fill('test-admin-renamed')
+  await loginPage.locator('#admin-password').fill(secret)
+  await loginPage.locator('.login-form button[type=submit]').click()
+  await loginPage.locator('.report-heading h1').waitFor()
+  assert.equal(new URL(loginPage.url()).hash, '#/updates')
+  await loginContext.close()
+  console.log('PASS restart login: readiness polling reloads stale resources before login and retains the update redirect')
+
   assert.deepEqual(errors, [], 'browser emitted errors during regression')
   console.log('PASS mobile layout and zero browser errors; disposable fixture cleaned')
 } catch (error) {
-  console.error(String(error.message).replaceAll(secret, '<REDACTED>'))
+  console.error(String(error.stack || error.message).replaceAll(secret, '<REDACTED>')
+    .replace(/gatehouse_session=[^;\s'"\x1b]+/g, 'gatehouse_session=<REDACTED>'))
   process.exitCode = 1
 } finally {
   await browser?.close()

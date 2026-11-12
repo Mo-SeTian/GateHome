@@ -37,7 +37,7 @@
         </div>
         <div class="brand-info">
           <span class="brand-title">GateHome</span>
-          <span class="brand-version">家庭网关 · {{ gatewayVersion }}</span>
+          <span class="brand-version"><span class="brand-caption">家庭网关 · </span>{{ gatewayVersion }}</span>
         </div>
         <button class="mobile-close-btn" aria-label="关闭侧边栏导航" @click="closeSidebar">
           <X :size="18" />
@@ -45,88 +45,92 @@
       </div>
 
       <!-- Navigation Menus (严格 1:1 对齐 GateHome 实际两大分组) -->
-      <nav class="sidebar-nav">
+      <nav class="sidebar-nav" aria-label="主导航">
         <!-- 分组 1: 工作空间 -->
-        <div class="nav-section-title">工作空间</div>
-        <router-link to="/overview" class="nav-link" active-class="active" @click="onNavClick">
-          <LayoutDashboard :size="17" class="nav-icon" />
-          <span class="nav-text">概览</span>
-        </router-link>
-        <router-link to="/routes" class="nav-link" active-class="active" @click="onNavClick">
-          <Network :size="17" class="nav-icon" />
-          <span class="nav-text">反向代理</span>
-          <span v-if="gatewayConfig" class="nav-badge brand">{{ gatewayConfig.routes?.length ?? 0 }}</span>
-        </router-link>
-        <router-link to="/icons" class="nav-link" active-class="active" @click="onNavClick">
-          <Images :size="17" class="nav-icon" />
-          <span class="nav-text">图标库</span>
-        </router-link>
-        <router-link to="/forwards" class="nav-link" active-class="active" @click="onNavClick">
-          <ArrowLeftRight :size="17" class="nav-icon" />
-          <span class="nav-text">端口转发</span>
-        </router-link>
-        <router-link to="/sunpanel" class="nav-link" active-class="active" @click="onNavClick">
-          <Compass :size="17" class="nav-icon" />
-          <span class="nav-text">浏览器首页</span>
-        </router-link>
-        <router-link to="/ddns" class="nav-link" active-class="active" @click="onNavClick">
-          <Globe :size="17" class="nav-icon" />
-          <span class="nav-text">动态域名</span>
-        </router-link>
-        <router-link to="/certificates" class="nav-link" active-class="active" @click="onNavClick">
-          <Lock :size="17" class="nav-icon" />
-          <span class="nav-text">SSL 证书</span>
-          <span v-if="certificatesExpiring" class="nav-badge warn" title="30 天内到期或已过期">{{ certificatesExpiring }}</span>
-        </router-link>
-        <router-link to="/subscriptions" class="nav-link" active-class="active" @click="onNavClick">
-          <Download :size="17" class="nav-icon" />
-          <span class="nav-text">订阅管理</span>
-        </router-link>
-        <router-link to="/access" class="nav-link" active-class="active" @click="onNavClick">
-          <ShieldAlert :size="17" class="nav-icon" />
-          <span class="nav-text">防火墙管理</span>
-          <span v-if="firewallAttached" class="nav-status-dot active" title="已关联启用的反代规则" />
-        </router-link>
+        <div class="nav-group">
+          <div class="nav-section-title">工作空间</div>
+          <router-link to="/overview" class="nav-link" active-class="active" @click="onNavClick">
+            <LayoutDashboard :size="14" class="nav-icon" />
+            <span class="nav-text">概览</span>
+          </router-link>
+          <router-link to="/routes" class="nav-link" active-class="active" @click="onNavClick">
+            <Network :size="14" class="nav-icon" />
+            <span class="nav-text">反向代理</span>
+            <span v-if="gatewayConfig" class="nav-badge brand">{{ gatewayConfig.routes?.length ?? 0 }}</span>
+          </router-link>
+          <router-link to="/icons" class="nav-link" active-class="active" @click="onNavClick">
+            <Images :size="14" class="nav-icon" />
+            <span class="nav-text">图标库</span>
+          </router-link>
+          <router-link to="/forwards" class="nav-link" active-class="active" @click="onNavClick">
+            <ArrowLeftRight :size="14" class="nav-icon" />
+            <span class="nav-text">端口转发</span>
+          </router-link>
+          <router-link to="/sunpanel" class="nav-link" active-class="active" @click="onNavClick">
+            <Compass :size="14" class="nav-icon" />
+            <span class="nav-text">浏览器首页</span>
+          </router-link>
+          <router-link to="/ddns" class="nav-link" active-class="active" @click="onNavClick">
+            <Globe :size="14" class="nav-icon" />
+            <span class="nav-text">动态域名</span>
+          </router-link>
+          <router-link to="/certificates" class="nav-link" active-class="active" @click="onNavClick">
+            <Lock :size="14" class="nav-icon" />
+            <span class="nav-text">SSL 证书</span>
+            <span v-if="certificatesExpiring" class="nav-badge warn" title="30 天内到期或已过期">{{ certificatesExpiring }}</span>
+          </router-link>
+          <router-link to="/subscriptions" class="nav-link" active-class="active" @click="onNavClick">
+            <Download :size="14" class="nav-icon" />
+            <span class="nav-text">订阅管理</span>
+          </router-link>
+          <router-link to="/access" class="nav-link" active-class="active" @click="onNavClick">
+            <ShieldAlert :size="14" class="nav-icon" />
+            <span class="nav-text">防火墙管理</span>
+            <span v-if="firewallAttached" class="nav-status-dot active" title="已关联启用的反代规则" />
+          </router-link>
+        </div>
 
         <!-- 分组 2: 观察与管理 -->
-        <div class="nav-section-title">观察与管理</div>
-        <router-link to="/firewall-logs" class="nav-link" active-class="active" @click="onNavClick">
-          <FileSearch :size="17" class="nav-icon" />
-          <span class="nav-text">防火墙拦截记录</span>
-        </router-link>
-        <router-link to="/logs" class="nav-link" active-class="active" @click="onNavClick">
-          <ScrollText :size="17" class="nav-icon" />
-          <span class="nav-text">日志</span>
-        </router-link>
-        <router-link to="/ip-blocks" class="nav-link" active-class="active" @click="onNavClick">
-          <Ban :size="17" class="nav-icon" />
-          <span class="nav-text">IP 拦截名单</span>
-        </router-link>
-        <router-link to="/statistics" class="nav-link" active-class="active" @click="onNavClick">
-          <BarChart3 :size="17" class="nav-icon" />
-          <span class="nav-text">统计</span>
-        </router-link>
-        <router-link to="/traffic" class="nav-link" active-class="active" @click="onNavClick">
-          <Activity :size="17" class="nav-icon" />
-          <span class="nav-text">流量统计</span>
-        </router-link>
-        <router-link to="/mcp" class="nav-link" active-class="active" @click="onNavClick">
-          <Bot :size="17" class="nav-icon" />
-          <span class="nav-text">AI 管理</span>
-          <span class="nav-badge ai">AI</span>
-        </router-link>
-        <router-link to="/updates" class="nav-link" active-class="active" @click="onNavClick">
-          <RefreshCw :size="17" class="nav-icon" />
-          <span class="nav-text">更新</span>
-        </router-link>
-        <router-link to="/backups" class="nav-link" active-class="active" @click="onNavClick">
-          <HardDriveDownload :size="17" class="nav-icon" />
-          <span class="nav-text">备份与恢复</span>
-        </router-link>
-        <router-link to="/settings" class="nav-link" active-class="active" @click="onNavClick">
-          <Settings :size="17" class="nav-icon" />
-          <span class="nav-text">设置</span>
-        </router-link>
+        <div class="nav-group">
+          <div class="nav-section-title">观察与管理</div>
+          <router-link to="/firewall-logs" class="nav-link" active-class="active" @click="onNavClick">
+            <FileSearch :size="14" class="nav-icon" />
+            <span class="nav-text">防火墙拦截记录</span>
+          </router-link>
+          <router-link to="/logs" class="nav-link" active-class="active" @click="onNavClick">
+            <ScrollText :size="14" class="nav-icon" />
+            <span class="nav-text">日志</span>
+          </router-link>
+          <router-link to="/ip-blocks" class="nav-link" active-class="active" @click="onNavClick">
+            <Ban :size="14" class="nav-icon" />
+            <span class="nav-text">IP 拦截名单</span>
+          </router-link>
+          <router-link to="/statistics" class="nav-link" active-class="active" @click="onNavClick">
+            <BarChart3 :size="14" class="nav-icon" />
+            <span class="nav-text">统计</span>
+          </router-link>
+          <router-link to="/traffic" class="nav-link" active-class="active" @click="onNavClick">
+            <Activity :size="14" class="nav-icon" />
+            <span class="nav-text">流量统计</span>
+          </router-link>
+          <router-link to="/mcp" class="nav-link" active-class="active" @click="onNavClick">
+            <Bot :size="14" class="nav-icon" />
+            <span class="nav-text">AI 管理</span>
+            <span class="nav-badge ai">AI</span>
+          </router-link>
+          <router-link to="/updates" class="nav-link" active-class="active" @click="onNavClick">
+            <RefreshCw :size="14" class="nav-icon" />
+            <span class="nav-text">更新</span>
+          </router-link>
+          <router-link to="/backups" class="nav-link" active-class="active" @click="onNavClick">
+            <HardDriveDownload :size="14" class="nav-icon" />
+            <span class="nav-text">备份与恢复</span>
+          </router-link>
+          <router-link to="/settings" class="nav-link" active-class="active" @click="onNavClick">
+            <Settings :size="14" class="nav-icon" />
+            <span class="nav-text">设置</span>
+          </router-link>
+        </div>
       </nav>
 
       <!-- Sidebar Footer Status Card -->
@@ -208,6 +212,7 @@ const handleLogout = () => {
 .app-sidebar {
   width: var(--sidebar-w);
   height: 100vh;
+  height: 100dvh;
   position: fixed;
   top: 0;
   left: 0;
@@ -223,10 +228,10 @@ const handleLogout = () => {
 
 .sidebar-brand {
   height: var(--topbar-h);
-  padding: 0 18px;
+  padding: 0 12px;
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   border-bottom: 1px solid var(--line);
   flex-shrink: 0;
 }
@@ -234,12 +239,13 @@ const handleLogout = () => {
 .brand-icon {
   width: 32px;
   height: 32px;
-  border-radius: 9px;
+  border-radius: var(--radius-sm);
   background: rgba(99, 102, 241, 0.12);
   display: flex;
   align-items: center;
   justify-content: center;
   border: 1px solid rgba(99, 102, 241, 0.25);
+  flex-shrink: 0;
 }
 
 .portal-arch {
@@ -250,10 +256,10 @@ const handleLogout = () => {
   fill: #ffffff;
   transition: fill 0.2s ease;
 }
-:global(.theme-light) .portal-arch {
+.theme-light .portal-arch {
   stroke: #0284c7;
 }
-:global(.theme-light) .portal-core {
+.theme-light .portal-core {
   fill: #4f46e5;
 }
 
@@ -261,6 +267,7 @@ const handleLogout = () => {
   display: flex;
   flex-direction: column;
   flex: 1;
+  min-width: 0;
 }
 
 .brand-title {
@@ -268,12 +275,15 @@ const handleLogout = () => {
   font-weight: 700;
   color: var(--ink);
   letter-spacing: -0.2px;
+  line-height: 1.25;
 }
 
 .brand-version {
-  font-size: 10px;
+  font-size: 10.5px;
   color: var(--faint);
   font-family: var(--mono);
+  line-height: 1.3;
+  white-space: nowrap;
 }
 
 .mobile-close-btn {
@@ -285,32 +295,43 @@ const handleLogout = () => {
 .sidebar-nav {
   flex: 1;
   overflow-y: auto;
-  padding: 10px 10px 16px 10px;
+  padding: 10px 12px 16px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.nav-group {
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
 
 .nav-section-title {
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
   color: var(--faint);
-  letter-spacing: 0.8px;
-  padding: 12px 10px 4px 10px;
+  letter-spacing: 0.6px;
+  padding: 0 10px 6px 10px;
+  user-select: none;
 }
 
 .nav-link {
   display: flex;
   align-items: center;
-  gap: 11px;
-  padding: 7px 12px;
+  gap: 10px;
+  padding: 8px 10px;
+  min-height: 36px;
   border-radius: var(--radius-sm);
   color: var(--muted);
   font-size: 13px;
   font-weight: 500;
+  line-height: 1.4;
   transition: var(--transition-smooth);
   position: relative;
+  text-decoration: none;
+  box-sizing: border-box;
 }
 
 .nav-link:hover {
@@ -330,9 +351,14 @@ const handleLogout = () => {
 }
 
 .nav-icon {
+  width: 14px;
+  height: 14px;
   color: var(--faint);
   transition: color 0.2s ease;
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 .nav-link:hover .nav-icon,
 .nav-link.active .nav-icon {
@@ -341,19 +367,24 @@ const handleLogout = () => {
 
 .nav-text {
   flex: 1;
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  letter-spacing: -0.1px;
 }
 
 .nav-badge {
-  font-size: 10px;
-  padding: 1px 6px;
-  border-radius: 999px;
+  font-size: 10.5px;
+  line-height: 1.2;
+  padding: 1.5px 6.5px;
+  border-radius: var(--radius-pill);
   background: var(--strip-bg);
   border: 1px solid var(--line);
   color: var(--muted);
   font-family: var(--mono);
+  font-weight: 600;
+  flex-shrink: 0;
 }
 
 .nav-badge.brand {
@@ -387,10 +418,11 @@ const handleLogout = () => {
   border-radius: 50%;
   background: var(--ok);
   box-shadow: var(--ok-glow);
+  flex-shrink: 0;
 }
 
 .sidebar-footer {
-  padding: 12px 14px;
+  padding: 12px;
   border-top: 1px solid var(--line);
   flex-shrink: 0;
 }
@@ -399,15 +431,17 @@ const handleLogout = () => {
   background: var(--strip-bg);
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
-  padding: 10px 12px;
-  font-size: 11.5px;
+  padding: 10px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-sizing: border-box;
 }
 
 .status-top {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 5px;
 }
 
 .status-indicator {
@@ -415,12 +449,14 @@ const handleLogout = () => {
   align-items: center;
   gap: 6px;
   font-weight: 600;
+  font-size: 11.5px;
   color: var(--ok);
 }
 
 .uptime-text {
   color: var(--faint);
   font-family: var(--mono);
+  font-size: 11px;
 }
 
 .status-details {
@@ -438,6 +474,7 @@ const handleLogout = () => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  font-family: var(--mono);
 }
 
 .login-link-btn {
@@ -446,8 +483,8 @@ const handleLogout = () => {
   word-break: keep-all !important;
   background: transparent;
   border: none;
-  padding: 2px 5px;
-  border-radius: 4px;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
   font-size: 11px;
   color: var(--brand-light);
   cursor: pointer;
@@ -462,11 +499,19 @@ const handleLogout = () => {
 }
 .logout-mini-icon {
   flex-shrink: 0;
-  opacity: 0.8;
+  opacity: 0.85;
+}
+
+.theme-light .login-link-btn,
+.theme-light .status-indicator {
+  color: var(--ink-secondary);
 }
 
 /* ================= Mobile Breakpoints ================= */
 @media (max-width: 1023px) {
+  .brand-caption {
+    display: none;
+  }
   .app-sidebar {
     transform: translateX(-105%);
     visibility: hidden;
@@ -478,7 +523,28 @@ const handleLogout = () => {
     box-shadow: 25px 0 60px rgba(0, 0, 0, 0.7);
   }
   .mobile-close-btn {
-    display: block;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    flex-shrink: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    border: none;
+    color: var(--muted);
+    cursor: pointer;
+    transition: var(--transition-smooth);
+  }
+  .mobile-close-btn:hover {
+    color: var(--ink);
+    background: rgba(148, 163, 184, 0.12);
+  }
+  .nav-link {
+    min-height: 44px;
+  }
+  .login-link-btn {
+    min-height: 44px;
   }
 }
 </style>

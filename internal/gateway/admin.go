@@ -93,7 +93,9 @@ func (a *Admin) Handler() http.Handler {
 	mux.HandleFunc("GET /china-outline.svg", serveFrontendDistFile("china-outline.svg", "image/svg+xml"))
 	mux.HandleFunc("GET /favicon.svg", serveFrontendDistFile("favicon.svg", "image/svg+xml"))
 	mux.HandleFunc("GET /favicon.ico", serveFrontendDistFile("favicon.svg", "image/svg+xml"))
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { jsonResponse(w, 200, map[string]bool{"ok": true}) })
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
+		jsonResponse(w, 200, map[string]any{"ok": true, "version": Version})
+	})
 	mux.HandleFunc("POST /api/login", a.login)
 	mux.HandleFunc("POST /api/logout", a.requireAuth(a.logout))
 	a.accountRoutes(mux)
@@ -282,6 +284,7 @@ func (a *Admin) Handler() http.Handler {
 		http.NotFound(w, r)
 	})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-GateHome-Version", Version)
 		if r.URL.Path == "/mcp" {
 			mcpHandler.ServeHTTP(w, r)
 			return
