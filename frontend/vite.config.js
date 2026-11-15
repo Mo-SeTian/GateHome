@@ -5,7 +5,21 @@ import path from 'path'
 
 export default defineConfig({
   base: './',
-  plugins: [vue()],
+  plugins: [vue(), {
+    name: 'vue-router-edge-focus-fix',
+    enforce: 'pre',
+    transform(code, id) {
+      if (!id.split('?')[0].endsWith('/vue-router/dist/vue-router.mjs')) return
+      // Backport vuejs/router#2704: hidden-page history writes restore Edge windows.
+      const listener = 'document.addEventListener("visibilitychange", beforeUnloadListener);'
+      if (!code.includes(listener)) throw new Error('Review the Vue Router Edge focus backport before upgrading')
+      return {
+        code: code.replace(listener, '').replace('document.removeEventListener("visibilitychange", beforeUnloadListener);', ''),
+        map: null
+      }
+    }
+  }],
+  optimizeDeps: { exclude: ['vue-router'] },
   define: {
     __GATEHOME_VERSION__: JSON.stringify(readFileSync(new URL('../VERSION', import.meta.url), 'utf8').trim())
   },

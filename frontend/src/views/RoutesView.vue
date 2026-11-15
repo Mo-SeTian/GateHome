@@ -785,7 +785,25 @@ function deleteGroup(group) {
 }
 async function copyHost(host) {
   try {
-    await navigator.clipboard.writeText(host)
+    try {
+      await navigator.clipboard.writeText(host)
+    } catch {
+      // LAN HTTP pages have no Clipboard API; copy during the original click.
+      if (document.visibilityState === 'hidden' || !document.hasFocus()) throw new Error('Page inactive')
+      const active = document.activeElement
+      const input = document.createElement('textarea')
+      input.value = host
+      input.readOnly = true
+      input.style.cssText = 'position:fixed;left:-9999px;top:0;font-size:16px'
+      document.body.append(input)
+      try {
+        input.select()
+        if (!document.execCommand('copy')) throw new Error('Copy rejected')
+      } finally {
+        input.remove()
+        if (document.visibilityState === 'visible' && document.hasFocus()) active?.focus({ preventScroll: true })
+      }
+    }
     toast.success('域名已复制')
   } catch {
     toast.error('复制失败，请手动复制域名')

@@ -81,6 +81,25 @@ try {
   await page.locator('.routes-page').waitFor()
   assert.equal(await page.evaluate(() => isSecureContext), false)
   assert.equal(await page.evaluate(() => typeof crypto.randomUUID), 'undefined')
+  const lifecycleHistoryWrites = await page.evaluate(() => {
+    const replaceState = history.replaceState
+    let writes = 0
+    history.replaceState = function (...args) { writes++; return replaceState.apply(this, args) }
+    try {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' })
+      document.dispatchEvent(new Event('visibilitychange'))
+      const hidden = writes
+      window.dispatchEvent(new Event('pagehide'))
+      return { hidden, pagehide: writes - hidden }
+    } finally {
+      history.replaceState = replaceState
+      delete document.visibilityState
+      document.dispatchEvent(new Event('visibilitychange'))
+    }
+  })
+  assert.equal(lifecycleHistoryWrites.hidden, 0, 'hidden page wrote history, triggering Edge window focus steal')
+  assert.equal(lifecycleHistoryWrites.pagehide, 1, 'leaving the page no longer saves scroll state')
+  console.log('PASS Edge minimize regression: hiding the page never writes history, leaving still saves scroll state')
   const dialog = () => page.locator('dialog[open]')
   const button = name => page.getByRole('button', { name, exact: true })
   async function api(endpoint, body) {
@@ -109,6 +128,79 @@ try {
     await route(view); await button(label).click(); await dialog().waitFor(); await closeEditor()
   }
   console.log('PASS ordinary HTTP: all seven configuration editors open without randomUUID')
+
+  const ddnsBefore = await api('config')
+  const compactGroups = [
+    { id: 'compact-home', name: '家庭域名', zone: 'example.test', hosts: ['nas', 'photos', 'media', 'cloud', 'home', 'vault', 'status'] },
+    { id: 'compact-lab', name: '实验室', zone: 'example.net', hosts: ['dev', 'git'] }
+  ].map(group => ({
+    ...group, hosts: group.hosts.map(host => `${host}.${group.zone}`), provider: 'cloudflare',
+    enabled: false, interval: 300, mode: 'dual', interface: state.config.ddns.ip_monitor.interface,
+    ipv4_source: 'interface', ipv6_source: 'interface'
+  }))
+  const ddnsFixture = await api('config', {
+    revision: ddnsBefore.revision,
+    config: { ...ddnsBefore.config, ddns: { ...ddnsBefore.config.ddns, groups: compactGroups } }
+  })
+  await page.evaluate(() => localStorage.setItem('gatehome_ddns_collapsed_groups', '[]'))
+  await route('ddns')
+  const ddnsCards = page.locator('.ddns-card')
+  const homeDdns = page.locator('[data-group-id=compact-home]')
+  const ddnsToggle = () => homeDdns.locator('button[aria-controls]')
+  await ddnsCards.nth(1).waitFor()
+  assert.equal(await page.locator('.ddns-card-body:visible').count(), 0, 'DDNS domains were expanded by default')
+  assert.equal(await ddnsToggle().getAttribute('aria-expanded'), 'false')
+  await homeDdns.getByText('7 个域名', { exact: true }).waitFor()
+  await button('展开全部组').waitFor()
+  await ddnsToggle().click()
+  assert.equal(await ddnsToggle().getAttribute('aria-expanded'), 'true')
+  assert.equal(await homeDdns.locator('.dns-records tbody tr:visible').count(), 7, 'expanding a group omitted domains')
+  await homeDdns.getByRole('button', { name: '编辑域名', exact: true }).click()
+  assert.equal((await dialog().locator('[name=hosts]').inputValue()).split('\n').length, 7)
+  await closeEditor()
+  await page.reload()
+  await homeDdns.locator('.ddns-card-body').waitFor()
+  assert.equal(await ddnsToggle().getAttribute('aria-expanded'), 'true', 'expanded preference was lost on reload')
+  await ddnsToggle().press('Enter')
+  assert.equal(await homeDdns.locator('.ddns-card-body').isVisible(), false)
+  await ddnsToggle().press('Space')
+  assert.equal(await homeDdns.locator('.dns-records tbody tr:visible').count(), 7)
+  await button('收起全部组').click()
+  assert.equal(await page.locator('.ddns-card-body:visible').count(), 0)
+  await page.reload()
+  await ddnsCards.nth(1).waitFor()
+  assert.equal(await page.locator('.ddns-card-body:visible').count(), 0, 'collapsed preference was lost on reload')
+  await button('展开全部组').click()
+  assert.equal(await page.locator('.dns-records tbody tr:visible').count(), 9)
+  await button('收起全部组').click()
+  assert.deepEqual((await api('config')).config, ddnsFixture.config, 'folding DDNS cards changed configuration')
+  console.log('PASS compact DDNS: default collapse, one-click full domain list, keyboard, persisted preferences and unchanged configuration')
+
+  for (const [width, height] of [[1440, 1000], [390, 844], [320, 667], [844, 390]]) {
+    await page.setViewportSize({ width, height })
+    for (const theme of ['light', 'dark']) {
+      if (!await page.locator('body').evaluate((el, theme) => el.classList.contains('theme-' + theme), theme))
+        await page.getByTitle(theme === 'dark' ? '切换为深色模式' : '切换为浅色模式').click()
+      assert.ok(await ddnsCards.evaluateAll(cards => cards.every(card => card.getBoundingClientRect().height <= 120)), 'collapsed DDNS card is too tall')
+      assert.ok((await ddnsToggle().boundingBox()).height >= 44)
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true)
+      if (process.env.GATEHOME_BROWSER_ARTIFACTS) {
+        await mkdir(process.env.GATEHOME_BROWSER_ARTIFACTS, { recursive: true })
+        await page.locator('.ddns-grid').screenshot({ path: path.join(process.env.GATEHOME_BROWSER_ARTIFACTS, `ddns-compact-${width}-${theme}.png`), animations: 'disabled' })
+      }
+      await ddnsToggle().click()
+      assert.equal(await homeDdns.locator('.dns-records tbody tr:visible').count(), 7)
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true)
+      if (process.env.GATEHOME_BROWSER_ARTIFACTS && [1440, 390].includes(width)) {
+        await homeDdns.screenshot({ path: path.join(process.env.GATEHOME_BROWSER_ARTIFACTS, `ddns-expanded-${width}-${theme}.png`), animations: 'disabled' })
+      }
+      await ddnsToggle().click()
+    }
+  }
+  const ddnsAfter = await api('config')
+  await api('config', { revision: ddnsAfter.revision, config: ddnsBefore.config })
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  console.log('PASS compact DDNS themes/mobile: compact summaries, full lists, 44px toggles and no page overflow in portrait/landscape')
 
   await route('access')
   await button('添加防火墙策略').click()
@@ -217,6 +309,56 @@ try {
   assert.equal(created.host, 'app.home.example.test'); assert.equal(created.tls, true)
   assert.match(created.id, /^[0-9a-f-]{36}$/)
   assert.equal(saved.route_passwords_configured[created.group_id + '/' + created.host], true)
+  assert.equal(await page.evaluate(() => typeof navigator.clipboard), 'undefined')
+  const clipboardPage = await context.newPage()
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: `http://127.0.0.1:${port}` })
+  await clipboardPage.goto(`http://127.0.0.1:${port}/healthz`)
+  await clipboardPage.evaluate(() => navigator.clipboard.writeText('TEST_ONLY_PREVIOUS_CLIPBOARD'))
+  const domainButton = page.getByRole('button', { name: created.host, exact: true })
+  await page.bringToFront()
+  await domainButton.click()
+  await page.locator('.toast-desktop-row .toast-text').filter({ hasText: /^域名已复制$/ }).waitFor()
+  await clipboardPage.bringToFront()
+  assert.equal(await clipboardPage.evaluate(() => navigator.clipboard.readText()), created.host)
+  await page.bringToFront()
+  assert.equal(await domainButton.evaluate(el => el === document.activeElement), true)
+  console.log('PASS route domain copy on ordinary HTTP: actual clipboard contains the host and button focus is preserved')
+
+  await clipboardPage.bringToFront()
+  await clipboardPage.evaluate(() => navigator.clipboard.writeText('TEST_ONLY_PREVIOUS_CLIPBOARD'))
+  await page.bringToFront()
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: {
+      writeText: async () => { throw new DOMException('TEST_ONLY_PERMISSION_DENIED', 'NotAllowedError') }
+    } })
+  })
+  await domainButton.click()
+  await clipboardPage.bringToFront()
+  assert.equal(await clipboardPage.evaluate(() => navigator.clipboard.readText()), created.host)
+  await page.bringToFront()
+  const copySuccesses = await page.locator('.toast-success').count()
+  await page.evaluate(() => { document.execCommand = () => false })
+  await domainButton.click()
+  await page.locator('.toast-desktop-row .toast-text').filter({ hasText: /^复制失败，请手动复制域名$/ }).waitFor()
+  assert.ok(await page.locator('.toast-success').count() <= copySuccesses, 'rejected copy was reported as successful')
+  assert.equal(await page.locator('textarea').count(), 0, 'temporary copy input was retained')
+  assert.equal(await domainButton.evaluate(el => el === document.activeElement), true)
+  await page.evaluate(() => { delete navigator.clipboard; delete document.execCommand })
+
+  await clipboardPage.goto(`http://127.0.0.1:${port}/console/#/routes`)
+  await clipboardPage.bringToFront()
+  await clipboardPage.locator('#admin-username').fill('admin')
+  await clipboardPage.locator('#admin-password').fill(secret)
+  await clipboardPage.locator('.login-form button[type=submit]').click()
+  await clipboardPage.locator('.routes-page').waitFor()
+  assert.equal(await clipboardPage.evaluate(() => isSecureContext), true)
+  await clipboardPage.evaluate(() => navigator.clipboard.writeText('TEST_ONLY_PREVIOUS_CLIPBOARD'))
+  await clipboardPage.getByRole('button', { name: created.host, exact: true }).click()
+  await clipboardPage.locator('.toast-desktop-row .toast-text').filter({ hasText: /^域名已复制$/ }).waitFor()
+  assert.equal(await clipboardPage.evaluate(() => navigator.clipboard.readText()), created.host)
+  await clipboardPage.close()
+  await page.bringToFront()
+  console.log('PASS route copy compatibility: denied Clipboard API falls back, rejected copy reports failure, secure-context API still works')
   await button('编辑').last().click()
   await dialog().locator('[name=auth_enabled]').uncheck()
   await dialog().locator('[name=clear_route_password]').check()

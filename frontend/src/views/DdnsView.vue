@@ -43,22 +43,27 @@
         class="report-panel ddns-card"
         :data-group-id="group.id"
       >
-        <div class="report-heading ddns-header-clickable" @click="toggleCollapse(group.id)">
-          <div class="header-left-title">
-            <button class="collapse-chevron-btn" :title="isCollapsed(group.id) ? '展开此配置' : '收起此配置'">
-              <ChevronDown :size="16" class="chevron-icon" :class="{ 'rotate-minus-90': isCollapsed(group.id) }" />
-            </button>
+        <button
+          type="button"
+          class="report-heading ddns-header-clickable"
+          :aria-expanded="!isCollapsed(group.id)"
+          :aria-controls="`ddns-details-${group.id}`"
+          :aria-label="`${isCollapsed(group.id) ? '展开' : '收起'} ${group.name} 的全部域名`"
+          @click="toggleCollapse(group.id)"
+        >
+          <span class="header-left-title">
+            <ChevronDown :size="16" class="chevron-icon" aria-hidden="true" :class="{ 'rotate-minus-90': isCollapsed(group.id) }" />
             <strong>{{ group.name }}</strong>
             <span class="mono-text zone-pill">{{ group.zone }}</span>
-            <span class="count-badge">{{ group.hosts?.length || 0 }} 个解析记录</span>
-          </div>
-          <div class="header-right-badges">
+            <span class="count-badge">{{ group.hosts?.length || 0 }} 个域名</span>
+          </span>
+          <span class="header-right-badges">
             <span class="badge" :class="state(group).tone">{{ state(group).label }}</span>
             <span class="collapse-hint-text">{{ isCollapsed(group.id) ? '展开' : '收起' }}</span>
-          </div>
-        </div>
+          </span>
+        </button>
 
-        <div v-show="!isCollapsed(group.id)" class="ddns-card-body">
+        <div :id="`ddns-details-${group.id}`" v-show="!isCollapsed(group.id)" class="ddns-card-body">
           <p class="mono-text domain-title">{{ group.zone }} · {{ modeLabel(group.mode) }}</p>
           <p class="report-note">
             Cloudflare · 每 {{ group.interval.toLocaleString() }} 秒 ·
@@ -92,7 +97,7 @@
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="host in visibleHosts(group)" :key="host">
+                <tr v-for="host in group.hosts" :key="host">
                   <td class="mono-text">{{ host }}</td>
                   <td>
                     <div v-for="family in ['ipv4', 'ipv6']" :key="family">
@@ -106,14 +111,6 @@
                 </tr>
               </tbody>
             </table>
-          </div>
-
-          <!-- Table Expand/Collapse Button for groups with > 6 hosts -->
-          <div v-if="group.hosts && group.hosts.length > 6" class="table-fold-bar">
-            <button class="btn btn-ghost btn-xs fold-toggle-btn" @click.stop="toggleTableExpand(group.id)">
-              <ChevronsUpDown :size="13" />
-              <span>{{ isTableExpanded(group.id) ? '收起部分解析记录' : `展开其余 ${group.hosts.length - 5} 条解析记录 (共 ${group.hosts.length} 条)` }}</span>
-            </button>
           </div>
 
           <details v-if="references(group.id).length" class="ref-details">
@@ -169,7 +166,7 @@
 </template>
 <script setup>
 import { computed, onMounted, onUnmounted, ref, shallowRef } from 'vue'
-import { Plus, ChevronDown, ChevronsUpDown } from 'lucide-vue-next'
+import { Plus, ChevronDown } from 'lucide-vue-next'
 import SpotlightCard from '@/components/SpotlightCard.vue'
 import DdnsEditor from '@/components/DdnsEditor.vue'
 import PublicIPMonitor from '@/components/PublicIPMonitor.vue'
@@ -200,13 +197,12 @@ const loading = ref(false),
   network = shallowRef(null),
   editor = shallowRef(null)
 
-const COLLAPSED_STORAGE_KEY = 'gatehome_ddns_collapsed_groups'
-const collapsedGroups = ref(loadCollapsedGroups())
-const expandedTables = ref(new Set())
+const EXPANDED_STORAGE_KEY = 'gatehome_ddns_expanded_groups'
+const expandedGroups = ref(loadExpandedGroups())
 
-function loadCollapsedGroups() {
+function loadExpandedGroups() {
   try {
-    const raw = localStorage.getItem(COLLAPSED_STORAGE_KEY)
+    const raw = localStorage.getItem(EXPANDED_STORAGE_KEY)
     if (!raw) return new Set()
     const parsed = JSON.parse(raw)
     return new Set(Array.isArray(parsed) ? parsed : [])
@@ -215,57 +211,37 @@ function loadCollapsedGroups() {
   }
 }
 
-function saveCollapsedGroups() {
+function saveExpandedGroups() {
   try {
-    localStorage.setItem(COLLAPSED_STORAGE_KEY, JSON.stringify([...collapsedGroups.value]))
+    localStorage.setItem(EXPANDED_STORAGE_KEY, JSON.stringify([...expandedGroups.value]))
   } catch {}
 }
 
 function isCollapsed(id) {
-  return collapsedGroups.value.has(id)
+  return !expandedGroups.value.has(id)
 }
 
 function toggleCollapse(id) {
-  if (collapsedGroups.value.has(id)) {
-    collapsedGroups.value.delete(id)
+  if (expandedGroups.value.has(id)) {
+    expandedGroups.value.delete(id)
   } else {
-    collapsedGroups.value.add(id)
+    expandedGroups.value.add(id)
   }
-  saveCollapsedGroups()
+  saveExpandedGroups()
 }
 
 const isAllCollapsed = computed(() => {
   if (!groups.value.length) return false
-  return groups.value.every(g => collapsedGroups.value.has(g.id))
+  return groups.value.every(g => isCollapsed(g.id))
 })
 
 function toggleAllCollapse() {
   if (isAllCollapsed.value) {
-    collapsedGroups.value.clear()
+    groups.value.forEach(g => expandedGroups.value.add(g.id))
   } else {
-    groups.value.forEach(g => collapsedGroups.value.add(g.id))
+    expandedGroups.value.clear()
   }
-  saveCollapsedGroups()
-}
-
-function isTableExpanded(id) {
-  return expandedTables.value.has(id)
-}
-
-function toggleTableExpand(id) {
-  if (expandedTables.value.has(id)) {
-    expandedTables.value.delete(id)
-  } else {
-    expandedTables.value.add(id)
-  }
-}
-
-function visibleHosts(group) {
-  if (!group?.hosts) return []
-  if (isTableExpanded(group.id) || group.hosts.length <= 6) {
-    return group.hosts
-  }
-  return group.hosts.slice(0, 5)
+  saveExpandedGroups()
 }
 const controller = new AbortController()
 let recordsVersion = 0,
@@ -395,13 +371,23 @@ onUnmounted(() => {
   display: grid;
   gap: 14px;
 }
+.ddns-card {
+  padding: 12px 16px;
+}
 .ddns-header-clickable {
+  width: 100%;
+  min-height: 44px;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
   cursor: pointer;
   user-select: none;
-  padding: 4px 6px;
+  padding: 0;
   border-radius: var(--radius-sm);
   transition: background 0.15s ease;
-  margin: -4px -6px 0;
+  margin: 0;
 }
 .ddns-header-clickable:hover {
   background: var(--strip-bg);
@@ -411,21 +397,15 @@ onUnmounted(() => {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+  min-width: 0;
+  flex: 1;
 }
-.collapse-chevron-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: transparent;
-  border: none;
+.header-left-title strong, .zone-pill {
+  overflow-wrap: anywhere;
+}
+.chevron-icon {
+  flex-shrink: 0;
   color: var(--muted);
-  padding: 0;
-  cursor: pointer;
-}
-.collapse-chevron-btn .chevron-icon {
   transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 .rotate-minus-90 {
@@ -436,6 +416,7 @@ onUnmounted(() => {
   color: var(--muted);
 }
 .count-badge {
+  white-space: nowrap;
   font-size: 11px;
   padding: 1px 7px;
   border-radius: 10px;
@@ -447,6 +428,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-shrink: 0;
 }
 .collapse-hint-text {
   font-size: 11px;
@@ -456,18 +438,7 @@ onUnmounted(() => {
 .ddns-card-body {
   display: grid;
   gap: 14px;
-}
-.table-fold-bar {
-  display: flex;
-  justify-content: center;
-  margin-top: -4px;
-}
-.fold-toggle-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11.5px;
-  color: var(--brand, #818cf8);
+  min-width: 0;
 }
 .domain-title {
   overflow-wrap: anywhere;
@@ -492,5 +463,8 @@ summary {
   .ddns-grid {
     grid-template-columns: 1fr;
   }
+}
+@media (prefers-reduced-motion: reduce) {
+  .chevron-icon { transition: none; }
 }
 </style>
