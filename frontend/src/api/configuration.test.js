@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { defaultRouteTLS, firewallDraft, firewallRecord, forwardState, replaceConfigItem, routeHost, routeUsesFullHost } from './configuration.js'
+import { defaultRouteTLS, firewallDraft, firewallRecord, forwardState, replaceConfigItem, routeAccessURL, routeHost, routeUsesFullHost } from './configuration.js'
 
 test('editing a route from a captured revision preserves unrelated data and the original draft', () => {
   const route = { group_id: 'default', host: 'old.example.com', auth: { enabled: true }, image: 'kept-image' }
@@ -65,6 +65,19 @@ test('route defaults prefer the configured HTTPS listener without changing HTTP-
   assert.equal(defaultRouteTLS({ http_port: 18080, https_port: 18443 }), true)
   assert.equal(defaultRouteTLS({ http_port: 0, https_port: 18443 }), true)
   assert.equal(defaultRouteTLS({ http_port: 18080, https_port: 0 }), false)
+})
+
+test('route access URLs include the correct protocol and explicit listener port', () => {
+  const route = { host: 'nas.example.test', tls: true }
+  const group = { http_port: 18080, https_port: 18443 }
+  assert.equal(routeAccessURL(route, group), 'https://nas.example.test:18443')
+  assert.equal(routeAccessURL({ ...route, tls: false }, group), 'http://nas.example.test:18080')
+  assert.equal(routeAccessURL(route, { https_port: 443 }), 'https://nas.example.test:443')
+  assert.equal(routeAccessURL({ ...route, tls: false }, { http_port: 80 }), 'http://nas.example.test:80')
+  assert.equal(routeAccessURL(route, { http_port: 18080, https_port: 0 }), '')
+  assert.equal(routeAccessURL(route, undefined), '')
+  assert.deepEqual(route, { host: 'nas.example.test', tls: true })
+  assert.deepEqual(group, { http_port: 18080, https_port: 18443 })
 })
 
 test('firewall edits preserve unknown fields and group order while converting input units', () => {

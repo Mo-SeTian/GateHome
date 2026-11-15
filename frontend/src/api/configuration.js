@@ -19,6 +19,11 @@ export function defaultRouteTLS(group) {
   return Boolean(group?.https_port)
 }
 
+export function routeAccessURL(route, group) {
+  const port = route.tls ? group?.https_port : group?.http_port
+  return port ? `${route.tls ? 'https' : 'http'}://${route.host}:${port}` : ''
+}
+
 export function replaceConfigItem(snapshot, collection, item, originalId) {
   const config = structuredClone(snapshot.config)
   const items = config[collection] ?? []

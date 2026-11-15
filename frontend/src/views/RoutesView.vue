@@ -38,41 +38,6 @@
     <p v-if="loadError" class="page-error" role="alert">{{ loadError }}</p>
     <p v-if="loading" role="status">正在读取反代配置…</p>
 
-    <details v-if="gatewayConfig" class="group-panel ref-details">
-      <summary>
-        <span>反代组与监听端口（共 {{ proxyGroups.length }} 组）</span>
-      </summary>
-      <div class="group-panel-content">
-        <div v-for="group in proxyGroups" :key="group.id" class="group-row">
-          <div>
-            <strong>{{ group.name }}</strong>
-            <p>
-              HTTP {{ group.http_port || '关闭' }} / HTTPS {{ group.https_port || '关闭' }} ·
-              {{ groupState(group) }}
-            </p>
-            <p v-if="group.domain_suffix">域名后缀 {{ group.domain_suffix }}</p>
-          </div>
-          <div class="action-btn-group">
-            <button class="btn btn-secondary btn-sm" :disabled="isSavingConfig" @click="openGroup(group)">
-              编辑
-            </button>
-            <button class="btn btn-ghost btn-sm" :disabled="isSavingConfig" @click="toggleGroup(group)">
-              {{ group.enabled ? '停用' : '启用' }}
-            </button>
-            <button
-              class="btn btn-ghost btn-sm text-bad"
-              :disabled="isSavingConfig || getGroupCount(group.id) > 0"
-              title="先移走或删除组内路由，再删除此组"
-              @click="deleteGroup(group)"
-            >
-              删除
-            </button>
-          </div>
-        </div>
-        <p v-if="!proxyGroups.length" class="report-note">尚无反代组，请先新建反代组。</p>
-      </div>
-    </details>
-
     <div class="filter-bar">
       <div class="chips-group">
         <button class="chip-btn" :class="{ active: selectedGroup === 'ALL' }" @click="selectedGroup = 'ALL'">
@@ -105,76 +70,130 @@
       </div>
     </div>
 
-    <div class="routes-grid">
-      <SpotlightCard
-        v-for="route in filteredRoutes"
-        :key="route.id || routeKey(route)"
-        class="route-card"
-        :class="{ inactive: !route.enabled }"
-      >
-        <div class="card-head">
-          <div class="app-icon-wrap" :class="routeCategoryClass(route)">
-            <img
-              v-if="route.image"
-              :src="routeImageUrl(route.image)"
-              width="32"
-              height="32"
-              alt=""
-            /><Network v-else :size="18" />
-          </div>
-          <div class="card-title-group">
-            <div class="card-title-row">
-              <span class="service-name">{{ route.name || route.host }}</span>
-            </div>
-            <div class="service-category">所属组 {{ groupName(route.group_id) }}</div>
-          </div>
-          <label class="switch"
-            ><input
-              type="checkbox"
-              :checked="route.enabled"
-              :disabled="isSavingConfig"
-              :aria-label="`启用 ${route.name || route.host}`"
-              @change="toggleRoute(route, $event)" /><span class="switch-slider"
-          /></label>
-        </div>
-        <div class="endpoint-info">
-          <button type="button" class="info-row domain-row" @click="copyHost(route.host)">
-            <Globe :size="14" /><span class="info-text mono-text domain-text">{{ route.host }}</span
-            ><Copy :size="12" />
-          </button>
-          <div class="info-row target-row">
-            <ArrowRight :size="14" /><span class="info-text mono-text">{{ route.upstream }}</span>
-          </div>
-        </div>
-        <div class="feature-badges">
-          <span v-if="route.tls" class="feature-badge ssl"><Lock :size="10" /> HTTPS</span>
-          <span v-if="route.firewall_id" class="feature-badge fw">{{ firewallName(route.firewall_id) }}</span>
-          <span v-if="route.auth.enabled" class="feature-badge auth"><Key :size="10" /> 账号保护</span>
-          <span class="feature-badge hits">{{ route.enabled ? '已启用' : '已停用' }}</span>
-        </div>
-        <button type="button" class="health-detail" @click="showHealth(route)">
-          {{ routeHealth(route) }}
+    <section
+      v-for="{ group, items } in groupedRoutes"
+      :key="group.id"
+      class="route-group"
+      :class="{ collapsed: isGroupCollapsed(group.id) }"
+      :data-group-id="group.id"
+      :aria-labelledby="`route-group-title-${group.id}`"
+    >
+      <header class="route-group-header">
+        <button
+          type="button"
+          class="route-group-toggle"
+          :aria-label="`${isGroupCollapsed(group.id) ? '展开' : '收起'} ${group.name} 的路由`"
+          :aria-expanded="!isGroupCollapsed(group.id)"
+          :aria-controls="`route-group-body-${group.id}`"
+          @click="toggleGroupCollapse(group.id)"
+        >
+          <ChevronDown :size="16" aria-hidden="true" :class="{ folded: isGroupCollapsed(group.id) }" />
+          <span class="route-group-info">
+            <span class="route-group-title">
+              <strong :id="`route-group-title-${group.id}`">{{ group.name }}</strong>
+              <span class="chip-count">{{ items.length }} 个服务</span>
+            </span>
+            <span class="route-group-meta">
+              HTTP {{ group.http_port || '关闭' }} / HTTPS {{ group.https_port || '关闭' }} · {{ groupState(group) }}
+              <span v-if="group.domain_suffix"> · {{ group.domain_suffix }}</span>
+            </span>
+          </span>
         </button>
-        <div class="card-actions">
-          <span class="latency-label">{{ route.tls ? 'HTTPS' : 'HTTP' }}</span>
-          <div class="action-btn-group">
-            <RouterLink class="btn btn-ghost btn-sm" :to="{ path: '/traffic', query: { rule: route.id } }">查看流量</RouterLink>
-            <button class="btn btn-ghost btn-sm" :disabled="isSavingConfig" @click="openRoute(route)">
-              <Edit3 :size="13" /> 编辑
-            </button>
-            <button
-              class="btn btn-ghost btn-sm text-bad"
-              :disabled="isSavingConfig"
-              :aria-label="`删除 ${route.name || route.host}`"
-              @click="deleteRoute(route)"
-            >
-              <Trash2 :size="13" />
-            </button>
-          </div>
+        <div class="action-btn-group group-actions">
+          <button class="btn btn-secondary btn-sm" :disabled="isSavingConfig" @click="openGroup(group)">编辑组</button>
+          <button class="btn btn-ghost btn-sm" :disabled="isSavingConfig" @click="toggleGroup(group)">
+            {{ group.enabled ? '停用组' : '启用组' }}
+          </button>
+          <button
+            class="btn btn-ghost btn-sm text-bad"
+            :disabled="isSavingConfig || getGroupCount(group.id) > 0"
+            :aria-label="`删除反代组 ${group.name}`"
+            title="先移走或删除组内路由，再删除此组"
+            @click="deleteGroup(group)"
+          >删除组</button>
         </div>
-      </SpotlightCard>
-    </div>
-    <div v-if="gatewayConfig && !filteredRoutes.length" class="empty-state">
+      </header>
+      <div :id="`route-group-body-${group.id}`" v-show="!isGroupCollapsed(group.id)" class="route-group-body">
+        <div class="routes-grid">
+          <SpotlightCard
+            v-for="route in items"
+            :key="route.id || routeKey(route)"
+            class="route-card"
+            :class="{ inactive: !route.enabled }"
+          >
+            <div class="card-head">
+              <div class="app-icon-wrap" :class="routeCategoryClass(route)">
+                <img
+                  v-if="route.image"
+                  :src="routeImageUrl(route.image)"
+                  width="32"
+                  height="32"
+                  alt=""
+                /><Network v-else :size="18" />
+              </div>
+              <div class="card-title-group">
+                <div class="card-title-row">
+                  <span class="service-name">{{ route.name || route.host }}</span>
+                </div>
+                <div class="service-category">所属组 {{ groupName(route.group_id) }}</div>
+              </div>
+              <label class="switch"
+                ><input
+                  type="checkbox"
+                  :checked="route.enabled"
+                  :disabled="isSavingConfig"
+                  :aria-label="`启用 ${route.name || route.host}`"
+                  @change="toggleRoute(route, $event)" /><span class="switch-slider"
+              /></label>
+            </div>
+            <div class="endpoint-info">
+              <button
+                type="button"
+                class="info-row domain-row"
+                :disabled="!accessURL(route)"
+                :title="accessURL(route) || '此组尚未配置对应的访问端口'"
+                :aria-label="accessURL(route) ? `复制访问地址 ${accessURL(route)}` : '访问端口未配置'"
+                @click="copyURL(accessURL(route))"
+              >
+                <Globe :size="14" aria-hidden="true" /><span class="info-text mono-text domain-text">{{ accessURL(route) || route.host }}</span
+                ><Copy :size="12" aria-hidden="true" />
+              </button>
+              <div class="info-row target-row">
+                <ArrowRight :size="14" /><span class="info-text mono-text">{{ route.upstream }}</span>
+              </div>
+            </div>
+            <div class="feature-badges">
+              <span v-if="route.tls" class="feature-badge ssl"><Lock :size="10" /> HTTPS</span>
+              <span v-if="route.firewall_id" class="feature-badge fw">{{ firewallName(route.firewall_id) }}</span>
+              <span v-if="route.auth.enabled" class="feature-badge auth"><Key :size="10" /> 账号保护</span>
+              <span class="feature-badge hits">{{ route.enabled ? '已启用' : '已停用' }}</span>
+            </div>
+            <button type="button" class="health-detail" @click="showHealth(route)">
+              {{ routeHealth(route) }}
+            </button>
+            <div class="card-actions">
+              <span class="latency-label">{{ route.tls ? 'HTTPS' : 'HTTP' }}</span>
+              <div class="action-btn-group">
+                <RouterLink class="btn btn-ghost btn-sm" :to="{ path: '/traffic', query: { rule: route.id } }">查看流量</RouterLink>
+                <button class="btn btn-ghost btn-sm" :disabled="isSavingConfig" @click="openRoute(route)">
+                  <Edit3 :size="13" /> 编辑
+                </button>
+                <button
+                  class="btn btn-ghost btn-sm text-bad"
+                  :disabled="isSavingConfig"
+                  :aria-label="`删除 ${route.name || route.host}`"
+                  @click="deleteRoute(route)"
+                >
+                  <Trash2 :size="13" />
+                </button>
+              </div>
+            </div>
+          </SpotlightCard>
+        </div>
+        <p v-if="!items.length" class="group-empty">此组暂无反代服务，可通过“新建反代服务”添加。</p>
+      </div>
+    </section>
+    <div v-if="gatewayConfig && !groupedRoutes.length" class="empty-state">
       <AlertCircle :size="30" />
       <p>暂无匹配的反代服务</p>
     </div>
@@ -492,6 +511,7 @@ import { useRoute, useRouter } from 'vue-router'
 import {
   AlertCircle,
   ArrowRight,
+  ChevronDown,
   Copy,
   Edit3,
   Globe,
@@ -509,7 +529,7 @@ import RouteImagePicker from '@/components/RouteImagePicker.vue'
 import { routeImageUrl } from '@/api/icons'
 import ServiceDiscovery from '@/components/ServiceDiscovery.vue'
 import { adminApi } from '@/api/admin'
-import { defaultRouteTLS, replaceConfigItem, routeHost, routeKey, routeUsesFullHost } from '@/api/configuration'
+import { defaultRouteTLS, replaceConfigItem, routeAccessURL, routeHost, routeKey, routeUsesFullHost } from '@/api/configuration'
 import { useGatewayStatus } from '@/composables/useGatewayStatus'
 import { useToast } from '@/composables/useToast'
 
@@ -561,11 +581,38 @@ const filteredRoutes = computed(() =>
     if (!['ALL', 'INACTIVE'].includes(selectedGroup.value) && route.group_id !== selectedGroup.value)
       return false
     const query = searchQuery.value.trim().toLowerCase()
-    return [route.name, route.host, route.upstream].some((value) =>
+    return [route.name, route.host, route.upstream, accessURL(route)].some((value) =>
       (value || '').toLowerCase().includes(query)
     )
   })
 )
+const groupedRoutes = computed(() => proxyGroups.value
+  .filter(group => ['ALL', 'INACTIVE'].includes(selectedGroup.value) || group.id === selectedGroup.value)
+  .map(group => ({ group, items: filteredRoutes.value.filter(route => route.group_id === group.id) }))
+  .filter(section => section.items.length || (!searchQuery.value.trim() && selectedGroup.value !== 'INACTIVE')))
+const GROUP_COLLAPSE_KEY = 'gatehome_route_collapsed_groups'
+const collapsedGroups = ref(loadCollapsedGroups())
+function loadCollapsedGroups() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(GROUP_COLLAPSE_KEY) || '[]')
+    return new Set(Array.isArray(saved) ? saved : [])
+  } catch { return new Set() }
+}
+function saveCollapsedGroups() {
+  try { localStorage.setItem(GROUP_COLLAPSE_KEY, JSON.stringify([...collapsedGroups.value])) } catch {}
+}
+function isGroupCollapsed(id) {
+  return collapsedGroups.value.has(id)
+}
+function toggleGroupCollapse(id) {
+  if (collapsedGroups.value.has(id)) collapsedGroups.value.delete(id)
+  else collapsedGroups.value.add(id)
+  saveCollapsedGroups()
+}
+watch([searchQuery, selectedGroup], () => {
+  for (const { group } of groupedRoutes.value) collapsedGroups.value.delete(group.id)
+  saveCollapsedGroups()
+})
 const resolvedHost = computed(() =>
   routeHost(
     routeDraft.value.host || '',
@@ -588,6 +635,9 @@ function getGroupCount(id) {
 }
 function groupName(id) {
   return proxyGroups.value.find((group) => group.id === id)?.name || id
+}
+function accessURL(route) {
+  return routeAccessURL(route, proxyGroups.value.find(group => group.id === route.group_id))
 }
 function firewallName(id) {
   return gatewayConfig.value?.firewalls.find((firewall) => firewall.id === id)?.name || id
@@ -783,16 +833,16 @@ function deleteRoute(route) {
 function deleteGroup(group) {
   if (confirm(`删除反代组「${group.name}」？`)) return changeItem('groups', group, true)
 }
-async function copyHost(host) {
+async function copyURL(url) {
   try {
     try {
-      await navigator.clipboard.writeText(host)
+      await navigator.clipboard.writeText(url)
     } catch {
       // LAN HTTP pages have no Clipboard API; copy during the original click.
       if (document.visibilityState === 'hidden' || !document.hasFocus()) throw new Error('Page inactive')
       const active = document.activeElement
       const input = document.createElement('textarea')
-      input.value = host
+      input.value = url
       input.readOnly = true
       input.style.cssText = 'position:fixed;left:-9999px;top:0;font-size:16px'
       document.body.append(input)
@@ -804,9 +854,9 @@ async function copyHost(host) {
         if (document.visibilityState === 'visible' && document.hasFocus()) active?.focus({ preventScroll: true })
       }
     }
-    toast.success('域名已复制')
+    toast.success('访问地址已复制')
   } catch {
-    toast.error('复制失败，请手动复制域名')
+    toast.error('复制失败，请手动复制访问地址')
   }
 }
 function showHealth(route) {
@@ -882,28 +932,44 @@ onUnmounted(() => {
 .header-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .page-error { color: var(--bad); font-size: 13px; overflow-wrap: anywhere; }
 .form-note { color: var(--muted); font-size: 12px; margin: 0; overflow-wrap: anywhere; }
-.group-panel {
-  padding: 0;
-  background: var(--surface);
+.route-group {
+  min-width: 0;
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
-  overflow: hidden;
 }
-.group-panel summary {
-  padding: 10px 16px !important;
-  font-size: 13px;
-  font-weight: 600;
+.route-group-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+}
+.route-group-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: transparent;
   color: var(--ink);
+  text-align: left;
   cursor: pointer;
 }
-.group-panel-content {
-  padding: 4px 16px 14px !important;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+.route-group-toggle > svg { flex-shrink: 0; color: var(--muted); transition: transform 0.15s ease; }
+.route-group-toggle > svg.folded { transform: rotate(-90deg); }
+.route-group-toggle:hover strong { color: var(--brand-light); }
+.route-group-info { display: grid; gap: 5px; min-width: 0; }
+.route-group-title { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 14px; }
+.route-group-title strong { overflow-wrap: anywhere; }
+.route-group-meta { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.route-group-body { padding: 0 16px 16px; }
+.group-actions { flex-wrap: wrap; flex-shrink: 0; }
+.group-empty { padding: 12px 0; font-size: 12px; color: var(--muted); }
+@media (prefers-reduced-motion: reduce) {
+  .route-group-toggle > svg { transition: none; }
 }
-.group-row { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; padding-top: 12px; color: var(--ink); }
-.group-row p { color: var(--muted); font-size: 12px; margin: 4px 0; }
 .health-detail { color: var(--muted); text-align: left; font-size: 12px; margin-bottom: 12px; }
 .auth-fields {
   border: 1px solid var(--line);
@@ -1040,7 +1106,7 @@ onUnmounted(() => {
 .domain-row { cursor: pointer; color: var(--ink); }
 .domain-row:hover .domain-text { color: var(--brand-light); }
 .domain-row:hover .copy-icon { opacity: 1; }
-.domain-text { font-weight: 500; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.domain-text { font-weight: 500; flex: 1; overflow-wrap: anywhere; }
 .copy-icon { opacity: 0; color: var(--faint); transition: opacity 0.2s ease; }
 .target-row { color: var(--muted); }
 .target-arrow { color: var(--brand-cyan); }
@@ -1099,6 +1165,8 @@ onUnmounted(() => {
 .route-card { min-width: 0; }
 .info-text { min-width: 0; overflow-wrap: anywhere; }
 .domain-row { width: 100%; background: transparent; border: 0; text-align: left; }
+.domain-row > svg { flex-shrink: 0; }
+.domain-row:disabled { cursor: default; color: var(--muted); }
 
 .toggles-panel {
   background: var(--strip-bg); border: 1px solid var(--line);
@@ -1110,6 +1178,12 @@ onUnmounted(() => {
 .auth-sub-fields { padding: 8px 0; border-top: 1px dashed var(--line); margin-top: 4px; }
 
 @media (max-width: 640px) {
+  .route-group-header { flex-wrap: wrap; padding: 10px 12px; }
+  .route-group-toggle { flex-basis: 100%; }
+  .group-actions { width: 100%; }
+  .group-actions .btn { min-height: 44px; flex: 1; justify-content: center; }
+  .route-group-body { padding: 0 12px 12px; }
+  .domain-row { min-height: 44px; }
   .routes-grid { grid-template-columns: 1fr; }
   .filter-bar { flex-direction: column; align-items: stretch; }
   .search-box { width: 100%; }
