@@ -74,20 +74,9 @@
           <p class="report-note">
             使用 ECDSA P-256。独立 Token 需要相应 Zone 的 Zone:Read / DNS:Edit 权限，与 DDNS 组的凭据分开。
           </p>
-          <label class="form-field"
-            >独立 API Token<input
-              v-model="token"
-              name="token"
-              class="form-input"
-              type="password"
-              autocomplete="new-password"
-              maxlength="512"
-              :placeholder="
-                snapshot.certificate_credentials_configured?.[request?.id]
-                  ? '已配置，留空保留'
-                  : '填写此证书任务的 Token'
-              "
-          /></label>
+          <SecretInput id="certificate-token" v-model="token" label="独立 API Token" kind="certificate"
+            :credential-id="request?.id || ''" :configured="!!snapshot.certificate_credentials_configured?.[request?.id]"
+            :placeholder="snapshot.certificate_credentials_configured?.[request?.id] ? '已配置，留空保留' : '填写此证书任务的 Token'" />
           <label class="check-label"
             ><input v-model="clearToken" name="clear_token" type="checkbox" />清除已保存的 Token</label
           >
@@ -114,6 +103,7 @@
 import { newID } from '@/api/ids'
 import { nextTick, onMounted, onUnmounted, ref, toRaw } from 'vue'
 import { X } from 'lucide-vue-next'
+import SecretInput from '@/components/SecretInput.vue'
 import { domainList, replaceCertificate, tokenChange } from '@/api/dns'
 import { useGatewayStatus } from '@/composables/useGatewayStatus'
 const props = defineProps({ snapshot: Object, request: Object, settings: Boolean })

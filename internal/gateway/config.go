@@ -188,6 +188,7 @@ type State struct {
 	WebDAVBackup           WebDAVBackupState        `json:"webdav_backup,omitempty"`
 	MCP                    MCPConfig                `json:"mcp,omitempty"`
 	MCPTokenHash           string                   `json:"mcp_token_hash,omitempty"`
+	MCPToken               string                   `json:"mcp_token,omitempty"`
 	MCPClients             []MCPClient              `json:"mcp_clients,omitempty"`
 	AdminUsername          string                   `json:"admin_username"`
 	Config                 Config                   `json:"config"`

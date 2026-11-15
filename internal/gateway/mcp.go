@@ -509,9 +509,9 @@ func mcpRestoreRedactions(value, previous any) (any, error) {
 
 func (a *Admin) mcpSafeText(value string) string {
 	state := a.store.Snapshot()
-	secrets := []string{state.CloudflareToken, state.GitHubToken, state.ProxyPassword, state.PasswordHash, state.MCPTokenHash, state.WebDAVBackup.Password, state.WebDAVBackup.BackupPassword}
+	secrets := []string{state.CloudflareToken, state.GitHubToken, state.ProxyPassword, state.PasswordHash, state.MCPTokenHash, state.MCPToken, state.WebDAVBackup.Password, state.WebDAVBackup.BackupPassword}
 	for _, client := range state.MCPClients {
-		secrets = append(secrets, client.Hash)
+		secrets = append(secrets, client.Hash, client.Token)
 	}
 	for _, credential := range state.DNSCredentials {
 		secrets = append(secrets, credential.Token)

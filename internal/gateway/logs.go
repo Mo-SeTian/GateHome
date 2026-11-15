@@ -168,7 +168,10 @@ func (l *Logs) Add(e LogEntry) {
 	}
 	if l.store != nil {
 		s := l.store.Snapshot()
-		secrets := []string{s.CloudflareToken, s.ProxyPassword, s.PasswordHash, s.GitHubToken, s.WebDAVBackup.Password, s.WebDAVBackup.BackupPassword}
+		secrets := []string{s.CloudflareToken, s.ProxyPassword, s.PasswordHash, s.GitHubToken, s.WebDAVBackup.Password, s.WebDAVBackup.BackupPassword, s.MCPToken, s.MCPTokenHash}
+		for _, client := range s.MCPClients {
+			secrets = append(secrets, client.Token, client.Hash)
+		}
 		for _, hash := range s.RoutePasswordHashes {
 			secrets = append(secrets, hash)
 		}

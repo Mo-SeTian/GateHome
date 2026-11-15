@@ -124,22 +124,15 @@
         ><h2>GitHub API Token（可选）</h2>
         <p class="report-note">
           {{
-            configSnapshot?.github_token_configured ? '已配置，仅返回配置状态。' : '尚未配置。'
+            configSnapshot?.github_token_configured ? '已配置，可点击小眼睛查看。' : '尚未配置。'
           }}
           用于读取公开发行版本，提高 API 访问额度。
         </p>
         <form @submit.prevent="saveToken">
           <fieldset :disabled="!!busy || active || isSavingConfig">
-            <label
-              >新 Token<input
-                v-model="githubToken"
-                name="github_token"
-                class="form-input"
-                type="password"
-                autocomplete="new-password"
-                placeholder="留空保留已存 Token"
-                maxlength="512" /></label
-            ><label class="check-row"
+            <SecretInput id="github-token" v-model="githubToken" name="github_token" label="GitHub API Token"
+              kind="github" :configured="!!configSnapshot?.github_token_configured" placeholder="留空保留已存 Token" />
+            <label class="check-row"
               ><input v-model="clearToken" name="clear_github_token" type="checkbox" />明确清除已存
               Token</label
             ><button
@@ -226,6 +219,7 @@ import { useGatewayStatus } from '@/composables/useGatewayStatus'
 import { useSession } from '@/composables/useSession'
 import { useToast } from '@/composables/useToast'
 import '@/styles/reports.css'
+import SecretInput from '@/components/SecretInput.vue'
 const { gatewayStatus, gatewayVersion, refreshStatus, refreshConfig, saveConfig, isSavingConfig } =
     useGatewayStatus(),
   { endSession } = useSession()

@@ -95,6 +95,14 @@ func (c Config) CertificateDNSGroup(host string) (DDNSGroup, error) {
 }
 
 func validateCredentials(s State) error {
+	if !validStoredMCPToken(s.MCPToken, s.MCPTokenHash) {
+		return errors.New("MCP 令牌原值与摘要不一致")
+	}
+	for _, client := range s.MCPClients {
+		if !validStoredMCPToken(client.Token, client.Hash) {
+			return errors.New("MCP 客户端令牌原值与摘要不一致")
+		}
+	}
 	if err := validateWebDAVBackupState(s.WebDAVBackup); err != nil {
 		return err
 	}

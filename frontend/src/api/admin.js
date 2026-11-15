@@ -16,6 +16,7 @@ export const adminApi = {
   status: (signal) => request('/api/status', { signal }),
   config: (signal) => request('/api/config', { signal }),
   saveConfig: (body) => request('/api/config', { method: 'PUT', body }),
+  revealCredential: (body, signal) => request('/api/credentials/reveal', { method: 'POST', body, signal }),
   restart: () => request('/api/maintenance/restart', { method: 'POST', body: {} }),
   maintenance: (signal) => request('/api/maintenance', { signal }),
   sunPanelRoutes: (signal) => request('/api/sunpanel/routes', { signal }),

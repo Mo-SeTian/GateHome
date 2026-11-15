@@ -105,7 +105,7 @@ func TestMCPClientCanBePausedWithoutRunningPanel(t *testing.T) {
 	}
 }
 
-func TestMCPClientsSurviveEncryptedBackupWithoutPlaintextTokens(t *testing.T) {
+func TestMCPClientsSurviveEncryptedBackupWithRevealableTokens(t *testing.T) {
 	a, _ := testAdmin(t)
 	if _, err := a.store.saveMCP(MCPConfig{Enabled: true, Read: true}, false, a.store.Snapshot().Revision); err != nil {
 		t.Fatal("fixture setup failed")
@@ -116,15 +116,16 @@ func TestMCPClientsSurviveEncryptedBackupWithoutPlaintextTokens(t *testing.T) {
 		t.Fatal("client creation failed")
 	}
 	stored, err := os.ReadFile(a.store.path)
-	if err != nil || bytes.Contains(stored, []byte(token)) {
-		t.Fatal("client credential stored in plaintext")
+	info, statErr := os.Stat(a.store.path)
+	if err != nil || statErr != nil || info.Mode().Perm()&0077 != 0 || !bytes.Contains(stored, []byte(token)) {
+		t.Fatal("revealable client credential was not retained in owner-only storage")
 	}
 	archive, err := encodeBackup(backupPayload{State: a.store.Snapshot(), Certificates: map[string][]byte{}, Files: map[string][]byte{}}, "TEST_ONLY_BACKUP_PASSWORD")
 	if err != nil || bytes.Contains(archive, []byte(token)) {
 		t.Fatal("encrypted backup failed or disclosed token")
 	}
 	restored, _, err := decodeBackup(archive, "TEST_ONLY_BACKUP_PASSWORD")
-	if err != nil || len(restored.State.MCPClients) != 1 || !validMCPToken(restored.State, "Bearer "+token) || !restored.State.MCPClients[0].ExpiresAt.Equal(expires) {
+	if err != nil || len(restored.State.MCPClients) != 1 || !validMCPToken(restored.State, "Bearer "+token) || restored.State.MCPClients[0].Token != token || !restored.State.MCPClients[0].ExpiresAt.Equal(expires) {
 		t.Fatal("client authorization or expiry lost on restore")
 	}
 }

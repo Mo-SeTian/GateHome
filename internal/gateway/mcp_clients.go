@@ -11,15 +11,17 @@ import (
 	"time"
 )
 
-// Hash is stored locally and in encrypted backups, never in management responses.
+// Hash and Token are excluded from ordinary management responses.
 type MCPClient struct {
-	ID        string     `json:"id"`
-	Name      string     `json:"name"`
-	Config    MCPConfig  `json:"config"`
-	Hash      string     `json:"hash,omitempty"`
-	CreatedAt time.Time  `json:"created_at"`
-	ExpiresAt *time.Time `json:"expires_at,omitempty"`
-	RevokedAt *time.Time `json:"revoked_at,omitempty"`
+	ID         string     `json:"id"`
+	Name       string     `json:"name"`
+	Config     MCPConfig  `json:"config"`
+	Hash       string     `json:"hash,omitempty"`
+	Token      string     `json:"token,omitempty"`
+	Revealable bool       `json:"revealable,omitempty"` // Derived for management views only.
+	CreatedAt  time.Time  `json:"created_at"`
+	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
+	RevokedAt  *time.Time `json:"revoked_at,omitempty"`
 }
 
 func mcpClientForToken(state State, header string) (MCPClient, bool) {
@@ -43,12 +45,15 @@ func mcpClientForToken(state State, header string) (MCPClient, bool) {
 func publicMCPClients(state State) []MCPClient {
 	clients := append([]MCPClient{}, state.MCPClients...)
 	for i := range clients {
+		clients[i].Revealable = clients[i].Token != ""
 		clients[i].Hash = ""
+		clients[i].Token = ""
 	}
 	return clients
 }
 
 func (s *Store) saveMCPClient(client MCPClient, rotate, revoke bool, revision int) (string, error) {
+	client.Token, client.Revealable = "", false
 	client.Name = strings.TrimSpace(client.Name)
 	if !revoke && (client.Name == "" || len([]rune(client.Name)) > 40 || strings.ContainsAny(client.Name, "\r\n") || strings.Contains(client.Name, "ghmcp_")) {
 		return "", errors.New("请填写客户端名称并至少授权一项权限")
@@ -79,6 +84,7 @@ func (s *Store) saveMCPClient(client MCPClient, rotate, revoke bool, revision in
 			return "", errors.New("已撤销的客户端不可重新启用，请创建新 Token")
 		}
 		client.Hash, client.CreatedAt = prior.Hash, prior.CreatedAt
+		client.Token = prior.Token
 		if client.Config.SunPanelWrite == nil {
 			client.Config.SunPanelWrite = prior.Config.SunPanelWrite
 		}
@@ -104,6 +110,8 @@ func (s *Store) saveMCPClient(client MCPClient, rotate, revoke bool, revision in
 		client = next.MCPClients[index]
 		client.RevokedAt = &now
 		client.Hash = ""
+		client.Token = ""
+		client.Revealable = false
 		client.Config.Enabled = false
 	} else if rotate {
 		secret := make([]byte, 32)
@@ -113,6 +121,7 @@ func (s *Store) saveMCPClient(client MCPClient, rotate, revoke bool, revision in
 		token = "ghmcp_" + hex.EncodeToString(secret)
 		sum := sha256.Sum256([]byte(token))
 		client.Hash = hex.EncodeToString(sum[:])
+		client.Token = token
 	}
 	if index < 0 {
 		next.MCPClients = append(next.MCPClients, client)
@@ -167,6 +176,6 @@ func (a *Admin) mcpClientRoutes(mux *http.ServeMux) {
 			return
 		}
 		state := a.store.Snapshot()
-		jsonResponse(w, 200, map[string]any{"config": state.MCP, "token_configured": state.MCPTokenHash != "", "clients": publicMCPClients(state), "revision": state.Revision, "token": token, "guide": mcpManagementGuide})
+		jsonResponse(w, 200, map[string]any{"config": state.MCP, "token_configured": state.MCPTokenHash != "", "token_reveal_available": state.MCPToken != "", "clients": publicMCPClients(state), "revision": state.Revision, "token": token, "guide": mcpManagementGuide})
 	}))
 }

@@ -65,6 +65,7 @@ func (s *Store) saveMCP(config MCPConfig, rotate bool, revision int) (string, er
 		token = "ghmcp_" + hex.EncodeToString(secret)
 		sum := sha256.Sum256([]byte(token))
 		next.MCPTokenHash = hex.EncodeToString(sum[:])
+		next.MCPToken = token
 	}
 	next.Revision++
 	if err := writeJSON(s.path, next); err != nil {
@@ -78,7 +79,7 @@ func (a *Admin) mcpSettingsRoutes(mux *http.ServeMux) {
 	a.mcpClientRoutes(mux)
 	status := func(w http.ResponseWriter, token string) {
 		state := a.store.Snapshot()
-		jsonResponse(w, 200, map[string]any{"config": state.MCP, "token_configured": state.MCPTokenHash != "", "revision": state.Revision, "token": token, "guide": mcpManagementGuide, "clients": publicMCPClients(state)})
+		jsonResponse(w, 200, map[string]any{"config": state.MCP, "token_configured": state.MCPTokenHash != "", "token_reveal_available": state.MCPToken != "", "revision": state.Revision, "token": token, "guide": mcpManagementGuide, "clients": publicMCPClients(state)})
 	}
 	mux.HandleFunc("GET /api/mcp", a.requireAuth(func(w http.ResponseWriter, r *http.Request) { status(w, "") }))
 	mux.HandleFunc("GET /api/mcp/sunpanel-users", a.requireAuth(func(w http.ResponseWriter, r *http.Request) {

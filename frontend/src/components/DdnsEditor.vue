@@ -37,23 +37,14 @@
               placeholder="example.com"
               required
           /></label>
-          <label class="form-field"
-            >独立 API Token<input
-              v-model="token"
-              name="token"
-              class="form-input"
-              type="password"
-              autocomplete="new-password"
-              maxlength="512"
-              :placeholder="
-                snapshot.dns_credentials_configured?.[group?.id] ? '已配置，留空保留' : '填写本组的 Token'
-              "
-          /></label>
+          <SecretInput id="ddns-token" v-model="token" label="独立 API Token" kind="ddns"
+            :credential-id="group?.id || ''" :configured="!!snapshot.dns_credentials_configured?.[group?.id]"
+            :placeholder="snapshot.dns_credentials_configured?.[group?.id] ? '已配置，留空保留' : '填写本组的 Token'" />
           <label class="check-label"
             ><input v-model="clearToken" name="clear_token" type="checkbox" />清除已保存的
             Token（需先停用同步）</label
           >
-          <p class="report-note">需要此 Zone 的 Zone:Read / DNS:Edit 权限。凭据不回显、不与证书任务共用。</p>
+          <p class="report-note">需要此 Zone 的 Zone:Read / DNS:Edit 权限。已保存 Token 可点击小眼睛查看，不与证书任务共用。</p>
           <label class="form-field"
             >同步类型<select v-model="draft.mode" name="mode" class="form-select">
               <option value="ipv4">IPv4 · A</option>
@@ -110,6 +101,7 @@ import { newID } from '@/api/ids'
 import { computed, nextTick, onMounted, onUnmounted, ref, toRaw } from 'vue'
 import { X } from 'lucide-vue-next'
 import IPSourceFields from '@/components/IPSourceFields.vue'
+import SecretInput from '@/components/SecretInput.vue'
 import { ddnsHosts, ddnsPrefixes, replaceDDNS, tokenChange } from '@/api/dns'
 import { useGatewayStatus } from '@/composables/useGatewayStatus'
 const props = defineProps({

@@ -164,8 +164,9 @@ func TestMCPSettingsSecretStorageAndHTTPBoundary(t *testing.T) {
 		t.Fatal("MCP activation failed")
 	}
 	contents, err := os.ReadFile(a.store.path)
-	if err != nil || strings.Contains(string(contents), response.Token) {
-		t.Fatal("plaintext MCP token persisted")
+	info, statErr := os.Stat(a.store.path)
+	if err != nil || statErr != nil || info.Mode().Perm()&0077 != 0 || !strings.Contains(string(contents), response.Token) {
+		t.Fatal("revealable MCP token missing from protected storage")
 	}
 	payload, err := snapshotBackupPaths(a.store.paths, a.store.Snapshot())
 	if err != nil {
@@ -224,8 +225,9 @@ func TestMCPTokenCreationBeforeActivation(t *testing.T) {
 		t.Fatal("token creation enabled service or granted permissions")
 	}
 	contents, err := os.ReadFile(a.store.path)
-	if err != nil || strings.Contains(string(contents), token) {
-		t.Fatal("API token persisted in plaintext")
+	info, statErr := os.Stat(a.store.path)
+	if err != nil || statErr != nil || info.Mode().Perm()&0077 != 0 || !strings.Contains(string(contents), token) {
+		t.Fatal("revealable API token missing from protected storage")
 	}
 	w = adminRequest(h, "PUT", "/api/mcp", map[string]any{"revision": state.Revision, "config": MCPConfig{Enabled: true, Read: true}}, cookie, "")
 	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &response) != nil || response.Token != "" {

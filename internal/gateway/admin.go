@@ -99,6 +99,7 @@ func (a *Admin) Handler() http.Handler {
 	mux.HandleFunc("POST /api/login", a.login)
 	mux.HandleFunc("POST /api/logout", a.requireAuth(a.logout))
 	a.accountRoutes(mux)
+	a.credentialRoutes(mux)
 	mux.HandleFunc("GET /api/config", a.requireAuth(a.getConfig))
 	mux.HandleFunc("PUT /api/config", a.requireAuth(a.putConfig))
 	mux.HandleFunc("GET /api/status", a.requireAuth(a.status))

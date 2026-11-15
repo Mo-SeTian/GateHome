@@ -34,8 +34,11 @@
           </fieldset>
         </form>
         <p class="report-note">
-          兼容 Token：{{ data.token_configured ? '已配置，不能读取原值' : '尚未配置' }}
+          兼容 Token：{{ data.token_configured ? data.token_reveal_available ? '已配置，可点击小眼睛查看' : '旧 Token 仅保存哈希，重新生成后可查看' : '尚未配置' }}
         </p>
+        <SecretInput v-if="data.token_configured" id="mcp-legacy-token" label="兼容 Token" kind="mcp-legacy"
+          configured readonly :revealable="!!data.token_reveal_available" :disabled="busy || loading"
+          :placeholder="data.token_reveal_available ? '点击小眼睛查看已保存的 Token' : '旧 Token 无法恢复原值'" />
         <div class="form-actions">
           <button class="btn btn-secondary" :disabled="busy || loading" @click="rotateLegacy">
             {{ data.token_configured ? '重新生成兼容 Token' : '创建兼容 Token' }}
@@ -60,21 +63,11 @@
       </SpotlightCard>
     </div>
     <SpotlightCard v-if="newToken" class="report-panel token-panel">
-      <h2>新 Token · 仅显示一次</h2>
-      <p class="report-note">{{ tokenLabel }}。请保存到客户端；关闭、刷新设置或离开本页后无法再次读取。</p>
-      <input
-        class="form-input mono-text"
-        aria-label="新 API Token"
-        :type="showToken ? 'text' : 'password'"
-        :value="newToken"
-        readonly
-        autocomplete="off"
-        spellcheck="false"
-      />
+      <h2>新 Token</h2>
+      <p class="report-note">{{ tokenLabel }}。请保存到客户端；以后可在对应 Token 设置中点击小眼睛再次查看。</p>
+      <SecretInput id="new-mcp-token" label="新 API Token" :model-value="newToken" readonly />
       <div class="report-actions">
         <button class="btn btn-secondary" @click="copy(newToken)">复制 Token</button
-        ><button class="btn btn-secondary" :aria-pressed="showToken" @click="showToken = !showToken">
-          {{ showToken ? '隐藏 Token' : '显示 Token' }}</button
         ><button class="btn btn-secondary" @click="testToken = newToken">用于本页调试</button
         ><button class="btn btn-secondary" @click="clearToken">关闭凭据</button>
       </div>
@@ -150,16 +143,8 @@
         仅在本页内存中使用；调用修改或维护类工具前会要求确认。
       </p>
       <div class="report-form">
-        <label class="wide"
-          >调试 Token<input
-            v-model.trim="testToken"
-            name="test_token"
-            class="form-input"
-            type="password"
-            autocomplete="off"
-            spellcheck="false"
-            @input="resetTools"
-        /></label>
+        <SecretInput id="mcp-test-token" v-model.trim="testToken" name="test_token" label="调试 Token"
+          class="wide" @update:model-value="resetTools" />
         <div class="report-actions wide">
           <button class="btn btn-secondary" :disabled="invoking || !testToken" @click="connect">
             {{ invoking ? '请求中…' : '连接并读取工具' }}</button
@@ -236,6 +221,9 @@
               class="form-input"
               type="datetime-local" /></label
           ><McpPermissions v-model="editor.client.config" :users="users" />
+          <SecretInput v-if="editor.client.id" id="mcp-client-token" label="客户端 Token" kind="mcp-client"
+            :credential-id="editor.client.id" configured readonly :revealable="!!editor.client.revealable"
+            :disabled="busy" :placeholder="editor.client.revealable ? '点击小眼睛查看已保存的 Token' : '旧 Token 仅保存哈希，重新生成后可查看'" />
           <p v-if="clientError" class="report-error" role="alert">{{ clientError }}</p>
           <footer>
             <button class="btn btn-primary" type="submit">{{ busy ? '保存中…' : '保存客户端' }}</button>
@@ -249,6 +237,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import SpotlightCard from '@/components/SpotlightCard.vue'
 import McpPermissions from '@/components/McpPermissions.vue'
+import SecretInput from '@/components/SecretInput.vue'
 import { adminApi } from '@/api/admin'
 import { mcpRequest } from '@/api/mcp'
 import { useGatewayStatus } from '@/composables/useGatewayStatus'
@@ -267,7 +256,6 @@ const data = ref(null),
   busy = ref(false)
 const newToken = ref(''),
   tokenLabel = ref(''),
-  showToken = ref(false),
   editor = ref(null),
   clientDialog = ref(null),
   clientError = ref('')
@@ -287,7 +275,6 @@ const clientConfig = JSON.stringify(
 const selectedTool = computed(() => tools.value.find((tool) => tool.name === toolName.value))
 function clearToken() {
   newToken.value = ''
-  showToken.value = false
   tokenLabel.value = ''
 }
 function resetTools() {
