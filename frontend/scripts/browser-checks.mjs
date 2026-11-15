@@ -178,10 +178,15 @@ try {
 
   for (const [width, height] of [[1440, 1000], [390, 844], [320, 667], [844, 390]]) {
     await page.setViewportSize({ width, height })
+    // The shell margin animates across the mobile breakpoint; measure its final layout.
+    await page.locator('.main-wrapper').evaluate(async el => {
+      await document.fonts.ready
+      await Promise.all(el.getAnimations().map(animation => animation.finished.catch(() => {})))
+    })
     for (const theme of ['light', 'dark']) {
       if (!await page.locator('body').evaluate((el, theme) => el.classList.contains('theme-' + theme), theme))
         await page.getByTitle(theme === 'dark' ? '切换为深色模式' : '切换为浅色模式').click()
-      assert.ok(await ddnsCards.evaluateAll(cards => cards.every(card => card.getBoundingClientRect().height <= 120)), 'collapsed DDNS card is too tall')
+      assert.ok(await ddnsCards.evaluateAll(cards => cards.every(card => card.getBoundingClientRect().height <= 120)), `collapsed DDNS card is too tall at ${width}px/${theme}`)
       assert.ok((await ddnsToggle().boundingBox()).height >= 44)
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true)
       if (process.env.GATEHOME_BROWSER_ARTIFACTS) {
