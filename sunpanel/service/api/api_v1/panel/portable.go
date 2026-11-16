@@ -86,6 +86,7 @@ func buildPortable(db *gorm.DB, userID uint, root string) ([]byte, error) {
 			if json.Unmarshal([]byte(item.IconJson), &icon) != nil {
 				return nil, errors.New("项目图片信息无效")
 			}
+			originalIcon := icon
 			if icon.ItemType == 2 && strings.HasPrefix(icon.Src, "/sunpanel/uploads/") {
 				rel := strings.TrimPrefix(icon.Src, "/sunpanel/uploads/")
 				if path.Clean(rel) != rel || strings.ContainsAny(rel, "\\\x00") || strings.HasPrefix(rel, "../") {
@@ -118,7 +119,13 @@ func buildPortable(db *gorm.DB, userID uint, root string) ([]byte, error) {
 				}
 				icon.Src = name
 			}
-			out.Items = append(out.Items, portableItem{item.Title, item.Url, item.LanUrl, item.Description, item.OpenMethod, item.Sort, icon, item.GateHome})
+			link := item.GateHome
+			if link != nil && link.Icon == originalIcon {
+				copy := *link
+				copy.Icon = icon
+				link = &copy
+			}
+			out.Items = append(out.Items, portableItem{item.Title, item.Url, item.LanUrl, item.Description, item.OpenMethod, item.Sort, icon, link})
 		}
 		manifest.Groups = append(manifest.Groups, out)
 	}
@@ -257,8 +264,14 @@ func importPortable(db *gorm.DB, userID uint, root string, manifest portableMani
 				return err
 			}
 			for _, item := range group.Items {
+				originalIcon := item.Icon
 				if images[item.Icon.Src] != nil {
 					item.Icon.Src = "/sunpanel/uploads/" + rel + "/" + path.Base(item.Icon.Src)
+				}
+				if item.GateHome != nil && item.GateHome.Icon == originalIcon {
+					copy := *item.GateHome
+					copy.Icon = item.Icon
+					item.GateHome = &copy
 				}
 				icon, err := json.Marshal(item.Icon)
 				if err != nil {

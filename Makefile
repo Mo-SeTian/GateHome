@@ -16,6 +16,7 @@ test: frontend
 	npm --prefix sunpanel run test:gatehome
 	npm --prefix sunpanel run type-check
 	go test -race ./...
+	go test -race sun-panel/api/api_v1/panel sun-panel/api/api_v1/system sun-panel/integration sun-panel/lib/imageasset sun-panel/router
 	go vet ./...
 
 linux: frontend

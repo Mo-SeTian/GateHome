@@ -9,6 +9,7 @@ import { t } from '@/locales'
 import type { GateHomeRoute } from '@/utils/gateHome'
 import { routeLink } from '@/utils/gateHome'
 import GateHomeConnection from '@/components/common/GateHomeConnection.vue'
+import { localizeGateHomeIcon } from '@/utils/gateHomeImages'
 
 interface Props {
   visible: boolean
@@ -21,6 +22,7 @@ const emit = defineEmits<Emit>()
 const ms = useMessage()
 const submitLoading = ref(false)
 const savingLocalIcon = ref(false)
+const savingGateHomeIcon = ref(false)
 const getIconLoading = ref([false, false])
 const itemIconGroupOptions = ref<{
   label: string
@@ -65,16 +67,24 @@ function setGateHomeRoutes(data: GateHomeRoute[]) {
   gateHomeSelection.value = null
 }
 
-function importGateHomeRoute() {
+async function importGateHomeRoute() {
   const route = selectedRoute.value
-  if (!route)
+  if (!route || savingGateHomeIcon.value)
     return
-  model.value.gateHome = routeLink(route)
-  model.value.title = model.value.gateHome.title
-  model.value.url = route.url
-  model.value.lanUrl = route.lanUrl
-  formRef.value?.restoreValidation()
-  ms.success('已填入名称、默认网址和内网地址，请检查后保存。')
+  const draft = model.value
+  savingGateHomeIcon.value = true
+  try {
+    const icon = await localizeGateHomeIcon(route)
+    if (!props.visible || model.value !== draft || selectedRoute.value?.id !== route.id) return
+    model.value.gateHome = routeLink(route, icon)
+    model.value.title = model.value.gateHome.title
+    model.value.url = route.url
+    model.value.lanUrl = route.lanUrl
+    if (icon) model.value.icon = icon
+    formRef.value?.restoreValidation()
+    ms.success('已填入名称、网址及可用图标，请检查后保存。')
+  } catch (err) { ms.error(err instanceof Error ? err.message : '图标保存失败，请重试') }
+  finally { savingGateHomeIcon.value = false }
 }
 
 const rules: FormRules = {
@@ -214,13 +224,15 @@ function getGroupListOptions() {
       <NCollapse class="mb-5" @update:expanded-names="expandGateHome">
         <NCollapseItem title="从 GateHome 导入" name="gatehome">
           <NSpace vertical :size="12">
-            <GateHomeConnection v-if="show && gateHomeExpanded" @routes="setGateHomeRoutes" @loading="gateHomeLoading = $event" @error="gateHomeError = $event" @ready="gateHomeReady = $event" />
-            <NSelect v-model:value="gateHomeSelection" aria-label="选择 GateHome 反代项" filterable clearable :loading="gateHomeLoading" :disabled="!gateHomeReady || gateHomeLoading || !!gateHomeError" :options="gateHomeOptions" placeholder="搜索反代名称、分组或域名">
+            <GateHomeConnection v-if="show && gateHomeExpanded" :disabled="savingGateHomeIcon || savingLocalIcon || submitLoading" @routes="setGateHomeRoutes" @loading="gateHomeLoading = $event" @error="gateHomeError = $event" @ready="gateHomeReady = $event" />
+            <NSelect v-model:value="gateHomeSelection" aria-label="选择 GateHome 反代项" filterable clearable :loading="gateHomeLoading" :disabled="!gateHomeReady || savingGateHomeIcon || gateHomeLoading || !!gateHomeError" :options="gateHomeOptions" placeholder="搜索反代名称、分组或域名">
               <template #empty>
                 {{ gateHomeLoading ? '正在读取反代配置…' : gateHomeReady ? '暂无可导入的已启用反代项' : '请先连接 GateHome' }}
               </template>
             </NSelect>
             <NAlert v-if="selectedRoute" type="info" :show-icon="false">
+              <img v-if="selectedRoute.imageData" :src="selectedRoute.imageData" width="40" height="40" style="object-fit: contain" alt="" />
+              <div v-if="selectedRoute.imageUnavailable">图片暂不可读取，保留当前图标。</div>
               <div class="break-all">
                 默认网址：{{ selectedRoute.url }}
               </div>
@@ -229,10 +241,10 @@ function getGroupListOptions() {
               </div>
             </NAlert>
             <div class="text-sm opacity-70">
-              默认网址按反代监听端口生成；外网端口映射不同时请修改。填入会替换当前名称和两个网址，保存后生效。
+              默认网址按反代监听端口生成；外网端口映射不同时请修改。填入会替换名称、网址及可用图标，保存后生效。
             </div>
             <NSpace justify="end">
-              <NButton type="primary" :disabled="!selectedRoute || gateHomeLoading || !!gateHomeError" @click="importGateHomeRoute">
+              <NButton type="primary" :loading="savingGateHomeIcon" :disabled="!selectedRoute || gateHomeLoading || !!gateHomeError || savingLocalIcon || submitLoading" @click="importGateHomeRoute">
                 填入网站信息
               </NButton>
             </NSpace>
@@ -240,7 +252,7 @@ function getGroupListOptions() {
         </NCollapseItem>
       </NCollapse>
       <NAlert v-if="model.gateHome" class="mb-4" type="info" :show-icon="false">已关联 GateHome 反代。首页的“GateHome 联动”可预览配置变化。<NButton text type="primary" @click="model.gateHome = null">解除关联</NButton></NAlert>
-      <NForm ref="formRef" :model="model" :rules="rules">
+      <NForm ref="formRef" :model="model" :rules="rules" :disabled="savingGateHomeIcon">
         <NGrid cols="2" :x-gap="10" item-responsive>
           <NGridItem span="2 500:1">
             <NFormItem path="itemIconGroupId" :label="t('iconItem.iconGroup')">
@@ -255,7 +267,7 @@ function getGroupListOptions() {
         </NGrid>
 
         <NFormItem path="icon" :label="$t('common.icon')">
-          <IconEditor v-model:item-icon="model.icon" v-model:saving="savingLocalIcon" />
+          <IconEditor v-model:item-icon="model.icon" v-model:saving="savingLocalIcon" :disabled="savingGateHomeIcon" />
         </NFormItem>
         <NFormItem path="url" :label="$t('iconItem.url')">
           <!-- <NSelect :style="{ width: '100px' }" :options="urlProtocolOptions" /> -->
@@ -285,7 +297,7 @@ function getGroupListOptions() {
 
     <template #footer>
       <div class="flex justify-end">
-        <NButton type="success" :loading="submitLoading" :disabled="savingLocalIcon" @click="handleValidateButtonClick">
+        <NButton type="success" :loading="submitLoading" :disabled="savingLocalIcon || savingGateHomeIcon" @click="handleValidateButtonClick">
           {{ $t('common.save') }}
         </NButton>
       </div>

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { randomBytes } from 'node:crypto'
-import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, writeFile, rm } from 'node:fs/promises'
 import { networkInterfaces, tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -37,6 +37,35 @@ async function startConnection(target) {
   return opened
 }
 async function finishedConnection(target) { if (!target.isClosed()) await target.waitForEvent('close') }
+async function picturePixels(target) {
+  const image = target.locator('img[src^="/sunpanel/uploads/"]').first()
+  await image.waitFor()
+  await target.waitForFunction(() => [...document.querySelectorAll('img[src^="/sunpanel/uploads/"]')].some(image => image.complete && image.naturalWidth > 0))
+  return image.evaluate(image => {
+    const canvas = document.createElement('canvas'); canvas.width = canvas.height = 128
+    const context = canvas.getContext('2d'); context.drawImage(image, 0, 0)
+    const pixel = (x, y) => [...context.getImageData(x, y, 1, 1).data]
+    const outer = image.closest('.item-icon')?.getBoundingClientRect(), bounds = image.getBoundingClientRect()
+    return { src: image.getAttribute('src'), width: image.naturalWidth, height: image.naturalHeight, left: pixel(0,64), right: pixel(127,64), top: pixel(64,0), fits: !outer || (bounds.width <= outer.width + 1 && bounds.height <= outer.height + 1) }
+  })
+}
+async function editFixtureIcon(target, legacy = false) {
+  return target.evaluate(async legacy => {
+    const session = JSON.parse(localStorage.getItem('AUTH_TOKEN')).data
+    const call = async (path, body) => (await fetch('/sunpanel/api/panel/itemIcon/' + path, { method: 'POST', headers: { 'Content-Type': 'application/json', token: session.token }, body: JSON.stringify(body) })).json()
+    const list = await call('getIconList', {})
+    const item = list.data.list.find(item => item.gateHome?.routeId === 'fixture-nas')
+    if (!item) return false
+    if (legacy) {
+      const old = item.gateHome
+      const result = await call('edit', { id:item.id, title:item.title, url:item.url, lanUrl:item.lanUrl, openMethod:item.openMethod, itemIconGroupId:item.itemIconGroupId, icon:null,
+        gateHome: { routeId:old.routeId, title:old.title, url:old.url, lanUrl:old.lanUrl } })
+      return result.code === 0
+    }
+    const result = await call('editIcon', { id:item.id, updateTime:item.updateTime, icon:{ itemType:1, text:'CUSTOM', backgroundColor:'#123456' } })
+    return result.code === 0
+  }, legacy)
+}
 try {
   const initialized = spawnSync(process.env.GO || 'go', ['run', 'scripts/console_fixture.go', data], { cwd: repository, input: password, stdio: 'pipe', env: { ...process.env, CGO_ENABLED: '0' } })
   assert.equal(initialized.status, 0, 'GateHome fixture initialization failed')
@@ -63,6 +92,9 @@ try {
   state.config.sunpanel = { enabled: true, port: panelPort, external_url: panelOrigin }
   state.config.groups = [{ id: 'fixture-web', name: 'Fixture', enabled: true, http_port: webPort, https_port: 0, domain_suffix: 'example.test' }]
   state.config.routes = [{ id: 'fixture-nas', group_id: 'fixture-web', name: 'Cross-domain NAS', host: 'nas.example.test', upstream: `http://127.0.0.1:${upstreamPort}/`, enabled: true, tls: false }]
+  await mkdir(path.join(data, 'icons/uploads'), { recursive:true })
+  await writeFile(path.join(data, 'icons/uploads/fixture.svg'), '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 48"><style>.left{fill:red}.right{fill:blue}</style><rect class="left" width="48" height="48"/><rect class="right" x="48" width="48" height="48"/></svg>')
+  state.config.routes[0].image = '/icons/uploads/fixture.svg'
   state.config.ddns.ip_monitor = { group_id: '', interface: Object.entries(networkInterfaces()).find(([, rows]) => rows.some(row => !row.internal))?.[0] || 'eth0', ipv4_source: 'interface', ipv6_source: 'interface' }
   await writeFile(statePath, JSON.stringify(state), { mode: 0o600 })
   server = spawn(path.resolve(repository, process.env.GATEHOME_TEST_BINARY || 'dist/gatehouse'), ['-data', data, '-admin', `127.0.0.1:${adminPort}`], { cwd: root, stdio: 'ignore' })
@@ -107,7 +139,14 @@ try {
   assert.equal(importResult.data.created, 1)
   await page.waitForFunction(() => !document.querySelector('.n-modal'))
   await page.getByText('Cross-domain NAS', { exact: true }).first().waitFor()
+  const copiedSVG = await picturePixels(page)
+  assert.deepEqual(copiedSVG.left, [255,0,0,255])
+  assert.deepEqual(copiedSVG.right, [0,0,255,255])
+  assert.equal(copiedSVG.top[3],0)
+  assert.equal(copiedSVG.width,128)
+  assert.equal(copiedSVG.fits,true)
   console.log('PASS SunPanel independent HTTPS domains: separate real logins, first-party management session, popup return and real bookmark import')
+  console.log('PASS SunPanel library pictures: SVG is copied to owned local PNG storage with full aspect ratio and visible edges')
 
   const embedded = await context.newPage()
   await loginPanel(embedded, adminOrigin)
@@ -124,14 +163,26 @@ try {
   await page.getByLabel('选择 GateHome 反代项', { exact: true }).click()
   await page.getByText(new RegExp(`^Fixture / Cross-domain NAS · http://nas.example.test:${webPort}/$`)).click()
   await page.getByRole('button', { name: '填入网站信息', exact: true }).click()
+  await page.waitForFunction(() => [...document.querySelectorAll('.n-modal input')].some(input => input.value === 'Cross-domain NAS'))
   assert.equal(await page.locator('.n-modal input').evaluateAll(inputs => inputs.some(input => input.value === 'Cross-domain NAS')), true)
   await closeModal(page)
   console.log('PASS SunPanel single-site import: the same cross-domain connection fills the real edit form')
 
   const configResult = await admin.evaluate(async () => (await fetch('/api/config')).json())
+  const uploaded = await admin.evaluate(async () => {
+    const canvas = document.createElement('canvas'); canvas.width = 96; canvas.height = 48
+    const context = canvas.getContext('2d'); context.fillStyle = '#00ff00'; context.fillRect(0,0,48,48); context.fillStyle = '#ffff00'; context.fillRect(48,0,48,48)
+    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'))
+    const body = new FormData(); body.append('file',blob,'TEST_ONLY_UPLOADED.png')
+    const response = await fetch('/api/route-images/upload',{ method:'POST',headers:{ 'X-Gatehouse-Request':'1' },body })
+    const result = await response.json()
+    return response.ok ? result.id : ''
+  })
+  assert.match(uploaded,/^[a-f0-9]{64}$/)
   configResult.config.routes[0].name = 'Updated NAS'
   configResult.config.routes[0].host = 'updated.example.test'
   configResult.config.routes[0].upstream = `http://localhost:${upstreamPort}`
+  configResult.config.routes[0].image = uploaded
   const changed = await admin.evaluate(async value => {
     const response = await fetch('/api/config', { method: 'PUT', headers: { 'Content-Type': 'application/json', 'X-Gatehouse-Request': '1' }, body: JSON.stringify(value) })
     return { status: response.status, error: response.ok ? '' : (await response.json()).error }
@@ -149,7 +200,41 @@ try {
   assert.equal(syncResult.data.updated, 1)
   await page.waitForFunction(() => !document.querySelector('.n-modal'))
   await page.getByText('Updated NAS', { exact: true }).first().waitFor()
+  const copiedUpload = await picturePixels(page)
+  assert.deepEqual(copiedUpload.left,[0,255,0,255])
+  assert.deepEqual(copiedUpload.right,[255,255,0,255])
+  assert.notEqual(copiedUpload.src,copiedSVG.src)
   console.log('PASS SunPanel linked updates: a fresh cross-domain read previews and applies real route changes')
+  console.log('PASS SunPanel uploaded pictures: linked update replaces the copied PNG when the GateHome image changes')
+
+  assert.equal(await editFixtureIcon(page,true),true)
+  await page.reload()
+  await page.getByRole('button',{ name:'GateHome 联动',exact:true }).click()
+  await page.getByRole('button',{ name:'连接 GateHome',exact:true }).waitFor()
+  await finishedConnection(await startConnection(page))
+  await page.getByText('关联更新',{ exact:true }).click()
+  await page.getByRole('checkbox',{ name:'Updated NAS',exact:true }).check()
+  await page.getByRole('button',{ name:'应用 1 个项目的更新',exact:true }).click()
+  await page.waitForFunction(() => !document.querySelector('.n-modal'))
+  const backfilled = await picturePixels(page)
+  assert.deepEqual(backfilled.left,[0,255,0,255])
+  console.log('PASS SunPanel existing bookmarks: legacy blank icons are backfilled through explicit linked updates')
+
+  assert.equal(await editFixtureIcon(page),true)
+  const latest = await admin.evaluate(async()=> (await fetch('/api/config')).json())
+  latest.config.routes[0].image = '/icons/uploads/fixture.svg'
+  assert.equal(await admin.evaluate(async value => (await fetch('/api/config',{ method:'PUT',headers:{ 'Content-Type':'application/json','X-Gatehouse-Request':'1' },body:JSON.stringify({ revision:value.revision,config:value.config }) })).status,latest),200)
+  await page.reload()
+  await page.getByRole('button',{ name:'GateHome 联动',exact:true }).click()
+  await page.getByRole('button',{ name:'连接 GateHome',exact:true }).waitFor()
+  await finishedConnection(await startConnection(page))
+  await page.getByText('关联更新',{ exact:true }).click()
+  await page.getByText('图标 · 保留自定义值',{ exact:true }).waitFor()
+  await page.getByRole('checkbox',{ name:'Updated NAS',exact:true }).check()
+  await page.getByRole('button',{ name:'应用 1 个项目的更新',exact:true }).click()
+  await page.waitForFunction(() => !document.querySelector('.n-modal'))
+  await page.getByText('CUSTOM',{ exact:true }).first().waitFor()
+  console.log('PASS SunPanel custom pictures: source changes preserve the user icon and record the new baseline')
 
   let hold
   await context.route('**/api/sunpanel/connect', async route => {
@@ -203,6 +288,8 @@ try {
   console.log('PASS SunPanel modal cleanup: closing the importer cancels its pending popup')
 
   assert.equal(await admin.evaluate(async () => (await fetch('/api/logout', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Gatehouse-Request': '1' }, body: '{}' })).status), 200)
+  assert.equal(await page.evaluate(async src => (await fetch(src)).status,backfilled.src),200)
+  console.log('PASS SunPanel picture independence: copied files remain available after GateHome logout')
   await page.getByRole('button', { name: 'GateHome 联动', exact: true }).click()
   await page.getByRole('button', { name: '连接 GateHome', exact: true }).waitFor()
   const reauthenticate = await startConnection(page)

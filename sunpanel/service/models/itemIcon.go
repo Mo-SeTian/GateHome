@@ -24,10 +24,12 @@ type ItemIcon struct {
 
 // Last imported values let explicit synchronization preserve user overrides.
 type GateHomeLink struct {
-	RouteID string `json:"routeId"`
-	Title   string `json:"title"`
-	URL     string `json:"url"`
-	LanURL  string `json:"lanUrl"`
+	RouteID string                    `json:"routeId"`
+	Title   string                    `json:"title"`
+	URL     string                    `json:"url"`
+	LanURL  string                    `json:"lanUrl"`
+	Image   *string                   `json:"image,omitempty"`
+	Icon    datatype.ItemIconIconInfo `json:"icon,omitempty"`
 }
 
 func (m *ItemIcon) DeleteByItemIconGroupIds(db *gorm.DB, userId uint, itemIconGroupIds []uint) (err error) {

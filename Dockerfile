@@ -3,6 +3,7 @@ WORKDIR /src/sunpanel
 COPY sunpanel/package.json sunpanel/pnpm-lock.yaml ./
 RUN npx --yes pnpm@8.15.9 install --frozen-lockfile
 COPY sunpanel ./
+COPY shared /src/shared
 RUN npx --yes pnpm@8.15.9 run build-only
 WORKDIR /src/frontend
 COPY frontend/package.json frontend/package-lock.json ./

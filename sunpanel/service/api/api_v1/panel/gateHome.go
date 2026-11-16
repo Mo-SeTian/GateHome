@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"errors"
 	"net/url"
+	"regexp"
 	"strings"
 	"sun-panel/api/api_v1/common/apiReturn"
 	"sun-panel/api/api_v1/common/base"
 	"sun-panel/global"
 	"sun-panel/models"
+	"sun-panel/models/datatype"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -41,8 +43,39 @@ func validSite(raw string, optional bool) bool {
 	return err == nil && len(raw) <= 4096 && u.Hostname() != "" && u.User == nil && (u.Scheme == "http" || u.Scheme == "https")
 }
 
+var sourceImageHash = regexp.MustCompile(`^[a-f0-9]{64}$`)
+
 func validLink(link *models.GateHomeLink) bool {
-	return link != nil && len(link.RouteID) > 0 && len(link.RouteID) <= 64 && len([]rune(link.Title)) <= 20 && validSite(link.URL, false) && validSite(link.LanURL, true)
+	return link != nil && len(link.RouteID) > 0 && len(link.RouteID) <= 64 && len([]rune(link.Title)) <= 20 && validSite(link.URL, false) && validSite(link.LanURL, true) &&
+		(link.Image == nil || *link.Image == "" || sourceImageHash.MatchString(*link.Image)) && link.Icon.ItemType >= 0 && link.Icon.ItemType <= 3 && len(link.Icon.Src) <= 1000 && len(link.Icon.Text) <= 1000 && len(link.Icon.BackgroundColor) <= 128
+}
+
+func syncGateHomeIcon(item *models.ItemIcon, next *models.GateHomeLink) error {
+	previous := item.GateHome
+	if next.Image == nil {
+		next.Image, next.Icon = previous.Image, previous.Icon
+		return nil
+	}
+	if (previous.Image == nil && *next.Image == "") || (previous.Image != nil && *previous.Image == *next.Image) {
+		next.Icon = previous.Icon
+		return nil
+	}
+	var current datatype.ItemIconIconInfo
+	if json.Unmarshal([]byte(item.IconJson), &current) != nil || current != previous.Icon {
+		next.Icon = previous.Icon
+		return nil
+	}
+	if *next.Image == "" {
+		next.Icon = datatype.ItemIconIconInfo{}
+	} else if next.Icon.ItemType != 2 || !strings.HasPrefix(next.Icon.Src, "/sunpanel/uploads/") {
+		return errors.New("请先将反代图片保存到当前首页")
+	}
+	encoded, err := json.Marshal(next.Icon)
+	if err != nil {
+		return err
+	}
+	item.IconJson = string(encoded)
+	return nil
 }
 
 func ownedGroup(tx *gorm.DB, id int, userID uint) bool {
@@ -152,8 +185,11 @@ func SyncGateHome(db *gorm.DB, userID uint, items []GateHomeSyncItem) error {
 			if item.LanUrl == item.GateHome.LanURL {
 				item.LanUrl = request.Route.LanURL
 			}
+			if err := syncGateHomeIcon(&item, &request.Route); err != nil {
+				return err
+			}
 			item.GateHome = &request.Route
-			if err := tx.Model(&item).Select("Title", "Url", "LanUrl", "GateHome").Updates(&item).Error; err != nil {
+			if err := tx.Model(&item).Select("Title", "Url", "LanUrl", "IconJson", "GateHome").Updates(&item).Error; err != nil {
 				return err
 			}
 		}

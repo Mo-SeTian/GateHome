@@ -68,7 +68,7 @@ func TestSunPanelConnectionRequiresBothSessionsAndConfiguredOrigin(t *testing.T)
 	}
 	w = adminRequest(h, "POST", "/api/sunpanel/connect", map[string]string{"origin": page}, cookie, management)
 	var routes []map[string]string
-	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &routes) != nil || len(routes) != 1 || len(routes[0]) != 5 || routes[0]["title"] != "NAS" || w.Header().Get("Cache-Control") != "no-store" || w.Header().Get("Access-Control-Allow-Origin") != "" || !reflect.DeepEqual(before, a.store.Snapshot()) {
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &routes) != nil || len(routes) != 1 || len(routes[0]) != 6 || routes[0]["title"] != "NAS" || w.Header().Get("Cache-Control") != "no-store" || w.Header().Get("Access-Control-Allow-Origin") != "" || !reflect.DeepEqual(before, a.store.Snapshot()) {
 		t.Fatal("connection response modified configuration, broadened CORS or exposed unexpected fields")
 	}
 	r := httptest.NewRequest("POST", "/api/sunpanel/connect", strings.NewReader(`{"origin":"https://page.example.test:18443"}`))

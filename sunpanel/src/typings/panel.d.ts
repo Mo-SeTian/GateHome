@@ -5,7 +5,7 @@ declare namespace Panel {
     }
 
     interface ItemInfo extends Common.InfoBase {
-        gateHome?: { routeId: string; title: string; url: string; lanUrl: string } | null
+        gateHome?: { routeId: string; title: string; url: string; lanUrl: string; image?: string; icon?: ItemIcon } | null
         icon: ItemIcon |null
         title: string
         url: string

@@ -9,6 +9,7 @@ defineProps<{ disabled?: boolean }>()
 const emit = defineEmits<{ (e: 'routes', routes: GateHomeRoute[]): void; (e: 'loading', loading: boolean): void; (e: 'error', message: string): void; (e: 'ready', ready: boolean): void }>()
 const auth = useAuthStore()
 const origins = ref<string[]>([]), selected = ref(''), loading = ref(false), error = ref(''), connected = ref(false)
+const unavailableImages = ref(0)
 let generation = 0, controller: AbortController | undefined, cancel: (() => void) | undefined
 function stop() { generation++; controller?.abort(); cancel?.(); cancel = undefined }
 function start() {
@@ -16,6 +17,7 @@ function start() {
   controller = new AbortController()
   loading.value = true
   error.value = ''
+  unavailableImages.value = 0
   emit('loading', true)
   emit('error', '')
   emit('routes', [])
@@ -37,7 +39,7 @@ async function refresh() {
   connected.value = false
   try {
     const routes = await loadGateHomeRoutes(controller?.signal)
-    if (current === generation) { emit('routes', routes); emit('ready', true) }
+    if (current === generation) { unavailableImages.value = routes.filter(route => route.imageUnavailable).length; emit('routes', routes); emit('ready', true) }
   } catch (err) {
     if (current !== generation) return
     if (err instanceof GateHomeLoginRequired) {
@@ -60,6 +62,7 @@ function connect() {
       await connectionInfo()
       if (current !== generation) return
       connected.value = true
+      unavailableImages.value = routes.filter(route => route.imageUnavailable).length
       emit('routes', routes)
       emit('ready', true)
     }).catch(err => { if (current === generation) failed(err.message) }).finally(() => settled(current))
@@ -76,6 +79,7 @@ onBeforeUnmount(stop)
 <template>
   <NSpace vertical :size="12" class="gatehome-connection">
     <NAlert v-if="error" type="warning" :show-icon="false">{{ error }}</NAlert>
+    <NAlert v-if="unavailableImages" type="warning" :show-icon="false">{{ unavailableImages }} 个反代图片暂不可读取；可以继续导入网址，图片恢复后重新联动。</NAlert>
     <NAlert v-else-if="origins.length && !connected" type="info" :show-icon="false">独立域名访问需连接 GateHome；已登录时将自动读取并返回本页。</NAlert>
     <NSelect v-if="origins.length > 1" v-model:value="selected" aria-label="GateHome 管理入口" :options="origins.map(value => ({ label: value, value }))" :disabled="loading || disabled" />
     <span v-else-if="origins.length" class="gatehome-entry">{{ selected }}</span>

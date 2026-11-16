@@ -6,7 +6,7 @@
       <p class="connection-origin">{{ origin }}</p>
       <p v-if="error" class="report-error" role="alert">{{ error }}</p>
       <p v-else role="status">{{ sent ? '反代列表已发送，可返回 SunPanel 继续导入。' : '正在通过 GateHome 管理会话读取反代列表…' }}</p>
-      <p class="connection-note">仅发送已启用反代的名称和访问地址。登录凭据保留在 GateHome。</p>
+      <p class="connection-note">仅发送已启用反代的名称、访问地址和图标。登录凭据保留在 GateHome。</p>
       <button class="btn btn-secondary" @click="close">关闭连接窗口</button>
     </section>
   </main>
@@ -17,6 +17,7 @@ import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { Link2 } from 'lucide-vue-next'
 import { adminApi } from '@/api/admin'
+import { withRouteImages } from '../../../shared/sunpanel-images'
 
 const route = useRoute()
 const origin = typeof route.query.origin === 'string' ? route.query.origin : ''
@@ -29,7 +30,7 @@ onMounted(async () => {
     const target = new URL(origin)
     if (!['http:', 'https:'].includes(target.protocol) || target.origin !== origin || !/^[a-f0-9]{32}$/.test(state) || !window.opener)
       throw new Error('连接请求无效，请从 SunPanel 的“连接 GateHome”按钮重新打开。')
-    const routes = await adminApi.connectSunPanel(origin, controller.signal)
+    const routes = await withRouteImages(await adminApi.connectSunPanel(origin, controller.signal), controller.signal)
     if (controller.signal.aborted) return
     window.opener.postMessage({ type: 'gatehome:sunpanel-routes', state, routes }, origin)
     sent.value = true

@@ -2,6 +2,8 @@
 !go.mod
 !go.sum
 !VERSION
+!shared/
+!shared/**
 !frontend/
 !frontend/**
 frontend/node_modules

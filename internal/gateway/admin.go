@@ -106,6 +106,7 @@ func (a *Admin) Handler() http.Handler {
 	a.maintenanceRoutes(mux)
 	a.webDAVBackupRoutes(mux)
 	mux.HandleFunc("GET /api/sunpanel/routes", a.requireAuth(a.sunPanelRoutes))
+	mux.HandleFunc("GET /api/sunpanel/routes/{id}/image", a.requireAuth(a.sunPanelRouteImage))
 	mux.HandleFunc("POST /api/sunpanel/connection", a.sunPanelConnectionInfo)
 	mux.HandleFunc("POST /api/sunpanel/connect", a.requireAuth(a.sunPanelConnect))
 	a.onlineUpdateRoutes(mux)

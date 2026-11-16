@@ -53,6 +53,7 @@ jobs:
           npm --prefix sunpanel run test:gatehome
           npm --prefix sunpanel run type-check
           go test -race ./...
+          go test -race sun-panel/api/api_v1/panel sun-panel/api/api_v1/system sun-panel/integration sun-panel/lib/imageasset sun-panel/router
           go vet ./...
           CGO_ENABLED=0 make -o frontend build
           python3 scripts/install_checks.py
