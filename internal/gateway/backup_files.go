@@ -9,6 +9,8 @@ import (
 	"errors"
 	"image"
 	"strings"
+
+	"sun-panel/lib/imageasset"
 )
 
 func isBackupImage(name string) bool {
@@ -48,7 +50,10 @@ func validRouteImage(id string, data []byte) bool {
 		return len(data) <= 64<<10
 	}
 	config, format, err := image.DecodeConfig(bytes.NewReader(data))
-	return err == nil && format == "png" && config.Width > 0 && config.Height > 0 && config.Width <= 128 && config.Height <= 128
+	if err == nil {
+		return format == "png" && config.Width > 0 && config.Height > 0 && config.Width <= 128 && config.Height <= 128
+	}
+	return imageasset.Validate("image.svg", data)
 }
 
 func validateBackupFiles(payload backupPayload) error {

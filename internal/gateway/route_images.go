@@ -21,6 +21,7 @@ import (
 
 	"golang.org/x/image/draw"
 	_ "golang.org/x/image/webp"
+	"sun-panel/lib/imageasset"
 )
 
 const maxImageUpload = 5 << 20
@@ -116,6 +117,10 @@ func storeRouteImage(dir string, data []byte) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	return writeRouteImage(dir, data)
+}
+
+func writeRouteImage(dir string, data []byte) (string, error) {
 	dir = filepath.Join(dir, "route-images")
 	if os.MkdirAll(dir, 0700) != nil {
 		return "", errors.New("图片目录无法创建")
@@ -230,7 +235,7 @@ func downloadRouteImageWithProxy(ctx context.Context, raw string, state State) (
 		return nil, errors.New("图片 URL 无效")
 	}
 	req.Header.Set("User-Agent", "Gatehouse-ImageImport/1.0")
-	req.Header.Set("Accept", "image/png,image/jpeg,image/webp,image/gif,image/x-icon,*/*;q=0.1")
+	req.Header.Set("Accept", "image/svg+xml,image/png,image/jpeg,image/webp,image/gif,image/x-icon,*/*;q=0.1")
 	response, err := client.Do(req)
 	if err != nil {
 		return nil, errors.New("图片下载失败，请检查地址、网络或 HTTPS 证书")
@@ -246,8 +251,28 @@ func downloadRouteImageWithProxy(ctx context.Context, raw string, state State) (
 	return data, nil
 }
 
+// Called only with validated local route images.
+func routeImageContentType(data []byte) string {
+	mime := http.DetectContentType(data)
+	if !strings.HasPrefix(mime, "image/") {
+		return "image/svg+xml"
+	}
+	return mime
+}
+
 func (a *Admin) routeImageRoutes(mux *http.ServeMux) {
-	respond := func(w http.ResponseWriter, data []byte) {
+	respond := func(w http.ResponseWriter, data []byte, online bool) {
+		svg := online && !strings.HasPrefix(http.DetectContentType(data), "image/")
+		if svg {
+			if len(data) > maxRouteImage {
+				apiError(w, 400, "SVG 图片须小于等于 128 KiB")
+				return
+			}
+			if !imageasset.Validate("image.svg", data) {
+				apiError(w, 400, "图片格式无效，或 SVG 包含脚本/外部资源")
+				return
+			}
+		}
 		a.updateMu.Lock()
 		defer a.updateMu.Unlock()
 		if a.maintenance.Busy() {
@@ -255,7 +280,13 @@ func (a *Admin) routeImageRoutes(mux *http.ServeMux) {
 			return
 		}
 		dir := a.store.paths.Data
-		id, err := storeRouteImage(dir, data)
+		var id string
+		var err error
+		if svg {
+			id, err = writeRouteImage(dir, data)
+		} else {
+			id, err = storeRouteImage(dir, data)
+		}
 		if err != nil {
 			apiError(w, 400, err.Error())
 			return
@@ -285,7 +316,7 @@ func (a *Admin) routeImageRoutes(mux *http.ServeMux) {
 			apiError(w, 400, "一次只能上传一张图片")
 			return
 		}
-		respond(w, data)
+		respond(w, data, false)
 	}))
 	mux.HandleFunc("POST /api/route-images/import", a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
@@ -316,7 +347,7 @@ func (a *Admin) routeImageRoutes(mux *http.ServeMux) {
 				return
 			}
 		}
-		respond(w, data)
+		respond(w, data, body.ScanID == "")
 	}))
 	mux.HandleFunc("GET /api/route-images/{id}", a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
 		data, err := readRouteImage(a.store.paths.Data, r.PathValue("id"))
@@ -324,8 +355,8 @@ func (a *Admin) routeImageRoutes(mux *http.ServeMux) {
 			http.NotFound(w, r)
 			return
 		}
-		w.Header().Set("Content-Type", http.DetectContentType(data))
-		w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
+		w.Header().Set("Content-Type", routeImageContentType(data))
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox")
 		w.Write(data)
 	}))
 }

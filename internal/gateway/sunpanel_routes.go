@@ -78,7 +78,7 @@ func (a *Admin) sunPanelRouteImage(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		data, _ = readRouteImage(a.store.paths.Data, ref)
-		mime = http.DetectContentType(data)
+		mime = routeImageContentType(data)
 	}
 	if len(data) == 0 {
 		http.NotFound(w, r)
@@ -88,7 +88,7 @@ func (a *Admin) sunPanelRouteImage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("ETag", `"`+hex.EncodeToString(sum[:])+`"`)
 	w.Header().Set("Content-Type", mime)
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox")
 	w.Write(data)
 }
 

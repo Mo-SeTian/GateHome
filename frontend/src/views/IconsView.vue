@@ -7,6 +7,7 @@
       </div>
       <div class="icons-actions">
         <button class="btn btn-secondary" type="button" @click="openImport"><Github :size="15" />从 GitHub 导入</button>
+        <button class="btn btn-secondary" type="button" @click="openLinkImport"><Link2 :size="15" />通过链接导入</button>
         <button class="btn btn-primary" type="button" @click="openUpload"><Upload :size="15" />上传本地图标</button>
       </div>
     </div>
@@ -118,6 +119,36 @@
       </form>
     </dialog>
 
+    <dialog ref="linkDialog" class="icon-form-dialog" aria-labelledby="icon-link-title" @cancel="blockClose" @close="clearLinkPreview">
+      <header class="icon-dialog-header">
+        <h2 id="icon-link-title">通过链接导入</h2>
+        <button type="button" class="icon-close" aria-label="关闭链接导入" :disabled="formBusy" @click="linkDialog.close()"><X :size="18" /></button>
+      </header>
+      <form class="icon-form" @submit.prevent="previewLinkedIcon">
+        <label class="form-field">
+          <span>图片链接</span>
+          <input v-model.trim="imageLink" class="form-input" type="url" placeholder="https://example.com/icon.svg"
+            required maxlength="2048" :disabled="formBusy" @input="clearLinkPreview" />
+        </label>
+        <p class="icon-form-hint">支持 PNG、JPG、GIF、WebP、ICO 和 SVG，最大 5 MiB。</p>
+        <div v-if="linkPreview" class="icon-detail-preview">
+          <img :src="linkPreview.src" width="88" height="88" alt="待导入图标预览"
+            @load="linkReady = true" @error="linkPreviewFailed" />
+          <p>{{ linkPreview.file.name }} · {{ formatBytes(linkPreview.file.size) }}</p>
+        </div>
+        <p v-if="formError" class="icon-error" role="alert">{{ formError }}</p>
+        <div class="icon-form-actions">
+          <button class="btn btn-secondary" type="button" :disabled="formBusy" @click="linkDialog.close()">取消</button>
+          <button v-if="!linkPreview" class="btn btn-primary" type="submit" :disabled="formBusy || !imageLink">
+            {{ formBusy ? '加载预览中…' : '预览图标' }}
+          </button>
+          <button v-else class="btn btn-primary" type="button" :disabled="formBusy || !linkReady" @click="importLinkedIcon">
+            {{ formBusy ? '导入中…' : '确认导入' }}
+          </button>
+        </div>
+      </form>
+    </dialog>
+
     <dialog ref="uploadDialog" class="icon-form-dialog" aria-labelledby="icon-upload-title" @cancel="blockClose">
       <header class="icon-dialog-header">
         <h2 id="icon-upload-title">上传本地图标</h2>
@@ -188,7 +219,7 @@
 
 <script setup>
 import { onMounted, onUnmounted, ref } from 'vue'
-import { Copy, Github, RefreshCw, Search, Trash2, Upload, X } from 'lucide-vue-next'
+import { Copy, Github, Link2, RefreshCw, Search, Trash2, Upload, X } from 'lucide-vue-next'
 import { iconsApi, iconSources, iconStyles } from '@/api/icons'
 import { formatBytes } from '@/api/reports'
 import { useIconSearch } from '@/composables/useIconSearch'
@@ -204,12 +235,16 @@ const standard = ref(false)
 const reindexing = ref(false)
 const job = ref({ state: 'idle' })
 const importDialog = ref(null)
+const linkDialog = ref(null)
 const uploadDialog = ref(null)
 const detailDialog = ref(null)
 const fileInput = ref(null)
 const detailURL = ref(null)
 const repository = ref('https://github.com/xushier/HD-Icons')
 const mirror = ref('direct')
+const imageLink = ref('')
+const linkPreview = ref(null)
+const linkReady = ref(false)
 const files = ref([])
 const dragging = ref(false)
 const formBusy = ref(false)
@@ -278,6 +313,74 @@ function openImport() {
   importDialog.value.showModal()
 }
 
+function clearLinkPreview() {
+  linkPreview.value = null
+  linkReady.value = false
+  formError.value = ''
+}
+
+function openLinkImport() {
+  imageLink.value = ''
+  clearLinkPreview()
+  linkDialog.value.showModal()
+}
+
+function linkedIconFilename(url, type) {
+  const ext = {
+    'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif',
+    'image/webp': 'webp', 'image/x-icon': 'ico', 'image/svg+xml': 'svg'
+  }[type]
+  if (!ext) throw new Error('图片格式无效')
+  let name = new URL(url).pathname.split('/').pop()
+  try { name = decodeURIComponent(name) } catch { name = '' }
+  name = name.replace(/\.[a-z0-9]+$/i, '').replace(/[^\p{L}\p{N}._ -]/gu, '-').trim().replace(/^\.+/, '')
+  return (Array.from(name).slice(0, 55).join('').trim() || '在线图标') + '.' + ext
+}
+
+async function previewLinkedIcon() {
+  if (formBusy.value || linkPreview.value) return
+  formBusy.value = true
+  formError.value = ''
+  try {
+    const image = await iconsApi.previewURL(imageLink.value, lifetime.signal)
+    const file = new File([image], linkedIconFilename(imageLink.value, image.type), { type: image.type })
+    const src = await new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(reader.result)
+      reader.onerror = () => reject(new Error('无法读取图片预览'))
+      reader.readAsDataURL(file)
+    })
+    if (!lifetime.signal.aborted) linkPreview.value = { file, src }
+  } catch (err) {
+    if (!lifetime.signal.aborted) formError.value = err.message
+  } finally {
+    formBusy.value = false
+  }
+}
+
+function linkPreviewFailed() {
+  clearLinkPreview()
+  formError.value = '浏览器无法显示这张图片'
+}
+
+async function importLinkedIcon() {
+  if (formBusy.value || !linkPreview.value || !linkReady.value) return
+  formBusy.value = true
+  formError.value = ''
+  try {
+    await iconsApi.upload([linkPreview.value.file])
+    if (!lifetime.signal.aborted) {
+      linkDialog.value.close()
+      refreshUploads()
+      toast.success('已导入图标')
+    }
+  } catch (err) {
+    if (!lifetime.signal.aborted) formError.value = err.message
+  } finally {
+    formBusy.value = false
+  }
+}
+
 function openUpload() {
   formError.value = ''
   files.value = []
@@ -332,18 +435,22 @@ async function submitUpload() {
   try {
     const result = await iconsApi.upload(files.value)
     uploadDialog.value?.close()
-    filters.keyword = ''
-    filters.style = ''
-    filters.source = 'uploads'
-    page.value = 1
-    refresh()
-    loadStats()
+    refreshUploads()
     toast.success(`已上传 ${result.items.length} 张图标`)
   } catch (err) {
     formError.value = err.message
   } finally {
     formBusy.value = false
   }
+}
+
+function refreshUploads() {
+  filters.keyword = ''
+  filters.style = ''
+  filters.source = 'uploads'
+  page.value = 1
+  refresh()
+  loadStats()
 }
 
 async function reindex() {

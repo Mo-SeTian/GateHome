@@ -195,6 +195,45 @@ func TestIconLibraryPathSafety(t *testing.T) {
 	}
 }
 
+func TestIconURLPreviewValidatesContent(t *testing.T) {
+	_, handler := testAdmin(t)
+	cookie := loginForTest(t, handler)
+	raster := testRoutePNG(t, 16, 8)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		switch r.URL.Path {
+		case "/svg":
+			w.Write([]byte(testLibrarySVG))
+		case "/png":
+			w.Write(raster)
+		default:
+			w.Write([]byte(`<svg xmlns="http://www.w3.org/2000/svg"><use href="https://example.test/icon.svg#mark"/></svg>`))
+		}
+	}))
+	defer upstream.Close()
+	const endpoint = "/api/icons/preview-url"
+	if w := adminRequest(handler, "POST", endpoint, map[string]string{"url": upstream.URL + "/svg"}, nil, ""); w.Code != 401 {
+		t.Fatal("anonymous icon preview accepted")
+	}
+	for _, fixture := range []struct {
+		path, mime string
+		content    []byte
+	}{{"/svg?size=48", "image/svg+xml", []byte(testLibrarySVG)}, {"/png", "image/png", raster}} {
+		w := adminRequest(handler, "POST", endpoint, map[string]string{"url": upstream.URL + fixture.path}, cookie, "")
+		if w.Code != 200 || w.Header().Get("Content-Type") != fixture.mime || !bytes.Equal(w.Body.Bytes(), fixture.content) {
+			t.Fatalf("preview did not return the validated original: %d", w.Code)
+		}
+	}
+	if w := adminRequest(handler, "POST", endpoint, map[string]string{"url": upstream.URL + "/invalid"}, cookie, ""); w.Code != 400 {
+		t.Fatal("SVG referencing an external resource was accepted")
+	}
+	w := adminRequest(handler, "GET", "/api/icons?source=uploads", nil, cookie, "")
+	var index iconIndex
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &index) != nil || len(index.Items) != 0 {
+		t.Fatal("preview saved an icon")
+	}
+}
+
 func TestIconLibraryImport(t *testing.T) {
 	a, h := testAdmin(t)
 	cookie := loginForTest(t, h)

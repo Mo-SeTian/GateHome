@@ -173,6 +173,62 @@ func uploadRouteImage(h http.Handler, data []byte, cookie *http.Cookie, origin s
 	h.ServeHTTP(w, r)
 	return w
 }
+
+func TestRouteImageURLImportSVG(t *testing.T) {
+	a, handler := testAdmin(t)
+	cookie := loginForTest(t, handler)
+	svg := `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 24"><style>.mark{fill:#6b5ced}</style><rect class="mark" width="48" height="24"/></svg>`
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		content := svg
+		switch r.URL.Query().Get("case") {
+		case "large":
+			content += strings.Repeat(" ", maxRouteImage)
+		case "unsafe":
+			content = strings.Replace(svg, "<rect ", `<rect onload="return false" `, 1)
+		}
+		w.Write([]byte(content))
+	}))
+	importURL := func(query string) *httptest.ResponseRecorder {
+		return adminRequest(handler, "POST", "/api/route-images/import", map[string]string{"url": upstream.URL + "/render?" + query}, cookie, "")
+	}
+	for _, query := range []string{"case=large", "case=unsafe"} {
+		if w := importURL(query); w.Code != 400 {
+			t.Fatalf("invalid SVG accepted: %s (%d)", query, w.Code)
+		}
+	}
+	w := importURL("theme=dark")
+	upstream.Close()
+	var result map[string]string
+	if w.Code != 201 || json.Unmarshal(w.Body.Bytes(), &result) != nil || !routeImageID.MatchString(result["id"]) {
+		t.Fatalf("SVG URL import failed: %d %s", w.Code, w.Body.String())
+	}
+	state := a.store.Snapshot()
+	state.Config.Routes = []Route{{ID: "online-svg", GroupID: state.Config.Groups[0].ID, Host: "svg.example.test",
+		Upstream: "http://127.0.0.1:5000", Enabled: true, Image: result["id"]}}
+	if err := a.store.Update(state.Config, nil, state.Revision); err != nil {
+		t.Fatal(err)
+	}
+	for _, endpoint := range []string{result["url"], "/api/sunpanel/routes/online-svg/image"} {
+		w = adminRequest(handler, "GET", endpoint, nil, cookie, "")
+		if w.Code != 200 || w.Header().Get("Content-Type") != "image/svg+xml" ||
+			!strings.Contains(w.Header().Get("Content-Security-Policy"), "sandbox") || w.Body.String() != svg {
+			t.Fatalf("local SVG unavailable at %s: %d", endpoint, w.Code)
+		}
+	}
+	payload, err := snapshotBackupPaths(a.store.paths, a.store.Snapshot())
+	if err != nil {
+		t.Fatal(err)
+	}
+	restoreDir := t.TempDir()
+	if err := restorePayload(restoreDir, payload); err != nil {
+		t.Fatal(err)
+	}
+	if restored, err := readRouteImage(restoreDir, result["id"]); err != nil || string(restored) != svg {
+		t.Fatal("SVG did not survive backup and restore")
+	}
+}
+
 func TestRouteImageAPIAuthUploadScanAndConfig(t *testing.T) {
 	a, h := testAdmin(t)
 	cookie := loginForTest(t, h)

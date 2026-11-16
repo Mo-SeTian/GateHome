@@ -37,6 +37,9 @@ export const iconsApi = {
   stats: signal => request('/api/icons/stats', { signal }),
   importStatus: signal => request('/api/icons/import-status', { signal }),
   importGitHub: body => request('/api/icons/import-github', { method: 'POST', body }),
+  previewURL: (url, signal) => request('/api/icons/preview-url', {
+    method: 'POST', body: { url }, signal, responseType: 'blob'
+  }),
   upload: files => {
     const body = new FormData()
     for (const file of files) body.append('file', file)

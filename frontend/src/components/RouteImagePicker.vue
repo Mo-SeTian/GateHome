@@ -83,7 +83,7 @@
 
     <!-- 底部格式提示 -->
     <div class="picker-footer">
-      <span class="file-format-tip">支持 PNG / JPG / GIF / WebP / ICO 格式（建议 1:1 比例）</span>
+      <span class="file-format-tip">支持 PNG / JPG / GIF / WebP / ICO，链接另支持 SVG（最多 128 KiB）</span>
     </div>
 
     <!-- 状态反馈 -->

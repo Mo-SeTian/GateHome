@@ -11,7 +11,16 @@ import { chromium } from 'playwright'
 const repository = fileURLToPath(new URL('../../', import.meta.url))
 const root = await mkdtemp(path.join(tmpdir(), 'gatehome-console-check-'))
 const secret = randomBytes(24).toString('hex')
+const linkedSVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 24"><style>.mark{fill:#6754ed}</style><rect class="mark" width="48" height="24"/></svg>'
+let linkedContent = linkedSVG
+let linkedRequests = 0
 const upstream = createServer((req, res) => {
+  if (req.url.startsWith('/linked-icon')) {
+    linkedRequests++
+    res.setHeader('Content-Type', 'application/octet-stream')
+    res.end(linkedContent)
+    return
+  }
   if (req.url !== '/') { res.writeHead(404); res.end(); return }
   res.setHeader('Content-Type', 'text/html')
   res.end('<html><head><title>Console test upstream</title></head><body>TEST_ONLY_UPSTREAM</body></html>')
@@ -925,6 +934,58 @@ try {
     await importDialog.getByRole('button', { name: '取消', exact: true }).click()
   }
 
+  const beforeLinkImport = await api('icons/stats')
+  await button('通过链接导入').click()
+  const linkDialog = page.getByRole('dialog', { name: '通过链接导入', exact: true })
+  const imageLink = linkDialog.getByLabel('图片链接', { exact: true })
+  const linkedURL = `http://127.0.0.1:${upstreamPort}/linked-icon?theme=light`
+  await imageLink.fill(linkedURL)
+  await linkDialog.getByRole('button', { name: '预览图标', exact: true }).click()
+  const linkedPreview = linkDialog.getByRole('img', { name: '待导入图标预览' })
+  await linkedPreview.evaluate(img => img.decode())
+  assert.match(await linkedPreview.getAttribute('src'), /^data:image\/svg\+xml;base64,/)
+  assert.equal((await api('icons/stats')).total, beforeLinkImport.total, 'preview saved an icon')
+  await linkDialog.getByRole('button', { name: '取消', exact: true }).click()
+  assert.equal((await api('icons/stats')).total, beforeLinkImport.total, 'cancelling saved an icon')
+
+  await button('通过链接导入').click()
+  await imageLink.fill(linkedURL)
+  await linkDialog.getByRole('button', { name: '预览图标', exact: true }).click()
+  await linkedPreview.evaluate(img => img.decode())
+  await imageLink.fill(linkedURL + '&changed=1')
+  assert.equal(await linkedPreview.count(), 0, 'changing the URL retained a stale preview')
+  assert.equal(await linkDialog.getByRole('button', { name: '确认导入', exact: true }).count(), 0)
+  await linkDialog.getByRole('button', { name: '预览图标', exact: true }).click()
+  await linkedPreview.evaluate(img => img.decode())
+  for (const [width, theme] of [[1440, 'light'], [390, 'light'], [320, 'dark']]) {
+    await page.setViewportSize({ width, height: 900 })
+    // A modal intentionally traps focus, so set the existing theme preference directly.
+    await page.locator('body').evaluate((body, theme) => { body.className = 'theme-' + theme }, theme)
+    await linkedPreview.evaluate(img => img.decode())
+    assert.equal(await linkDialog.evaluate(el => el.scrollWidth <= el.clientWidth), true)
+    const bounds = await linkDialog.boundingBox()
+    assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= width)
+    if (process.env.GATEHOME_BROWSER_ARTIFACTS) {
+      await page.screenshot({ path: path.join(process.env.GATEHOME_BROWSER_ARTIFACTS, `icons-link-${width}-${theme}.png`) })
+    }
+  }
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.locator('body').evaluate(body => { body.className = 'theme-light' })
+  const previewedRequests = linkedRequests
+  linkedContent = linkedSVG.replace('#6754ed', '#ef4444')
+  await linkDialog.getByRole('button', { name: '确认导入', exact: true }).click()
+  await linkDialog.waitFor({ state: 'hidden' })
+  await cards.getByText('linked-icon', { exact: true }).waitFor()
+  assert.equal(linkedRequests, previewedRequests, 'confirmation downloaded a different image')
+  const linkedIcons = await api('icons?source=uploads&keyword=linked-icon')
+  assert.equal(linkedIcons.items.length, 1)
+  assert.equal(linkedIcons.items[0].format, 'svg')
+  const localSVG = await page.evaluate(url => fetch(url).then(response => response.text()), linkedIcons.items[0].url)
+  assert.equal(localSVG, linkedSVG, 'imported icon differs from its preview')
+  assert.equal((await api('icons/stats')).total, beforeLinkImport.total + 1)
+  linkedContent = linkedSVG
+  console.log('PASS URL icon import: SVG preview, cancel without saving, changed-link reset and exact preview content on confirmation')
+
   const aspectImages = await page.evaluate(() => [[256, 128], [128, 256], [128, 128]].map(([width, height]) => {
     const canvas = document.createElement('canvas')
     canvas.width = width
@@ -988,6 +1049,29 @@ try {
   await routeDialog.waitFor({ state: 'hidden' })
   assert.ok((await api('config')).config.routes.some(row => row.image?.startsWith('/icons/uploads/')))
   await page.locator(`.routes-grid img[src="${previewURL}"]`).waitFor()
+
+  await button('编辑').first().click()
+  await routeDialog.getByRole('textbox', { name: '图片地址', exact: true }).fill(linkedURL)
+  await routeDialog.getByRole('button', { name: '导入', exact: true }).click()
+  await routePreview.waitFor()
+  await page.waitForFunction(() => document.querySelector('.route-icon-img')?.getAttribute('src')?.startsWith('/api/route-images/'))
+  await routePreview.evaluate(img => img.decode())
+  assert.equal(await routePreview.evaluate(img => img.naturalWidth / img.naturalHeight), 2)
+  const onlineSVGRef = await routePreview.getAttribute('src')
+  assert.match(onlineSVGRef, /^\/api\/route-images\/[a-f0-9]{64}$/)
+  linkedContent = ''
+  await routeDialog.getByRole('button', { name: '保存路由', exact: true }).click()
+  await routeDialog.waitFor({ state: 'hidden' })
+  await page.reload()
+  await page.locator(`.routes-grid img[src="${onlineSVGRef}"]`).first().evaluate(img => img.decode())
+  const routeSVGResponse = await page.evaluate(async url => {
+    const response = await fetch(url)
+    return { type: response.headers.get('content-type'), content: await response.text() }
+  }, onlineSVGRef)
+  assert.equal(routeSVGResponse.type, 'image/svg+xml')
+  assert.equal(routeSVGResponse.content, linkedSVG)
+  linkedContent = linkedSVG
+  console.log('PASS route URL SVG: query URL import, full aspect ratio, route save and reload after the source disappears')
 
   async function assertCompleteIcon(image, ratio) {
     await image.evaluate(img => img.decode())

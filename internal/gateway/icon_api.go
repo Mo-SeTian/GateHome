@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"sun-panel/lib/imageasset"
 )
 
 const maxIconBatch = 16
@@ -71,6 +73,7 @@ func (a *Admin) iconRoutes(mux *http.ServeMux) {
 		jsonResponse(w, 200, library.index.Stats)
 	}))
 	mux.HandleFunc("POST /api/icons/upload", a.requireAuth(a.uploadIcons))
+	mux.HandleFunc("POST /api/icons/preview-url", a.requireAuth(a.previewIconURL))
 	mux.HandleFunc("DELETE /api/icons/{id...}", a.requireAuth(a.deleteIcon))
 	mux.HandleFunc("GET /api/icons/file/{path...}", a.requireAuth(a.serveLibraryIcon))
 	mux.HandleFunc("POST /api/icons/import-github", a.requireAuth(a.startIconImport))
@@ -83,6 +86,45 @@ func (a *Admin) iconRoutes(mux *http.ServeMux) {
 		}
 		jsonResponse(w, 200, status)
 	}))
+}
+
+func (a *Admin) previewIconURL(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		URL string `json:"url"`
+	}
+	if !decodeBody(w, r, &input) {
+		return
+	}
+	content, err := downloadRouteImageWithProxy(r.Context(), input.URL, a.store.Snapshot())
+	if err != nil {
+		apiError(w, 400, err.Error())
+		return
+	}
+	ext, err := imageasset.Extension(content)
+	if err != nil {
+		apiError(w, 400, err.Error())
+		return
+	}
+	format := iconFormat(ext)
+	if err := validateIconContent(content, format); err != nil {
+		apiError(w, 400, err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", iconMIMEs[format])
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox")
+	w.Write(content)
+}
+
+func validateIconContent(content []byte, format string) error {
+	if _, _, err := iconDimensions(bytes.NewReader(content), format); err != nil {
+		return errors.New("图标内容无效，或图片尺寸超过 4096 × 4096")
+	}
+	if format != "svg" && format != "ico" {
+		if _, _, err := image.Decode(bytes.NewReader(content)); err != nil {
+			return errors.New("图标无法解码")
+		}
+	}
+	return nil
 }
 
 func (a *Admin) lockIconWrite(w http.ResponseWriter) bool {
@@ -167,15 +209,9 @@ func (a *Admin) uploadIcons(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		part.Close()
-		if _, _, err := iconDimensions(bytes.NewReader(content), format); err != nil {
-			apiError(w, 400, "图标内容无效，或图片尺寸超过 4096 × 4096")
+		if err := validateIconContent(content, format); err != nil {
+			apiError(w, 400, err.Error())
 			return
-		}
-		if format != "svg" && format != "ico" {
-			if _, _, err := image.Decode(bytes.NewReader(content)); err != nil {
-				apiError(w, 400, "图标无法解码")
-				return
-			}
 		}
 		subdir := strconv.Itoa(len(names))
 		if err := os.Mkdir(filepath.Join(stage, subdir), 0700); err != nil {
