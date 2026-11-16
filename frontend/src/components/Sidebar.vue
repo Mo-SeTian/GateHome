@@ -16,25 +16,7 @@
     >
       <!-- Brand Logo Section -->
       <div class="sidebar-brand">
-        <div class="brand-icon">
-          <svg viewBox="0 0 32 32" width="22" height="22" fill="none">
-            <defs>
-              <linearGradient id="brand-grad" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" stop-color="#6366f1" />
-                <stop offset="50%" stop-color="#8b5cf6" />
-                <stop offset="100%" stop-color="#06b6d4" />
-              </linearGradient>
-            </defs>
-            <!-- Option A: Aurora Portal Outer Ring -->
-            <circle cx="16" cy="16" r="12" stroke="url(#brand-grad)" stroke-width="2.2" stroke-dasharray="19 4 10 3" />
-            <!-- Inner Arch Gateway -->
-            <path d="M11 23 V15 C11 12.24 13.24 10 16 10 C18.76 10 21 12.24 21 15 V23" class="portal-arch" stroke-width="2.2" stroke-linecap="round" />
-            <!-- Center Core Pulse -->
-            <circle cx="16" cy="15" r="2" class="portal-core" />
-            <!-- Cardinal Star Spokes -->
-            <path d="M16 6.5 V8.5 M16 21.5 V24 M8.5 16 H6.5 M25.5 16 H23.5" stroke="#818cf8" stroke-width="1.2" stroke-linecap="round" opacity="0.8" />
-          </svg>
-        </div>
+        <img class="brand-icon" src="/favicon.svg" width="32" height="32" alt="" />
         <div class="brand-info">
           <span class="brand-title">GateHome</span>
           <span class="brand-version"><span class="brand-caption">家庭网关 · </span>{{ gatewayVersion }}</span>
@@ -237,30 +219,7 @@ const handleLogout = () => {
 }
 
 .brand-icon {
-  width: 32px;
-  height: 32px;
-  border-radius: var(--radius-sm);
-  background: rgba(99, 102, 241, 0.12);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid rgba(99, 102, 241, 0.25);
   flex-shrink: 0;
-}
-
-.portal-arch {
-  stroke: #38bdf8;
-  transition: stroke 0.2s ease;
-}
-.portal-core {
-  fill: #ffffff;
-  transition: fill 0.2s ease;
-}
-.theme-light .portal-arch {
-  stroke: #0284c7;
-}
-.theme-light .portal-core {
-  fill: #4f46e5;
 }
 
 .brand-info {

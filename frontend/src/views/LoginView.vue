@@ -23,23 +23,7 @@
       <!-- Brand Art Header -->
       <div class="login-art">
         <div class="brand-cube-icon">
-          <svg viewBox="0 0 32 32" width="34" height="34" fill="none">
-            <defs>
-              <linearGradient id="login-brand-g" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" stop-color="#6366f1" />
-                <stop offset="50%" stop-color="#8b5cf6" />
-                <stop offset="100%" stop-color="#06b6d4" />
-              </linearGradient>
-            </defs>
-            <!-- Option A: Aurora Portal Outer Ring -->
-            <circle cx="16" cy="16" r="12" stroke="url(#login-brand-g)" stroke-width="2.2" stroke-dasharray="19 4 10 3" />
-            <!-- Inner Arch Gateway -->
-            <path d="M11 23 V15 C11 12.24 13.24 10 16 10 C18.76 10 21 12.24 21 15 V23" class="login-portal-arch" stroke-width="2.2" stroke-linecap="round" />
-            <!-- Center Core Pulse -->
-            <circle cx="16" cy="15" r="2" class="login-portal-core" />
-            <!-- Cardinal Star Spokes -->
-            <path d="M16 6.5 V8.5 M16 21.5 V24 M8.5 16 H6.5 M25.5 16 H23.5" stroke="#818cf8" stroke-width="1.2" stroke-linecap="round" opacity="0.8" />
-          </svg>
+          <img src="/favicon.svg" width="38" height="38" alt="" />
         </div>
         <h1 class="brand-name">GateHome</h1>
         <p class="brand-desc">家庭网络管理控制台</p>
@@ -353,21 +337,6 @@ async function handleSubmit() {
   justify-content: center;
   margin-bottom: 12px;
   box-shadow: 0 8px 24px rgba(99, 102, 241, 0.15);
-}
-
-.login-portal-arch {
-  stroke: #38bdf8;
-  transition: stroke 0.2s ease;
-}
-.login-portal-core {
-  fill: #ffffff;
-  transition: fill 0.2s ease;
-}
-:global(.theme-light) .login-portal-arch {
-  stroke: #0284c7;
-}
-:global(.theme-light) .login-portal-core {
-  fill: #4f46e5;
 }
 
 .brand-name {
