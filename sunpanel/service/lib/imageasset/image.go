@@ -81,8 +81,10 @@ func validICO(data []byte) bool {
 func validSVG(data []byte) bool {
 	decoder := xml.NewDecoder(bytes.NewReader(data))
 	depth := 0
+	styleDepth := 0
+	var styleText strings.Builder
 	seen := false
-	allowed := " svg g path rect circle ellipse line polyline polygon text tspan defs use symbol clippath mask pattern lineargradient radialgradient stop title desc "
+	allowed := " svg g path rect circle ellipse line polyline polygon text tspan defs use symbol clippath mask pattern lineargradient radialgradient stop title desc style "
 	for {
 		token, err := decoder.Token()
 		if err == io.EOF {
@@ -93,6 +95,9 @@ func validSVG(data []byte) bool {
 		}
 		switch v := token.(type) {
 		case xml.StartElement:
+			if styleDepth != 0 {
+				return false
+			}
 			if depth == 0 {
 				if seen || v.Name.Local != "svg" {
 					return false
@@ -116,7 +121,18 @@ func validSVG(data []byte) bool {
 				}
 			}
 			depth++
+			if v.Name.Local == "style" {
+				styleDepth = depth
+				styleText.Reset()
+			}
 		case xml.EndElement:
+			if depth == styleDepth {
+				css := strings.ToLower(styleText.String())
+				if strings.Contains(css, "url") || strings.ContainsAny(css, "\\@") {
+					return false
+				}
+				styleDepth = 0
+			}
 			depth--
 		case xml.Directive:
 			return false
@@ -125,6 +141,9 @@ func validSVG(data []byte) bool {
 				return false
 			}
 		case xml.CharData:
+			if styleDepth != 0 {
+				styleText.Write(v)
+			}
 			if depth == 0 && strings.TrimSpace(string(v)) != "" {
 				return false
 			}

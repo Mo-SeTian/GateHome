@@ -1,5 +1,5 @@
 // Probe from the browser: the server may be on a different network.
-export async function resolveAutoUrl(url: string, lanUrl?: string, verifyHTTPS?: (url: string) => Promise<boolean>): Promise<string> {
+export async function resolveAutoUrl(url: string, lanUrl?: string, verifyProbe?: (url: string) => Promise<boolean>): Promise<string> {
   if (!lanUrl || lanUrl === url)
     return url
 
@@ -11,8 +11,8 @@ export async function resolveAutoUrl(url: string, lanUrl?: string, verifyHTTPS?:
       return url
 
     // WebViews may show a certificate dialog even for a background fetch.
-    // Validate HTTPS through our authenticated server first; never bypass TLS.
-    if (target.protocol === 'https:' && (!verifyHTTPS || !await verifyHTTPS(lanUrl)))
+    // Validate the entire redirect chain through our authenticated server first.
+    if (!verifyProbe || !await verifyProbe(lanUrl))
       return url
 
     // An opaque response (including a login page or HTTP error) proves reachability.
@@ -22,7 +22,7 @@ export async function resolveAutoUrl(url: string, lanUrl?: string, verifyHTTPS?:
       cache: 'no-store',
       credentials: 'omit',
       referrerPolicy: 'no-referrer',
-      redirect: 'manual',
+      redirect: 'follow',
       signal: controller.signal,
     }).then(() => lanUrl, () => url)
     const fallback = new Promise<string>((resolve) => {
@@ -44,7 +44,7 @@ export async function resolveAutoUrl(url: string, lanUrl?: string, verifyHTTPS?:
 const autoUrlCacheMs = 60_000
 
 // Each home page checks LAN addresses in the background; clicks only read results.
-export function createAutoUrlResolver(onChange?: () => void, verifyHTTPS?: (url: string) => Promise<boolean>) {
+export function createAutoUrlResolver(onChange?: () => void, verifyProbe?: (url: string) => Promise<boolean>) {
   const probes = new Map<string, Promise<void>>()
   const reachable = new Set<string>()
   const checkedAt = new Map<string, number>()
@@ -70,7 +70,7 @@ export function createAutoUrlResolver(onChange?: () => void, verifyHTTPS?: (url:
           checkedAt.delete(lanUrl)
         }
         if (!probe) {
-          probe = resolveAutoUrl(item.url, lanUrl, verifyHTTPS).then((chosen) => {
+          probe = resolveAutoUrl(item.url, lanUrl, verifyProbe).then((chosen) => {
             if (probes.get(lanUrl) !== probe)
               return
             if (chosen === lanUrl)

@@ -28,15 +28,17 @@ func serviceHealthOptions(c Config) ServiceHealthConfig {
 }
 
 type serviceHealthResult struct {
-	State        string     `json:"state"`
-	Label        string     `json:"label"`
-	Message      string     `json:"message"`
-	Status       int        `json:"status,omitempty"`
-	DurationMS   int64      `json:"duration_ms"`
-	CheckedAt    time.Time  `json:"checked_at"`
-	TLSVerified  bool       `json:"tls_verified"`
-	TLSExpiresAt *time.Time `json:"tls_expires_at,omitempty"`
-	Healthy      bool       `json:"healthy"`
+	State               string     `json:"state"`
+	Label               string     `json:"label"`
+	Message             string     `json:"message"`
+	Status              int        `json:"status,omitempty"`
+	DurationMS          int64      `json:"duration_ms"`
+	CheckedAt           time.Time  `json:"checked_at"`
+	TLSVerified         bool       `json:"tls_verified"`
+	TLSExpiresAt        *time.Time `json:"tls_expires_at,omitempty"`
+	Healthy             bool       `json:"healthy"`
+	BrowserProbeAllowed bool       `json:"browser_probe_allowed"`
+	redirectURL         string
 }
 type healthNotice struct {
 	RouteID string    `json:"route_id"`
@@ -150,12 +152,30 @@ func probeServiceHealth(ctx context.Context, raw string) serviceHealthResult {
 		result.State, result.Label, result.Message, result.Healthy = "healthy", "服务正常", "上游返回成功响应", true
 	case response.StatusCode >= 300 && response.StatusCode < 400:
 		result.State, result.Label, result.Message, result.Healthy = "redirect", "服务可达", "上游返回跳转，检测不会继续跟随", true
+		if location, err := response.Location(); err == nil {
+			result.redirectURL = location.String()
+		}
 	case response.StatusCode == 401 || response.StatusCode == 403:
 		result.State, result.Label, result.Message, result.Healthy = "auth_required", "需要验证", "服务可达，需要登录或访问授权", true
 	default:
 		result.State, result.Label, result.Message = "http_error", "HTTP 异常", "服务已连通，但返回异常状态码"
 	}
 	return finish()
+}
+
+// Verify every redirect before allowing a browser probe to follow it, without
+// changing ordinary health checks or exposing untrusted TLS to a WebView.
+func (a *Admin) browserProbeHealth(ctx context.Context, raw string) serviceHealthResult {
+	result := a.cachedServiceHealth(ctx, raw, time.Minute)
+	last := result
+	for hops := 0; last.State == "redirect" && last.redirectURL != "" && hops < 3; hops++ {
+		last = a.cachedServiceHealth(ctx, last.redirectURL, time.Minute)
+	}
+	if last.Status == 0 || last.State == "redirect" {
+		return last
+	}
+	result.BrowserProbeAllowed = true
+	return result
 }
 
 func (a *Admin) cachedServiceHealth(ctx context.Context, raw string, ttl time.Duration) serviceHealthResult {
@@ -402,7 +422,11 @@ func (a *Admin) sunPanelSiteHealth(w http.ResponseWriter, r *http.Request) {
 				row.Default = a.cachedServiceHealth(r.Context(), defaultURL, time.Minute)
 			}
 			if lanURL != "" {
-				row.LAN = a.cachedServiceHealth(r.Context(), lanURL, time.Minute)
+				if input.TLSOnly {
+					row.LAN = a.browserProbeHealth(r.Context(), lanURL)
+				} else {
+					row.LAN = a.cachedServiceHealth(r.Context(), lanURL, time.Minute)
+				}
 			}
 			results[i] = row
 		}(i, item.ID, item.URL, item.LanURL)

@@ -11,6 +11,7 @@ export interface HealthResult {
   duration_ms: number
   checked_at: string
   tls_verified: boolean
+  browser_probe_allowed: boolean
   tls_expires_at?: string
 }
 export interface SiteHealth {

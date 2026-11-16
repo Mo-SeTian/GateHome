@@ -14,12 +14,13 @@ test('details report cached reachability and retain the last completed check tim
   t.mock.method(Date, 'now', () => now)
   let finish
   const probe = t.mock.method(globalThis, 'fetch', () => new Promise(resolve => { finish = resolve }))
-  const resolver = createAutoUrlResolver()
+  const resolver = createAutoUrlResolver(undefined, async () => true)
   assert.equal(resolver.inspect(defaultUrl).state, 'unconfigured')
   assert.equal(resolver.inspect(defaultUrl, defaultUrl).state, 'same')
   assert.equal(resolver.inspect(defaultUrl, lanUrl).state, 'unchecked')
   const pending = resolver.check([{ url: defaultUrl, lanUrl }])
   assert.equal(resolver.inspect(defaultUrl, lanUrl).state, 'checking')
+  await Promise.resolve()
   finish({ type: 'opaque' })
   await pending
   assert.deepEqual(resolver.inspect(defaultUrl, lanUrl), { state: 'reachable', checkedAt: now })
@@ -44,7 +45,7 @@ test('opaque and authentication responses prove LAN reachability', async (t) => 
   let response
   const probe = t.mock.method(globalThis, 'fetch', async () => response)
   for (response of [{ type: 'opaque', status: 0 }, { status: 401 }, { status: 405 }])
-    assert.equal(await resolveAutoUrl(defaultUrl, lanUrl), lanUrl)
+    assert.equal(await resolveAutoUrl(defaultUrl, lanUrl, async () => true), lanUrl)
   const [url, options] = probe.mock.calls[0].arguments
   assert.equal(url, lanUrl)
   assert.equal(options.method, 'HEAD')
@@ -52,14 +53,14 @@ test('opaque and authentication responses prove LAN reachability', async (t) => 
   assert.equal(options.cache, 'no-store')
   assert.equal(options.credentials, 'omit')
   assert.equal(options.referrerPolicy, 'no-referrer')
-  assert.equal(options.redirect, 'manual')
+  assert.equal(options.redirect, 'follow')
 })
 
 test('network or browser policy failure uses the default URL', async (t) => {
   t.mock.method(globalThis, 'fetch', async () => {
     throw new TypeError('Failed to fetch')
   })
-  assert.equal(await resolveAutoUrl(defaultUrl, lanUrl), defaultUrl)
+  assert.equal(await resolveAutoUrl(defaultUrl, lanUrl, async () => true), defaultUrl)
 })
 
 test('a stalled probe falls back within 1500 ms and is aborted', async (t) => {
@@ -69,7 +70,8 @@ test('a stalled probe falls back within 1500 ms and is aborted', async (t) => {
     signal = options.signal
     return new Promise(() => {})
   })
-  const chosen = resolveAutoUrl(defaultUrl, lanUrl)
+  const chosen = resolveAutoUrl(defaultUrl, lanUrl, async () => true)
+  await Promise.resolve()
   t.mock.timers.tick(1500)
   assert.equal(await chosen, defaultUrl)
   assert.equal(signal.aborted, true)
@@ -82,7 +84,7 @@ test('a successful probe cancels its timeout', async (t) => {
     signal = options.signal
     return { type: 'opaque' }
   })
-  assert.equal(await resolveAutoUrl(defaultUrl, lanUrl), lanUrl)
+  assert.equal(await resolveAutoUrl(defaultUrl, lanUrl, async () => true), lanUrl)
   t.mock.timers.tick(1500)
   assert.equal(signal.aborted, false)
 })
@@ -90,11 +92,12 @@ test('a successful probe cancels its timeout', async (t) => {
 test('background checks populate cached choices; opening sites never starts or waits for a probe', async (t) => {
   let finish
   const probe = t.mock.method(globalThis, 'fetch', () => new Promise(resolve => { finish = resolve }))
-  const network = createAutoUrlResolver()
+  const network = createAutoUrlResolver(undefined, async () => true)
   assert.equal(network.resolve(defaultUrl, lanUrl), defaultUrl)
   assert.equal(probe.mock.callCount(), 0)
   const checking = network.check([{ url: defaultUrl, lanUrl }])
   assert.equal(network.resolve(defaultUrl, lanUrl), defaultUrl)
+  await Promise.resolve()
   finish({ type: 'opaque' })
   await checking
   for (let i = 0; i < 3; i++)
@@ -109,7 +112,7 @@ test('a batch checks each LAN address once across groups, duplicate entries and 
       throw new TypeError('Failed to fetch')
     return { type: 'opaque' }
   })
-  const network = createAutoUrlResolver()
+  const network = createAutoUrlResolver(undefined, async () => true)
   const entries = [{ url: defaultUrl, lanUrl }, { url: `${defaultUrl}other`, lanUrl: ` ${lanUrl} ` }, { url: defaultUrl, lanUrl: unreachable }, { url: defaultUrl }, { url: lanUrl, lanUrl }]
   await Promise.all([network.check(entries), network.check(entries)])
   await network.check(entries)
@@ -122,13 +125,13 @@ test('a batch checks each LAN address once across groups, duplicate entries and 
 
 test('new addresses are checked after edits; results belong to the current home page', async (t) => {
   const probe = t.mock.method(globalThis, 'fetch', async () => ({ type: 'opaque' }))
-  const firstPage = createAutoUrlResolver()
+  const firstPage = createAutoUrlResolver(undefined, async () => true)
   await firstPage.check([{ url: defaultUrl, lanUrl }])
   const changedLanUrl = 'http://192.168.1.4:5000/'
   assert.equal(firstPage.resolve(defaultUrl, changedLanUrl), defaultUrl)
   await firstPage.check([{ url: defaultUrl, lanUrl: changedLanUrl }])
   assert.equal(firstPage.resolve(defaultUrl, changedLanUrl), changedLanUrl)
-  const nextPage = createAutoUrlResolver()
+  const nextPage = createAutoUrlResolver(undefined, async () => true)
   assert.equal(nextPage.resolve(defaultUrl, lanUrl), defaultUrl)
   await nextPage.check([{ url: defaultUrl, lanUrl }])
   assert.equal(nextPage.resolve(defaultUrl, lanUrl), lanUrl)
@@ -144,7 +147,7 @@ test('expired results fall back immediately and a background recheck detects los
       throw new TypeError('TEST_ONLY_NETWORK_LOSS')
     return { type: 'opaque' }
   })
-  const network = createAutoUrlResolver()
+  const network = createAutoUrlResolver(undefined, async () => true)
   const items = [{ url: defaultUrl, lanUrl }]
   await network.check(items)
   now += 59_999
@@ -167,9 +170,10 @@ test('expired results fall back immediately and a background recheck detects los
 test('a probe from the previous network cannot overwrite a newer unreachable result', async (t) => {
   let finishOld
   const probe = t.mock.method(globalThis, 'fetch', () => new Promise(resolve => { finishOld = resolve }))
-  const network = createAutoUrlResolver()
+  const network = createAutoUrlResolver(undefined, async () => true)
   const items = [{ url: defaultUrl, lanUrl }]
   const oldCheck = network.check(items)
+  await Promise.resolve()
   network.invalidate()
   probe.mock.mockImplementation(async () => { throw new TypeError('TEST_ONLY_NETWORK_LOSS') })
   await network.check(items)
@@ -197,12 +201,13 @@ function browserNetworkFixture(t) {
 test('foreground checks, periodic refresh and debounced reconnection run silently; cleanup stops them', async (t) => {
   const browser = browserNetworkFixture(t)
   const probe = t.mock.method(globalThis, 'fetch', async () => ({ type: 'opaque' }))
-  const network = createAutoUrlResolver()
+  const network = createAutoUrlResolver(undefined, async () => true)
   const items = [{ url: defaultUrl, lanUrl }]
   await network.check(items)
   const stop = startAutoUrlRefresh(network, () => items, () => true)
   t.mock.timers.tick(60_000)
   t.mock.timers.tick(200)
+  await Promise.resolve()
   assert.equal(probe.mock.callCount(), 2)
   await network.check(items)
   browser.document.visibilityState = 'hidden'
@@ -213,6 +218,7 @@ test('foreground checks, periodic refresh and debounced reconnection run silentl
   browser.window.dispatchEvent(new Event('offline'))
   assert.equal(network.resolve(defaultUrl, lanUrl), defaultUrl)
   t.mock.timers.tick(200)
+  await Promise.resolve()
   assert.equal(probe.mock.callCount(), 2)
   browser.navigator.onLine = true
   browser.document.visibilityState = 'visible'
@@ -221,16 +227,19 @@ test('foreground checks, periodic refresh and debounced reconnection run silentl
   t.mock.timers.tick(199)
   assert.equal(probe.mock.callCount(), 2)
   t.mock.timers.tick(1)
+  await Promise.resolve()
   assert.equal(probe.mock.callCount(), 3)
   await network.check(items)
   browser.document.dispatchEvent(new Event('visibilitychange'))
   t.mock.timers.tick(200)
+  await Promise.resolve()
   assert.equal(probe.mock.callCount(), 4)
   await network.check(items)
   const restored = Object.assign(new Event('pageshow'), { persisted: true })
   browser.window.dispatchEvent(restored)
   browser.document.dispatchEvent(new Event('visibilitychange'))
   t.mock.timers.tick(200)
+  await Promise.resolve()
   assert.equal(probe.mock.callCount(), 5)
   await network.check(items)
   stop()
@@ -246,7 +255,7 @@ test('manual network modes never start automatic probes, including browsers with
   const browser = browserNetworkFixture(t)
   delete browser.navigator.connection
   const probe = t.mock.method(globalThis, 'fetch', async () => ({ type: 'opaque' }))
-  const stop = startAutoUrlRefresh(createAutoUrlResolver(), () => [{ url: defaultUrl, lanUrl }], () => false)
+  const stop = startAutoUrlRefresh(createAutoUrlResolver(undefined, async () => true), () => [{ url: defaultUrl, lanUrl }], () => false)
   browser.document.dispatchEvent(new Event('visibilitychange'))
   browser.window.dispatchEvent(new Event('online'))
   t.mock.timers.tick(120_000)
@@ -255,19 +264,23 @@ test('manual network modes never start automatic probes, including browsers with
 })
 
 
-test('HTTPS probes never contact an unverified certificate from the browser', async (t) => {
+test('probes never contact an unverified certificate or redirect chain from the browser', async (t) => {
   const probe=t.mock.method(globalThis,'fetch',async()=>({type:'opaque'}))
   const secureLAN='https://192.168.2.2/'
   assert.equal(await resolveAutoUrl(defaultUrl,secureLAN),defaultUrl)
   assert.equal(await resolveAutoUrl(defaultUrl,secureLAN,async()=>false),defaultUrl)
   assert.equal(await resolveAutoUrl(defaultUrl,secureLAN,async()=>{throw new Error('TEST_ONLY_TLS_FAILURE')}),defaultUrl)
+  assert.equal(await resolveAutoUrl(defaultUrl,lanUrl),defaultUrl)
+  assert.equal(await resolveAutoUrl(defaultUrl,lanUrl,async()=>false),defaultUrl)
   assert.equal(probe.mock.callCount(),0)
   assert.equal(await resolveAutoUrl(defaultUrl,secureLAN,async()=>true),secureLAN)
   assert.equal(probe.mock.callCount(),1)
 })
 
-test('HTTP redirects prove reachability without following the untrusted HTTPS target', async (t) => {
- const probe=t.mock.method(globalThis,'fetch',async()=>({type:'opaqueredirect'}))
- assert.equal(await resolveAutoUrl(defaultUrl,lanUrl),lanUrl)
- assert.equal(probe.mock.calls[0].arguments[1].redirect,'manual')
+test('HTTP redirects are followed only after the server approves the complete chain', async (t) => {
+ const probe=t.mock.method(globalThis,'fetch',async()=>({type:'opaque'}))
+ assert.equal(await resolveAutoUrl(defaultUrl,lanUrl,async()=>false),defaultUrl)
+ assert.equal(probe.mock.callCount(),0)
+ assert.equal(await resolveAutoUrl(defaultUrl,lanUrl,async()=>true),lanUrl)
+ assert.equal(probe.mock.calls[0].arguments[1].redirect,'follow')
 })

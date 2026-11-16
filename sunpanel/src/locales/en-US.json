@@ -249,7 +249,7 @@
     "geticonFail": "Failed to get icon",
     "iconGroup": "Group",
     "inputIconName": "Icon name (e.g. mdi:home) or an HTTP(S) image URL",
-    "inputIconUrlOrUpload": "Enter icon URL or upload",
+    "inputIconUrlOrUpload": "Enter an image URL (SVG supported) or upload",
     "lanUrl": "LAN URL",
     "lanUrlInputPlaceholder": "http(s):// (LAN mode, will redirect to this address)",
     "newWindowOpen": "Open in new window",

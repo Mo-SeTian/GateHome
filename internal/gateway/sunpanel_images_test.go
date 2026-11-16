@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
+	"sun-panel/lib/imageasset"
 	"sync/atomic"
 	"testing"
 )
@@ -22,6 +24,15 @@ func TestSunPanelImageImport(t *testing.T) {
 		}
 		if r.URL.Path == "/html" {
 			w.Write([]byte("<html>not an image</html>"))
+			return
+		}
+		if r.URL.Path == "/icon.svg" {
+			w.Header().Set("Content-Type", "image/svg+xml")
+			io.WriteString(w, `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 48"><style>.logo{fill:red}</style><rect class="logo" width="96" height="48"/></svg>`)
+			return
+		}
+		if r.URL.Path == "/active.svg" {
+			io.WriteString(w, `<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>`)
 			return
 		}
 		w.Write(testRoutePNG(t, 256, 128))
@@ -41,26 +52,35 @@ func TestSunPanelImageImport(t *testing.T) {
 			t.Error("unexpected worker request")
 			return
 		}
-		file, _, err := r.FormFile("imgfile")
+		file, header, err := r.FormFile("imgfile")
 		if err != nil {
 			t.Error("upload did not use the existing image API")
 			return
 		}
 		defer file.Close()
-		config, format, err := image.DecodeConfig(file)
-		if err != nil || format != "png" || config.Width != 128 || config.Height != 64 {
-			t.Error("remote image was not normalized before uploading")
-			return
+		data, _ := io.ReadAll(file)
+		if filepath.Ext(header.Filename) == ".svg" {
+			if !imageasset.Validate(header.Filename, data) {
+				t.Error("remote SVG was not validated before uploading")
+				return
+			}
+		} else {
+			config, format, err := image.DecodeConfig(bytes.NewReader(data))
+			if err != nil || format != "png" || config.Width != 128 || config.Height != 64 {
+				t.Error("remote image was not normalized before uploading")
+				return
+			}
 		}
 		uploads.Add(1)
 		if failUpload {
 			jsonResponse(w, 200, map[string]any{"code": 1300, "msg": "TEST_ONLY_WRITE_FAILURE"})
 			return
 		}
-		jsonResponse(w, 200, map[string]any{"code": 0, "data": map[string]string{"imageUrl": "/sunpanel/uploads/test.png"}})
+		jsonResponse(w, 200, map[string]any{"code": 0, "data": map[string]string{"imageUrl": "/sunpanel/uploads/test" + filepath.Ext(header.Filename)}})
 	}))
 	defer worker.Close()
 	a.SetSunPanel(&SunPanel{bridgeURL: worker.URL})
+	expectedURL := "/sunpanel/uploads/test.png"
 	request := func(handler http.Handler, raw, token string, cookie *http.Cookie, origin string) int {
 		body, _ := json.Marshal(map[string]string{"url": raw})
 		r := httptest.NewRequest("POST", "http://localhost/sunpanel/api/file/importImg", bytes.NewReader(body))
@@ -87,7 +107,7 @@ func TestSunPanelImageImport(t *testing.T) {
 		if json.Unmarshal(w.Body.Bytes(), &result) != nil {
 			t.Fatal("invalid import response")
 		}
-		if result.Code == 0 && result.Data.ImageURL != "/sunpanel/uploads/test.png" {
+		if result.Code == 0 && result.Data.ImageURL != expectedURL {
 			t.Fatal("import did not return the local Sun-Panel URL")
 		}
 		return result.Code
@@ -115,6 +135,14 @@ func TestSunPanelImageImport(t *testing.T) {
 	if request(a.SunPanelHandler(), imageServer.URL+"/html", "TEST_ONLY_PANEL_TOKEN", nil, "") == 0 || uploads.Load() != 2 {
 		t.Fatal("non-image data reached the upload API")
 	}
+	expectedURL = "/sunpanel/uploads/test.svg"
+	if request(a.SunPanelHandler(), imageServer.URL+"/icon.svg?version=1", "TEST_ONLY_PANEL_TOKEN", nil, "") != 0 || uploads.Load() != 3 {
+		t.Fatal("online SVG with styles and URL parameters could not be saved locally")
+	}
+	if request(a.SunPanelHandler(), imageServer.URL+"/active.svg", "TEST_ONLY_PANEL_TOKEN", nil, "") == 0 || uploads.Load() != 3 {
+		t.Fatal("active SVG reached the upload API")
+	}
+	expectedURL = "/sunpanel/uploads/test.png"
 	failUpload = true
 	if request(a.SunPanelHandler(), imageServer.URL, "TEST_ONLY_PANEL_TOKEN", nil, "") == 0 {
 		t.Fatal("failed local persistence reported success")

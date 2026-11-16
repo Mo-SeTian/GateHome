@@ -14,7 +14,17 @@ const root = await mkdtemp(path.join(tmpdir(), 'gatehome-cross-domain-check-'))
 const data = path.join(root, 'data')
 const password = randomBytes(24).toString('hex')
 let server, browser, gateway, page, leakedManagementCookie = false
-const upstream = createServer((req, res) => { res.setHeader('Content-Type', 'text/html'); res.end('TEST_ONLY_UPSTREAM') })
+let svgAvailable = true
+const upstream = createServer((req, res) => {
+  if (req.url?.startsWith('/online-fixture.svg')) {
+    if (!svgAvailable) { res.writeHead(404); res.end(); return }
+    res.setHeader('Content-Type', 'image/svg+xml')
+    res.end('<svg xmlns="http://www.w3.org/2000/svg" width="96" height="48" viewBox="0 0 96 48"><style>.left{fill:red}.right{fill:blue}</style><rect class="left" width="48" height="48"/><rect class="right" x="48" width="48" height="48"/></svg>')
+    return
+  }
+  if (req.url === '/desktop-redirect') { res.writeHead(307, { Location: '/' }); res.end(); return }
+  res.setHeader('Content-Type', 'text/html'); res.end('TEST_ONLY_UPSTREAM')
+})
 const listen = app => new Promise(resolve => app.listen(0, '127.0.0.1', () => resolve(app.address().port)))
 async function freePort() { const listener = createServer(); const port = await listen(listener); await new Promise(resolve => listener.close(resolve)); return port }
 async function loginGateHome(target, origin) {
@@ -147,6 +157,69 @@ try {
   assert.equal(copiedSVG.fits,true)
   console.log('PASS SunPanel independent HTTPS domains: separate real logins, first-party management session, popup return and real bookmark import')
   console.log('PASS SunPanel library pictures: SVG is copied to owned local PNG storage with full aspect ratio and visible edges')
+
+  const svgContext = await browser.newContext({ locale: 'zh-CN', colorScheme: 'dark', viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce' })
+  const svgPage = await svgContext.newPage()
+  svgPage.on('pageerror', () => errors.push('SVG page exception'))
+  await loginPanel(svgPage, `http://127.0.0.1:${panelPort}`)
+  await svgPage.getByRole('button', { name: /^(添加|Add) · Browser fixture$/ }).click()
+  await svgPage.locator('.n-modal .n-form-item').filter({ hasText: '标题' }).locator('input').fill('在线 SVG 验证')
+  await svgPage.getByPlaceholder('http(s)://', { exact: true }).fill('https://example.test/')
+  const lanAddress = `http://127.0.0.1:${upstreamPort}/desktop-redirect`
+  await svgPage.getByPlaceholder('http(s)://（内网模式，会跳转该地址）', { exact: true }).fill(lanAddress)
+  const onlineSVG = `http://127.0.0.1:${upstreamPort}/online-fixture.svg?revision=1`
+  await svgPage.getByRole('radio', { name: '在线图标', exact: true }).click()
+  await svgPage.getByPlaceholder('例如 mdi:home，或完整 HTTP(S) 图片 URL', { exact: true }).fill(onlineSVG)
+  await svgPage.waitForFunction(() => [...document.querySelectorAll('.n-modal img')].some(img => img.src.includes('online-fixture.svg') && img.complete && img.naturalWidth === 96))
+  await svgPage.getByRole('radio', { name: '图片', exact: true }).click()
+  await svgPage.getByPlaceholder('输入图片地址（支持 SVG）或上传', { exact: true }).fill(onlineSVG)
+  const savedSVG = svgPage.waitForResponse(r => new URL(r.url()).pathname === '/sunpanel/api/file/importImg')
+  await svgPage.getByRole('button', { name: '保存为本地图标', exact: true }).click()
+  const svgResult = await (await savedSVG).json()
+  assert.equal(svgResult.code, 0)
+  const svgURL = svgResult.data.imageUrl
+  assert.match(svgURL, /^\/sunpanel\/uploads\/.+\.svg$/)
+  await svgPage.getByRole('button', { name: '保存', exact: true }).click()
+  await svgPage.waitForFunction(() => !document.querySelector('.n-modal'))
+  svgAvailable = false
+  await svgPage.reload()
+  await svgPage.waitForFunction(src => [...document.images].some(img => img.getAttribute('src') === src && img.complete && img.naturalWidth === 96), svgURL)
+  const localSVG = svgPage.locator(`img[src="${svgURL}"]`)
+  const svgPixels = await localSVG.evaluate(image => {
+    const canvas = document.createElement('canvas'); canvas.width = 96; canvas.height = 48
+    const ctx = canvas.getContext('2d'); ctx.drawImage(image, 0, 0, 96, 48)
+    return { width: image.naturalWidth, height: image.naturalHeight, fit: getComputedStyle(image).objectFit,
+      left: [...ctx.getImageData(0, 24, 1, 1).data], right: [...ctx.getImageData(95, 24, 1, 1).data] }
+  })
+  assert.deepEqual(svgPixels, { width:96, height:48, fit:'contain', left:[255,0,0,255], right:[0,0,255,255] })
+  if (process.env.GATEHOME_BROWSER_ARTIFACTS) {
+    await mkdir(process.env.GATEHOME_BROWSER_ARTIFACTS, { recursive:true })
+    await svgPage.screenshot({ path:path.join(process.env.GATEHOME_BROWSER_ARTIFACTS,'sunpanel-online-svg-desktop.png') })
+  }
+  await svgPage.getByRole('button', { name: /^网络模式:/ }).click()
+  await svgPage.getByText('自动（内网优先）', { exact:true }).click()
+  await svgPage.getByRole('button', { name: /^网络模式:/ }).click()
+  await svgPage.getByText('查看检测详情', { exact:true }).click()
+  const networkRow = svgPage.locator('.n-modal article').filter({ hasText:'在线 SVG 验证' })
+  await networkRow.getByText('内网检测：内网可达', { exact:true }).waitFor()
+  assert.ok((await networkRow.textContent()).includes(`实际打开：${lanAddress}`))
+  await closeModal(svgPage)
+  if (process.env.GATEHOME_BROWSER_ARTIFACTS) {
+    await svgPage.setViewportSize({ width:390,height:844 })
+    await svgPage.screenshot({ path:path.join(process.env.GATEHOME_BROWSER_ARTIFACTS,'sunpanel-online-svg-mobile.png') })
+  }
+  const removedSVG = await svgPage.evaluate(async () => {
+    const session = JSON.parse(localStorage.getItem('AUTH_TOKEN')).data
+    const call = async (endpoint, body = {}) => (await fetch('/sunpanel/api/panel/itemIcon/'+endpoint, { method:'POST', headers:{'Content-Type':'application/json',token:session.token},body:JSON.stringify(body) })).json()
+    const list = await call('getIconList')
+    const item = list.data.list.find(item => item.title === '在线 SVG 验证')
+    return item && (await call('deletes',{ids:[item.id]})).code === 0
+  })
+  assert.equal(removedSVG,true)
+  await svgContext.close()
+  svgAvailable = true
+  console.log('PASS SunPanel online SVG: URL parameters, styles, both icon modes, local vector storage, full proportions and source-independent reload')
+  console.log('PASS SunPanel automatic LAN selection: authenticated redirect validation and real cross-origin browser probes select a reachable HTTP 307 service')
 
   const embedded = await context.newPage()
   await loginPanel(embedded, adminOrigin)

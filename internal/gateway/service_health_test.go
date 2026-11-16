@@ -88,6 +88,51 @@ func TestServiceHealthCacheDeduplicatesAndCancels(t *testing.T) {
 	}
 }
 
+func TestBrowserProbeHealthValidatesRedirectChains(t *testing.T) {
+	a, _ := testAdmin(t)
+	var secureCalls atomic.Int32
+	secure := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { secureCalls.Add(1); w.WriteHeader(200) }))
+	secure.Config.ErrorLog = log.New(io.Discard, "", 0)
+	secure.StartTLS()
+	defer secure.Close()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "HEAD" || r.Header.Get("Cookie") != "" || r.Header.Get("Authorization") != "" {
+			t.Error("browser preflight sent unexpected method or credentials")
+		}
+		switch r.URL.Path {
+		case "/redirect":
+			http.Redirect(w, r, "/desktop/", 307)
+		case "/tls":
+			http.Redirect(w, r, secure.URL, 307)
+		case "/restricted":
+			http.Redirect(w, r, "http://169.254.169.254/", 307)
+		case "/loop":
+			http.Redirect(w, r, "/loop", 307)
+		case "/auth":
+			w.WriteHeader(401)
+		default:
+			w.WriteHeader(200)
+		}
+	}))
+	defer server.Close()
+	for _, test := range []struct {
+		path    string
+		allowed bool
+	}{{"/", true}, {"/redirect", true}, {"/auth", true}, {"/tls", false}, {"/restricted", false}, {"/loop", false}} {
+		result := a.browserProbeHealth(context.Background(), server.URL+test.path)
+		if result.BrowserProbeAllowed != test.allowed {
+			t.Errorf("browser probe approval for %s = %v", test.path, result.BrowserProbeAllowed)
+		}
+	}
+	if secureCalls.Load() != 0 {
+		t.Fatal("untrusted HTTPS handler was reached")
+	}
+	ordinary := a.cachedServiceHealth(context.Background(), server.URL+"/redirect", time.Minute)
+	if ordinary.State != "redirect" || ordinary.Status != 307 || ordinary.BrowserProbeAllowed {
+		t.Fatal("browser preflight changed the ordinary health result")
+	}
+}
+
 func TestServiceHealthNotificationsAreDeduplicated(t *testing.T) {
 	a, _ := testAdmin(t)
 	route := Route{ID: "fixture-route", Upstream: "http://127.0.0.1/"}
@@ -156,5 +201,10 @@ func TestPanelHealthRequiresLoginAndSavedOwnedIDs(t *testing.T) {
 	result := call(`{"ids":[11],"url":"http://169.254.169.254/"}`, "TEST_ONLY_PANEL_SESSION")
 	if result["code"] != float64(0) || targetCalls.Load() != 1 || result["data"].([]any)[0].(map[string]any)["url"] != target.URL {
 		t.Fatal("saved owned URL not used or duplicate probe")
+	}
+	preflight := call(`{"ids":[11],"tlsOnly":true}`, "TEST_ONLY_PANEL_SESSION")
+	lan := preflight["data"].([]any)[0].(map[string]any)["lan"].(map[string]any)
+	if lan["browser_probe_allowed"] != true || targetCalls.Load() != 1 {
+		t.Fatal("saved LAN preflight was not approved or reused from cache")
 	}
 }

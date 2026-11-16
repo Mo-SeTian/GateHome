@@ -16,9 +16,6 @@ const defaultStyle = computed(() => ({
   width: `${props.size}px`,
   height: `${props.size}px`,
 }))
-const iconExt = computed(() => {
-  return props.itemIcon?.src?.split('.').pop()
-})
 </script>
 
 <template>
@@ -32,14 +29,11 @@ const iconExt = computed(() => {
         </template>
 
         <template v-else-if="itemIcon?.itemType === 2">
-          <div v-if="iconExt === 'svg'" :style="{ backgroundColor: (forceBackground ?? itemIcon?.backgroundColor) || defaultBackground, ...defaultStyle }" class="flex justify-center items-center">
-            <img :src="itemIcon?.src" class="w-[35px] h-[35px]">
-          </div>
-          <NImage v-else :style="{ backgroundColor: (forceBackground ?? itemIcon?.backgroundColor) || defaultBackground, ...defaultStyle }" :src="itemIcon?.src" preview-disabled />
+          <NImage :style="{ backgroundColor: (forceBackground ?? itemIcon?.backgroundColor) || defaultBackground, ...defaultStyle }" :src="itemIcon?.src" :width="size" :height="size" object-fit="contain" preview-disabled />
         </template>
 
         <template v-else-if="itemIcon?.itemType === 3">
-          <NImage v-if="isImageURL(itemIcon.text)" :style="{ backgroundColor: (forceBackground ?? itemIcon?.backgroundColor) || defaultBackground, ...defaultStyle }" :src="itemIcon.text?.trim()" preview-disabled />
+          <NImage v-if="isImageURL(itemIcon.text)" :style="{ backgroundColor: (forceBackground ?? itemIcon?.backgroundColor) || defaultBackground, ...defaultStyle }" :src="itemIcon.text?.trim()" :width="size" :height="size" object-fit="contain" preview-disabled />
           <NAvatar v-else :size="props.size" :style="{ backgroundColor: (forceBackground ?? itemIcon?.backgroundColor) || defaultBackground }">
             <SvgIconOnline style="font-size: 35px;" :icon="itemIcon.text" />
           </NAvatar>

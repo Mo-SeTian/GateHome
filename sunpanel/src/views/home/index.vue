@@ -67,7 +67,7 @@ function rememberHealth(rows: SiteHealth[]) {
       siteHealth.value[row.id] = row
   }
 }
-async function verifyHTTPS(lanUrl: string) {
+async function verifyBrowserProbe(lanUrl: string) {
   if (authStore.visitMode !== VisitMode.VISIT_MODE_LOGIN)
     return false
   const item = items.value.flatMap(group => group.items || []).find(item => item.lanUrl?.trim() === lanUrl)
@@ -82,9 +82,9 @@ async function verifyHTTPS(lanUrl: string) {
     const prior = saved?.url === row.url ? saved : undefined
     siteHealth.value[row.id] = { ...row, default: prior?.default || row.default }
   }
-  return row?.lan.tls_verified === true
+  return row?.lan.browser_probe_allowed === true
 }
-const autoUrls = createAutoUrlResolver(() => { autoUrlRevision.value++ }, verifyHTTPS)
+const autoUrls = createAutoUrlResolver(() => { autoUrlRevision.value++ }, verifyBrowserProbe)
 async function refreshSiteHealth(sites: Panel.ItemInfo[]) {
   if (!healthActive || document.visibilityState === 'hidden' || authStore.visitMode !== VisitMode.VISIT_MODE_LOGIN)
     return
@@ -661,7 +661,7 @@ function handleAddItem(itemIconGroupId?: number) {
             <div>实际打开：{{ row.chosen }}</div>
             <div>内网检测：{{ row.status }}</div>
             <div>最近检测：{{ row.checkedAt ? new Date(row.checkedAt).toLocaleString() : '暂无' }}</div>
-            <div v-if="row.serverHealth">服务器检查：{{ row.serverHealth.label }} · {{ row.serverHealth.duration_ms }} ms <span v-if="row.serverHealth.status">· HTTP {{ row.serverHealth.status }}</span></div>
+            <div v-if="row.serverHealth">服务器检查（实际打开地址）：{{ row.serverHealth.label }} · {{ row.serverHealth.duration_ms }} ms <span v-if="row.serverHealth.status">· HTTP {{ row.serverHealth.status }}</span></div>
             <div v-if="row.serverHealth">{{ row.serverHealth.message }}</div>
             <div v-if="row.lanHealth?.state === 'tls_untrusted'">内网证书不可信，自动模式不会请求该 HTTPS 地址；已回退默认网址。</div>
           </article>

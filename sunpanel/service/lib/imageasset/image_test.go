@@ -17,12 +17,19 @@ func TestImageContentAndSVGValidation(t *testing.T) {
 	if !Validate("icon.svg", safe) {
 		t.Fatal("safe SVG rejected")
 	}
+	if !Validate("styled.svg", []byte(`<svg xmlns="http://www.w3.org/2000/svg"><style>.logo{fill:#123456}</style><path class="logo" d="M0 0h24v24z"/></svg>`)) {
+		t.Fatal("self-contained SVG styles rejected")
+	}
 	for _, unsafe := range []string{
 		`<svg><script>alert(1)</script></svg>`,
 		`<svg onload="alert(1)"></svg>`,
 		`<svg><foreignObject><div>Active HTML</div></foreignObject></svg>`,
 		`<svg><use href="https://example.test/icon.svg#x"/></svg>`,
 		`<svg><style>@import url(https://example.test/);</style></svg>`,
+		`<svg><style>.logo{fill:url(https://example.test/icon)}</style></svg>`,
+		`<svg><style>.logo{fill:u\72l(https://example.test/icon)}</style></svg>`,
+		`<svg><style>.logo{fill:u<![CDATA[rl]]>(https://example.test/icon)}</style></svg>`,
+		`<svg><style><path/></style></svg>`,
 		`<!DOCTYPE svg [<!ENTITY e SYSTEM "file:///etc/passwd">]><svg>&e;</svg>`,
 		`<svg></svg><svg></svg>`,
 		`<svg><path fill="url(https://example.test/)"/></svg>`,

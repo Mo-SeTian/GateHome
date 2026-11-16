@@ -6,6 +6,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"sun-panel/lib/imageasset"
 	"time"
 )
 
@@ -59,14 +60,22 @@ func (a *Admin) sunPanelImageImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	data, err := downloadRouteImageWithProxy(r.Context(), input.URL, a.store.Snapshot())
+	name := "remote-icon.png"
 	if err == nil {
-		data, err = normalizeRouteImage(data)
+		var ext string
+		ext, err = imageasset.Extension(data)
+		if err == nil {
+			if ext == ".svg" {
+				name = "remote-icon.svg"
+			} else {
+				data, err = normalizeRouteImage(data)
+			}
+		}
 	}
 	if err != nil {
 		reply(-1, err.Error())
 		return
 	}
-	name := "remote-icon.png"
 	if http.DetectContentType(data) == "image/x-icon" || http.DetectContentType(data) == "image/vnd.microsoft.icon" {
 		name = "remote-icon.ico"
 	}
