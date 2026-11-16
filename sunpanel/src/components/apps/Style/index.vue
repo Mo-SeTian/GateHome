@@ -203,7 +203,8 @@ function resetPanelConfig() {
         <NUploadDragger style="width: 100%;">
           <div
             class="h-[200px] w-full border bg-slate-100 flex justify-center items-center cursor-pointer rounded-[10px]"
-            :style="{ background: `url(${panelState.panelConfig.backgroundImageSrc}) no-repeat`, backgroundSize: 'cover' }"
+            :class="{ 'sunpanel-gradient': !panelState.panelConfig.backgroundImageSrc }"
+            :style="{ background: panelState.panelConfig.backgroundImageSrc ? `url(${panelState.panelConfig.backgroundImageSrc}) center / cover no-repeat` : undefined }"
           >
             <div class="text-shadow text-white">
               {{ $t('apps.baseSettings.uploadOrDragText') }}
@@ -211,6 +212,16 @@ function resetPanelConfig() {
           </div>
         </NUploadDragger>
       </NUpload>
+
+      <NButton
+        class="mt-[10px]" size="small" :disabled="!panelState.panelConfig.backgroundImageSrc"
+        @click="panelState.panelConfig.backgroundImageSrc = ''"
+      >
+        使用动态渐变
+      </NButton>
+      <div class="mt-[5px] text-xs text-slate-500 dark:text-slate-400">
+        未设置壁纸图片时，显示缓慢流动的动态渐变背景。
+      </div>
 
       <div class="flex items-center mt-[5px]">
         <span class="mr-[10px]">{{ $t('apps.baseSettings.customImageAddress') }}</span>

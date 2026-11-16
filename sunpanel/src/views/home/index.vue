@@ -447,11 +447,11 @@ function handleAddItem(itemIconGroupId?: number) {
 <template>
   <div class="w-full h-full sun-main">
     <div
-      class="cover wallpaper" :style="{
+      class="cover wallpaper" :class="{ 'sunpanel-gradient': !panelState.panelConfig.backgroundImageSrc }" :style="{
         filter: `blur(${panelState.panelConfig.backgroundBlur}px)`,
-        background: `url(${panelState.panelConfig.backgroundImageSrc}) no-repeat`,
-        backgroundSize: 'cover',
-        backgroundPosition: 'center',
+        background: panelState.panelConfig.backgroundImageSrc
+          ? `url(${panelState.panelConfig.backgroundImageSrc}) center / cover no-repeat`
+          : undefined,
       }"
     />
     <div class="mask" :style="{ backgroundColor: `rgba(0,0,0,${panelState.panelConfig.backgroundMaskNumber})` }" />
