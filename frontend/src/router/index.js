@@ -120,6 +120,12 @@ const routes = [
 
   // Standalone
   {
+    path: '/sunpanel-connect',
+    name: 'SunPanelConnect',
+    component: () => import('@/views/SunPanelConnectView.vue'),
+    meta: { title: 'SunPanel 联动', hideLayout: true }
+  },
+  {
     path: '/login',
     name: 'Login',
     component: () => import('@/views/LoginView.vue'),

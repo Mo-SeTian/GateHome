@@ -13,6 +13,8 @@ build: frontend
 
 test: frontend
 	npm --prefix frontend test
+	npm --prefix sunpanel run test:gatehome
+	npm --prefix sunpanel run type-check
 	go test -race ./...
 	go vet ./...
 

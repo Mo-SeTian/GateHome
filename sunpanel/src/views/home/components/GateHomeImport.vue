@@ -3,7 +3,8 @@ import { computed, ref, watch } from 'vue'
 import { NAlert, NButton, NCheckbox, NEmpty, NModal, NSelect, NSpace, NTabPane, NTabs, useMessage } from 'naive-ui'
 import { post } from '@/utils/request'
 import type { GateHomeRoute } from '@/utils/gateHome'
-import { isImported, loadGateHomeRoutes, routeChanges, routeLink } from '@/utils/gateHome'
+import { isImported, routeChanges, routeLink } from '@/utils/gateHome'
+import GateHomeConnection from '@/components/common/GateHomeConnection.vue'
 
 const props = defineProps<{ visible: boolean; groups: (Panel.ItemIconGroup & { items?: Panel.ItemInfo[] })[] }>()
 const emit = defineEmits<{ (e: 'update:visible', visible: boolean): void; (e: 'done'): void }>()
@@ -16,7 +17,7 @@ const group = ref<number | null>(null)
 const loading = ref(false)
 const saving = ref(false)
 const error = ref('')
-let request = 0
+const ready = ref(false)
 const existing = computed(() => props.groups.flatMap(group => group.items || []))
 const groupOptions = computed(() => props.groups.map(group => ({ label: group.title, value: group.id as number })))
 const routeOptions = computed(() => routes.value.map(route => ({
@@ -35,25 +36,10 @@ function toggleSync(id: number | undefined, checked: boolean) {
     syncSelected.value = checked ? [...syncSelected.value, id] : syncSelected.value.filter(selected => selected !== id)
 }
 
-async function refresh() {
-  const current = ++request
-  loading.value = true
-  error.value = ''
+function setRoutes(data: GateHomeRoute[]) {
+  routes.value = data
   selected.value = []
   syncSelected.value = []
-  try {
-    const data = await loadGateHomeRoutes()
-    if (current === request)
-      routes.value = data
-  }
-  catch (err) {
-    if (current === request)
-      error.value = err instanceof Error ? err.message : '读取失败，请重试。'
-  }
-  finally {
-    if (current === request)
-      loading.value = false
-  }
 }
 
 async function importSelected() {
@@ -93,24 +79,18 @@ async function syncSelectedItems() {
 watch(() => props.visible, (visible) => {
   if (visible) {
     group.value = props.groups[0]?.id as number || null
-    refresh()
+    setRoutes([])
+    error.value = ''
+    loading.value = false
   }
-  else { ++request }
 })
 </script>
 
 <template>
-  <NModal v-model:show="show" preset="card" title="GateHome 联动" style="width: min(760px, calc(100vw - 24px)); border-radius: 1rem" :mask-closable="!saving" :closable="!saving">
+  <NModal v-model:show="show" preset="card" title="GateHome 联动" style="width: min(760px, calc(100vw - 24px)); max-height: calc(100vh - 24px); max-height: calc(100dvh - 24px); overflow: hidden; border-radius: 1rem" content-style="overflow: auto; min-height: 0" :mask-closable="!saving" :closable="!saving">
     <NSpace vertical :size="16">
-      <NAlert v-if="error" type="warning" :show-icon="false">
-        {{ error }}
-      </NAlert>
-      <NSpace justify="space-between" align="center">
-        <span>读取已启用的反代项，导入后按需预览并更新。</span>
-        <NButton :loading="loading" :disabled="saving" @click="refresh">
-          刷新反代列表
-        </NButton>
-      </NSpace>
+      <span>读取已启用的反代项，导入后按需预览并更新。</span>
+      <GateHomeConnection v-if="show" :disabled="saving" @routes="setRoutes" @loading="loading = $event" @error="error = $event" @ready="ready = $event" />
       <NTabs type="line" animated>
         <NTabPane name="import" tab="批量导入">
           <NSpace vertical :size="16">
@@ -119,7 +99,7 @@ watch(() => props.visible, (visible) => {
             <label>选择反代项</label>
             <NSelect v-model:value="selected" multiple filterable clearable aria-label="批量选择反代项" placeholder="搜索名称或分组，已存在的项目自动跳过" :options="routeOptions" :loading="loading" :disabled="loading || saving || !!error" />
             <div class="gatehome-preview">
-              <NEmpty v-if="!preview.length" description="选择后在这里预览内外网地址" />
+              <NEmpty v-if="!preview.length" :description="ready ? '选择后在这里预览内外网地址' : '读取或连接 GateHome 后选择反代'" />
               <article v-for="route in preview" :key="route.id" class="gatehome-row">
                 <strong>{{ routeLink(route).title }}</strong>
                 <div>默认网址：{{ route.url }}</div>
@@ -139,8 +119,8 @@ watch(() => props.visible, (visible) => {
               只更新仍与上次导入值相同的名称和地址；自定义字段、图标和分组保留。
             </NAlert>
             <div class="gatehome-preview">
-              <NEmpty v-if="!syncRows.length && !loading" description="关联项目暂无变化" />
-              <article v-for="row in syncRows" :key="row.item.id" class="gatehome-row">
+              <NEmpty v-if="!ready || !syncRows.length" :description="ready ? '关联项目暂无变化' : '读取或连接 GateHome 后查看更新'" />
+              <article v-for="row in ready ? syncRows : []" :key="row.item.id" class="gatehome-row">
                 <NCheckbox v-if="row.route" :checked="syncSelected.includes(row.item.id as number)" :disabled="saving" @update:checked="toggleSync(row.item.id, $event)">
                   {{ row.item.title }}
                 </NCheckbox>

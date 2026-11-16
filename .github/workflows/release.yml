@@ -50,6 +50,8 @@ jobs:
       - name: Verify code and installer
         run: |
           npm --prefix frontend test
+          npm --prefix sunpanel run test:gatehome
+          npm --prefix sunpanel run type-check
           go test -race ./...
           go vet ./...
           CGO_ENABLED=0 make -o frontend build

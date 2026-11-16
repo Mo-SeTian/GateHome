@@ -20,6 +20,7 @@ export const adminApi = {
   restart: () => request('/api/maintenance/restart', { method: 'POST', body: {} }),
   maintenance: (signal) => request('/api/maintenance', { signal }),
   sunPanelRoutes: (signal) => request('/api/sunpanel/routes', { signal }),
+  connectSunPanel: (origin, signal) => request('/api/sunpanel/connect', { method: 'POST', body: { origin }, signal }),
   mcp: (signal) => request('/api/mcp', { signal }),
   mcpUsers: (signal) => request('/api/mcp/sunpanel-users', { signal }),
   saveMCP: (body) => request('/api/mcp', { method: 'PUT', body }),

@@ -86,6 +86,7 @@
       <p class="report-note">
         首页使用独立的 SunPanel 登录。登录后通过首页工具栏的「GateHome
         联动」批量导入已启用反代，也可预览关联更新；自定义名称、地址和分组会保留。
+        使用独立域名时，可点击「连接 GateHome」完成联动；请先填写上方外网访问地址。
       </p>
       <p v-if="!enabled" class="report-empty">首页服务未启用，请保存设置并重启服务。</p>
       <p v-else-if="gatewayStatus?.restart_required" class="report-empty">

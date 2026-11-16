@@ -6,7 +6,9 @@ import IconEditor from './IconEditor.vue'
 import { edit, getSiteFavicon } from '@/api/panel/itemIcon'
 import { getList as getGroupList } from '@/api/panel/itemIconGroup'
 import { t } from '@/locales'
+import type { GateHomeRoute } from '@/utils/gateHome'
 import { routeLink } from '@/utils/gateHome'
+import GateHomeConnection from '@/components/common/GateHomeConnection.vue'
 
 interface Props {
   visible: boolean
@@ -42,13 +44,12 @@ interface Emit {
 const model = ref<Panel.Info>(props.itemInfo ? { ...props.itemInfo } : { ...restoreDefault })
 const formRef = ref<FormInst | null>(null)
 
-interface GateHomeRoute { id: string; title: string; group: string; url: string; lanUrl: string }
 const gateHomeRoutes = ref<GateHomeRoute[]>([])
 const gateHomeLoading = ref(false)
 const gateHomeError = ref('')
-const gateHomeLoaded = ref(false)
+const gateHomeReady = ref(false)
+const gateHomeExpanded = ref(false)
 const gateHomeSelection = ref<number | null>(null)
-let gateHomeRequest = 0
 const gateHomeOptions = computed(() => gateHomeRoutes.value.map((route, value) => ({
   label: `${route.group} / ${route.title} · ${route.url}`,
   value,
@@ -56,33 +57,12 @@ const gateHomeOptions = computed(() => gateHomeRoutes.value.map((route, value) =
 const selectedRoute = computed(() => gateHomeSelection.value === null ? null : gateHomeRoutes.value[gateHomeSelection.value])
 
 function expandGateHome(names: Array<string | number> | string | number | null) {
-  if (Array.isArray(names) && names.length && !gateHomeLoaded.value && !gateHomeLoading.value)
-    loadGateHomeRoutes()
+  gateHomeExpanded.value = Array.isArray(names) ? names.includes('gatehome') : names === 'gatehome'
 }
 
-async function loadGateHomeRoutes() {
-  const request = ++gateHomeRequest
-  gateHomeLoading.value = true
-  gateHomeError.value = ''
+function setGateHomeRoutes(data: GateHomeRoute[]) {
+  gateHomeRoutes.value = data
   gateHomeSelection.value = null
-  try {
-    const response = await fetch('/api/sunpanel/routes', { credentials: 'same-origin' })
-    if (!response.ok)
-      throw new Error(response.status === 401 ? '请先在当前浏览器登录 GateHome 管理页，再点击刷新。' : '无法读取反代配置，请稍后重试。')
-    const data = await response.json()
-    if (request !== gateHomeRequest)
-      return
-    gateHomeRoutes.value = data
-    gateHomeLoaded.value = true
-  }
-  catch (error) {
-    if (request === gateHomeRequest)
-      gateHomeError.value = error instanceof Error ? error.message : '读取失败，请重试。'
-  }
-  finally {
-    if (request === gateHomeRequest)
-      gateHomeLoading.value = false
-  }
 }
 
 function importGateHomeRoute() {
@@ -190,9 +170,7 @@ async function getIconByUrl(url: string, loadingIndex: number) {
 
 watch(() => props.visible, (newValue) => {
   savingLocalIcon.value = false
-  ++gateHomeRequest
   gateHomeLoading.value = false
-  gateHomeLoaded.value = false
   gateHomeRoutes.value = []
   gateHomeSelection.value = null
   gateHomeError.value = ''
@@ -231,17 +209,15 @@ function getGroupListOptions() {
 </script>
 
 <template>
-  <NModal v-model:show="show" preset="card" size="small" style="width: 600px;border-radius: 1rem;" :title="itemInfo ? t('iconItem.edit') : t('iconItem.add')">
+  <NModal v-model:show="show" preset="card" size="small" style="width: min(600px, calc(100vw - 24px)); max-height: calc(100vh - 24px); max-height: calc(100dvh - 24px); overflow: hidden; border-radius: 1rem;" content-style="overflow: auto; min-height: 0" :title="itemInfo ? t('iconItem.edit') : t('iconItem.add')">
     <div class="p-[5px]">
       <NCollapse class="mb-5" @update:expanded-names="expandGateHome">
         <NCollapseItem title="从 GateHome 导入" name="gatehome">
           <NSpace vertical :size="12">
-            <NAlert v-if="gateHomeError" type="warning" :show-icon="false">
-              {{ gateHomeError }}
-            </NAlert>
-            <NSelect v-model:value="gateHomeSelection" aria-label="选择 GateHome 反代项" filterable clearable :loading="gateHomeLoading" :disabled="gateHomeLoading || !!gateHomeError" :options="gateHomeOptions" placeholder="搜索反代名称、分组或域名">
+            <GateHomeConnection v-if="show && gateHomeExpanded" @routes="setGateHomeRoutes" @loading="gateHomeLoading = $event" @error="gateHomeError = $event" @ready="gateHomeReady = $event" />
+            <NSelect v-model:value="gateHomeSelection" aria-label="选择 GateHome 反代项" filterable clearable :loading="gateHomeLoading" :disabled="!gateHomeReady || gateHomeLoading || !!gateHomeError" :options="gateHomeOptions" placeholder="搜索反代名称、分组或域名">
               <template #empty>
-                {{ gateHomeLoading ? '正在读取反代配置…' : '暂无可导入的已启用反代项' }}
+                {{ gateHomeLoading ? '正在读取反代配置…' : gateHomeReady ? '暂无可导入的已启用反代项' : '请先连接 GateHome' }}
               </template>
             </NSelect>
             <NAlert v-if="selectedRoute" type="info" :show-icon="false">
@@ -256,9 +232,6 @@ function getGroupListOptions() {
               默认网址按反代监听端口生成；外网端口映射不同时请修改。填入会替换当前名称和两个网址，保存后生效。
             </div>
             <NSpace justify="end">
-              <NButton :loading="gateHomeLoading" @click="loadGateHomeRoutes">
-                刷新
-              </NButton>
               <NButton type="primary" :disabled="!selectedRoute || gateHomeLoading || !!gateHomeError" @click="importGateHomeRoute">
                 填入网站信息
               </NButton>
