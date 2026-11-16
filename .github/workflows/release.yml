@@ -11,9 +11,12 @@ concurrency:
   group: gatehome-release
   cancel-in-progress: false
 jobs:
-  release:
+  version:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -33,12 +36,24 @@ jobs:
           if os.environ['RELEASE_REF_TYPE'] == 'tag':
               assert os.environ['RELEASE_REF'] == 'v' + version, 'Tag must match VERSION'
           else:
-              assert os.environ['RELEASE_REF'] == 'main' and '-beta.' in version, 'Branch publication is limited to main prereleases'
+              assert os.environ['RELEASE_REF'] == 'main', 'Unexpected release branch'
+              if '-beta.' not in version:
+                  print('Stable versions are published by their matching tags.')
+                  raise SystemExit(0)
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
               output.write('version=' + version + '\n')
               output.write('tag=v' + version + '\n')
               output.write('prerelease=' + str('-beta.' in version).lower() + '\n')
           PY
+  release:
+    needs: version
+    if: needs.version.outputs.tag != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -71,9 +86,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ steps.version.outputs.tag }}
-          RELEASE_VERSION: ${{ steps.version.outputs.version }}
-          PRERELEASE: ${{ steps.version.outputs.prerelease }}
+          RELEASE_TAG: ${{ needs.version.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.version.outputs.version }}
+          PRERELEASE: ${{ needs.version.outputs.prerelease }}
         run: |
           set -euo pipefail
           assets=(

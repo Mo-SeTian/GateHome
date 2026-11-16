@@ -20,7 +20,7 @@ GateHome 是面向家庭服务器和内网服务的自托管网关。Go 程序�
 
 ## 安装
 
-当前源码的功能可通过 Docker 构建，或从 [GitHub Releases](https://github.com/Mo-SeTian/GateHome/releases) 下载 Beta 完整安装包。安装后，在局域网访问 `http://服务器IP:16666`。管理端口请限制在可信网络内。
+可通过 Docker 构建，或从 [GitHub Latest](https://github.com/Mo-SeTian/GateHome/releases/latest) 下载正式版完整安装包。安装后，在局域网访问 `http://服务器IP:16666`。管理端口请限制在可信网络内。
 
 ### Docker Compose
 
@@ -61,7 +61,7 @@ curl -fsSL https://raw.githubusercontent.com/Mo-SeTian/GateHome/main/install.sh 
 sudo bash gatehome-install.sh install
 ```
 
-图标库随 Beta 提供。使用 systemd 从旧版升级到包含图标库的版本时，请通过完整安装包同步更新启动器，以支持新图标路径的备份和回滚。可用 `systemctl status gatehouse` 查看状态、用 `journalctl -u gatehouse` 查看启动日志。卸载使用 `sudo bash install.sh uninstall`，默认保留持久化目录。
+使用 systemd 从不含图标库的旧版升级时，请通过完整安装包同步更新启动器，以支持图标路径的备份和回滚。可用 `systemctl status gatehouse` 查看状态、用 `journalctl -u gatehouse` 查看启动日志。卸载使用 `sudo bash install.sh uninstall`，默认保留持久化目录。
 
 ### 直接运行二进制
 
