@@ -83,7 +83,14 @@ func (t *Traffic) path(day time.Time) string {
 }
 
 func (t *Traffic) add(route *Route, upload, download int, at time.Time) {
-	if t == nil || route.ID == "" || (upload == 0 && download == 0) {
+	if t == nil {
+		return
+	}
+	t.addBytes(route.ID, route.Host, trafficBytes{Upload: uint64(upload), Download: uint64(download)}, at)
+}
+
+func (t *Traffic) addBytes(id, label string, counts trafficBytes, at time.Time) {
+	if t == nil || id == "" || counts == (trafficBytes{}) {
 		return
 	}
 	at = at.UTC()
@@ -93,14 +100,14 @@ func (t *Traffic) add(route *Route, upload, download int, at time.Time) {
 	if t.days[day] == nil {
 		t.days[day] = make(trafficDay)
 	}
-	entry := t.days[day][route.ID]
+	entry := t.days[day][id]
 	if entry == nil {
 		entry = &trafficRuleDay{}
-		t.days[day][route.ID] = entry
+		t.days[day][id] = entry
 	}
-	entry.Host = route.Host
-	entry.Hours[at.Hour()].Upload += uint64(upload)
-	entry.Hours[at.Hour()].Download += uint64(download)
+	entry.Host = label
+	entry.Hours[at.Hour()].Upload += counts.Upload
+	entry.Hours[at.Hour()].Download += counts.Download
 	t.dirty[day] = true
 }
 
@@ -180,8 +187,9 @@ func (t *Traffic) flush(now time.Time) error {
 }
 
 type trafficRuleTotal struct {
-	ID   string `json:"id"`
-	Host string `json:"host"`
+	ID       string `json:"id"`
+	Host     string `json:"host"`
+	Protocol string `json:"protocol,omitempty"`
 	trafficBytes
 }
 
@@ -195,13 +203,17 @@ type trafficReport struct {
 }
 
 func (t *Traffic) report(from, to time.Time, id string) trafficReport {
+	return t.reportMatching(from, to, id, func(key string) bool { return id == "" || id == key })
+}
+
+func (t *Traffic) reportMatching(from, to time.Time, id string, match func(string) bool) trafficReport {
 	result := trafficReport{From: from, To: to, Rule: id, Rules: []trafficRuleTotal{}}
 	totals := make(map[string]trafficRuleTotal)
 	t.mu.Lock()
 	result.StorageError = t.readError || t.saveError
 	for hour := from; hour.Before(to); hour = hour.Add(time.Hour) {
 		for ruleID, rule := range t.days[hour.Truncate(24*time.Hour)] {
-			if rule == nil || (id != "" && id != ruleID) {
+			if rule == nil || !match(ruleID) {
 				continue
 			}
 			b := rule.Hours[hour.Hour()]

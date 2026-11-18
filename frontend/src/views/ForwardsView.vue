@@ -76,6 +76,27 @@
         <p v-if="forward.protocol !== 'tcp'" class="traffic-tag">
           UDP 空闲超时 {{ forward.udp_idle_seconds || 300 }} 秒
         </p>
+        <div v-if="liveTraffic.get(forward.id)" class="forward-traffic" :data-forward-id="forward.id">
+          <div class="forward-traffic-head">
+            <span>当前监听 · 近 5 秒平均</span>
+            <RouterLink :to="{ path: '/traffic', query: { source: 'forward', rule: forward.id } }">流量明细</RouterLink>
+          </div>
+          <p v-if="statusError" class="report-note">实时数据暂不可用</p>
+          <template v-else>
+            <p v-if="liveTraffic.get(forward.id).rows.length > 1" class="forward-traffic-line">
+              <strong>合计</strong>
+              <span>上传 {{ formatRate(liveTraffic.get(forward.id).total, 'upload') }}</span>
+              <span>下载 {{ formatRate(liveTraffic.get(forward.id).total, 'download') }}</span>
+            </p>
+            <p v-for="sample in liveTraffic.get(forward.id).rows" :key="sample.protocol"
+              class="forward-traffic-line" :data-protocol="sample.protocol">
+              <strong>{{ sample.protocol.toUpperCase() }}</strong>
+              <span>上传 {{ formatRate(sample, 'upload') }}</span>
+              <span>下载 {{ formatRate(sample, 'download') }}</span>
+              <span>{{ sample.protocol === 'tcp' ? '连接' : '会话' }} {{ sample.active }}</span>
+            </p>
+          </template>
+        </div>
         <div class="card-footer">
           <span class="status-indicator"
             ><span
@@ -188,13 +209,15 @@ import { ArrowRight, Edit3, Plus, Trash2, X } from 'lucide-vue-next'
 import SpotlightCard from '@/components/SpotlightCard.vue'
 import RestartNotice from '@/components/RestartNotice.vue'
 import { forwardState, replaceConfigItem } from '@/api/configuration'
-import { useGatewayStatus } from '@/composables/useGatewayStatus'
+import { formatBytes } from '@/api/reports'
+import { useGatewayStatus, useStatusPolling } from '@/composables/useGatewayStatus'
 import { useToast } from '@/composables/useToast'
 
 const {
   gatewayConfig,
   gatewayConfigSnapshot,
   gatewayStatus,
+  statusError,
   isSavingConfig,
   refreshConfig,
   refreshStatus,
@@ -205,6 +228,29 @@ const forwards = computed(() => gatewayConfig.value?.forwards ?? [])
 const runningListeners = computed(() =>
   (gatewayStatus.value?.forward_listeners ?? []).filter((item) => item.enabled)
 )
+const liveTraffic = computed(() => {
+  const groups = new Map()
+  for (const row of gatewayStatus.value?.forward_traffic ?? []) {
+    if (!groups.has(row.id)) {
+      groups.set(row.id, {
+        rows: [],
+        total: { sampled: true, upload_bytes_per_second: 0, download_bytes_per_second: 0 }
+      })
+    }
+    const { rows, total } = groups.get(row.id)
+    rows.push(row)
+    total.sampled &&= row.sampled
+    total.upload_bytes_per_second += row.upload_bytes_per_second
+    total.download_bytes_per_second += row.download_bytes_per_second
+  }
+  return groups
+})
+
+function formatRate(sample, direction) {
+  if (!sample.sampled) return '—'
+  const rate = sample[direction + '_bytes_per_second']
+  return rate > 0 && rate < 1 ? '< 1 B/s' : formatBytes(rate) + '/s'
+}
 const protocols = [
   { value: '', label: '全部协议' },
   { value: 'tcp', label: 'TCP' },
@@ -318,6 +364,7 @@ async function deleteForward(forward) {
   }
 }
 onMounted(reload)
+useStatusPolling()
 onUnmounted(() => controller.abort())
 </script>
 
@@ -394,6 +441,12 @@ onUnmounted(() => controller.abort())
 }
 .forward-name { font-size: 13.5px; font-weight: 600; color: var(--ink); }
 .traffic-tag { font-size: 11px; color: var(--faint); font-family: var(--mono); }
+.forward-traffic { display: grid; gap: 6px; font-size: 12px; color: var(--muted); }
+.forward-traffic-head, .forward-traffic-line { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; }
+.forward-traffic-head { justify-content: space-between; }
+.forward-traffic-head a { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
+.forward-traffic-line { font-variant-numeric: tabular-nums; }
+.forward-traffic-line strong { min-width: 28px; color: var(--ink); }
 
 .pipeline-box {
   background: var(--strip-bg);

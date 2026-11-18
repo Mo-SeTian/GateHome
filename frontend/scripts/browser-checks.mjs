@@ -6,6 +6,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawn, spawnSync } from 'node:child_process'
 import { createServer } from 'node:http'
+import { createSocket } from 'node:dgram'
 import { chromium } from 'playwright'
 
 const repository = fileURLToPath(new URL('../../', import.meta.url))
@@ -25,7 +26,7 @@ const upstream = createServer((req, res) => {
   res.setHeader('Content-Type', 'text/html')
   res.end('<html><head><title>Console test upstream</title></head><body>TEST_ONLY_UPSTREAM</body></html>')
 })
-let server, browser
+let server, browser, upstreamUDP
 const listen = (app) => new Promise(resolve => app.listen(0, '127.0.0.1', () => resolve(app.address().port)))
 const pause = (ms) => new Promise(resolve => setTimeout(resolve, ms))
 async function startServer(port) {
@@ -47,6 +48,17 @@ try {
   assert.equal(initialized.status, 0, 'disposable fixture initialization failed')
   const statePath = path.join(root, 'state.json')
   const state = JSON.parse(await readFile(statePath, 'utf8'))
+  const upstreamPort = await listen(upstream)
+  upstreamUDP = createSocket('udp4')
+  upstreamUDP.on('message', (message, peer) => upstreamUDP.send(message, peer.port, peer.address))
+  await new Promise((resolve, reject) => upstreamUDP.once('error', reject).bind(upstreamPort, '127.0.0.1', resolve))
+  const forwardReservation = createServer()
+  const forwardPort = await listen(forwardReservation)
+  await new Promise(resolve => forwardReservation.close(resolve))
+  state.config.forwards = [{
+    id: 'traffic-fixture', name: '流量测试转发', protocol: 'tcp+udp', enabled: true,
+    listen_port: forwardPort, upstream: '127.0.0.1:' + upstreamPort
+  }]
   state.config.groups = [
     { id: 'test-https', name: 'HTTPS 测试组', enabled: false, http_port: 0, https_port: 29443, domain_suffix: 'example.test' },
     { id: 'test-http', name: 'HTTP 测试组', enabled: false, http_port: 29080, https_port: 0, domain_suffix: 'example.net' }
@@ -59,7 +71,6 @@ try {
   const fixtureSVG = i => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><rect width="48" height="48" rx="10" fill="hsl(${i * 23 % 360} 57% 42%)"/><path d="M12 24h24m-12-12v24" stroke="#fff" stroke-width="3"/></svg>`
   await Promise.all(Array.from({ length: 60 }, (_, i) =>
     writeFile(path.join(iconPack, `fixture-service-${String(i).padStart(2, '0')}.svg`), fixtureSVG(i))))
-  const upstreamPort = await listen(upstream)
   const reservation = createServer()
   const port = await listen(reservation)
   await new Promise(resolve => reservation.close(resolve))
@@ -587,6 +598,46 @@ try {
   assert.equal(imported.firewall_id, 'test-policy'); assert.equal(imported.host, 'scan.home.example.test')
   assert.equal(imported.tls, true)
   console.log('PASS real discovery scan/import: selected firewall, editable name and nested host retained')
+
+  await route('forwards')
+  const forwardMetrics = page.locator('[data-forward-id="traffic-fixture"]')
+  await forwardMetrics.getByText('合计', { exact: true }).waitFor()
+  assert.match(await (await fetch(`http://127.0.0.1:${forwardPort}/`)).text(), /TEST_ONLY_UPSTREAM/)
+  const udpPayload = Buffer.from('TEST_ONLY_UDP_TRAFFIC')
+  const udpClient = createSocket('udp4')
+  try {
+    const reply = await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('UDP traffic fixture did not reply')), 3000)
+      udpClient.once('error', error => { clearTimeout(timer); reject(error) })
+      udpClient.once('message', message => { clearTimeout(timer); resolve(message) })
+      udpClient.send(udpPayload, forwardPort, '127.0.0.1')
+    })
+    assert.deepEqual(reply, udpPayload)
+  } finally {
+    udpClient.close()
+  }
+  await page.waitForFunction(() => {
+    const samples = document.querySelectorAll('[data-forward-id="traffic-fixture"] [data-protocol]')
+    return [...samples].some(row => row.textContent.includes('B/s') && !row.textContent.includes('下载 0 B/s'))
+  }, null, { timeout: 15000 })
+  await page.waitForFunction(async () => {
+    const report = await fetch('/api/statistics/traffic?source=forward&rule=traffic-fixture').then(response => response.json())
+    return report.rules?.length === 2
+  }, null, { polling: 500 })
+  await forwardMetrics.getByRole('link', { name: '流量明细' }).click()
+  await page.locator('.traffic-table [data-protocol="tcp"]').waitFor()
+  await page.locator('.traffic-table [data-protocol="udp"]').waitFor()
+  assert.equal(await page.locator('select[name=rule]').inputValue(), 'traffic-fixture')
+  await page.locator('select[name=protocol]').selectOption('udp')
+  await button('查询流量').click()
+  await page.locator('.traffic-table [data-protocol="tcp"]').waitFor({ state: 'hidden' })
+  assert.equal(await page.locator('[data-total="upload"]').getAttribute('data-bytes'), String(udpPayload.length))
+  assert.equal(await page.locator('[data-total="download"]').getAttribute('data-bytes'), String(udpPayload.length))
+  await page.setViewportSize({ width: 320, height: 844 })
+  await page.locator('.main-wrapper').evaluate(el => Promise.all(el.getAnimations().map(animation => animation.finished)))
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1))
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  console.log('PASS port forwarding traffic: real TCP and UDP, live rates, per-rule history link, protocol filter and mobile layout')
 
   await route('forwards'); await button('添加转发规则').click()
   await dialog().locator('[name=name]').fill('Conflict draft')
@@ -1421,5 +1472,6 @@ try {
     server.kill('SIGTERM'); await stopped
   }
   await new Promise(resolve => upstream.close(resolve))
+  upstreamUDP?.close()
   await rm(root, { recursive: true, force: true })
 }

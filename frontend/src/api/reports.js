@@ -18,11 +18,16 @@ export function logQuery(scope, filters, page, size, through) {
 }
 
 export function trafficQuery(form) {
-  if (form.range !== 'custom') return { rule: form.rule, hours: Number(form.range) }
+  const filter = { rule: form.rule }
+  if (form.source === 'forward') {
+    filter.source = 'forward'
+    if (form.protocol) filter.protocol = form.protocol
+  }
+  if (form.range !== 'custom') return { ...filter, hours: Number(form.range) }
   const from = new Date(form.from), to = new Date(form.to)
   if (!form.from || !form.to || !Number.isFinite(from.getTime()) || !Number.isFinite(to.getTime()) || from >= to)
     throw new Error('请选择有效的起止时间，结束时间须晚于开始时间')
-  return { rule: form.rule, from: from.toISOString(), to: to.toISOString() }
+  return { ...filter, from: from.toISOString(), to: to.toISOString() }
 }
 
 export function subscriptionState(subscription, status) {

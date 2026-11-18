@@ -3,13 +3,26 @@
     <div class="report-heading">
       <div>
         <h1>流量统计</h1>
-        <p>按反代规则和时间查看 HTTP 请求体上传量与响应体下载量，按小时汇总，保留最近 30 天</p>
+        <p>查看反向代理与端口转发的上传量和下载量，按小时汇总，保留最近 30 天</p>
       </div>
     </div>
     <form class="report-form" @submit.prevent="load">
+      <label>流量类型
+        <select v-model="form.source" name="source" class="form-select" @change="changeSource">
+          <option value="http">反向代理</option>
+          <option value="forward">端口转发</option>
+        </select>
+      </label>
+      <label v-if="form.source === 'forward'">协议
+        <select v-model="form.protocol" name="protocol" class="form-select">
+          <option value="">全部协议</option>
+          <option value="tcp">TCP</option>
+          <option value="udp">UDP</option>
+        </select>
+      </label>
       <label
-        >反代规则<select v-model="form.rule" name="rule" class="form-select">
-          <option value="">全部反代规则</option>
+        >{{ form.source === 'forward' ? '转发规则' : '反代规则' }}<select v-model="form.rule" name="rule" class="form-select">
+          <option value="">全部{{ form.source === 'forward' ? '转发' : '反代' }}规则</option>
           <option v-for="item in ruleOptions" :key="item.id" :value="item.id">{{ item.label }}</option>
         </select></label
       >
@@ -42,8 +55,11 @@
       </button>
     </form>
     <p class="report-note">
-      自选时间按浏览器时区输入，服务器会覆盖涉及的整小时。统计不含协议头、拦截响应、WebSocket 数据及 TCP/UDP
-      端口转发。
+      自选时间按浏览器时区输入，统计覆盖涉及的整小时。
+      <template v-if="(data ? applied : form).source === 'forward'">
+        转发流量按写入目标连接的有效数据字节计数，每 5 秒汇总，不含协议头。
+      </template>
+      <template v-else>反代统计口径为 HTTP 请求体和响应体，不含拦截响应及 WebSocket 数据。</template>
     </p>
     <p v-if="error" ref="errorElement" class="report-error" role="alert" tabindex="-1">
       {{ error }}{{ data ? '。当前显示上次成功查询的流量。' : '' }}
@@ -54,7 +70,7 @@
       <p v-if="data.storage_error" class="report-warning" role="alert">
         流量统计文件读取或保存失败，结果可能不完整，请检查数据目录和磁盘空间。
       </p>
-      <div class="report-metrics traffic-totals">
+      <div class="report-metrics traffic-totals" :class="{ 'with-total': applied.source === 'forward' }">
         <SpotlightCard class="report-metric"
           ><span class="metric-label">上传 · 客户端发往上游</span>
           <div class="metric-value" data-total="upload" :data-bytes="data.upload_bytes">
@@ -68,26 +84,35 @@
           </div>
           <p class="report-note">{{ data.download_bytes.toLocaleString() }} 字节</p></SpotlightCard
         >
+        <SpotlightCard v-if="applied.source === 'forward'" class="report-metric">
+          <span class="metric-label">总传输量</span>
+          <div class="metric-value" data-total="combined">{{ formatBytes(data.upload_bytes + data.download_bytes) }}</div>
+        </SpotlightCard>
       </div>
       <div v-if="data.rules.length" class="report-table-wrap">
         <table class="report-table traffic-table">
           <thead>
             <tr>
-              <th>反代规则 / 域名</th>
-              <th>所属反代组</th>
+              <th>{{ applied.source === 'forward' ? '转发规则' : '反代规则 / 域名' }}</th>
+              <th>{{ applied.source === 'forward' ? '协议' : '所属反代组' }}</th>
               <th>上传量</th>
               <th>下载量</th>
               <th>总传输量</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="row in data.rules" :key="row.id" :data-route-id="row.id">
-              <td>
+            <tr v-for="row in data.rules" :key="row.id + '/' + (row.protocol || '')" :data-route-id="row.id"
+              :data-protocol="row.protocol">
+              <td v-if="applied.source === 'forward'">
+                <strong>{{ forwardRules.get(row.id)?.name || row.host }}</strong>
+                <small class="mono-text">{{ row.id }}</small>
+              </td>
+              <td v-else>
                 <strong>{{ route(row.id)?.name || row.host }}</strong
                 ><small class="mono-text">{{ row.host }}</small
                 ><small class="mono-text">{{ row.id }}</small>
               </td>
-              <td>{{ groupName(row.id) }}</td>
+              <td>{{ applied.source === 'forward' ? row.protocol.toUpperCase() : groupName(row.id) }}</td>
               <td class="mono-text" :data-bytes="row.upload_bytes">
                 {{ formatBytes(row.upload_bytes) }}<small>{{ row.upload_bytes.toLocaleString() }} 字节</small>
               </td>
@@ -100,7 +125,7 @@
           </tbody>
         </table>
       </div>
-      <p v-else class="report-empty">所选时间和规则暂无 HTTP 流量记录。</p>
+      <p v-else class="report-empty">所选时间和规则暂无{{ applied.source === 'forward' ? '端口转发' : ' HTTP ' }}流量记录。</p>
     </template>
     <p v-else-if="loading" role="status">正在读取流量统计…</p>
   </div>
@@ -117,25 +142,33 @@ import '@/styles/reports.css'
 const { gatewayConfig, refreshConfig } = useGatewayStatus()
 const currentRoute = useRoute()
 const requestedRule = () => typeof currentRoute.query.rule === 'string' ? currentRoute.query.rule : ''
-const form = ref({ rule: requestedRule(), range: '24', from: '', to: '' }),
+const requestedSource = () => currentRoute.query.source === 'forward' ? 'forward' : 'http'
+const form = ref({ source: requestedSource(), protocol: '', rule: requestedRule(), range: '24', from: '', to: '' }),
   applied = shallowRef({ ...form.value })
 const data = shallowRef(null),
   loading = ref(false),
   error = ref(''),
   errorElement = ref(null)
 const dirty = computed(() => JSON.stringify(form.value) !== JSON.stringify(applied.value))
+const forwardRules = computed(() => new Map((gatewayConfig.value?.forwards ?? []).map(item => [item.id, item])))
 const ruleOptions = computed(() => {
+  const history = form.value.source === applied.value.source ? data.value?.rules ?? [] : []
   const options = new Map(
-    (data.value?.rules ?? []).map((row) => [
+    history.map((row) => [
       row.id,
       { id: row.id, label: `${row.host} · 历史规则 ${row.id}` }
     ])
   )
-  for (const item of gatewayConfig.value?.routes ?? [])
-    options.set(item.id, {
-      id: item.id,
-      label: `${groupName(item.id)} / ${item.name || item.host} · ${item.host}`
-    })
+  if (form.value.source === 'forward') {
+    for (const item of forwardRules.value.values())
+      options.set(item.id, { id: item.id, label: `${item.name} · :${item.listen_port}` })
+  } else {
+    for (const item of gatewayConfig.value?.routes ?? [])
+      options.set(item.id, {
+        id: item.id,
+        label: `${groupName(item.id)} / ${item.name || item.host} · ${item.host}`
+      })
+  }
   if (form.value.rule && !options.has(form.value.rule))
     options.set(form.value.rule, { id: form.value.rule, label: `历史规则 ${form.value.rule}` })
   return [...options.values()]
@@ -172,7 +205,14 @@ async function load() {
     if (request === version) loading.value = false
   }
 }
-watch(() => currentRoute.query.rule, () => {
+function changeSource() {
+  form.value.protocol = ''
+  form.value.rule = ''
+  load()
+}
+watch([() => currentRoute.query.source, () => currentRoute.query.rule], () => {
+  form.value.source = requestedSource()
+  form.value.protocol = ''
   form.value.rule = requestedRule()
   load()
 })
@@ -188,8 +228,9 @@ onUnmounted(() => controller.abort())
 .traffic-totals {
   grid-template-columns: 1fr 1fr;
 }
+.traffic-totals.with-total { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 @media (max-width: 600px) {
-  .traffic-totals {
+  .traffic-totals, .traffic-totals.with-total {
     grid-template-columns: 1fr;
   }
 }

@@ -26,6 +26,7 @@ type Admin struct {
 	sunPanel     *SunPanel
 	store        *Store
 	proxy        *Proxy
+	forwarder    *PortForwarder
 	certs        *Certificates
 	jobs         *Jobs
 	started      time.Time
@@ -55,6 +56,9 @@ func NewAdmin(store *Store, proxy *Proxy, certs *Certificates, jobs *Jobs, admin
 	proxy.ConfigureState(store.Snapshot())
 	return &Admin{store: store, proxy: proxy, certs: certs, jobs: jobs, started: time.Now(), ports: store.Snapshot().Config, adminPort: adminPort, sessions: map[[32]byte]time.Time{}, attempts: map[string]routeAttempts{}, domainDNS: newDomainDNS(store)}
 }
+
+// SetPortForwarder connects the running listeners before the admin server starts.
+func (a *Admin) SetPortForwarder(forwarder *PortForwarder) { a.forwarder = forwarder }
 
 func jsonResponse(w http.ResponseWriter, code int, value any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -547,6 +551,7 @@ func (a *Admin) status(w http.ResponseWriter, r *http.Request) {
 		"uptime_seconds":           int(time.Since(a.started).Seconds()), "requests": a.proxy.Requests.Load(), "blocked": a.proxy.Blocked.Load(), "failures": a.proxy.Failures.Load(),
 		"listeners":         a.ports.Groups,
 		"forward_listeners": a.ports.Forwards,
+		"forward_traffic":   a.forwarder.trafficStatus(),
 		"restart_required":  listenerSignature(c) != listenerSignature(a.ports),
 		"subscriptions":     subscriptions,
 		"log_storage":       a.logs.StorageStatus(),

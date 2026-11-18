@@ -44,7 +44,7 @@ func testForward(protocol string, port int, upstream string) PortForward {
 
 func startTestForwards(t *testing.T, c Config) *PortForwarder {
 	t.Helper()
-	p, err := StartPortForwards(context.Background(), c, NewProxy(c, nil))
+	p, err := StartPortForwards(context.Background(), c, NewProxy(c, nil), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -320,7 +320,7 @@ func TestPortForwardResolvedLoopAndContextCancellation(t *testing.T) {
 	c.Forwards = []PortForward{testForward("tcp", port, "127.0.0.1:9"), testForward("udp", port, "127.0.0.1:9")}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	p, err := StartPortForwards(ctx, c, NewProxy(c, nil))
+	p, err := StartPortForwards(ctx, c, NewProxy(c, nil), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -351,7 +351,7 @@ func TestPortForwardResolvedLoopAndContextCancellation(t *testing.T) {
 			t.Fatal("cancelled listener retained its port", err)
 		}
 	}
-	if _, err := StartPortForwards(ctx, c, p.proxy); !errors.Is(err, context.Canceled) {
+	if _, err := StartPortForwards(ctx, c, p.proxy, nil); !errors.Is(err, context.Canceled) {
 		t.Fatal("cancelled context opened new listeners", err)
 	}
 }
@@ -414,7 +414,7 @@ func TestPortForwardBindRollbackAndRestartPreflight(t *testing.T) {
 	tcpPort := testForwardPort(t, "tcp")
 	c := DefaultConfig()
 	c.Forwards = []PortForward{testForward("tcp", tcpPort, "127.0.0.1:22"), testForward("udp", port, "127.0.0.1:53")}
-	if _, err := StartPortForwards(context.Background(), c, NewProxy(c, nil)); err == nil {
+	if _, err := StartPortForwards(context.Background(), c, NewProxy(c, nil), nil); err == nil {
 		t.Fatal("occupied UDP port accepted")
 	}
 	listener, err := net.Listen("tcp", ":"+strconv.Itoa(tcpPort))

@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -136,15 +137,19 @@ func validatePortForwards(c Config) error {
 const maxForwardSessions = 1024
 
 type PortForwarder struct {
-	ctx       context.Context
-	cancel    context.CancelFunc
-	wg        sync.WaitGroup
-	bindings  []*forwardBinding
-	proxy     *Proxy
-	failures  chan error
-	slots     chan struct{}
-	pending   *semaphore.Weighted
-	closeOnce sync.Once
+	ctx         context.Context
+	cancel      context.CancelFunc
+	wg          sync.WaitGroup
+	bindings    []*forwardBinding
+	proxy       *Proxy
+	failures    chan error
+	slots       chan struct{}
+	pending     *semaphore.Weighted
+	closeOnce   sync.Once
+	traffic     *Traffic
+	sampleMu    sync.Mutex
+	sampledAt   time.Time
+	finalSample sync.Once
 }
 
 type forwardBinding struct {
@@ -153,6 +158,7 @@ type forwardBinding struct {
 	udp      *net.UDPConn
 	mu       sync.Mutex
 	sessions map[netip.AddrPort]*forwardUDPSession
+	traffic  forwardCounters
 }
 
 type forwardUDPSession struct {
@@ -160,7 +166,7 @@ type forwardUDPSession struct {
 }
 
 // Bind all ports before serving. A failed bind releases every port opened here.
-func StartPortForwards(ctx context.Context, c Config, proxy *Proxy) (*PortForwarder, error) {
+func StartPortForwards(ctx context.Context, c Config, proxy *Proxy, traffic *Traffic) (*PortForwarder, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -168,7 +174,7 @@ func StartPortForwards(ctx context.Context, c Config, proxy *Proxy) (*PortForwar
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(ctx)
-	p := &PortForwarder{ctx: ctx, cancel: cancel, proxy: proxy, failures: make(chan error, 1), slots: make(chan struct{}, maxForwardSessions), pending: semaphore.NewWeighted(32 << 20)}
+	p := &PortForwarder{ctx: ctx, cancel: cancel, proxy: proxy, traffic: traffic, failures: make(chan error, 1), slots: make(chan struct{}, maxForwardSessions), pending: semaphore.NewWeighted(32 << 20)}
 	for _, rule := range c.Forwards {
 		if !rule.Enabled {
 			continue
@@ -191,6 +197,7 @@ func StartPortForwards(ctx context.Context, c Config, proxy *Proxy) (*PortForwar
 			p.bindings = append(p.bindings, b)
 		}
 	}
+	p.sampledAt = time.Now()
 	for _, b := range p.bindings {
 		p.wg.Add(1)
 		go func() {
@@ -202,6 +209,10 @@ func StartPortForwards(ctx context.Context, c Config, proxy *Proxy) (*PortForwar
 			}
 		}()
 	}
+	if len(p.bindings) > 0 {
+		p.wg.Add(1)
+		go p.runTrafficSampler()
+	}
 	context.AfterFunc(ctx, p.closeListeners)
 	return p, nil
 }
@@ -211,6 +222,7 @@ func (p *PortForwarder) Failures() <-chan error { return p.failures }
 func (p *PortForwarder) Close() {
 	p.closeListeners()
 	p.wg.Wait()
+	p.finalSample.Do(func() { p.sampleTraffic(time.Now()) })
 }
 
 func (p *PortForwarder) closeListeners() {
@@ -302,7 +314,7 @@ func (p *PortForwarder) serveTCP(b *forwardBinding) {
 			go func() {
 				defer p.wg.Done()
 				defer func() { <-p.slots }()
-				p.forwardTCP(b.rule, client)
+				p.forwardTCP(b, client)
 			}()
 		default:
 			client.Close()
@@ -310,22 +322,24 @@ func (p *PortForwarder) serveTCP(b *forwardBinding) {
 	}
 }
 
-func (p *PortForwarder) forwardTCP(rule PortForward, client net.Conn) {
+func (p *PortForwarder) forwardTCP(b *forwardBinding, client net.Conn) {
 	defer client.Close()
 	stopClient := context.AfterFunc(p.ctx, func() { client.Close() })
 	defer stopClient()
-	upstream, err := p.dial(rule)
+	upstream, err := p.dial(b.rule)
 	if err != nil {
 		if p.ctx.Err() == nil {
-			p.logDialFailure(rule, client.RemoteAddr().String(), err)
+			p.logDialFailure(b.rule, client.RemoteAddr().String(), err)
 		}
 		return
 	}
+	b.traffic.active.Add(1)
+	defer b.traffic.active.Add(-1)
 	defer upstream.Close()
 	stopUpstream := context.AfterFunc(p.ctx, func() { upstream.Close() })
 	defer stopUpstream()
-	copyStream := func(dst, src net.Conn) {
-		if _, err := io.Copy(dst, src); err != nil {
+	copyStream := func(dst, src net.Conn, count *atomic.Uint64) {
+		if _, err := io.Copy(forwardTrafficWriter{dst, count}, src); err != nil {
 			dst.Close()
 			src.Close()
 			return
@@ -333,8 +347,11 @@ func (p *PortForwarder) forwardTCP(rule PortForward, client net.Conn) {
 		dst.(*net.TCPConn).CloseWrite()
 	}
 	done := make(chan struct{})
-	go func() { copyStream(upstream, client); close(done) }()
-	copyStream(client, upstream)
+	go func() {
+		defer close(done)
+		copyStream(upstream, client, &b.traffic.upload)
+	}()
+	copyStream(client, upstream, &b.traffic.download)
 	<-done
 }
 
@@ -392,6 +409,8 @@ func (p *PortForwarder) forwardUDP(b *forwardBinding, remote netip.AddrPort, ses
 		}
 		return
 	}
+	b.traffic.active.Add(1)
+	defer b.traffic.active.Add(-1)
 	defer upstream.Close()
 	stop := context.AfterFunc(p.ctx, func() { upstream.Close() })
 	defer stop()
@@ -409,7 +428,9 @@ func (p *PortForwarder) forwardUDP(b *forwardBinding, remote netip.AddrPort, ses
 				return
 			}
 			if p.allowed(b.rule, remote.String()) {
-				if _, err := b.udp.WriteToUDPAddrPort(buffer[:n], remote); err != nil {
+				written, err := b.udp.WriteToUDPAddrPort(buffer[:n], remote)
+				b.traffic.download.Add(uint64(written))
+				if err != nil {
 					return
 				}
 			}
@@ -425,7 +446,9 @@ func (p *PortForwarder) forwardUDP(b *forwardBinding, remote netip.AddrPort, ses
 			p.pending.Release(int64(len(packet)))
 			upstream.SetWriteDeadline(time.Now().Add(5 * time.Second))
 			upstream.SetReadDeadline(time.Now().Add(forwardUDPTimeout(b.rule)))
-			if _, err := upstream.Write(packet); err != nil {
+			written, err := upstream.Write(packet)
+			b.traffic.upload.Add(uint64(written))
+			if err != nil {
 				upstream.Close()
 				<-done
 				return

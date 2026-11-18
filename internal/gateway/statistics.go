@@ -272,7 +272,13 @@ func (a *Admin) routeTrafficReport(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 	id := query.Get("rule")
 	if id != "" && !idPattern.MatchString(id) {
-		apiError(w, 400, "反代规则标识无效")
+		apiError(w, 400, "流量统计规则标识无效")
+		return
+	}
+	source, protocol := query.Get("source"), query.Get("protocol")
+	if (source != "" && source != "http" && source != "forward") ||
+		(protocol != "" && (source != "forward" || (protocol != "tcp" && protocol != "udp"))) {
+		apiError(w, 400, "流量类型或协议无效")
 		return
 	}
 	now := time.Now().UTC()
@@ -300,6 +306,14 @@ func (a *Admin) routeTrafficReport(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		from = now.Add(-time.Duration(hours) * time.Hour).Truncate(time.Hour)
+	}
+	if source == "forward" {
+		if a.forwarder == nil || a.forwarder.traffic == nil {
+			apiError(w, 503, "端口转发流量统计存储未能启动，请检查数据目录")
+			return
+		}
+		jsonResponse(w, 200, a.forwarder.traffic.forwardReport(from, to, id, protocol))
+		return
 	}
 	if a.proxy.traffic == nil {
 		apiError(w, 503, "流量统计存储未能启动，请检查数据目录")

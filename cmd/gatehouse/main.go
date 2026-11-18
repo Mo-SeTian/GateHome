@@ -160,6 +160,16 @@ func run() error {
 			}
 		}()
 	}
+	forwardTraffic, err := gateway.OpenTraffic(filepath.Join(paths.Data, "forward-traffic"))
+	if err != nil {
+		log.Print("无法打开端口转发流量统计目录，请检查数据目录")
+	} else {
+		defer func() {
+			if err := forwardTraffic.Flush(); err != nil {
+				log.Print("端口转发流量统计保存失败，请检查数据目录")
+			}
+		}()
+	}
 	subscriptions.SetLogs(logs)
 	jobs.SetLogs(logs)
 	certs.SetLogs(logs)
@@ -202,11 +212,12 @@ func run() error {
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
-	forwards, err := gateway.StartPortForwards(ctx, c, proxy)
+	forwards, err := gateway.StartPortForwards(ctx, c, proxy, forwardTraffic)
 	if err != nil {
 		return err
 	}
 	defer forwards.Close()
+	admin.SetPortForwarder(forwards)
 	servers := []*http.Server{}
 	errorsCh := make(chan error, len(listeners))
 	for i, listener := range listeners {
@@ -226,6 +237,9 @@ func run() error {
 	logs.Start(ctx)
 	if traffic != nil {
 		traffic.Start(ctx)
+	}
+	if forwardTraffic != nil {
+		forwardTraffic.Start(ctx)
 	}
 	if *managedRoot != "" {
 		if err := gateway.MarkServiceReady(maintenance); err != nil {
