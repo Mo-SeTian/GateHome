@@ -268,8 +268,8 @@ func (a *Admin) routeImageRoutes(mux *http.ServeMux) {
 				apiError(w, 400, "SVG 图片须小于等于 128 KiB")
 				return
 			}
-			if !imageasset.Validate("image.svg", data) {
-				apiError(w, 400, "图片格式无效，或 SVG 包含脚本/外部资源")
+			if err := imageasset.ValidateStandaloneSVG(data); err != nil {
+				apiError(w, 400, err.Error())
 				return
 			}
 		}

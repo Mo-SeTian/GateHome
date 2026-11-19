@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import subprocess
 import tempfile
 import tarfile
 import zipfile
@@ -22,6 +23,25 @@ def private(path):
         return True
     return path.parts[0] in excluded or any(part in {"node_modules", ".git", "__pycache__", ".DS_Store", "dist"} or part.startswith(".env") for part in path.parts) or path.suffix in {".key", ".pem", ".test"}
 
+def tracked_sources():
+    try:
+        names = subprocess.check_output(
+            ["git", "ls-files", "--cached", "--deduplicate", "-z"], cwd=ROOT
+        )
+    except (OSError, subprocess.CalledProcessError):
+        raise SystemExit("Build the release snapshot from a Git checkout") from None
+    for name in names.split(b"\0"):
+        if not name:
+            continue
+        relative = Path(os.fsdecode(name))
+        if private(relative) or relative.as_posix() in {"manifest.json", "SHA256SUMS"}:
+            continue
+        source = ROOT / relative
+        if source.resolve() != source:
+            raise SystemExit("Release source contains a symlink")
+        if not source.is_file():
+            raise SystemExit("Release source is missing a tracked file")
+        yield relative, source
 
 versions = ROOT / "版本"
 updates = ROOT / "更新版本"
@@ -30,26 +50,10 @@ updates.mkdir(exist_ok=True)
 destination = versions / version
 with tempfile.TemporaryDirectory(prefix=".release-", dir=versions) as temp:
     stage = Path(temp)
-    for source in ROOT.iterdir():
-        if private(Path(source.name)) or source.name in {"manifest.json", "SHA256SUMS"}:
-            continue
-        if source.is_symlink():
-            raise SystemExit("Release source contains a symlink")
-        if source.is_file():
-            shutil.copy2(source, stage / source.name)
-        elif source.is_dir():
-            for item in source.rglob("*"):
-                relative = item.relative_to(ROOT)
-                if private(relative):
-                    continue
-                if item.is_symlink():
-                    raise SystemExit("Release source contains a symlink")
-                target = stage / relative
-                if item.is_dir():
-                    target.mkdir(parents=True, exist_ok=True)
-                elif item.is_file():
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(item, target)
+    for relative, source in tracked_sources():
+        target = stage / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
     (stage / "dist").mkdir()
     checksums = []
     for arch in ("amd64", "arm64"):

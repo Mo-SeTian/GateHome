@@ -186,6 +186,8 @@ func TestRouteImageURLImportSVG(t *testing.T) {
 			content += strings.Repeat(" ", maxRouteImage)
 		case "unsafe":
 			content = strings.Replace(svg, "<rect ", `<rect onload="return false" `, 1)
+		case "missing-namespace":
+			content = strings.Replace(svg, ` xmlns="http://www.w3.org/2000/svg"`, "", 1)
 		}
 		w.Write([]byte(content))
 	}))
@@ -196,6 +198,9 @@ func TestRouteImageURLImportSVG(t *testing.T) {
 		if w := importURL(query); w.Code != 400 {
 			t.Fatalf("invalid SVG accepted: %s (%d)", query, w.Code)
 		}
+	}
+	if w := importURL("case=missing-namespace"); w.Code != 400 || !strings.Contains(w.Body.String(), "命名空间") {
+		t.Fatal("namespace-free SVG was not rejected with an explanation")
 	}
 	w := importURL("theme=dark")
 	upstream.Close()

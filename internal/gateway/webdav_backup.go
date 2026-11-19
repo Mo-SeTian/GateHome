@@ -227,10 +227,6 @@ func (a *Admin) backupSnapshot() (backupPayload, error) {
 	if err := checkBackupCapacity(a.store.paths, state); err != nil {
 		return backupPayload{}, err
 	}
-	if a.logs != nil {
-		a.logs.mu.Lock()
-		defer a.logs.mu.Unlock()
-	}
 	if a.sunPanel != nil {
 		return a.sunPanel.snapshot(a.store.paths, state)
 	}

@@ -16,6 +16,27 @@ import (
 	"golang.org/x/net/webdav"
 )
 
+func TestBackupSnapshotDoesNotWaitForLogWriter(t *testing.T) {
+	a, _ := testAdmin(t)
+	a.logs = &Logs{}
+	a.logs.mu.Lock()
+	defer a.logs.mu.Unlock()
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := a.backupSnapshot()
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("snapshot waited on a lock for logs it does not include")
+	}
+}
+
 func davFixture(t *testing.T, wrap func(http.Handler) http.Handler) (State, string) {
 	t.Helper()
 	root := t.TempDir()

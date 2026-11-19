@@ -3,6 +3,7 @@ package gateway
 import (
 	"io"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -10,9 +11,34 @@ import (
 const forwardTrafficInterval = 5 * time.Second
 
 type forwardCounters struct {
-	upload, download atomic.Uint64
-	active           atomic.Int64
-	latest           forwardTrafficStatus // protected by PortForwarder.sampleMu
+	mu     sync.Mutex
+	hours  map[time.Time]trafficBytes
+	active atomic.Int64
+	latest forwardTrafficStatus // protected by PortForwarder.sampleMu
+}
+
+func (c *forwardCounters) record(at time.Time, counts trafficBytes) {
+	if counts == (trafficBytes{}) {
+		return
+	}
+	hour := at.UTC().Truncate(time.Hour)
+	c.mu.Lock()
+	if c.hours == nil {
+		c.hours = make(map[time.Time]trafficBytes)
+	}
+	bucket := c.hours[hour]
+	bucket.Upload += counts.Upload
+	bucket.Download += counts.Download
+	c.hours[hour] = bucket
+	c.mu.Unlock()
+}
+
+func (c *forwardCounters) drain() map[time.Time]trafficBytes {
+	c.mu.Lock()
+	hours := c.hours
+	c.hours = nil
+	c.mu.Unlock()
+	return hours
 }
 
 type forwardTrafficStatus struct {
@@ -26,12 +52,17 @@ type forwardTrafficStatus struct {
 
 type forwardTrafficWriter struct {
 	io.Writer
-	counter *atomic.Uint64
+	counters *forwardCounters
+	upload   bool
 }
 
 func (w forwardTrafficWriter) Write(p []byte) (int, error) {
 	n, err := w.Writer.Write(p)
-	w.counter.Add(uint64(n))
+	if w.upload {
+		w.counters.record(time.Now(), trafficBytes{Upload: uint64(n)})
+	} else {
+		w.counters.record(time.Now(), trafficBytes{Download: uint64(n)})
+	}
 	return n, err
 }
 
@@ -58,11 +89,15 @@ func (p *PortForwarder) sampleTraffic(now time.Time) {
 	}
 	p.sampledAt = now
 	for _, b := range p.bindings {
-		counts := trafficBytes{Upload: b.traffic.upload.Swap(0), Download: b.traffic.download.Swap(0)}
-		b.traffic.latest.UploadBPS = float64(counts.Upload) / elapsed
-		b.traffic.latest.DownloadBPS = float64(counts.Download) / elapsed
+		var totals trafficBytes
+		for hour, counts := range b.traffic.drain() {
+			totals.Upload += counts.Upload
+			totals.Download += counts.Download
+			p.traffic.addBytes(b.rule.ID+"/"+b.rule.Protocol, b.rule.Name, counts, hour)
+		}
+		b.traffic.latest.UploadBPS = float64(totals.Upload) / elapsed
+		b.traffic.latest.DownloadBPS = float64(totals.Download) / elapsed
 		b.traffic.latest.Sampled = true
-		p.traffic.addBytes(b.rule.ID+"/"+b.rule.Protocol, b.rule.Name, counts, now)
 	}
 }
 

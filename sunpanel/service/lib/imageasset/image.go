@@ -33,11 +33,20 @@ func Extension(data []byte) (string, error) {
 	if validICO(data) {
 		return ".ico", nil
 	}
-	if validSVG(data) {
+	if validSVG(data, false) {
 		return ".svg", nil
 	}
 	return "", errors.New("图片格式无效，或 SVG 包含脚本/外部资源")
 }
+
+// ValidateStandaloneSVG checks a new SVG that will be served as a standalone image.
+func ValidateStandaloneSVG(data []byte) error {
+	if len(data) > Limit || !validSVG(data, true) {
+		return errors.New("SVG 图片无效，需声明 SVG 命名空间且不能包含脚本或外部资源")
+	}
+	return nil
+}
+
 func Validate(name string, data []byte) bool {
 	ext, err := Extension(data)
 	actual := strings.ToLower(filepath.Ext(name))
@@ -78,7 +87,7 @@ func validICO(data []byte) bool {
 	}
 	return true
 }
-func validSVG(data []byte) bool {
+func validSVG(data []byte, requireNamespace bool) bool {
 	decoder := xml.NewDecoder(bytes.NewReader(data))
 	depth := 0
 	styleDepth := 0
@@ -99,7 +108,7 @@ func validSVG(data []byte) bool {
 				return false
 			}
 			if depth == 0 {
-				if seen || v.Name.Local != "svg" {
+				if seen || v.Name.Local != "svg" || (requireNamespace && v.Name.Space == "") {
 					return false
 				}
 				seen = true

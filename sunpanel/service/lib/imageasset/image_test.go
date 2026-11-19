@@ -42,3 +42,14 @@ func TestImageContentAndSVGValidation(t *testing.T) {
 		t.Fatal("oversized image accepted")
 	}
 }
+
+func TestStandaloneSVGRequiresNamespaceWithoutInvalidatingLegacyImages(t *testing.T) {
+	withNamespace := []byte(`<svg xmlns="http://www.w3.org/2000/svg"><rect width="8" height="8"/></svg>`)
+	legacy := bytes.Replace(withNamespace, []byte(` xmlns="http://www.w3.org/2000/svg"`), nil, 1)
+	if err := ValidateStandaloneSVG(withNamespace); err != nil {
+		t.Fatal(err)
+	}
+	if ValidateStandaloneSVG(legacy) == nil || !Validate("legacy.svg", legacy) {
+		t.Fatal("new images must declare a namespace while existing backups remain readable")
+	}
+}

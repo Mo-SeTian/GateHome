@@ -115,6 +115,43 @@ func TestTrafficPersistsAndFiltersByRuleAndHour(t *testing.T) {
 	}
 }
 
+func TestForwardTrafficKeepsWriteHourAcrossSamples(t *testing.T) {
+	history, err := OpenTraffic(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	boundary := time.Date(2026, 11, 19, 12, 0, 0, 0, time.UTC)
+	b := &forwardBinding{rule: PortForward{ID: "hourly", Name: "Hourly", Protocol: "tcp"}}
+	p := &PortForwarder{
+		traffic: history, bindings: []*forwardBinding{b}, sampledAt: boundary.Add(-3 * time.Second),
+	}
+	b.traffic.record(boundary.Add(-time.Second), trafficBytes{Upload: 500, Download: 100})
+	b.traffic.record(boundary, trafficBytes{Upload: 250, Download: 50})
+	p.sampleTraffic(boundary.Add(2 * time.Second))
+
+	for _, tc := range []struct {
+		from, to time.Time
+		want     trafficBytes
+	}{
+		{boundary.Add(-time.Hour), boundary, trafficBytes{Upload: 500, Download: 100}},
+		{boundary, boundary.Add(time.Hour), trafficBytes{Upload: 250, Download: 50}},
+	} {
+		report := history.forwardReport(tc.from, tc.to, "hourly", "tcp")
+		if report.trafficBytes != tc.want || len(report.Rules) != 1 {
+			t.Fatalf("unexpected history for %v: %+v", tc.from, report)
+		}
+	}
+	status := p.trafficStatus()[0]
+	if status.UploadBPS != 150 || status.DownloadBPS != 30 {
+		t.Fatalf("the live sample lost bytes across the boundary: %+v", status)
+	}
+	p.sampleTraffic(boundary.Add(7 * time.Second))
+	report := history.forwardReport(boundary.Add(-time.Hour), boundary.Add(time.Hour), "hourly", "tcp")
+	if report.Upload != 750 || report.Download != 150 || p.trafficStatus()[0].UploadBPS != 0 {
+		t.Fatalf("second sample repeated counted traffic: %+v", report)
+	}
+}
+
 func TestTrafficAPIRequiresAuthAndValidRange(t *testing.T) {
 	a, h := testAdmin(t)
 	m, err := OpenTraffic(t.TempDir())

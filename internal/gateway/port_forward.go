@@ -10,7 +10,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -338,8 +337,8 @@ func (p *PortForwarder) forwardTCP(b *forwardBinding, client net.Conn) {
 	defer upstream.Close()
 	stopUpstream := context.AfterFunc(p.ctx, func() { upstream.Close() })
 	defer stopUpstream()
-	copyStream := func(dst, src net.Conn, count *atomic.Uint64) {
-		if _, err := io.Copy(forwardTrafficWriter{dst, count}, src); err != nil {
+	copyStream := func(dst, src net.Conn, upload bool) {
+		if _, err := io.Copy(forwardTrafficWriter{Writer: dst, counters: &b.traffic, upload: upload}, src); err != nil {
 			dst.Close()
 			src.Close()
 			return
@@ -349,9 +348,9 @@ func (p *PortForwarder) forwardTCP(b *forwardBinding, client net.Conn) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		copyStream(upstream, client, &b.traffic.upload)
+		copyStream(upstream, client, true)
 	}()
-	copyStream(client, upstream, &b.traffic.download)
+	copyStream(client, upstream, false)
 	<-done
 }
 
@@ -429,7 +428,7 @@ func (p *PortForwarder) forwardUDP(b *forwardBinding, remote netip.AddrPort, ses
 			}
 			if p.allowed(b.rule, remote.String()) {
 				written, err := b.udp.WriteToUDPAddrPort(buffer[:n], remote)
-				b.traffic.download.Add(uint64(written))
+				b.traffic.record(time.Now(), trafficBytes{Download: uint64(written)})
 				if err != nil {
 					return
 				}
@@ -447,7 +446,7 @@ func (p *PortForwarder) forwardUDP(b *forwardBinding, remote netip.AddrPort, ses
 			upstream.SetWriteDeadline(time.Now().Add(5 * time.Second))
 			upstream.SetReadDeadline(time.Now().Add(forwardUDPTimeout(b.rule)))
 			written, err := upstream.Write(packet)
-			b.traffic.upload.Add(uint64(written))
+			b.traffic.record(time.Now(), trafficBytes{Upload: uint64(written)})
 			if err != nil {
 				upstream.Close()
 				<-done
