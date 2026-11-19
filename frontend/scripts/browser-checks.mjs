@@ -443,6 +443,14 @@ try {
   assert.equal(await domainButton.evaluate(el => el === document.activeElement), true)
   console.log('PASS route domain copy on ordinary HTTP: actual clipboard contains the full HTTPS URL/port and button focus is preserved')
 
+  const healthButton = page.getByRole('button', { name: /查看 Console review route 的健康诊断/ })
+  await healthButton.focus()
+  await page.keyboard.press('Enter')
+  const healthDialog = page.getByRole('dialog', { name: '上游健康诊断' })
+  await healthDialog.waitFor()
+  await page.keyboard.press('Escape')
+  await healthDialog.waitFor({ state: 'hidden' })
+
   await clipboardPage.bringToFront()
   await clipboardPage.evaluate(() => navigator.clipboard.writeText('TEST_ONLY_PREVIOUS_CLIPBOARD'))
   await page.bringToFront()
@@ -509,7 +517,7 @@ try {
   await httpsSection.waitFor()
   assert.equal(await httpsSection.locator('.route-card').count(), 1)
   assert.equal(await httpSection.locator('.route-card').count(), 1)
-  await page.locator('.route-group[data-group-id=empty-fixture]').getByText('此组暂无反代服务，可通过“新建反代服务”添加。', { exact: true }).waitFor()
+  await page.locator('.route-group[data-group-id=empty-fixture]').getByText('此组暂无反代服务', { exact: true }).waitFor()
   assert.equal(await httpsSection.getByRole('button', { name: '删除反代组 HTTPS 测试组', exact: true }).isDisabled(), true)
   const clipboardProbe = await context.newPage()
   await clipboardProbe.goto(`http://127.0.0.1:${port}/healthz`)
@@ -929,6 +937,14 @@ try {
   ]) {
     await route(view)
     await page.waitForFunction(view => document.querySelector('.sidebar-nav a.active')?.hash === '#/' + view, view)
+  }
+  for (const [view, field] of [['logs', '请求方法'], ['firewall-logs', '检测引擎']]) {
+    await route(view)
+    const explorer = page.locator('.log-explorer')
+    await explorer.getByRole('combobox', { name: '反代规则' }).waitFor()
+    await explorer.getByRole('button', { name: '更多筛选', expanded: false }).click()
+    await explorer.getByRole('button', { name: '收起', expanded: true }).waitFor()
+    await explorer.getByRole('combobox', { name: field }).waitFor()
   }
   await page.getByRole('button', { name: '关闭此通知' }).evaluateAll(buttons => buttons.forEach(button => button.click()))
   await page.getByRole('link', { name: '图标库', exact: true }).click()
@@ -1427,7 +1443,7 @@ try {
   await page.locator('.report-heading h1').waitFor()
   assert.equal(await page.evaluate(() => window.upgradeDocumentMarker), undefined)
   assert.equal(new URL(page.url()).hash, '#/updates')
-  assert.equal(await page.locator('.brand-version').textContent(), '家庭网关 · v' + (await api('status')).version)
+  assert.equal(await page.locator('.brand-version').textContent(), 'v' + (await api('status')).version)
   await page.unroute('**/api/status')
   console.log('PASS update resource synchronization: a new server version reloads the document and preserves the current route')
 

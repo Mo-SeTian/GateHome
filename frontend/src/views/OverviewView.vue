@@ -1,10 +1,7 @@
 <template>
   <div class="report-page overview-page animate-fade-in">
     <header class="report-heading">
-      <div>
-        <h1>系统概览</h1>
-        <p>网关状态、资源遥测与访问统计 · 每 5 秒采样</p>
-      </div>
+      <h1>系统概览</h1>
       <div class="report-actions">
         <button class="btn btn-secondary" :disabled="isRefreshing || isSavingConfig" @click="refresh(true)">
           {{ isRefreshing ? '刷新中…' : '刷新数据' }}</button
@@ -20,13 +17,10 @@
     <p v-if="loadError" class="report-error" role="alert">
       {{ loadError }}{{ dashboard ? '，保留上次采样' : '' }}
     </p>
-    <p v-else class="report-note">
-      {{
-        dashboard
-          ? `最近采样 ${reportDate(dashboard.sampled_at)} · ${resources.platform}`
-          : '正在读取网关遥测…'
-      }}
+    <p v-else-if="dashboard" class="report-note">
+      最近采样 <time :datetime="dashboard.sampled_at">{{ reportDate(dashboard.sampled_at) }}</time>
     </p>
+    <p v-else class="report-note" role="status">正在读取网关遥测…</p>
     <div class="dashboard-grid">
       <SpotlightCard
         v-for="id in widgetIDs"

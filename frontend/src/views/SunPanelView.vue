@@ -1,10 +1,7 @@
 <template>
   <div class="report-page animate-fade-in">
     <header class="report-heading">
-      <div>
-        <h1>SunPanel 浏览器首页</h1>
-        <p>管理首页服务与访问入口，保留独立账号、分组、网站和上传资源</p>
-      </div>
+      <h1>SunPanel 浏览器首页</h1>
       <button class="btn btn-secondary" :disabled="loading || isSavingConfig" @click="reload">
         刷新配置
       </button>

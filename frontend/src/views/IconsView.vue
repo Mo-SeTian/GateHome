@@ -1,27 +1,14 @@
 <template>
   <div class="icons-page">
-    <div class="page-topbar icons-heading">
-      <div>
-        <h1 class="page-title">图标库</h1>
-        <p class="page-subtitle">为反代服务查找和管理本地图标</p>
-      </div>
+    <header class="report-heading">
+      <h1>图标库</h1>
       <div class="icons-actions">
         <button class="btn btn-secondary" type="button" @click="openImport"><Github :size="15" />从 GitHub 导入</button>
         <button class="btn btn-secondary" type="button" @click="openLinkImport"><Link2 :size="15" />通过链接导入</button>
         <button class="btn btn-primary" type="button" @click="openUpload"><Upload :size="15" />上传本地图标</button>
       </div>
-    </div>
+    </header>
 
-    <dl class="icons-stats">
-      <div>
-        <dt>图标总数</dt>
-        <dd>{{ stats ? stats.total.toLocaleString() : '—' }} <small v-if="stats">{{ formatBytes(stats.bytes) }}</small></dd>
-      </div>
-      <div v-for="[value, label] in sources" :key="value">
-        <dt>{{ label }}</dt>
-        <dd>{{ stats ? (stats.sources[value] || 0).toLocaleString() : '—' }}</dd>
-      </div>
-    </dl>
     <div v-if="statsError" class="icon-error" role="alert">{{ statsError }}</div>
     <div v-if="job.state !== 'idle'" class="icons-job" role="status">
       <span><strong>{{ job.message }}</strong><template v-if="job.state === 'completed'"> · {{ job.count }} 个</template></span>
@@ -34,7 +21,7 @@
           <Search :size="16" aria-hidden="true" />
           <input
             v-model="filters.keyword" type="search" maxlength="80" aria-label="搜索图标"
-            placeholder="搜索英文名、中文名或拼音" @keydown.esc="filters.keyword = ''"
+            placeholder="搜索名称或拼音" @keydown.esc="filters.keyword = ''"
           />
         </label>
         <button type="button" class="btn btn-secondary" :disabled="reindexing" @click="reindex">
@@ -49,7 +36,7 @@
             v-for="[value, label] in sources" :key="value" type="button" class="icon-chip"
             :aria-pressed="filters.source === value" @click="filters.source = value"
           >
-            {{ label }}<span v-if="stats"> {{ stats.sources[value] || 0 }}</span>
+            {{ label }}<span v-if="stats"> {{ (stats.sources[value] || 0).toLocaleString() }}</span>
           </button>
         </div>
       </div>
@@ -65,7 +52,12 @@
       </div>
 
       <div class="icons-results-bar">
-        <span role="status">{{ loading ? '正在读取图标…' : `共 ${total.toLocaleString()} 个图标` }}</span>
+        <div class="icons-result-count">
+          <span role="status">{{ loading ? '正在读取图标…' : `${total.toLocaleString()} 个结果` }}</span>
+          <span v-if="stats">
+            全库 <template v-if="!loading && stats.total !== total">{{ stats.total.toLocaleString() }} 个 · </template>{{ formatBytes(stats.bytes) }}
+          </span>
+        </div>
         <div class="icon-filters" role="group" aria-label="网格密度">
           <button type="button" class="icon-chip" :aria-pressed="!standard" @click="standard = false">紧凑</button>
           <button type="button" class="icon-chip" :aria-pressed="standard" @click="standard = true">标准</button>
@@ -169,7 +161,7 @@
             />
           </label>
         </div>
-        <p class="icon-form-hint">每次最多 16 张，每张不超过 5 MiB。建议使用 512 × 512 或更大的图片。</p>
+        <p class="icon-form-hint">每次最多 16 张，每张最大 5 MiB。</p>
         <ul v-if="files.length" class="icon-upload-list" aria-label="待上传文件">
           <li v-for="(file, i) in files" :key="i"><span>{{ file.name }}</span><small>{{ formatBytes(file.size) }}</small></li>
         </ul>
@@ -510,21 +502,8 @@ async function copyURL() {
 
 <style scoped>
 .icons-page { max-width: 1140px; margin: 0 auto; display: grid; gap: 14px; }
-.icons-heading {
-  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
-  gap: 10px; margin-bottom: 0;
-}
 .icons-actions, .icons-toolbar, .icons-pages { display: flex; align-items: center; gap: 8px; }
 .icons-actions { flex-wrap: wrap; }
-.icons-stats {
-  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
-  background: var(--card-bg); border: 1px solid var(--line); border-radius: var(--radius-md);
-}
-.icons-stats > div { min-width: 0; padding: 10px 16px; }
-.icons-stats > div + div { border-left: 1px solid var(--line); }
-.icons-stats dt { font-size: 12px; color: var(--muted); }
-.icons-stats dd { font-size: 24px; font-weight: 500; font-variant-numeric: tabular-nums; }
-.icons-stats small { font-size: 11px; color: var(--muted); white-space: nowrap; }
 .icons-job {
   display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px;
   padding: 8px 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--muted);
@@ -539,6 +518,7 @@ async function copyURL() {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
   color: var(--muted); font-size: 12px; margin-top: 4px; border-top: 1px solid var(--line); padding-top: 8px;
 }
+.icons-result-count { display: flex; flex-wrap: wrap; column-gap: 10px; font-variant-numeric: tabular-nums; }
 .icons-grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 6px; }
 .icons-grid .icon-tile { min-height: 65px; padding: 5px; gap: 3px; transition: transform 120ms, border-color 120ms; }
 .icons-grid .icon-tile:hover { transform: translateY(-2px); }
@@ -590,11 +570,6 @@ async function copyURL() {
 }
 @media (max-width: 600px) {
   .icons-page { gap: 10px; }
-  .icons-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .icons-stats > div:nth-child(3) { border-left: 0; }
-  .icons-stats > div:nth-child(n+3) { border-top: 1px solid var(--line); }
-  .icons-stats > div { padding: 8px 10px; }
-  .icons-stats dd { font-size: 20px; }
   .icons-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
   .icons-grid.standard { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .icons-actions .btn, .icons-toolbar .btn, .icons-pages .btn, .icon-form-actions .btn { min-height: 44px; }

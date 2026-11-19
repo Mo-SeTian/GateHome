@@ -1,5 +1,5 @@
 <template>
-  <div class="login-wrapper">
+  <main class="login-wrapper">
     <!-- Ambient Aurora Glow Orbs -->
     <div class="glow-orb orb-1" />
     <div class="glow-orb orb-2" />
@@ -10,32 +10,21 @@
       <button 
         class="theme-pill-btn" 
         :title="theme === 'dark' ? '切换为浅色模式' : '切换为深色模式'" 
+        :aria-label="theme === 'dark' ? '切换为浅色模式' : '切换为深色模式'"
         @click="toggleTheme"
       >
         <Sun v-if="theme === 'dark'" :size="15" />
         <Moon v-else :size="15" />
-        <span>{{ theme === 'dark' ? '深色极客黑' : '清透晨曦白' }}</span>
       </button>
     </div>
 
     <!-- Login Centered Shell -->
     <div class="login-container">
-      <!-- Brand Art Header -->
-      <div class="login-art">
-        <div class="brand-cube-icon">
-          <img src="/favicon.svg" width="38" height="38" alt="" />
-        </div>
-        <h1 class="brand-name">GateHome</h1>
-        <p class="brand-desc">家庭网络管理控制台</p>
-      </div>
-
-      <!-- Spotlight Frosted Login Card -->
       <SpotlightCard class="login-card">
-        <div class="card-header">
-          <div class="eyebrow-pill">GATEHOUSE CONSOLE</div>
-          <h2 class="card-title">欢迎回来</h2>
-          <p class="card-subtitle">使用 GateHome 管理员账号和管理密码登录</p>
-        </div>
+        <header class="login-brand">
+          <img src="/favicon.svg" width="38" height="38" alt="" />
+          <h1 class="brand-name">GateHome</h1>
+        </header>
 
         <!-- Inline Error Banner -->
         <transition name="slide-down">
@@ -46,12 +35,9 @@
         </transition>
 
         <!-- Login Form -->
-        <form class="login-form" :aria-busy="isLoading" @submit.prevent="handleSubmit">
+        <form class="login-form" aria-label="管理员登录" :aria-busy="isLoading" @submit.prevent="handleSubmit">
           <div class="form-group">
-            <label class="form-label" for="admin-username">
-              <span>管理员账号</span>
-              <span class="required-star">*</span>
-            </label>
+            <label class="form-label" for="admin-username">管理员账号</label>
             <div class="input-with-icon">
               <User :size="16" class="field-icon" />
               <input 
@@ -59,7 +45,6 @@
                 v-model="username" 
                 type="text" 
                 class="form-input" 
-                placeholder="请输入管理员账号"
                 maxlength="64"
                 autocomplete="username"
                 required 
@@ -70,10 +55,7 @@
 
           <div class="form-group">
             <div class="label-with-action">
-              <label class="form-label" for="admin-password">
-                <span>管理密码</span>
-                <span class="required-star">*</span>
-              </label>
+              <label class="form-label" for="admin-password">密码</label>
               <button 
                 type="button" 
                 class="field-help-btn"
@@ -90,7 +72,6 @@
                 v-model="password" 
                 :type="showPassword ? 'text' : 'password'" 
                 class="form-input" 
-                placeholder="请输入管理密码" 
                 maxlength="72"
                 autocomplete="current-password"
                 required 
@@ -110,20 +91,9 @@
           <button type="submit" class="btn btn-primary submit-btn" :disabled="isLoading">
             <span v-if="isLoading" class="btn-spinner" />
             <LogIn v-else :size="16" />
-            <span>{{ isLoading ? '身份凭据校验中...' : '进入控制台' }}</span>
+            <span>{{ isLoading ? '登录中…' : '登录' }}</span>
           </button>
         </form>
-
-        <!-- Official GateHome Helper Note -->
-        <div class="login-note-box">
-          <p class="login-note">
-            请使用网关管理账户。管理会话有效期为 12 小时。
-          </p>
-        </div>
-
-        <div class="login-footer">
-          <span>GateHome · {{ gatewayVersion }} · Aurora Next Console</span>
-        </div>
       </SpotlightCard>
     </div>
 
@@ -131,7 +101,7 @@
       <div class="modal-header">
         <div class="modal-title-row">
           <KeyRound :size="18" class="modal-icon" />
-          <h3 id="forgot-title">如何重置管理员账户密码？</h3>
+          <h2 id="forgot-title">如何重置管理员账户密码？</h2>
         </div>
         <button type="button" class="modal-close-btn" aria-label="关闭" autofocus @click="forgotDialog.close()">
           <X :size="16" />
@@ -161,7 +131,7 @@
         <button type="button" class="btn btn-primary btn-sm" @click="forgotDialog.close()">我知道了</button>
       </div>
     </dialog>
-  </div>
+  </main>
 </template>
 
 <script setup>
@@ -170,7 +140,6 @@ import { useRouter, useRoute } from 'vue-router'
 import { User, Lock, Eye, EyeOff, LogIn, AlertCircle, Sun, Moon, KeyRound, X } from 'lucide-vue-next'
 import SpotlightCard from '@/components/SpotlightCard.vue'
 import { useAppStore } from '@/composables/useAppStore'
-import { useGatewayStatus } from '@/composables/useGatewayStatus'
 import { useSession } from '@/composables/useSession'
 import { useToast } from '@/composables/useToast'
 import { postLoginPath } from '@/router'
@@ -181,7 +150,6 @@ const router = useRouter()
 const route = useRoute()
 const { theme, toggleTheme } = useAppStore()
 const { login } = useSession()
-const { gatewayVersion } = useGatewayStatus()
 const { success } = useToast()
 
 const username = ref('')
@@ -290,14 +258,14 @@ async function handleSubmit() {
 .theme-pill-btn {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 7px 14px;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
   background: var(--card-bg);
   backdrop-filter: blur(20px);
   border: 1px solid var(--card-border);
   border-radius: var(--radius-pill);
   color: var(--muted);
-  font-size: 12px;
   cursor: pointer;
   transition: var(--transition-smooth);
 }
@@ -313,30 +281,12 @@ async function handleSubmit() {
   max-width: 420px;
   position: relative;
   z-index: 10;
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
 }
 
-/* Brand Art */
-.login-art {
-  text-align: center;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-
-.brand-cube-icon {
-  width: 52px;
-  height: 52px;
-  border-radius: 16px;
-  background: rgba(99, 102, 241, 0.12);
-  border: 1px solid rgba(99, 102, 241, 0.3);
+.login-brand {
   display: flex;
   align-items: center;
-  justify-content: center;
-  margin-bottom: 12px;
-  box-shadow: 0 8px 24px rgba(99, 102, 241, 0.15);
+  gap: 12px;
 }
 
 .brand-name {
@@ -347,48 +297,17 @@ async function handleSubmit() {
   margin: 0;
 }
 
-.brand-desc {
-  font-size: 13px;
-  color: var(--muted);
-  margin-top: 4px;
-  font-weight: 500;
-}
-
 /* Spotlight Card */
 .login-card {
-  padding: 30px 28px 24px;
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
+  padding: 26px 28px;
   box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35);
   border-radius: 20px;
 }
 
-.card-header {
+.login-card :deep(.card-inner) {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-}
-
-.eyebrow-pill {
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 1.2px;
-  color: var(--brand-light);
-  text-transform: uppercase;
-}
-
-.card-title {
-  font-size: 21px;
-  font-weight: 700;
-  color: var(--ink);
-  margin: 2px 0 0;
-}
-
-.card-subtitle {
-  font-size: 12.5px;
-  color: var(--muted);
-  margin: 0;
+  gap: 20px;
 }
 
 /* Error Banner */
@@ -424,13 +343,6 @@ async function handleSubmit() {
   font-size: 12px;
   font-weight: 600;
   color: var(--ink-secondary);
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.required-star {
-  color: var(--danger);
 }
 
 .label-with-action {
@@ -493,7 +405,7 @@ async function handleSubmit() {
 
 .submit-btn {
   width: 100%;
-  height: 42px;
+  min-height: 44px;
   font-size: 14px;
   font-weight: 600;
   display: flex;
@@ -513,28 +425,6 @@ async function handleSubmit() {
   animation: spin 0.75s linear infinite;
 }
 
-/* Official Note */
-.login-note-box {
-  background: var(--strip-bg);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  padding: 10px 12px;
-}
-
-.login-note {
-  font-size: 11px;
-  line-height: 1.55;
-  color: var(--faint);
-  margin: 0;
-}
-
-.login-footer {
-  text-align: center;
-  font-size: 11px;
-  color: var(--faint);
-  padding-top: 4px;
-}
-
 /* Modal */
 .modal-title-row {
   display: flex;
@@ -542,7 +432,7 @@ async function handleSubmit() {
   gap: 8px;
 }
 
-.modal-title-row h3 {
+.modal-title-row h2 {
   font-size: 16px;
   font-weight: 700;
   color: var(--ink);

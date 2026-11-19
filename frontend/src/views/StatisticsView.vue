@@ -1,14 +1,11 @@
 <template>
   <div class="report-page animate-fade-in">
-    <div class="report-heading">
-      <div>
-        <h1>访问统计</h1>
-        <p>按保留日志核对请求、账号验证和安全事件，趋势显示实际请求次数</p>
-      </div>
+    <header class="report-heading">
+      <h1>访问统计</h1>
       <button class="btn btn-secondary" :disabled="!data || loading || !!error" @click="exportSVG">
         导出图表 SVG
       </button>
-    </div>
+    </header>
     <form class="report-form" @submit.prevent="load">
       <label
         >统计时间<select v-model="form.hours" name="hours" class="form-select">

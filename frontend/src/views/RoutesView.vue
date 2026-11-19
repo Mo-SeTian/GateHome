@@ -1,10 +1,7 @@
 <template>
   <div class="routes-page animate-fade-in">
-    <div class="page-topbar">
-      <div>
-        <h1 class="page-title">反向代理与路由组</h1>
-        <p class="page-subtitle">管理反代组、域名路由、来源 IP 防火墙与独立访问账户</p>
-      </div>
+    <header class="report-heading">
+      <h1>反向代理</h1>
       <div class="header-actions">
         <button class="btn btn-secondary" :disabled="loading || isSavingConfig" @click="reload">刷新</button>
         <button
@@ -32,29 +29,36 @@
           <Plus :size="15" /> 新建反代服务
         </button>
       </div>
-    </div>
+    </header>
 
     <RestartNotice />
     <p v-if="loadError" class="page-error" role="alert">{{ loadError }}</p>
     <p v-if="loading" role="status">正在读取反代配置…</p>
 
     <div class="filter-bar">
-      <div class="chips-group">
-        <button class="chip-btn" :class="{ active: selectedGroup === 'ALL' }" @click="selectedGroup = 'ALL'">
+      <div class="chips-group" role="group" aria-label="筛选反代服务">
+        <button
+          type="button" class="chip-btn" :class="{ active: selectedGroup === 'ALL' }"
+          :aria-pressed="selectedGroup === 'ALL'" @click="selectedGroup = 'ALL'"
+        >
           全部路由 <span class="chip-count">{{ routes.length }}</span>
         </button>
         <button
           v-for="group in proxyGroups"
           :key="group.id"
+          type="button"
           class="chip-btn"
           :class="{ active: selectedGroup === group.id }"
+          :aria-pressed="selectedGroup === group.id"
           @click="selectedGroup = group.id"
         >
           {{ group.name }} <span class="chip-count">{{ getGroupCount(group.id) }}</span>
         </button>
         <button
+          type="button"
           class="chip-btn"
           :class="{ active: selectedGroup === 'INACTIVE' }"
+          :aria-pressed="selectedGroup === 'INACTIVE'"
           @click="selectedGroup = 'INACTIVE'"
         >
           已停用 <span class="chip-count">{{ routes.filter((route) => !route.enabled).length }}</span>
@@ -131,12 +135,7 @@
                   alt=""
                 /><Network v-else :size="18" />
               </div>
-              <div class="card-title-group">
-                <div class="card-title-row">
-                  <span class="service-name">{{ route.name || route.host }}</span>
-                </div>
-                <div class="service-category">所属组 {{ groupName(route.group_id) }}</div>
-              </div>
+              <span class="service-name" :title="route.name || route.host">{{ route.name || route.host }}</span>
               <label class="switch"
                 ><input
                   type="checkbox"
@@ -162,17 +161,21 @@
                 <ArrowRight :size="14" /><span class="info-text mono-text">{{ route.upstream }}</span>
               </div>
             </div>
-            <div class="feature-badges">
-              <span v-if="route.tls" class="feature-badge ssl"><Lock :size="10" /> HTTPS</span>
+            <div v-if="route.firewall_id || route.auth.enabled || !accessURL(route)" class="feature-badges">
+              <span v-if="!accessURL(route)" class="feature-badge protocol">
+                {{ route.tls ? 'HTTPS' : 'HTTP' }} 端口未配置
+              </span>
               <span v-if="route.firewall_id" class="feature-badge fw">{{ firewallName(route.firewall_id) }}</span>
               <span v-if="route.auth.enabled" class="feature-badge auth"><Key :size="10" /> 账号保护</span>
-              <span class="feature-badge hits">{{ route.enabled ? '已启用' : '已停用' }}</span>
             </div>
-            <button type="button" class="health-detail" @click="showHealth(route)">
-              {{ routeHealth(route) }}
-            </button>
             <div class="card-actions">
-              <span class="latency-label">{{ route.tls ? 'HTTPS' : 'HTTP' }}</span>
+              <button
+                type="button" class="health-detail" aria-haspopup="dialog"
+                :aria-label="`${routeHealth(route)}，查看 ${route.name || route.host} 的健康诊断`"
+                @click="showHealth(route)"
+              >
+                {{ routeHealth(route) }}
+              </button>
               <div class="action-btn-group">
                 <RouterLink class="btn btn-ghost btn-sm" :to="{ path: '/traffic', query: { rule: route.id } }">查看流量</RouterLink>
                 <button class="btn btn-ghost btn-sm" :disabled="isSavingConfig" @click="openRoute(route)">
@@ -190,7 +193,7 @@
             </div>
           </SpotlightCard>
         </div>
-        <p v-if="!items.length" class="group-empty">此组暂无反代服务，可通过“新建反代服务”添加。</p>
+        <p v-if="!items.length" class="group-empty">此组暂无反代服务</p>
       </div>
     </section>
     <div v-if="gatewayConfig && !groupedRoutes.length" class="empty-state">
@@ -516,7 +519,6 @@ import {
   Edit3,
   Globe,
   Key,
-  Lock,
   Network,
   Plus,
   Search,
@@ -632,9 +634,6 @@ const passwordRequired = computed(() => {
 
 function getGroupCount(id) {
   return routes.value.filter((route) => route.group_id === id).length
-}
-function groupName(id) {
-  return proxyGroups.value.find((group) => group.id === id)?.name || id
 }
 function accessURL(route) {
   return routeAccessURL(route, proxyGroups.value.find(group => group.id === route.group_id))
@@ -970,7 +969,6 @@ onUnmounted(() => {
 @media (prefers-reduced-motion: reduce) {
   .route-group-toggle > svg { transition: none; }
 }
-.health-detail { color: var(--muted); text-align: left; font-size: 12px; margin-bottom: 12px; }
 .auth-fields {
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
@@ -1028,9 +1026,6 @@ onUnmounted(() => {
   color: var(--faint);
 }
 .routes-page { display: flex; flex-direction: column; gap: 20px; }
-.page-topbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; }
-.page-title { font-size: 22px; font-weight: 700; color: var(--ink); }
-.page-subtitle { font-size: 13px; color: var(--muted); margin-top: 3px; }
 
 .filter-bar { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
 .chips-group { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
@@ -1092,10 +1087,7 @@ onUnmounted(() => {
 .app-icon-wrap.dev { background: rgba(168, 85, 247, 0.12); color: #c084fc; }
 .app-icon-wrap.ops { background: rgba(56, 189, 248, 0.12); color: #38bdf8; }
 
-.card-title-group { flex: 1; min-width: 0; }
-.card-title-row { display: flex; align-items: center; gap: 6px; }
-.service-name { font-size: 13.5px; font-weight: 600; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.service-category { font-size: 11px; color: var(--faint); margin-top: 1px; }
+.service-name { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 600; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .endpoint-info {
   background: var(--strip-bg); border: 1px solid var(--line);
@@ -1116,11 +1108,10 @@ onUnmounted(() => {
   display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; font-weight: 600;
   padding: 2px 7px; border-radius: 4px;
 }
-.feature-badge.ssl { background: rgba(16, 185, 129, 0.12); color: var(--ok); border: 1px solid rgba(16, 185, 129, 0.2); }
+.feature-badge.protocol { background: var(--strip-bg); color: var(--muted); border: 1px solid var(--line); }
 .feature-badge.fw { background: rgba(99, 102, 241, 0.12); color: var(--brand-light); border: 1px solid rgba(99, 102, 241, 0.2); }
 .feature-badge.auth { background: rgba(245, 158, 11, 0.12); color: var(--warn); border: 1px solid rgba(245, 158, 11, 0.2); }
 .feature-badge.ws { background: rgba(6, 182, 212, 0.12); color: var(--brand-cyan); border: 1px solid rgba(6, 182, 212, 0.2); }
-.feature-badge.hits { background: var(--strip-bg); color: var(--faint); border: 1px solid var(--line); font-family: var(--mono); }
 
 .health-detail {
   display: inline-flex;
@@ -1132,7 +1123,6 @@ onUnmounted(() => {
   border-radius: var(--radius-pill);
   color: var(--muted);
   font-size: 11px;
-  margin-bottom: 12px;
   width: fit-content;
   cursor: pointer;
   transition: var(--transition-smooth);
@@ -1146,10 +1136,10 @@ onUnmounted(() => {
 
 .card-actions {
   margin-top: auto;
-  display: flex; align-items: center; justify-content: space-between; border-top: 1px solid var(--line); padding-top: 12px;
+  display: flex; align-items: center; justify-content: space-between; gap: 6px; flex-wrap: wrap;
+  border-top: 1px solid var(--line); padding-top: 8px;
 }
 .latency-indicator { display: flex; align-items: center; gap: 4px; font-size: 11.5px; }
-.latency-label { color: var(--faint); }
 .latency-val { color: var(--ok); font-family: var(--mono); font-weight: 600; }
 .latency-val.zero { color: var(--faint); }
 .action-btn-group { display: flex; gap: 4px; }
@@ -1184,6 +1174,7 @@ onUnmounted(() => {
   .group-actions .btn { min-height: 44px; flex: 1; justify-content: center; }
   .route-group-body { padding: 0 12px 12px; }
   .domain-row { min-height: 44px; }
+  .health-detail { min-height: 44px; }
   .routes-grid { grid-template-columns: 1fr; }
   .filter-bar { flex-direction: column; align-items: stretch; }
   .search-box { width: 100%; }

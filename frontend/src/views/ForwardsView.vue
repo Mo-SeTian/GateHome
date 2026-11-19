@@ -1,17 +1,14 @@
 <template>
   <div class="forwards-page animate-fade-in">
-    <div class="page-topbar">
-      <div>
-        <h1 class="page-title">端口转发</h1>
-        <p class="page-subtitle">管理 TCP / UDP 四层转发、来源 IP 防火墙及当前监听状态</p>
-      </div>
+    <header class="report-heading">
+      <h1>端口转发</h1>
       <div class="header-actions">
         <button class="btn btn-secondary" :disabled="loading || isSavingConfig" @click="reload">刷新</button
         ><button class="btn btn-primary" :disabled="!gatewayConfig || isSavingConfig" @click="openForward()">
           <Plus :size="15" /> 添加转发规则
         </button>
       </div>
-    </div>
+    </header>
     <RestartNotice />
     <p v-if="loading" role="status">正在读取转发配置…</p>
     <p v-if="loadError" class="page-error" role="alert">{{ loadError }}</p>
@@ -382,15 +379,6 @@ onUnmounted(() => controller.abort())
   gap: 20px;
 }
 
-.page-topbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 16px;
-}
-.page-title { font-size: 22px; font-weight: 700; color: var(--ink); }
-.page-subtitle { font-size: 13px; color: var(--muted); margin-top: 3px; }
 
 .forwards-grid {
   display: grid;
@@ -516,7 +504,6 @@ onUnmounted(() => controller.abort())
   .forwards-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 640px) {
-  .page-topbar { flex-direction: column; align-items: stretch; gap: 12px; }
   .header-actions { width: 100%; }
   .header-actions .btn { flex: 1; justify-content: center; }
   .protocol-filters { width: 100%; display: flex; }

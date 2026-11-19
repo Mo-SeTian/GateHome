@@ -1,10 +1,7 @@
 <template>
   <div class="report-page animate-fade-in">
-    <div class="report-heading">
-      <div>
-        <h1>SSL / TLS 证书管理</h1>
-        <p>按任务管理普通域名与泛域名证书，Cloudflare DNS-01 自动验证</p>
-      </div>
+    <header class="report-heading">
+      <h1>SSL / TLS 证书</h1>
       <div class="report-actions">
         <button class="btn btn-secondary" :disabled="loading || isSavingConfig" @click="reload">
           刷新状态</button
@@ -20,7 +17,7 @@
           <Plus :size="15" /> 添加证书任务
         </button>
       </div>
-    </div>
+    </header>
     <p v-if="error || statusError" class="report-error" role="alert">{{ error || statusError }}</p>
     <p v-if="acme?.staging" class="report-warning" role="status">
       当前为测试环境，签发的证书不被浏览器信任。正式环境切换会加载各自独立的证书。

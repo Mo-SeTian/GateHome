@@ -1,10 +1,7 @@
 <template>
   <div class="report-page animate-fade-in">
     <header class="report-heading">
-      <div>
-        <h1>系统与网关设置</h1>
-        <p>管理访问来源、出站代理、日志保留和管理员账户</p>
-      </div>
+      <h1>设置</h1>
       <button class="btn btn-secondary" :disabled="loading || isSavingConfig" @click="reload">
         重新读取
       </button>

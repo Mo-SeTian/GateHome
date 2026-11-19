@@ -1,10 +1,7 @@
 <template>
   <div class="report-page animate-fade-in">
     <header class="report-heading">
-      <div>
-        <h1>AI 管理 · MCP</h1>
-        <p>通过 Streamable HTTP 连接 AI，为各客户端配置独立权限、有效期与首页账号</p>
-      </div>
+      <h1>AI 管理 · MCP</h1>
       <div class="report-actions">
         <button class="btn btn-secondary" :disabled="busy || loading" @click="load">刷新设置</button
         ><button class="btn btn-secondary" :disabled="busy || loadingUsers" @click="loadUsers">

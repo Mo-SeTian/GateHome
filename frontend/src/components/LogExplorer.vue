@@ -8,15 +8,15 @@
         <div class="filter-primary-fields">
           <!-- 规则 / 分类 -->
           <div v-if="scope === 'project'" class="filter-col">
-            <label class="col-label">项目分类</label>
-            <select v-model="form.category" name="category" class="form-select">
+            <label :for="filterId + '-category'" class="col-label">项目分类</label>
+            <select :id="filterId + '-category'" v-model="form.category" name="category" class="form-select">
               <option value="">全部分类</option>
               <option v-for="(label, key) in categories" :key="key" :value="key">{{ label }}</option>
             </select>
           </div>
           <div v-else class="filter-col">
-            <label class="col-label">反代规则</label>
-            <select v-model="form.rule" name="rule" class="form-select">
+            <label :for="filterId + '-rule'" class="col-label">反代规则</label>
+            <select :id="filterId + '-rule'" v-model="form.rule" name="rule" class="form-select">
               <option value="">全部反代规则</option>
               <option v-for="route in gatewayConfig?.routes" :key="routeKey(route)" :value="routeKey(route)">
                 {{ routeLabel(route) }}
@@ -29,8 +29,8 @@
 
           <!-- 执行结果 -->
           <div class="filter-col filter-col-sm">
-            <label class="col-label">执行结果</label>
-            <select v-model="form.result" name="result" class="form-select">
+            <label :for="filterId + '-result'" class="col-label">执行结果</label>
+            <select :id="filterId + '-result'" v-model="form.result" name="result" class="form-select">
               <option value="">全部结果</option>
               <option value="success">成功</option>
               <option value="error">失败</option>
@@ -39,10 +39,11 @@
 
           <!-- 关键词搜索 -->
           <div class="filter-col filter-col-search">
-            <label class="col-label">关键词搜索</label>
+            <label :for="filterId + '-search'" class="col-label">关键词搜索</label>
             <div class="search-box">
               <Search :size="14" class="search-icon" />
               <input
+                :id="filterId + '-search'"
                 v-model="form.search"
                 name="search"
                 class="form-input"
@@ -63,6 +64,7 @@
             type="button"
             class="btn btn-secondary filter-toggle-btn"
             :class="{ active: showAdvanced }"
+            :aria-expanded="showAdvanced"
             @click="showAdvanced = !showAdvanced"
           >
             <SlidersHorizontal :size="14" />
@@ -101,8 +103,9 @@
           <div class="advanced-grid">
             <template v-if="scope !== 'project'">
               <div class="filter-col">
-                <label class="col-label">来源 IP</label>
+                <label :for="filterId + '-ip'" class="col-label">来源 IP</label>
                 <input
+                  :id="filterId + '-ip'"
                   v-model="form.ip"
                   name="ip"
                   class="form-input mono-text"
@@ -111,15 +114,16 @@
                 />
               </div>
               <div class="filter-col">
-                <label class="col-label">请求方法</label>
-                <select v-model="form.method" name="method" class="form-select">
+                <label :for="filterId + '-method'" class="col-label">请求方法</label>
+                <select :id="filterId + '-method'" v-model="form.method" name="method" class="form-select">
                   <option value="">全部方法</option>
                   <option v-for="method in methods" :key="method">{{ method }}</option>
                 </select>
               </div>
               <div class="filter-col">
-                <label class="col-label">HTTP 状态码</label>
+                <label :for="filterId + '-status'" class="col-label">HTTP 状态码</label>
                 <input
+                  :id="filterId + '-status'"
                   v-model="form.status"
                   name="status"
                   class="form-input"
@@ -133,8 +137,8 @@
 
             <template v-if="securityScope">
               <div class="filter-col">
-                <label class="col-label">防火墙策略</label>
-                <select v-model="form.firewall" name="firewall" class="form-select">
+                <label :for="filterId + '-firewall'" class="col-label">防火墙策略</label>
+                <select :id="filterId + '-firewall'" v-model="form.firewall" name="firewall" class="form-select">
                   <option value="">全部策略</option>
                   <option v-for="firewall in gatewayConfig?.firewalls" :key="firewall.id" :value="firewall.id">
                     {{ firewall.name }}
@@ -148,23 +152,24 @@
                 </select>
               </div>
               <div class="filter-col">
-                <label class="col-label">检测引擎</label>
-                <select v-model="form.engine" name="engine" class="form-select">
+                <label :for="filterId + '-engine'" class="col-label">检测引擎</label>
+                <select :id="filterId + '-engine'" v-model="form.engine" name="engine" class="form-select">
                   <option value="">全部引擎</option>
                   <option v-for="engine in engines" :key="engine" :value="engine">{{ engineLabel(engine) }}</option>
                 </select>
               </div>
               <div class="filter-col">
-                <label class="col-label">处理动作</label>
-                <select v-model="form.decision" name="decision" class="form-select">
+                <label :for="filterId + '-decision'" class="col-label">处理动作</label>
+                <select :id="filterId + '-decision'" v-model="form.decision" name="decision" class="form-select">
                   <option value="">全部动作</option>
                   <option value="block">拦截</option>
                   <option value="detect">仅记录</option>
                 </select>
               </div>
               <div class="filter-col">
-                <label class="col-label">检测规则编号</label>
+                <label :for="filterId + '-rule_id'" class="col-label">检测规则编号</label>
                 <input
+                  :id="filterId + '-rule_id'"
                   v-model="form.rule_id"
                   name="rule_id"
                   class="form-input"
@@ -177,21 +182,16 @@
             </template>
 
             <div class="filter-col">
-              <label class="col-label">开始时间</label>
-              <input v-model="form.from" name="from" class="form-input" type="datetime-local" />
+              <label :for="filterId + '-from'" class="col-label">开始时间</label>
+              <input :id="filterId + '-from'" v-model="form.from" name="from" class="form-input" type="datetime-local" />
             </div>
             <div class="filter-col">
-              <label class="col-label">结束时间</label>
-              <input v-model="form.to" name="to" class="form-input" type="datetime-local" />
+              <label :for="filterId + '-to'" class="col-label">结束时间</label>
+              <input :id="filterId + '-to'" v-model="form.to" name="to" class="form-input" type="datetime-local" />
             </div>
           </div>
         </div>
       </transition>
-
-      <div class="filter-quick-info">
-        <span class="quick-info-text">保留最多 5000 条实时日志 · 翻页保留快照 · 筛选或刷新读取最新记录</span>
-        <span v-if="dirty && data" class="dirty-badge">筛选条件已变更，点击「筛选」生效</span>
-      </div>
     </form>
     <p v-if="error" ref="errorElement" class="report-error" role="alert" tabindex="-1">
       {{ error }}{{ data ? '。当前显示上次成功查询的记录。' : '' }}
@@ -200,7 +200,7 @@
     <p v-if="data?.write_error" class="report-warning" role="alert">
       日志写入或清理失败，当前记录可能仅存在于内存，请检查日志目录权限与磁盘空间。
     </p>
-    <p v-if="dirty && data" class="report-note">筛选条件尚未应用，当前仍显示上次查询结果。</p>
+    <p v-if="dirty && data" class="report-note" role="status">筛选条件尚未应用，仍显示上次结果。</p>
     <div v-if="data" class="report-pagination">
       <span ref="resultElement" class="log-result" role="status" tabindex="-1"
         >共 {{ data.total }} 条 · 第 {{ data.page }} / {{ data.pages }} 页</span
@@ -366,7 +366,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, useId } from 'vue'
 import {
   ChevronDown,
   RefreshCw,
@@ -382,6 +382,7 @@ import { useGatewayStatus } from '@/composables/useGatewayStatus'
 import { useToast } from '@/composables/useToast'
 import '@/styles/reports.css'
 
+const filterId = useId()
 const props = defineProps({ scope: { type: String, required: true }, title: String })
 const { gatewayConfig, refreshConfig } = useGatewayStatus()
 const toast = useToast()
@@ -798,25 +799,6 @@ onUnmounted(() => controller.abort())
   transform: translateY(-8px);
 }
 
-.filter-quick-info {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  font-size: 11.5px;
-  color: var(--muted);
-  padding: 2px 2px 0;
-  flex-wrap: wrap;
-}
-
-.dirty-badge {
-  color: var(--brand);
-  font-weight: 600;
-  background: rgba(99, 102, 241, 0.1);
-  padding: 2px 8px;
-  border-radius: var(--radius-sm);
-}
-
 /* 详情弹窗样式 */
 .detail-dl {
   display: flex;
@@ -935,17 +917,6 @@ onUnmounted(() => controller.abort())
   .advanced-grid {
     grid-template-columns: 1fr !important;
     gap: 10px;
-  }
-
-  .filter-quick-info {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 6px;
-  }
-
-  .quick-info-text {
-    font-size: 11px;
-    line-height: 1.4;
   }
 
   .report-pagination {

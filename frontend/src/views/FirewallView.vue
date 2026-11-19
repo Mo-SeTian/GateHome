@@ -1,10 +1,7 @@
 <template>
   <div class="firewall-page animate-fade-in">
-    <div class="page-topbar">
-      <div>
-        <h1 class="page-title">防火墙与 WAF 攻击防护</h1>
-        <p class="page-subtitle">管理来源 IP / CIDR、规则订阅与 Coraza · OWASP CRS 防护，保存后立即生效</p>
-      </div>
+    <header class="report-heading">
+      <h1>防火墙与 WAF</h1>
       <div class="header-actions">
         <button class="btn btn-secondary" :disabled="loading || isSavingConfig" @click="reload">刷新</button>
         <button class="btn btn-secondary" @click="$router.push('/firewall-logs')">
@@ -14,7 +11,7 @@
           <Plus :size="15" /> 添加防火墙策略
         </button>
       </div>
-    </div>
+    </header>
     <p v-if="loading" role="status">正在读取防火墙配置…</p>
     <p v-if="loadError" class="error" role="alert">{{ loadError }}</p>
     <div class="strategy-tabs" role="group" aria-label="选择防火墙策略">
@@ -311,7 +308,6 @@ onUnmounted(() => controller.abort())
   flex-direction: column;
   gap: 20px;
 }
-.page-topbar,
 .policy-actions,
 .group-head,
 .summary-row {
@@ -320,16 +316,6 @@ onUnmounted(() => controller.abort())
   justify-content: space-between;
   gap: 12px;
   flex-wrap: wrap;
-}
-.page-title {
-  font-size: 22px;
-  font-weight: 700;
-  color: var(--ink);
-}
-.page-subtitle {
-  font-size: 13px;
-  color: var(--muted);
-  margin-top: 3px;
 }
 .header-actions,
 .strategy-tabs,

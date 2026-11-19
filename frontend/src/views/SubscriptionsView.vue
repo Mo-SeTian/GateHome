@@ -1,10 +1,7 @@
 <template>
   <div class="report-page subscriptions-page animate-fade-in">
-    <div class="report-heading">
-      <div>
-        <h1>IP 规则订阅管理</h1>
-        <p>自动获取 IPv4 / IPv6 / CIDR 规则，更新后应用到引用它的防火墙 IP 组</p>
-      </div>
+    <header class="report-heading">
+      <h1>IP 规则订阅</h1>
       <div class="report-actions">
         <button class="btn btn-secondary" :disabled="loading || isSavingConfig" @click="reload">
           刷新状态
@@ -20,7 +17,7 @@
           <Plus :size="15" /> 添加 IP 订阅
         </button>
       </div>
-    </div>
+    </header>
     <p v-if="loading && !gatewayConfig" role="status">正在读取订阅配置…</p>
     <p v-if="error || statusError" class="report-error" role="alert">{{ error || statusError }}</p>
     <SpotlightCard class="report-panel preset-panel">

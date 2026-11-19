@@ -6,20 +6,17 @@
         <Menu :size="20" />
       </button>
 
-      <!-- Page Breadcrumb & Title -->
-      <div class="breadcrumb-container">
-        <span class="crumb-root">GateHome</span>
-        <span class="crumb-separator">/</span>
-        <span class="crumb-current">{{ currentTitle }}</span>
-      </div>
+      <span class="current-page">{{ currentTitle }}</span>
     </div>
 
-    <!-- Center Search Launcher (⌘K) -->
     <div class="header-center">
-      <button class="cmdk-trigger-btn" @click="openCmdk">
-        <Search :size="15" class="search-icon" />
-        <span class="search-placeholder">搜索页面与快捷操作...</span>
-        <kbd class="shortcut-pill">⌘K</kbd>
+      <button
+        class="cmdk-trigger-btn" type="button" aria-haspopup="dialog"
+        aria-keyshortcuts="Meta+K Control+K" @click="openCmdk"
+      >
+        <Search :size="15" class="search-icon" aria-hidden="true" />
+        <span class="search-placeholder">搜索页面与操作</span>
+        <kbd class="shortcut-pill" aria-hidden="true">⌘K</kbd>
       </button>
     </div>
 
@@ -62,11 +59,11 @@
         <button 
           class="user-profile-badge" 
           @click="isDropdownOpen = !isDropdownOpen"
+          :aria-label="`账户菜单，${username}`"
           :aria-expanded="isDropdownOpen"
         >
-          <div class="user-avatar">
+          <div class="user-avatar" aria-hidden="true">
             <span>{{ username.slice(0, 1).toUpperCase() }}</span>
-            <span class="avatar-status-dot" />
           </div>
           <span class="username">{{ username }}</span>
           <ChevronDown :size="14" class="chevron-icon" :class="{ 'rotate-180': isDropdownOpen }" />
@@ -96,7 +93,7 @@
               <button class="menu-item-btn" @click="handleToggleThemeFromMenu">
                 <Sun v-if="theme === 'dark'" :size="15" class="menu-item-icon" />
                 <Moon v-else :size="15" class="menu-item-icon" />
-                <span>外观模式: {{ theme === 'dark' ? '深色黑曜石' : '浅色晨曦' }}</span>
+                <span>{{ theme === 'dark' ? '切换为浅色模式' : '切换为深色模式' }}</span>
               </button>
 
               <button class="menu-item-btn" @click="handleOpenCmdkFromMenu">
@@ -196,7 +193,7 @@ onUnmounted(() => {
 }
 
 .header-left {
-  display: flex;
+  display: none;
   align-items: center;
   gap: 12px;
 }
@@ -214,24 +211,8 @@ onUnmounted(() => {
   background: var(--card-hover-bg);
 }
 
-.breadcrumb-container {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+.current-page {
   font-size: 13.5px;
-}
-
-.crumb-root {
-  color: var(--faint);
-  font-weight: 500;
-}
-
-.crumb-separator {
-  color: var(--faint);
-  font-size: 12px;
-}
-
-.crumb-current {
   color: var(--ink);
   font-weight: 600;
 }
@@ -411,18 +392,6 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  position: relative;
-}
-
-.avatar-status-dot {
-  position: absolute;
-  bottom: -1px;
-  right: -1px;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--ok);
-  border: 1.5px solid var(--canvas);
 }
 
 .username {
@@ -573,8 +542,8 @@ body.theme-dark .user-dropdown-popover {
     padding-inline: 14px;
     gap: 8px;
   }
-  .header-left, .breadcrumb-container { min-width: 0; }
-  .crumb-current {
+  .header-left { display: flex; min-width: 0; }
+  .current-page {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -625,8 +594,5 @@ body.theme-dark .user-dropdown-popover {
     width: 12px;
     height: 12px;
   }
-}
-@media (max-width: 420px) {
-  .crumb-root, .crumb-separator { display: none; }
 }
 </style>

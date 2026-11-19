@@ -1,10 +1,7 @@
 <template>
   <div class="ip-blocks-page animate-fade-in">
-    <div class="page-topbar">
-      <div>
-        <h1 class="page-title">IP 拦截名单</h1>
-        <p class="page-subtitle">查看账号验证、安全防护及管理员冻结记录，按反代规则独立生效，到期自动解除</p>
-      </div>
+    <header class="report-heading">
+      <h1>IP 拦截名单</h1>
       <div class="header-actions">
         <button
           class="btn btn-secondary"
@@ -17,7 +14,7 @@
           <ShieldAlert :size="15" /> 手动冻结 IP
         </button>
       </div>
-    </div>
+    </header>
     <p v-if="loading && !view" role="status">正在读取冻结记录…</p>
     <p v-if="loadError" class="error" role="alert">
       {{ loadError }}{{ view ? '。当前显示上次获取的记录。' : '' }}
@@ -358,7 +355,6 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 20px;
 }
-.page-topbar,
 .filter-bar,
 .freeze-head,
 .freeze-footer,
@@ -369,16 +365,6 @@ onUnmounted(() => {
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 12px;
-}
-.page-title {
-  font-size: 22px;
-  font-weight: 700;
-  color: var(--ink);
-}
-.page-subtitle {
-  font-size: 13px;
-  color: var(--muted);
-  margin-top: 3px;
 }
 .header-actions {
   display: flex;

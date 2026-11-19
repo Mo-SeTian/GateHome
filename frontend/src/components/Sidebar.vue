@@ -19,7 +19,7 @@
         <img class="brand-icon" src="/favicon.svg" width="32" height="32" alt="" />
         <div class="brand-info">
           <span class="brand-title">GateHome</span>
-          <span class="brand-version"><span class="brand-caption">家庭网关 · </span>{{ gatewayVersion }}</span>
+          <span class="brand-version">{{ gatewayVersion }}</span>
         </div>
         <button class="mobile-close-btn" aria-label="关闭侧边栏导航" @click="closeSidebar">
           <X :size="18" />
@@ -38,7 +38,6 @@
           <router-link to="/routes" class="nav-link" active-class="active" @click="onNavClick">
             <Network :size="14" class="nav-icon" />
             <span class="nav-text">反向代理</span>
-            <span v-if="gatewayConfig" class="nav-badge brand">{{ gatewayConfig.routes?.length ?? 0 }}</span>
           </router-link>
           <router-link to="/icons" class="nav-link" active-class="active" @click="onNavClick">
             <Images :size="14" class="nav-icon" />
@@ -56,10 +55,14 @@
             <Globe :size="14" class="nav-icon" />
             <span class="nav-text">动态域名</span>
           </router-link>
-          <router-link to="/certificates" class="nav-link" active-class="active" @click="onNavClick">
+          <router-link
+            to="/certificates" class="nav-link" active-class="active"
+            :aria-label="certificatesExpiring ? `SSL 证书，${certificatesExpiring} 张即将到期或已过期` : undefined"
+            @click="onNavClick"
+          >
             <Lock :size="14" class="nav-icon" />
             <span class="nav-text">SSL 证书</span>
-            <span v-if="certificatesExpiring" class="nav-badge warn" title="30 天内到期或已过期">{{ certificatesExpiring }}</span>
+            <span v-if="certificatesExpiring" class="nav-badge" title="30 天内到期或已过期">{{ certificatesExpiring }}</span>
           </router-link>
           <router-link to="/subscriptions" class="nav-link" active-class="active" @click="onNavClick">
             <Download :size="14" class="nav-icon" />
@@ -68,7 +71,6 @@
           <router-link to="/access" class="nav-link" active-class="active" @click="onNavClick">
             <ShieldAlert :size="14" class="nav-icon" />
             <span class="nav-text">防火墙管理</span>
-            <span v-if="firewallAttached" class="nav-status-dot active" title="已关联启用的反代规则" />
           </router-link>
         </div>
 
@@ -98,7 +100,6 @@
           <router-link to="/mcp" class="nav-link" active-class="active" @click="onNavClick">
             <Bot :size="14" class="nav-icon" />
             <span class="nav-text">AI 管理</span>
-            <span class="nav-badge ai">AI</span>
           </router-link>
           <router-link to="/updates" class="nav-link" active-class="active" @click="onNavClick">
             <RefreshCw :size="14" class="nav-icon" />
@@ -150,11 +151,10 @@ import { useGatewayStatus } from '@/composables/useGatewayStatus'
 import { useLogout, useSession } from '@/composables/useSession'
 
 const { isSidebarOpen, closeSidebar } = useAppStore()
-const { gatewayConfig, gatewayStatus, gatewayVersion, gatewayState } = useGatewayStatus()
+const { gatewayStatus, gatewayVersion, gatewayState } = useGatewayStatus()
 const { isLoggingOut } = useSession()
 const logout = useLogout()
 const adminAddress = window.location.host
-const firewallAttached = computed(() => gatewayConfig.value?.routes?.some(route => route.enabled && route.firewall_id))
 const certificatesExpiring = computed(() => (gatewayStatus.value?.certificates ?? []).filter(cert =>
   cert.ready && Date.parse(cert.not_after) <= Date.now() + 30 * 86400000
 ).length)
@@ -338,45 +338,11 @@ const handleLogout = () => {
   line-height: 1.2;
   padding: 1.5px 6.5px;
   border-radius: var(--radius-pill);
-  background: var(--strip-bg);
-  border: 1px solid var(--line);
-  color: var(--muted);
-  font-family: var(--mono);
-  font-weight: 600;
-  flex-shrink: 0;
-}
-
-.nav-badge.brand {
-  background: rgba(99, 102, 241, 0.2);
-  color: var(--brand-light);
-  border-color: rgba(99, 102, 241, 0.35);
-}
-
-.nav-badge.warn {
   background: rgba(245, 158, 11, 0.2);
   color: var(--warn);
-  border-color: rgba(245, 158, 11, 0.35);
-}
-
-.nav-badge.bad {
-  background: rgba(244, 63, 94, 0.2);
-  color: var(--bad);
-  border-color: rgba(244, 63, 94, 0.35);
-}
-
-.nav-badge.ai {
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.3), rgba(6, 182, 212, 0.3));
-  color: #38bdf8;
-  border: 1px solid rgba(6, 182, 212, 0.4);
-  font-weight: 700;
-}
-
-.nav-status-dot.active {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--ok);
-  box-shadow: var(--ok-glow);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  font-family: var(--mono);
+  font-weight: 600;
   flex-shrink: 0;
 }
 
@@ -468,9 +434,6 @@ const handleLogout = () => {
 
 /* ================= Mobile Breakpoints ================= */
 @media (max-width: 1023px) {
-  .brand-caption {
-    display: none;
-  }
   .app-sidebar {
     transform: translateX(-105%);
     visibility: hidden;

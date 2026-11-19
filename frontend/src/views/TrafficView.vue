@@ -1,11 +1,8 @@
 <template>
   <div class="report-page animate-fade-in">
-    <div class="report-heading">
-      <div>
-        <h1>流量统计</h1>
-        <p>查看反向代理与端口转发的上传量和下载量，按小时汇总，保留最近 30 天</p>
-      </div>
-    </div>
+    <header class="report-heading">
+      <h1>流量统计</h1>
+    </header>
     <form class="report-form" @submit.prevent="load">
       <label>流量类型
         <select v-model="form.source" name="source" class="form-select" @change="changeSource">

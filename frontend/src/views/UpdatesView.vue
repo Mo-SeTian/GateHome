@@ -1,10 +1,7 @@
 <template>
   <div class="report-page animate-fade-in">
     <header class="report-heading">
-      <div>
-        <h1>版本更新与回滚</h1>
-        <p>检查正式版或 Beta，校验更新包，并查看更新前的真实备份</p>
-      </div>
+      <h1>版本更新与回滚</h1>
       <button class="btn btn-secondary" :disabled="!!busy || loading" @click="reload">刷新维护状态</button>
     </header>
     <p v-if="error" class="report-error" role="alert">{{ error }}</p>

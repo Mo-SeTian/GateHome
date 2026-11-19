@@ -1,10 +1,7 @@
 <template>
   <div class="report-page ddns-page animate-fade-in">
-    <div class="report-heading">
-      <div>
-        <h1>动态域名解析 DDNS</h1>
-        <p>每组独立配置 Cloudflare 账户与域名，自动同步 IPv4 / IPv6，仅修改 DNS 灰云记录</p>
-      </div>
+    <header class="report-heading">
+      <h1>动态域名（DDNS）</h1>
       <div class="report-actions">
         <button class="btn btn-secondary" :disabled="loading || isSavingConfig" @click="reload(true)">
           刷新配置与解析</button
@@ -28,7 +25,7 @@
           <Plus :size="15" /> 添加 DDNS 组
         </button>
       </div>
-    </div>
+    </header>
     <p v-if="error" class="report-error" role="alert">{{ error }}</p>
     <p v-if="pollError || statusError" class="report-error" role="alert">{{ pollError || statusError }}</p>
     <PublicIPMonitor v-if="gatewayConfig" @network="network = $event" />

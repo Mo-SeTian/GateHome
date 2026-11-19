@@ -1,10 +1,7 @@
 <template>
   <div class="report-page animate-fade-in">
     <header class="report-heading">
-      <div>
-        <h1>备份与恢复</h1>
-        <p>导出加密整站备份、配置 WebDAV 计划，并在预检后恢复数据</p>
-      </div>
+      <h1>备份与恢复</h1>
       <button class="btn btn-secondary" :disabled="!!busy || loading" @click="reload">重新读取</button>
     </header>
     <p v-if="error" class="report-error" role="alert">{{ error }}</p>
