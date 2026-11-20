@@ -51,6 +51,11 @@ export function formatBytes(value) {
   return `${amount.toLocaleString(undefined, { maximumFractionDigits: unit ? 2 : 0 })} ${units[unit]}`
 }
 
+export function formatByteRate(value) {
+  if (value == null) return '—'
+  return value > 0 && value < 1 ? '< 1 B/s' : formatBytes(value) + '/s'
+}
+
 export function engineLabel(engine) {
   return { ip: 'IP 规则', waf: 'CRS', custom: 'HTTP 规则', rate: '访问限速', system: '系统保护', auth: '账号验证', freeze: 'IP 冻结' }[engine] || engine
 }

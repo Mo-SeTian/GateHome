@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"bufio"
+	"context"
 	"crypto/tls"
 	"io"
 	"net"
@@ -9,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func testRoute(host, upstream string) Route {
@@ -122,17 +124,27 @@ func TestWebSocketUpgradeAndDuplex(t *testing.T) {
 		line, _ := rw.ReadString('\n')
 		rw.WriteString(line)
 		rw.Flush()
+		if _, err := io.Copy(io.Discard, rw); err == nil {
+			rw.WriteString("after half-close\n")
+			rw.Flush()
+		}
 	}))
 	defer backend.Close()
 	c := DefaultConfig()
 	c.Routes = []Route{testRoute("ws.example.com", backend.URL)}
-	proxy := httptest.NewServer(NewProxy(c, nil))
+	p := NewProxy(c, nil)
+	proxy := httptest.NewUnstartedServer(p)
+	proxy.Config.ConnContext = ProxyConnContext
+	proxy.Start()
 	defer proxy.Close()
 	conn, err := net.Dial("tcp", strings.TrimPrefix(proxy.URL, "http://"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer conn.Close()
+	if err := conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
 	io.WriteString(conn, "GET /socket HTTP/1.1\r\nHost: ws.example.com\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n")
 	r := bufio.NewReader(conn)
 	resp, err := http.ReadResponse(r, nil)
@@ -142,10 +154,126 @@ func TestWebSocketUpgradeAndDuplex(t *testing.T) {
 	if resp.StatusCode != 101 {
 		t.Fatalf("upgrade failed: %d", resp.StatusCode)
 	}
-	io.WriteString(conn, "bidirectional-test\n")
+	const payload = "bidirectional-test\n"
+	io.WriteString(conn, payload)
 	line, err := r.ReadString('\n')
-	if err != nil || line != "bidirectional-test\n" {
+	if err != nil || line != payload {
 		t.Fatal("duplex stream did not pass through")
+	}
+	if got := p.liveTraffic.status().Total.Active; got != 1 {
+		t.Fatalf("active upgraded connections = %d", got)
+	}
+	if err := conn.(*net.TCPConn).CloseWrite(); err != nil {
+		t.Fatal(err)
+	}
+	if line, err := r.ReadString('\n'); err != nil || line != "after half-close\n" {
+		t.Fatalf("proxy did not preserve the upgrade half-close: %q, %v", line, err)
+	}
+	waitForProxyConnectionsToClose(t, p)
+	p.liveTraffic.sample(time.Second)
+	if got := p.liveTraffic.status().Total; got != (proxyTrafficMetrics{
+		UploadBPS: float64(len(payload)), DownloadBPS: float64(len(payload + "after half-close\n")),
+	}) {
+		t.Fatalf("upgraded traffic = %+v", got)
+	}
+}
+
+func TestProxyLiveTrafficDeduplicatesHTTP2Connections(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	entered := make(chan struct{}, 4)
+	release := make(chan struct{})
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil || string(body) != "request" {
+			t.Errorf("unexpected upstream body: %q, %v", body, err)
+		}
+		entered <- struct{}{}
+		select {
+		case <-release:
+			_, _ = io.WriteString(w, "response")
+		case <-r.Context().Done():
+		}
+	}))
+	defer upstream.Close()
+	c := DefaultConfig()
+	first := testRoute("first.example.com", upstream.URL)
+	first.ID = "first"
+	second := testRoute("second.example.com", upstream.URL)
+	second.ID = "second"
+	c.Routes = []Route{first, second}
+	p := NewProxy(c, nil)
+	proxy := httptest.NewUnstartedServer(p)
+	proxy.EnableHTTP2 = true
+	proxy.Config.ConnContext = ProxyConnContext
+	proxy.StartTLS()
+	defer proxy.Close()
+	defer cancel()
+
+	transport := proxy.Client().Transport.(*http.Transport).Clone()
+	defer transport.CloseIdleConnections()
+	separateClient := &http.Client{Transport: transport}
+	done := make(chan error, 4)
+	for i, route := range []Route{first, first, second, second} {
+		client := proxy.Client()
+		if i == 3 {
+			client = separateClient
+		}
+		req, err := http.NewRequestWithContext(ctx, "POST", proxy.URL, strings.NewReader("request"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Host = route.Host
+		go func() {
+			res, err := client.Do(req)
+			if err != nil {
+				done <- err
+				return
+			}
+			defer res.Body.Close()
+			if res.ProtoMajor != 2 || res.StatusCode != http.StatusOK {
+				t.Errorf("unexpected response: %s %s", res.Proto, res.Status)
+			}
+			_, err = io.Copy(io.Discard, res.Body)
+			done <- err
+		}()
+		select {
+		case <-entered:
+		case <-ctx.Done():
+			t.Fatal("request did not reach upstream")
+		}
+	}
+
+	live := p.liveTraffic.status()
+	if live.Sampled || live.Total.Active != 2 || live.Routes[first.ID].Active != 1 || live.Routes[second.ID].Active != 2 {
+		t.Fatalf("two connections with four streams counted incorrectly: %+v", live)
+	}
+	close(release)
+	for range 4 {
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+	}
+	waitForProxyConnectionsToClose(t, p)
+	p.liveTraffic.sample(time.Second)
+	live = p.liveTraffic.status()
+	if !live.Sampled || live.Total != (proxyTrafficMetrics{UploadBPS: 28, DownloadBPS: 32}) ||
+		live.Routes[first.ID] != (proxyTrafficMetrics{UploadBPS: 14, DownloadBPS: 16}) ||
+		live.Routes[second.ID] != (proxyTrafficMetrics{UploadBPS: 14, DownloadBPS: 16}) {
+		t.Fatalf("unexpected per-route and total rates: %+v", live)
+	}
+	p.liveTraffic.sample(time.Second)
+	if idle := p.liveTraffic.status(); !idle.Sampled || idle.Total != (proxyTrafficMetrics{}) || len(idle.Routes) != 0 {
+		t.Fatalf("idle connections or an expired sample still shown: %+v", idle)
+	}
+}
+
+func waitForProxyConnectionsToClose(t *testing.T, p *Proxy) {
+	t.Helper()
+	for deadline := time.Now().Add(time.Second); p.liveTraffic.status().Total.Active != 0; {
+		if time.Now().After(deadline) {
+			t.Fatal("active connections were not released")
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 

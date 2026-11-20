@@ -552,6 +552,7 @@ func (a *Admin) status(w http.ResponseWriter, r *http.Request) {
 		"listeners":         a.ports.Groups,
 		"forward_listeners": a.ports.Forwards,
 		"forward_traffic":   a.forwarder.trafficStatus(),
+		"proxy_traffic":     a.proxy.liveTraffic.status(),
 		"restart_required":  listenerSignature(c) != listenerSignature(a.ports),
 		"subscriptions":     subscriptions,
 		"log_storage":       a.logs.StorageStatus(),

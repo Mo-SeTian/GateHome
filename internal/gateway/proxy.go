@@ -2,7 +2,6 @@ package gateway
 
 import (
 	"fmt"
-	"golang.org/x/sync/semaphore"
 	"io"
 	"log"
 	"net"
@@ -13,10 +12,13 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"golang.org/x/sync/semaphore"
 )
 
 type proxyRoute struct {
 	route     Route
+	trafficID string
 	handler   http.Handler
 	firewall  *compiledFirewall
 	groupName string
@@ -33,6 +35,7 @@ type Proxy struct {
 	subscriptions  *Subscriptions
 	logs           *Logs
 	traffic        *Traffic
+	liveTraffic    proxyLiveTraffic
 	defense        *IPDefense
 	wafSlots       chan struct{}
 	wafMemory      *semaphore.Weighted
@@ -84,6 +87,7 @@ func (p *Proxy) configurePrepared(c Config, hashes map[string]string, firewalls 
 		u, _ := url.Parse(r.Upstream)
 		upstream := u
 		adminUpstream := isAdminUpstream(upstream, p.adminPort, adminAddresses)
+		trafficID := proxyTrafficID(r)
 		h := &httputil.ReverseProxy{
 			Rewrite: func(pr *httputil.ProxyRequest) {
 				pr.SetURL(upstream)
@@ -105,7 +109,15 @@ func (p *Proxy) configurePrepared(c Config, hashes map[string]string, firewalls 
 				if !adminUpstream {
 					stripAdminResponseCookies(response)
 				}
-				return stripRouteResponseCookies(response)
+				if err := stripRouteResponseCookies(response); err != nil {
+					return err
+				}
+				if response.StatusCode == http.StatusSwitchingProtocols {
+					if body, ok := response.Body.(io.ReadWriteCloser); ok {
+						response.Body = proxyUpgradeTraffic{ReadWriteCloser: body, live: &p.liveTraffic, id: trafficID}
+					}
+				}
+				return nil
 			},
 			ErrorLog: log.New(io.Discard, "", 0),
 			ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
@@ -117,7 +129,7 @@ func (p *Proxy) configurePrepared(c Config, hashes map[string]string, firewalls 
 			},
 		}
 		group, _ := c.Group(r.GroupID)
-		entry := proxyRoute{route: r, handler: h, firewall: firewalls[r.FirewallID], groupName: group.Name}
+		entry := proxyRoute{route: r, trafficID: trafficID, handler: h, firewall: firewalls[r.FirewallID], groupName: group.Name}
 		if r.Auth.Enabled {
 			key := routeKey(r)
 			entry.auth = previous[key].auth
@@ -266,12 +278,11 @@ func (p *Proxy) serveGroup(groupID string, w http.ResponseWriter, r *http.Reques
 	}
 	outcome = "forwarded"
 	logged.authResult = ""
-	if p.traffic != nil {
-		logged.traffic, logged.trafficRoute = p.traffic, &route.route
-		if r.Body != nil && r.Body != http.NoBody {
-			// Wrap after WAF inspection so replayed data is counted once.
-			r.Body = trafficRequestBody{ReadCloser: r.Body, traffic: p.traffic, route: &route.route}
-		}
+	defer p.liveTraffic.begin(r.Context(), route.trafficID)()
+	logged.traffic = &proxyTrafficCounter{live: &p.liveTraffic, history: p.traffic, route: &route.route, id: route.trafficID}
+	if r.Body != nil && r.Body != http.NoBody {
+		// Wrap after WAF inspection so replayed data is counted once.
+		r.Body = trafficRequestBody{ReadCloser: r.Body, counter: logged.traffic}
 	}
 	route.handler.ServeHTTP(w, r)
 }

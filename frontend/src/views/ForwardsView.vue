@@ -206,7 +206,7 @@ import { ArrowRight, Edit3, Plus, Trash2, X } from 'lucide-vue-next'
 import SpotlightCard from '@/components/SpotlightCard.vue'
 import RestartNotice from '@/components/RestartNotice.vue'
 import { forwardState, replaceConfigItem } from '@/api/configuration'
-import { formatBytes } from '@/api/reports'
+import { formatByteRate } from '@/api/reports'
 import { useGatewayStatus, useStatusPolling } from '@/composables/useGatewayStatus'
 import { useToast } from '@/composables/useToast'
 
@@ -244,9 +244,7 @@ const liveTraffic = computed(() => {
 })
 
 function formatRate(sample, direction) {
-  if (!sample.sampled) return '—'
-  const rate = sample[direction + '_bytes_per_second']
-  return rate > 0 && rate < 1 ? '< 1 B/s' : formatBytes(rate) + '/s'
+  return formatByteRate(sample.sampled ? sample[direction + '_bytes_per_second'] : null)
 }
 const protocols = [
   { value: '', label: '全部协议' },

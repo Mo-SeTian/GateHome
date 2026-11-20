@@ -192,6 +192,7 @@ func run() error {
 			tlsGetters = append(tlsGetters, certs.ForGroup(group.ID))
 		}
 	}
+	proxyListenerEnd := len(handlers)
 	if c.SunPanel.Enabled {
 		addresses = append(addresses, ":"+strconv.Itoa(c.SunPanel.Port))
 		handlers = append(handlers, admin.SunPanelHandler())
@@ -218,10 +219,14 @@ func run() error {
 	}
 	defer forwards.Close()
 	admin.SetPortForwarder(forwards)
+	proxy.StartTrafficSampling(ctx)
 	servers := []*http.Server{}
 	errorsCh := make(chan error, len(listeners))
 	for i, listener := range listeners {
 		server := &http.Server{Handler: handlers[i], ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 120 * time.Second, MaxHeaderBytes: 64 << 10, ErrorLog: log.New(io.Discard, "", 0)}
+		if i > 0 && i < proxyListenerEnd {
+			server.ConnContext = gateway.ProxyConnContext
+		}
 		servers = append(servers, server)
 		if tlsGetters[i] != nil {
 			server.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12, GetCertificate: tlsGetters[i]}

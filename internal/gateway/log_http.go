@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"net"
 	"net/http"
-	"time"
 )
 
 type loggedResponseWriter struct {
@@ -14,8 +13,7 @@ type loggedResponseWriter struct {
 	authResult    string
 	authMessage   string
 	freezeCreated bool
-	traffic       *Traffic
-	trafficRoute  *Route
+	traffic       *proxyTrafficCounter
 }
 
 func (w *loggedResponseWriter) WriteHeader(status int) {
@@ -35,7 +33,7 @@ func (w *loggedResponseWriter) Write(b []byte) (int, error) {
 	}
 	n, err := w.ResponseWriter.Write(b)
 	if w.traffic != nil {
-		w.traffic.add(w.trafficRoute, 0, n, time.Now())
+		w.traffic.record(0, n)
 	}
 	return n, err
 }

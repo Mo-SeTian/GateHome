@@ -35,6 +35,15 @@
     <p v-if="loadError" class="page-error" role="alert">{{ loadError }}</p>
     <p v-if="loading" role="status">正在读取反代配置…</p>
 
+    <section class="proxy-live-summary" aria-labelledby="proxy-live-title">
+      <header>
+        <h2 id="proxy-live-title">反代实时汇总</h2>
+        <span v-if="statusError" role="status">实时数据暂不可用</span>
+        <span v-else>速率 · 近 5 秒平均</span>
+      </header>
+      <ProxyTrafficMetrics :sample="liveTraffic?.total" :sampled="liveTraffic?.sampled" />
+    </section>
+
     <div class="filter-bar">
       <div class="chips-group" role="group" aria-label="筛选反代服务">
         <button
@@ -168,6 +177,11 @@
               <span v-if="route.firewall_id" class="feature-badge fw">{{ firewallName(route.firewall_id) }}</span>
               <span v-if="route.auth.enabled" class="feature-badge auth"><Key :size="10" /> 账号保护</span>
             </div>
+            <ProxyTrafficMetrics
+              class="route-traffic-metrics"
+              :sample="liveTraffic ? (liveTraffic.routes[route.id || routeKey(route)] ?? idleTraffic) : undefined"
+              :sampled="liveTraffic?.sampled"
+            />
             <div class="card-actions">
               <button
                 type="button" class="health-detail" aria-haspopup="dialog"
@@ -528,17 +542,19 @@ import {
 import SpotlightCard from '@/components/SpotlightCard.vue'
 import RestartNotice from '@/components/RestartNotice.vue'
 import RouteImagePicker from '@/components/RouteImagePicker.vue'
+import ProxyTrafficMetrics from '@/components/ProxyTrafficMetrics.vue'
 import { routeImageUrl } from '@/api/icons'
 import ServiceDiscovery from '@/components/ServiceDiscovery.vue'
 import { adminApi } from '@/api/admin'
 import { defaultRouteTLS, replaceConfigItem, routeAccessURL, routeHost, routeKey, routeUsesFullHost } from '@/api/configuration'
-import { useGatewayStatus } from '@/composables/useGatewayStatus'
+import { useGatewayStatus, useStatusPolling } from '@/composables/useGatewayStatus'
 import { useToast } from '@/composables/useToast'
 
 const {
   gatewayConfig,
   gatewayConfigSnapshot,
   gatewayStatus,
+  statusError,
   isSavingConfig,
   refreshConfig,
   refreshStatus,
@@ -549,6 +565,8 @@ const currentRoute = useRoute()
 const router = useRouter()
 const routes = computed(() => gatewayConfig.value?.routes ?? [])
 const proxyGroups = computed(() => gatewayConfig.value?.groups ?? [])
+const liveTraffic = computed(() => statusError.value ? null : gatewayStatus.value?.proxy_traffic)
+const idleTraffic = { upload_bytes_per_second: 0, download_bytes_per_second: 0, active: 0 }
 const selectedGroup = ref('ALL')
 const searchQuery = ref('')
 const loading = ref(false)
@@ -916,6 +934,7 @@ watch(
   { immediate: true }
 )
 let healthTimer
+useStatusPolling()
 onMounted(() => {
   reload()
   healthTimer = setInterval(refreshHealth, 30000)
@@ -1026,6 +1045,25 @@ onUnmounted(() => {
   color: var(--faint);
 }
 .routes-page { display: flex; flex-direction: column; gap: 20px; }
+.proxy-live-summary {
+  --proxy-metric-size: clamp(17px, 2vw, 24px);
+  display: grid;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--card-bg);
+}
+.proxy-live-summary header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 12px;
+  flex-wrap: wrap;
+}
+.proxy-live-summary h2 { color: var(--ink); font-size: 15px; }
+.proxy-live-summary header span { color: var(--muted); font-size: 12px; }
+.route-traffic-metrics { padding-bottom: 8px; }
 
 .filter-bar { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
 .chips-group { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }

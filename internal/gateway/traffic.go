@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -241,16 +240,4 @@ func (t *Traffic) reportMatching(from, to time.Time, id string, match func(strin
 		return a.ID < b.ID
 	})
 	return result
-}
-
-type trafficRequestBody struct {
-	io.ReadCloser
-	traffic *Traffic
-	route   *Route
-}
-
-func (b trafficRequestBody) Read(p []byte) (int, error) {
-	n, err := b.ReadCloser.Read(p)
-	b.traffic.add(b.route, n, 0, time.Now())
-	return n, err
 }
