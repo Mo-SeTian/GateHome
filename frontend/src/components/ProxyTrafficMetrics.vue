@@ -28,6 +28,7 @@ defineProps({ sample: Object, sampled: Boolean })
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
   margin: 0;
+  text-align: center;
 }
 .proxy-metrics dt { color: var(--muted); font-size: 12px; }
 .proxy-metrics dd {
