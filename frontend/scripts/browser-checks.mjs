@@ -488,14 +488,14 @@ try {
   console.log('PASS route copy compatibility: denied Clipboard API falls back, rejected copy reports failure, secure-context API still works')
   await button('编辑').last().click()
   await dialog().locator('[name=auth_enabled]').uncheck()
-  await dialog().locator('[name=clear_route_password]').check()
+  assert.equal(await dialog().locator('[name=clear_route_password]').count(), 0)
   await dialog().getByRole('button', { name: '保存路由', exact: true }).click()
   await page.waitForFunction(() => !document.querySelector('dialog[open]'))
   saved = await api('config')
-  assert.equal(saved.route_passwords_configured[created.group_id + '/' + created.host], false)
+  assert.equal(saved.route_passwords_configured[created.group_id + '/' + created.host], true)
   await page.getByRole('link', { name: '查看流量', exact: true }).click()
   await page.waitForFunction(id => document.querySelector('select[name=rule]')?.value === id, created.id)
-  console.log('PASS real HTTP save: nested prefix, group TLS defaults, password clear and route traffic link')
+  console.log('PASS real HTTP save: nested prefix, group TLS defaults, password retention and route traffic link')
 
   const routesBefore = await api('config')
   const httpFixture = {
@@ -687,6 +687,9 @@ try {
     await page.screenshot({ path: path.join(process.env.GATEHOME_BROWSER_ARTIFACTS, 'account-desktop.png') })
   }
   assert.equal(await page.locator('#account-current-password').evaluate(el => el === document.activeElement), true, 'account current password did not receive focus')
+  const currentPasswordEye = accountDialog.locator('[aria-controls="account-current-password"]')
+  await currentPasswordEye.click()
+  assert.equal(await page.locator('#account-current-password').getAttribute('type'), 'text')
   for (const key of ['Tab', 'Shift+Tab']) {
     for (let n = 0; n < 10; n++) {
       await page.keyboard.press(key)
@@ -701,6 +704,7 @@ try {
   await page.locator('.user-profile-badge').click()
   await button('修改管理账户密码').click()
   await accountDialog.waitFor()
+  assert.equal(await page.locator('#account-current-password').getAttribute('type'), 'password')
   await accountDialog.getByRole('button', { name: '取消', exact: true }).click()
   await page.waitForFunction(() => !document.querySelector('dialog[open]'))
   assert.equal(await page.locator('.user-profile-badge').evaluate(el => el === document.activeElement), true, 'account menu close did not restore the profile trigger')

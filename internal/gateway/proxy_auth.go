@@ -279,6 +279,21 @@ func (g *routeGate) login(w http.ResponseWriter, r *http.Request, route Route) {
 	http.Redirect(w, r, destination, http.StatusSeeOther)
 }
 
+const routePasswordScript = `const password = document.getElementById('password');
+const eye = document.getElementById('password-eye');
+eye.hidden = false;
+function showPassword(show) {
+  password.type = show ? 'text' : 'password';
+  eye.setAttribute('aria-pressed', String(show));
+  eye.setAttribute('aria-label', show ? '隐藏密码' : '显示密码');
+}
+eye.addEventListener('click', () => showPassword(password.type === 'password'));
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) showPassword(false);
+});`
+
+var routePasswordScriptHash = sha256.Sum256([]byte(routePasswordScript))
+
 var routeLoginPage = template.Must(template.New("route-login").Parse(`<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>服务访问验证 · GateHome</title><link rel="stylesheet" href="/.gatehouse-auth/style.css"></head>
 <body><main class="auth-card"><div class="brand"><span class="brand-mark" aria-hidden="true">G</span><span>GateHome <small>服务访问验证</small></span></div><div class="service-label">PROTECTED SERVICE</div><h1>{{.Name}}</h1><p class="domain">{{.Host}}</p>
@@ -290,10 +305,12 @@ var routeLoginPage = template.Must(template.New("route-login").Parse(`<!doctype 
   <path d="M9 12h12l-3 -3" />
   <path d="M18 15l3 -3" />
 </svg>退出此服务验证</button></form>
-{{else}}<p class="intro">此服务已开启独立账号验证。请输入为本服务设置的访问账号和密码。</p><form action="/.gatehouse-auth" method="post"><input type="hidden" name="return" value="{{.Return}}"><label for="username">访问账号</label><input id="username" name="username" autocomplete="username" maxlength="64" required autofocus><label for="password">访问密码</label><input id="password" name="password" type="password" autocomplete="current-password" maxlength="72" required aria-describedby="auth-error"><p id="auth-error" class="error" role="alert">{{.Error}}</p><button class="primary" type="submit"><svg class="auth-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 8v-2a2 2 0 0 0 -2 -2h-7a2 2 0 0 0 -2 2v12a2 2 0 0 0 2 2h7a2 2 0 0 0 2 -2v-2" />
+{{else}}<p class="intro">此服务已开启独立账号验证。请输入为本服务设置的访问账号和密码。</p><form action="/.gatehouse-auth" method="post"><input type="hidden" name="return" value="{{.Return}}"><label for="username">访问账号</label><input id="username" name="username" autocomplete="username" maxlength="64" required autofocus><label for="password">访问密码</label>
+<div class="password-field"><input id="password" name="password" type="password" autocomplete="current-password" maxlength="72" required aria-describedby="auth-error"><button id="password-eye" type="button" aria-label="显示密码" aria-pressed="false" aria-controls="password" hidden><svg class="auth-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg></button></div>
+<p id="auth-error" class="error" role="alert">{{.Error}}</p><button class="primary" type="submit"><svg class="auth-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 8v-2a2 2 0 0 0 -2 -2h-7a2 2 0 0 0 -2 2v12a2 2 0 0 0 2 2h7a2 2 0 0 0 2 -2v-2" />
   <path d="M21 12h-13l3 -3" />
   <path d="M11 15l-3 -3" />
-</svg>验证并进入服务</button></form>{{end}}
+</svg>验证并进入服务</button></form><script>` + routePasswordScript + `</script>{{end}}
 <p class="account-note">使用此反代服务的独立账号，不是 GateHome 管理员账号。</p><footer>由 GateHome 保护此服务的访问入口</footer></main></body></html>`))
 
 func (g *routeGate) page(w http.ResponseWriter, r *http.Request, route Route, code int, message, destination string) {
@@ -302,7 +319,7 @@ func (g *routeGate) page(w http.ResponseWriter, r *http.Request, route Route, co
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("X-Frame-Options", "DENY")
 	w.Header().Set("Referrer-Policy", "same-origin")
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; script-src 'sha256-"+base64.StdEncoding.EncodeToString(routePasswordScriptHash[:])+"'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
 	w.WriteHeader(code)
 	name := route.Name
 	if name == "" {

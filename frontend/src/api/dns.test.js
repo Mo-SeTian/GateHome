@@ -21,10 +21,9 @@ test('DDNS and certificate changes preserve full config, credentials stay in sep
   assert.equal(cert.acme.email, 'test@example.test')
   assert.deepEqual(cert.ddns, snapshot.config.ddns)
   assert.throws(() => replaceCertificate(snapshot, {}, 'gone'), /不存在/)
-  assert.deepEqual(tokenChange('dns_tokens', 'dns', '', false), {})
-  assert.deepEqual(tokenChange('certificate_tokens', 'cert', '', true), { certificate_tokens: { cert: '' } })
-  assert.deepEqual(tokenChange('dns_tokens', 'dns', ' TEST_ONLY_PLACEHOLDER ', false), { dns_tokens: { dns: 'TEST_ONLY_PLACEHOLDER' } })
-  assert.throws(() => tokenChange('dns_tokens', 'dns', 'TEST_ONLY_PLACEHOLDER', true), /同时/)
+  assert.deepEqual(tokenChange('dns_tokens', 'dns', undefined), {})
+  assert.deepEqual(tokenChange('certificate_tokens', 'cert', ''), { certificate_tokens: { cert: '' } })
+  assert.deepEqual(tokenChange('dns_tokens', 'dns', ' TEST_ONLY_PLACEHOLDER '), { dns_tokens: { dns: 'TEST_ONLY_PLACEHOLDER' } })
 })
 test('queued jobs never appear successful until the server records completion', () => {
   assert.equal(jobState(true).label, '等待运行')

@@ -19,7 +19,8 @@ export const maintenanceApi = {
     post('/api/maintenance/backup', { password }, { responseType: 'blob', signal }),
   webdav: (signal) => request('/api/backups/webdav', { signal }),
   saveWebDAV: (body) => request('/api/backups/webdav', { method: 'PUT', body }),
-  testWebDAV: (signal) => post('/api/backups/webdav/test', {}, { signal }),
+  testWebDAV: (body, signal) => post('/api/backups/webdav/test', body, { signal }),
+  webDAVDirectories: (body, signal) => post('/api/backups/webdav/directories', body, { signal }),
   runWebDAV: () => post('/api/backups/webdav/run'),
   files: (signal) => request('/api/backups/webdav/files', { signal }),
   inspectRemote: (body, signal) => post('/api/backups/webdav/inspect', body, { signal }),
@@ -27,12 +28,19 @@ export const maintenanceApi = {
     post('/api/backups/webdav/download', { name }, { responseType: 'blob', signal })
 }
 
+export function webDAVConnectionPayload(config, secrets, url = config.url) {
+  const body = { url, username: config.username }
+  if (secrets.password !== undefined) body.password = secrets.password
+  return body
+}
+
 export function webDAVPayload(snapshot, config, secrets) {
-  if (secrets.backupPassword !== secrets.confirmPassword) throw new Error('两次输入的备份加密密码不一致')
+  if (secrets.backupPassword !== undefined && secrets.backupPassword !== secrets.confirmPassword)
+    throw new Error('两次输入的备份加密密码不一致')
   const body = { revision: snapshot.revision, config: { ...config } }
-  if (secrets.clearPassword) body.password = ''
-  else if (secrets.password) body.password = secrets.password
-  if (secrets.backupPassword) body.backup_password = secrets.backupPassword
+  const { password } = webDAVConnectionPayload(config, secrets)
+  if (password !== undefined) body.password = password
+  if (secrets.backupPassword !== undefined) body.backup_password = secrets.backupPassword
   return body
 }
 

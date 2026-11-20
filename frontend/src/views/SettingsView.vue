@@ -66,29 +66,12 @@
               class="form-input"
               autocomplete="off"
           /></label>
-          <label
-            >代理密码（{{ snapshot.proxy_password_configured ? '已配置' : '未配置' }}）<select
-              v-model="passwordAction"
-              name="proxy_password_action"
-              class="form-select"
-            >
-              <option value="keep">保留已存密码</option>
-              <option value="replace">设置新密码</option>
-              <option value="clear">清除已存密码</option>
-            </select></label
-          >
-          <label v-if="passwordAction === 'replace'"
-            >新代理密码<input
-              v-model="proxyPassword"
-              name="proxy_password"
-              type="password"
-              class="form-input"
-              autocomplete="new-password"
-              required
-          /></label>
+          <SecretInput :key="snapshot.revision" id="outbound-proxy-password" v-model="proxyPassword" name="proxy_password"
+            label="代理密码" secret-name="密码" kind="outbound-proxy" :maxlength="255"
+            :configured="!!snapshot.proxy_password_configured"
+            :placeholder="snapshot.proxy_password_configured ? '已保存，点击小眼睛查看' : '填写代理密码'" />
           <p class="report-note">
-            用于
-            DDNS、订阅与版本检测等出站请求。修改代理地址或用户名时，后端会清除旧密码，请按需填写新密码；连接失败不会回退直连。
+            用于 DDNS、订阅与版本检测等出站请求。更换代理地址或账号时，请填写相应的密码。连接失败不会回退直连。
           </p>
         </SpotlightCard>
         <SpotlightCard class="report-panel">
@@ -201,6 +184,7 @@
 import { onMounted, onBeforeUnmount, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import SpotlightCard from '@/components/SpotlightCard.vue'
+import SecretInput from '@/components/SecretInput.vue'
 import RestartNotice from '@/components/RestartNotice.vue'
 import { adminApi } from '@/api/admin'
 import { useGatewayStatus } from '@/composables/useGatewayStatus'
@@ -227,15 +211,13 @@ const snapshot = ref(null),
   loading = ref(false),
   error = ref(''),
   restarting = ref(false),
-  passwordAction = ref('keep'),
-  proxyPassword = ref('')
+  proxyPassword = ref()
 function apply(config) {
   snapshot.value = config
   draft.value = structuredClone(config.config)
   origins.value = (config.config.admin_access?.origins || []).join('\n')
   trustedProxies.value = (config.config.trusted_proxies || []).join('\n')
-  passwordAction.value = 'keep'
-  proxyPassword.value = ''
+  proxyPassword.value = undefined
 }
 function formatBytes(value) {
   return value == null ? '—' : `${(value / 1024 / 1024).toFixed(2)} MiB`
@@ -275,10 +257,7 @@ async function save() {
     outbound_proxy: { ...draft.value.outbound_proxy },
     log_retention: { ...draft.value.log_retention }
   }
-  const credentials =
-    passwordAction.value === 'keep'
-      ? {}
-      : { proxy_password: passwordAction.value === 'clear' ? '' : proxyPassword.value }
+  const credentials = proxyPassword.value === undefined ? {} : { proxy_password: proxyPassword.value }
   try {
     const result = await saveConfig(snapshot.value, config, credentials)
     apply(result)
@@ -286,8 +265,6 @@ async function save() {
     await refreshStatus(controller.signal)
   } catch (err) {
     if (!controller.signal.aborted) error.value = err.message
-  } finally {
-    proxyPassword.value = ''
   }
 }
 async function restart() {
@@ -307,7 +284,7 @@ async function restart() {
 onMounted(reload)
 onBeforeUnmount(() => {
   controller.abort()
-  proxyPassword.value = ''
+  proxyPassword.value = undefined
 })
 </script>
 <style scoped>
@@ -332,16 +309,11 @@ onBeforeUnmount(() => {
 .report-panel h2 {
   margin-bottom: 0;
 }
-label:not(.toggle-row):not(.check-row) {
+label:not(.toggle-row) {
   display: grid;
   gap: 7px;
   font-size: 12px;
   color: var(--ink-secondary);
-}
-.check-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
 }
 .theme-options {
   display: grid;

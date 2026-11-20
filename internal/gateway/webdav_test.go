@@ -60,6 +60,84 @@ func davFixture(t *testing.T, wrap func(http.Handler) http.Handler) (State, stri
 func davName(id, date, nonce string) string {
 	return "gatehome-backup-" + id + "-" + date + "-" + nonce + ".zip"
 }
+
+func TestWebDAVBrowseDraftAndSaveChildDirectory(t *testing.T) {
+	a, handler := testAdmin(t)
+	state, root := davFixture(t, nil)
+	config := state.WebDAVBackup.Config
+	config.URL = strings.TrimSuffix(config.URL, "nested/备份/")
+	if err := os.MkdirAll(filepath.Join(root, "备份 A", "子目录"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "notes.txt"), nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	saved := state.WebDAVBackup
+	if err := a.store.saveWebDAVBackup(config, &saved.Password, &saved.BackupPassword, a.store.Snapshot().Revision); err != nil {
+		t.Fatal(err)
+	}
+	cookie := loginForTest(t, handler)
+	const directoriesPath = "/api/backups/webdav/directories"
+	const testPath = "/api/backups/webdav/test"
+	draft := map[string]string{"url": config.URL, "username": config.Username}
+	if got := adminRequest(handler, "POST", directoriesPath, draft, nil, "").Code; got != 401 {
+		t.Fatalf("unauthenticated browse returned HTTP %d", got)
+	}
+	before := a.store.Snapshot().Revision
+	browse := adminRequest(handler, "POST", directoriesPath, draft, cookie, "")
+	var result struct{ Directories []webDAVDirectory }
+	if browse.Code != 200 || json.Unmarshal(browse.Body.Bytes(), &result) != nil || len(result.Directories) != 1 || result.Directories[0].Name != "备份 A" {
+		t.Fatalf("directory browse did not return the direct child: HTTP %d", browse.Code)
+	}
+	child := result.Directories[0].URL
+	draft["url"] = child
+	draft["password"] = "TEST_ONLY_WRONG_PASSWORD"
+	rejected := adminRequest(handler, "POST", testPath, draft, cookie, "")
+	if rejected.Code != 400 || !strings.Contains(rejected.Body.String(), "HTTP 401") || strings.Contains(rejected.Body.String(), draft["password"]) {
+		t.Fatalf("upstream 401 should be a sanitized connection error, got HTTP %d", rejected.Code)
+	}
+	delete(draft, "password")
+	draft["url"] = child + "missing/"
+	missing := adminRequest(handler, "POST", testPath, draft, cookie, "")
+	if missing.Code != 400 || !strings.Contains(missing.Body.String(), "HTTP 404") {
+		t.Fatalf("missing directory should return a path error, got HTTP %d", missing.Code)
+	}
+	if _, err := os.Stat(filepath.Join(root, "备份 A", "missing")); !os.IsNotExist(err) {
+		t.Fatal("connection test modified the remote directory")
+	}
+	draft["url"] = child
+	if got := adminRequest(handler, "POST", testPath, draft, cookie, "").Code; got != 200 {
+		t.Fatalf("testing child directory without reentering password returned HTTP %d", got)
+	}
+	if snapshot := a.store.Snapshot(); snapshot.Revision != before || snapshot.WebDAVBackup.Config.URL != config.URL {
+		t.Fatal("connection tests persisted draft settings")
+	}
+	config.URL = child
+	if err := a.store.saveWebDAVBackup(config, nil, nil, before); err != nil {
+		t.Fatal(err)
+	}
+	actual := a.store.Snapshot()
+	if actual.WebDAVBackup.Password != saved.Password {
+		t.Fatal("choosing a child cleared the stored credential")
+	}
+	client, err := newWebDAVClient(actual)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.close()
+	name := davName(client.id, "20261011T030000Z", "123456abcdef")
+	if _, err := client.upload(t.Context(), name, []byte("TEST_ONLY_PAYLOAD"), 2); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "备份 A", name)); err != nil {
+		t.Fatal("backup did not use the selected directory")
+	}
+	config.URL = strings.Replace(child, "/dav/", "/other/", 1)
+	if webDAVConnectionPassword(config, actual.WebDAVBackup, nil) != "" {
+		t.Fatal("credential can leave the saved directory scope")
+	}
+}
+
 func TestWebDAVAtomicUploadVerificationAndOwnedRetention(t *testing.T) {
 	state, root := davFixture(t, nil)
 	client, err := newWebDAVClient(state)

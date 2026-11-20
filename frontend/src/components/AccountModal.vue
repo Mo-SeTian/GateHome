@@ -38,56 +38,22 @@
             <small class="form-hint">1–64 字节，区分大小写；支持中文，不含控制字符或首尾空格。</small>
           </div>
 
-          <div class="form-group">
-            <label class="form-label" for="account-current-password">
-              <span>当前管理密码</span>
-              <span class="required-star">*</span>
-            </label>
-            <input 
-              id="account-current-password"
-              ref="currentPasswordInput"
-              autocomplete="current-password"
-              v-model="form.currentPassword" 
-              type="password" 
-              class="form-input" 
-              maxlength="72" 
-              placeholder="验证当前管理密码" 
-              required 
-            />
+          <div v-if="isAccountModalOpen" class="form-group">
+            <SecretInput id="account-current-password" ref="currentPasswordInput" label="当前管理密码"
+              v-model="form.currentPassword" secret-name="密码" autocomplete="current-password" :maxlength="72"
+              placeholder="验证当前管理密码" required />
             <small class="form-hint">修改账号或密码前，须先验证当前管理员密码。</small>
           </div>
 
-          <div class="form-group">
-            <label class="form-label" for="account-new-password">
-              <span>新管理密码（可选）</span>
-            </label>
-            <input 
-              id="account-new-password"
-              autocomplete="new-password"
-              v-model="form.newPassword" 
-              type="password" 
-              class="form-input" 
-              maxlength="72" 
-              placeholder="留空时保持原管理密码" 
-            />
+          <div v-if="isAccountModalOpen" class="form-group">
+            <SecretInput id="account-new-password" label="新管理密码（可选）" v-model="form.newPassword"
+              secret-name="密码" :maxlength="72" placeholder="留空时保持原管理密码" />
             <small class="form-hint">12–72 字节；留空时只修改账号，保持原密码。</small>
           </div>
 
           <div class="form-group" v-if="form.newPassword">
-            <label class="form-label" for="account-confirm-password">
-              <span>再次输入新管理密码</span>
-              <span class="required-star">*</span>
-            </label>
-            <input 
-              id="account-confirm-password"
-              autocomplete="new-password"
-              v-model="form.confirmPassword" 
-              type="password" 
-              class="form-input" 
-              maxlength="72" 
-              placeholder="请重复新密码" 
-              required 
-            />
+            <SecretInput id="account-confirm-password" label="再次输入新管理密码" v-model="form.confirmPassword"
+              secret-name="密码" :maxlength="72" placeholder="请重复新密码" required />
           </div>
 
           <div class="warning-callout">
@@ -113,6 +79,7 @@
 import { nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { X, Save, AlertCircle, AlertTriangle } from 'lucide-vue-next'
+import SecretInput from '@/components/SecretInput.vue'
 import { useSession } from '@/composables/useSession'
 import { useToast } from '@/composables/useToast'
 

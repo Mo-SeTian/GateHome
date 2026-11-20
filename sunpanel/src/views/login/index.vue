@@ -88,7 +88,7 @@ function handleChangeLanuage(value: Language) {
         </NFormItem>
 
         <NFormItem>
-          <NInput v-model:value="form.password" type="password" :placeholder="$t('login.passwordPlaceholder')">
+          <NInput v-model:value="form.password" type="password" show-password-on="click" :placeholder="$t('login.passwordPlaceholder')">
             <template #prefix>
               <SvgIcon icon="mdi:password-outline" />
             </template>

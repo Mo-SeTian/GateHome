@@ -43,6 +43,18 @@ func (a *Admin) credentialRoutes(mux *http.ServeMux) {
 			if input.ID == "" {
 				value = s.GitHubToken
 			}
+		case "outbound-proxy":
+			if input.ID == "" {
+				value = s.ProxyPassword
+			}
+		case "webdav":
+			if input.ID == "" {
+				value = s.WebDAVBackup.Password
+			}
+		case "webdav-backup":
+			if input.ID == "" {
+				value = s.WebDAVBackup.BackupPassword
+			}
 		case "mcp-legacy":
 			if input.ID == "" {
 				value = s.MCPToken
@@ -59,7 +71,7 @@ func (a *Admin) credentialRoutes(mux *http.ServeMux) {
 			return
 		}
 		if value == "" {
-			apiError(w, 404, "此 Token 未保存原值或已移除；旧 MCP Token 需重新生成后才能查看")
+			apiError(w, 404, "此凭据当前无法查看，请确认它仍在使用")
 			return
 		}
 		jsonResponse(w, 200, map[string]string{"value": value})

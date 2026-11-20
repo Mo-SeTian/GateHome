@@ -6,7 +6,7 @@ import { maintenanceApi, webDAVPayload, onlineUpdateActive } from './maintenance
 test('WebDAV edits preserve the captured revision and omit unchanged write-only secrets', () => {
   const snapshot = { revision: 17, config: { url: 'http://storage.test/dav/', keep: 7, future_field: true } }
   const draft = { ...snapshot.config, keep: 3 }
-  const body = webDAVPayload(snapshot, draft, { password: '', backupPassword: '', confirmPassword: '' })
+  const body = webDAVPayload(snapshot, draft, { confirmPassword: '' })
   assert.deepEqual(body, { revision: 17, config: draft })
   assert.equal(snapshot.config.keep, 7)
   assert.equal(Object.hasOwn(body, 'password'), false)
@@ -15,8 +15,7 @@ test('WebDAV edits preserve the captured revision and omit unchanged write-only 
 
 test('clearing storage authentication is explicit and encryption confirmation is checked before a write', () => {
   const secrets = {
-    clearPassword: true,
-    password: 'TEST_ONLY_IGNORED',
+    password: '',
     backupPassword: 'TEST_ONLY_BACKUP_PASSWORD',
     confirmPassword: 'TEST_ONLY_BACKUP_PASSWORD'
   }

@@ -289,10 +289,7 @@
             <input v-model="routeDraft.auth.enabled" name="auth_enabled" type="checkbox" />
           </label>
         </div>
-        <label class="check-label">
-          <input v-model="clearRoutePassword" name="clear_route_password" type="checkbox" />清除已保存的访问密码（须关闭独立访问验证）
-        </label>
-        <fieldset v-if="routeDraft.auth.enabled" class="auth-fields">
+        <fieldset v-if="routeOpen && routeDraft.auth.enabled" class="auth-fields">
           <label class="form-group"
             >访问用户名<input
               v-model="routeDraft.auth.username"
@@ -302,17 +299,10 @@
               autocomplete="off"
               maxlength="64"
           /></label>
-          <label class="form-group"
-            >{{ passwordRequired ? '设置访问密码' : '修改访问密码'
-            }}<input
-              v-model="routePassword"
-              name="route_password"
-              class="form-input"
-              type="password"
-              autocomplete="new-password"
-              :required="passwordRequired"
-              :placeholder="passwordRequired ? '12–72 字节' : '留空保留已配置密码'"
-          /></label>
+          <SecretInput id="route-access-password" v-model="routePassword" name="route_password" secret-name="密码"
+            :label="passwordRequired ? '设置访问密码' : '修改访问密码'"
+            :required="passwordRequired" :maxlength="72"
+            :placeholder="passwordRequired ? '12–72 字节' : '留空保留已配置密码'" />
           <label class="form-group"
             >验证失败上限<input
               v-model.number="routeDraft.auth.failure_limit"
@@ -540,6 +530,7 @@ import {
   X
 } from 'lucide-vue-next'
 import SpotlightCard from '@/components/SpotlightCard.vue'
+import SecretInput from '@/components/SecretInput.vue'
 import RestartNotice from '@/components/RestartNotice.vue'
 import RouteImagePicker from '@/components/RouteImagePicker.vue'
 import ProxyTrafficMetrics from '@/components/ProxyTrafficMetrics.vue'
@@ -590,7 +581,6 @@ const routeDraft = ref({ auth: {} })
 const groupDraft = ref({})
 const healthDraft = ref({})
 const routePassword = ref('')
-const clearRoutePassword = ref(false)
 const fullHost = ref(false)
 const freezeMinutes = ref(60)
 const imageBusy = ref(false)
@@ -724,7 +714,6 @@ function openRoute(route) {
   }
   fullHost.value = routeUsesFullHost(route?.host, proxyGroups.value.find((group) => group.id === routeDraft.value.group_id))
   if (!route) routeDraft.value.tls = defaultRouteTLS(proxyGroups.value.find((group) => group.id === routeDraft.value.group_id))
-  clearRoutePassword.value = false
   freezeMinutes.value = (routeDraft.value.auth.freeze_seconds || 3600) / 60
   routePassword.value = ''
   imageBusy.value = false
@@ -734,7 +723,6 @@ function openRoute(route) {
 function closeRoute() {
   routeOpen.value = false
   routePassword.value = ''
-  clearRoutePassword.value = false
   imageBusy.value = false
 }
 function blockBusyClose(event) {
@@ -762,11 +750,6 @@ async function saveRoute() {
       auth: { ...routeDraft.value.auth, freeze_seconds: Number(freezeMinutes.value) * 60 }
     }
     const credentials = {}
-    if (clearRoutePassword.value) {
-      if (record.auth.enabled) throw new Error('请先关闭独立访问验证，再清除已保存密码')
-      if (routePassword.value) throw new Error('填写新密码和清除密码不能同时选择')
-      credentials.route_passwords = { [routeKey(record)]: '' }
-    }
     if (record.auth.enabled) {
       if (passwordRequired.value && !routePassword.value)
         throw new Error('域名、所属组或访问账号变化后，请重新设置独立访问密码')

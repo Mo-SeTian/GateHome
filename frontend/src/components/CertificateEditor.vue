@@ -76,10 +76,7 @@
           </p>
           <SecretInput id="certificate-token" v-model="token" label="独立 API Token" kind="certificate"
             :credential-id="request?.id || ''" :configured="!!snapshot.certificate_credentials_configured?.[request?.id]"
-            :placeholder="snapshot.certificate_credentials_configured?.[request?.id] ? '已配置，留空保留' : '填写此证书任务的 Token'" />
-          <label class="check-label"
-            ><input v-model="clearToken" name="clear_token" type="checkbox" />清除已保存的 Token</label
-          >
+            :placeholder="snapshot.certificate_credentials_configured?.[request?.id] ? '已保存，点击小眼睛查看' : '填写此证书任务的 Token'" />
           <label class="toggle-row">
             <span>启用此任务自动申请与续期</span>
             <input
@@ -117,8 +114,7 @@ const draft = ref(
   )
 )
 const domainsText = ref(props.request?.domains.join('\n') || ''),
-  token = ref(''),
-  clearToken = ref(false),
+  token = ref(),
   error = ref(''),
   errorElement = ref(null),
   dialog = ref(null)
@@ -126,7 +122,7 @@ function blockBusyClose(event) {
   if (isSavingConfig.value) event.preventDefault()
 }
 function close() {
-  token.value = ''
+  token.value = undefined
   emit('close')
 }
 async function save() {
@@ -142,10 +138,10 @@ async function save() {
     } else {
       record.domains = domainList(domainsText.value)
       config = replaceCertificate(props.snapshot, record, props.request?.id ?? null)
-      credentials = tokenChange('certificate_tokens', record.id, token.value, clearToken.value)
+      credentials = tokenChange('certificate_tokens', record.id, token.value)
     }
     await saveConfig(props.snapshot, config, credentials)
-    token.value = ''
+    token.value = undefined
     emit('saved')
   } catch (err) {
     error.value = err.message
@@ -155,7 +151,7 @@ async function save() {
 }
 onMounted(() => dialog.value.showModal())
 onUnmounted(() => {
-  token.value = ''
+  token.value = undefined
 })
 </script>
 <style scoped>

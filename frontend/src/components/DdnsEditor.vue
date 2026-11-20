@@ -39,11 +39,7 @@
           /></label>
           <SecretInput id="ddns-token" v-model="token" label="独立 API Token" kind="ddns"
             :credential-id="group?.id || ''" :configured="!!snapshot.dns_credentials_configured?.[group?.id]"
-            :placeholder="snapshot.dns_credentials_configured?.[group?.id] ? '已配置，留空保留' : '填写本组的 Token'" />
-          <label class="check-label"
-            ><input v-model="clearToken" name="clear_token" type="checkbox" />清除已保存的
-            Token（需先停用同步）</label
-          >
+            :placeholder="snapshot.dns_credentials_configured?.[group?.id] ? '已保存，点击小眼睛查看' : '填写本组的 Token'" />
           <p class="report-note">需要此 Zone 的 Zone:Read / DNS:Edit 权限。已保存 Token 可点击小眼睛查看，不与证书任务共用。</p>
           <label class="form-field"
             >同步类型<select v-model="draft.mode" name="mode" class="form-select">
@@ -136,8 +132,7 @@ for (const family of ['ipv4', 'ipv6']) {
 }
 draft.value.interface ||= ''
 const hostsText = ref(props.group ? ddnsPrefixes(props.group) : ''),
-  token = ref(''),
-  clearToken = ref(false)
+  token = ref()
 const dialog = ref(null),
   error = ref(''),
   errorElement = ref(null)
@@ -149,7 +144,7 @@ const preview = computed(() => {
   }
 })
 function close() {
-  token.value = ''
+  token.value = undefined
   emit('close')
 }
 function blockBusyClose(event) {
@@ -175,9 +170,9 @@ async function save() {
     await saveConfig(
       props.snapshot,
       replaceDDNS(props.snapshot, record, props.group?.id ?? null),
-      props.hostsOnly ? {} : tokenChange('dns_tokens', record.id, token.value, clearToken.value)
+      props.hostsOnly ? {} : tokenChange('dns_tokens', record.id, token.value)
     )
-    token.value = ''
+    token.value = undefined
     emit('saved')
   } catch (err) {
     error.value = err.message
@@ -187,15 +182,10 @@ async function save() {
 }
 onMounted(() => dialog.value.showModal())
 onUnmounted(() => {
-  token.value = ''
+  token.value = undefined
 })
 </script>
 <style scoped>
-.check-label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
 .domain-preview {
   white-space: pre-wrap;
   overflow-wrap: anywhere;

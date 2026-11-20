@@ -157,6 +157,24 @@ func webDAVNextRun(state WebDAVBackupState, now time.Time) *time.Time {
 	}
 	return &slot
 }
+func webDAVConnectionPassword(config WebDAVBackupConfig, saved WebDAVBackupState, password *string) string {
+	if password != nil {
+		return *password
+	}
+	if config.Username != saved.Config.Username {
+		return ""
+	}
+	if config.URL == saved.Config.URL {
+		return saved.Password
+	}
+	target, targetErr := webDAVBase(config.URL)
+	base, baseErr := webDAVBase(saved.Config.URL)
+	if targetErr == nil && baseErr == nil && webDAVSameOrigin(target, base) && strings.HasPrefix(target.Path, base.Path) {
+		return saved.Password
+	}
+	return ""
+}
+
 func (s *Store) saveWebDAVBackup(config WebDAVBackupConfig, password, backupPassword *string, revision int) error {
 	config = normalizeWebDAVConfig(config)
 	if err := validateWebDAVConfig(config); err != nil {
@@ -169,12 +187,7 @@ func (s *Store) saveWebDAVBackup(config WebDAVBackupConfig, password, backupPass
 	}
 	next := s.state
 	prior := next.WebDAVBackup
-	if config.URL != prior.Config.URL || config.Username != prior.Config.Username {
-		prior.Password = ""
-	}
-	if password != nil {
-		prior.Password = *password
-	}
+	prior.Password = webDAVConnectionPassword(config, prior, password)
 	if backupPassword != nil {
 		prior.BackupPassword = *backupPassword
 	}
@@ -368,6 +381,37 @@ func (a *Admin) webDAVResponse(w http.ResponseWriter) {
 	a.webDAV.mu.Unlock()
 	jsonResponse(w, 200, map[string]any{"config": normalizeWebDAVConfig(settings.Config), "revision": state.Revision, "password_configured": settings.Password != "", "backup_password_configured": settings.BackupPassword != "", "last_attempt": settings.LastAttempt, "last_success": settings.LastSuccess, "last_file": settings.LastFile, "last_error": settings.LastError, "next_run": webDAVNextRun(settings, time.Now()), "job": job, "busy": busy})
 }
+
+func (a *Admin) webDAVDraftClient(w http.ResponseWriter, r *http.Request) *webDAVClient {
+	var draft struct {
+		URL      *string `json:"url"`
+		Username string  `json:"username"`
+		Password *string `json:"password"`
+	}
+	if !decodeBody(w, r, &draft) {
+		return nil
+	}
+	state := a.store.Snapshot()
+	saved := state.WebDAVBackup
+	if draft.URL != nil {
+		config := saved.Config
+		config.URL = strings.TrimSpace(*draft.URL)
+		config.Username = draft.Username
+		if err := validateWebDAVConfig(normalizeWebDAVConfig(config)); err != nil {
+			apiError(w, 400, err.Error())
+			return nil
+		}
+		state.WebDAVBackup.Password = webDAVConnectionPassword(config, saved, draft.Password)
+		state.WebDAVBackup.Config = config
+	}
+	client, err := newWebDAVClient(state)
+	if err != nil {
+		apiError(w, 400, err.Error())
+		return nil
+	}
+	return client
+}
+
 func (a *Admin) webDAVBackupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/backups/webdav", a.requireAuth(func(w http.ResponseWriter, r *http.Request) { a.webDAVResponse(w) }))
 	mux.HandleFunc("PUT /api/backups/webdav", a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
@@ -419,22 +463,26 @@ func (a *Admin) webDAVBackupRoutes(mux *http.ServeMux) {
 		}
 		jsonResponse(w, 200, files)
 	}))
-	mux.HandleFunc("POST /api/backups/webdav/test", a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
-		var input struct{}
-		if !decodeBody(w, r, &input) {
+	mux.HandleFunc("POST /api/backups/webdav/directories", a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
+		client := a.webDAVDraftClient(w, r)
+		if client == nil {
 			return
 		}
-		client, err := newWebDAVClient(a.store.Snapshot())
+		defer client.close()
+		directories, err := client.directories(r.Context())
 		if err != nil {
 			apiError(w, 400, err.Error())
 			return
 		}
-		defer client.close()
-		if err := client.ensureCollection(r.Context(), client.base, 12); err != nil {
-			apiError(w, 400, err.Error())
+		jsonResponse(w, 200, map[string]any{"url": client.base.String(), "directories": directories})
+	}))
+	mux.HandleFunc("POST /api/backups/webdav/test", a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
+		client := a.webDAVDraftClient(w, r)
+		if client == nil {
 			return
 		}
-		if _, err := client.list(r.Context()); err != nil {
+		defer client.close()
+		if _, err := client.directories(r.Context()); err != nil {
 			apiError(w, 400, err.Error())
 			return
 		}

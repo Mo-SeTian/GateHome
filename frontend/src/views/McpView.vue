@@ -144,8 +144,8 @@
           class="wide" @update:model-value="resetTools" />
         <div class="report-actions wide">
           <button class="btn btn-secondary" :disabled="invoking || !testToken" @click="connect">
-            {{ invoking ? '请求中…' : '连接并读取工具' }}</button
-          ><button class="btn btn-secondary" :disabled="invoking" @click="disconnect">清除调试凭据</button>
+            {{ invoking ? '请求中…' : '连接并读取工具' }}
+          </button>
         </div>
         <template v-if="tools.length"
           ><label class="wide"
@@ -283,10 +283,6 @@ function resetTools() {
 function resetToolArgs() {
   toolArgs.value = '{}'
   result.value = ''
-}
-function disconnect() {
-  testToken.value = ''
-  resetTools()
 }
 function apply(response, label = '') {
   if (controller.signal.aborted) return
@@ -513,7 +509,8 @@ onMounted(load)
 onBeforeUnmount(() => {
   controller.abort()
   clearToken()
-  disconnect()
+  testToken.value = ''
+  resetTools()
   toolArgs.value = '{}'
 })
 </script>

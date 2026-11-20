@@ -33,9 +33,8 @@ export function replaceCertificate(snapshot, request, originalId) {
   return config
 }
 
-export function tokenChange(field, id, value, clear) {
-  if (clear && value.trim()) throw new Error('填写新 Token 和清除 Token 不能同时选择')
-  return clear || value.trim() ? { [field]: { [id]: clear ? '' : value.trim() } } : {}
+export function tokenChange(field, id, value) {
+  return value === undefined ? {} : { [field]: { [id]: value.trim() } }
 }
 
 export function jobState(enabled, job) {

@@ -128,14 +128,12 @@
         <form @submit.prevent="saveToken">
           <fieldset :disabled="!!busy || active || isSavingConfig">
             <SecretInput id="github-token" v-model="githubToken" name="github_token" label="GitHub API Token"
-              kind="github" :configured="!!configSnapshot?.github_token_configured" placeholder="留空保留已存 Token" />
-            <label class="check-row"
-              ><input v-model="clearToken" name="clear_github_token" type="checkbox" />明确清除已存
-              Token</label
-            ><button
+              kind="github" :configured="!!configSnapshot?.github_token_configured"
+              :placeholder="configSnapshot?.github_token_configured ? '已保存，点击小眼睛查看' : '填写 GitHub Token'" />
+            <button
               class="btn btn-secondary"
               type="submit"
-              :disabled="!configSnapshot || (!githubToken && !clearToken)"
+              :disabled="!configSnapshot || githubToken === undefined"
             >
               保存 GitHub Token
             </button>
@@ -238,8 +236,7 @@ const history = ref(null),
   historyLoading = ref(false),
   historyError = ref(''),
   configSnapshot = ref(null),
-  githubToken = ref(''),
-  clearToken = ref(false),
+  githubToken = ref(),
   file = ref(null),
   preview = ref(null)
 const active = computed(() => onlineUpdateActive(job.value?.phase))
@@ -299,7 +296,7 @@ async function loginAgain(message) {
   if (leaving || controller.signal.aborted) return
   leaving = true
   preview.value = null
-  githubToken.value = ''
+  githubToken.value = undefined
   endSession()
   await router.replace({ name: 'Login', query: { redirect: '/updates' } })
   toast.info(message)
@@ -414,22 +411,21 @@ async function rollback(backup) {
 async function saveToken() {
   await action('token', async () => {
     const result = await saveConfig(configSnapshot.value, configSnapshot.value.config, {
-      github_token: clearToken.value ? '' : githubToken.value
+      github_token: githubToken.value
     })
     if (!controller.signal.aborted) {
       configSnapshot.value = result
-      clearToken.value = false
+      githubToken.value = undefined
       toast.success('GitHub Token 设置已保存')
     }
   })
-  githubToken.value = ''
 }
 onMounted(reload)
 onBeforeUnmount(() => {
   controller.abort()
   clearTimeout(timer)
   pollGeneration++
-  githubToken.value = ''
+  githubToken.value = undefined
   file.value = null
   preview.value = null
 })
@@ -456,17 +452,12 @@ fieldset {
 h2 {
   margin-bottom: 0;
 }
-label:not(.toggle-row):not(.check-row) {
+label:not(.toggle-row) {
   display: grid;
   gap: 7px;
   color: var(--ink-secondary);
   font-size: 12px;
   min-width: 0;
-}
-.check-row {
-  display: flex;
-  gap: 8px;
-  align-items: center;
 }
 .version-label {
   color: var(--muted);

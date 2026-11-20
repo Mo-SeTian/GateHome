@@ -16,13 +16,21 @@ func TestCredentialRevealRequiresAdminSessionAndExplicitRequest(t *testing.T) {
 	s := a.store.Snapshot()
 	s.Config.DDNS.Groups = []DDNSGroup{testDDNSGroup()}
 	s.Config.ACME.Requests = []CertificateRequest{{ID: "cert", Provider: "cloudflare", Domains: []string{"example.test"}}}
+	s.Config.OutboundProxy.URL = "http://127.0.0.1:7890"
 	dns, cert, github := "TEST_ONLY_DDNS_TOKEN", "TEST_ONLY_CERT_TOKEN", "TEST_ONLY_GITHUB_TOKEN"
-	if err := a.store.UpdateRouteCredentials(s.Config, map[string]*string{"home": &dns}, map[string]*string{"cert": &cert}, nil, nil, nil, &github, s.Revision); err != nil {
+	proxy, storage, encryption := "TEST_ONLY_PROXY_PASSWORD", "TEST_ONLY_STORAGE_PASSWORD", "TEST_ONLY_BACKUP_PASSWORD"
+	if err := a.store.UpdateRouteCredentials(s.Config, map[string]*string{"home": &dns}, map[string]*string{"cert": &cert}, nil, &proxy, nil, &github, s.Revision); err != nil {
 		t.Fatal("credential fixture failed")
+	}
+	if err := a.store.saveWebDAVBackup(WebDAVBackupConfig{URL: "https://storage.example.test/dav/"}, &storage, &encryption, a.store.Snapshot().Revision); err != nil {
+		t.Fatal("WebDAV credential fixture failed")
 	}
 	a.logs, _ = NewLogs(t.TempDir(), a.store)
 	before := a.store.Snapshot()
-	for _, fixture := range []struct{ kind, id, value string }{{"ddns", "home", dns}, {"certificate", "cert", cert}, {"github", "", github}} {
+	for _, fixture := range []struct{ kind, id, value string }{
+		{"ddns", "home", dns}, {"certificate", "cert", cert}, {"github", "", github},
+		{"outbound-proxy", "", proxy}, {"webdav", "", storage}, {"webdav-backup", "", encryption},
+	} {
 		body := map[string]string{"kind": fixture.kind, "id": fixture.id}
 		if adminRequest(h, "POST", "/api/credentials/reveal", body, nil, "").Code != 401 {
 			t.Fatal("credential reveal accepted without a session")
@@ -59,10 +67,11 @@ func TestCredentialRevealRequiresAdminSessionAndExplicitRequest(t *testing.T) {
 		t.Fatal("credential read changed configuration or accepted GET")
 	}
 	public := adminRequest(h, "GET", "/api/config", nil, cookie, "")
+	webDAV := adminRequest(h, "GET", "/api/backups/webdav", nil, cookie, "")
 	logs, _, _ := a.logs.List("admin", "", 0, 100)
 	logBytes, _ := json.Marshal(logs)
-	for _, value := range []string{dns, cert, github} {
-		if bytes.Contains(public.Body.Bytes(), []byte(value)) || bytes.Contains(logBytes, []byte(value)) {
+	for _, value := range []string{dns, cert, github, proxy, storage, encryption} {
+		if bytes.Contains(public.Body.Bytes(), []byte(value)) || bytes.Contains(webDAV.Body.Bytes(), []byte(value)) || bytes.Contains(logBytes, []byte(value)) {
 			t.Fatal("credential escaped into ordinary responses or logs")
 		}
 	}

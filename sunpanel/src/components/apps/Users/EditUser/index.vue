@@ -126,7 +126,7 @@ const handleValidateButtonClick = (e: MouseEvent) => {
       </NFormItem>
 
       <NFormItem path="password" :label="$t('common.password')">
-        <NInput v-model:value="model.password" :maxlength="20" type="password" :placeholder="`${userInfo?.id ? $t('adminSettingUsers.EditpasswordPlaceholder') : $t('adminSettingUsers.passwordPlaceholder')}`" />
+        <NInput v-model:value="model.password" :maxlength="20" type="password" show-password-on="click" :placeholder="`${userInfo?.id ? $t('adminSettingUsers.EditpasswordPlaceholder') : $t('adminSettingUsers.passwordPlaceholder')}`" />
       </NFormItem>
     </NForm>
 

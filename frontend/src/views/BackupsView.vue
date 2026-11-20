@@ -26,21 +26,10 @@
         </p>
         <form @submit.prevent="exportBackup">
           <fieldset :disabled="!!busy">
-            <label
-              >备份密码<input
-                v-model="backupPassword"
-                name="backup_password"
-                class="form-input"
-                type="password"
-                autocomplete="new-password" /></label
-            ><label
-              >再次输入密码<input
-                v-model="confirmPassword"
-                name="confirm_password"
-                class="form-input"
-                type="password"
-                autocomplete="new-password"
-            /></label>
+            <SecretInput id="local-backup-password" name="backup_password" label="备份密码" :maxlength="null"
+              secret-name="密码" v-model="backupPassword" placeholder="留空使用默认加密" />
+            <SecretInput id="local-backup-confirm-password" name="confirm_password" label="再次输入密码" :maxlength="null"
+              secret-name="密码" v-model="confirmPassword" placeholder="" />
             <p class="report-note">
               ZIP 内容使用 AES-256-GCM
               加密。密码可留空，恢复时须使用相同密码；文件直接下载到浏览器，请自行保存。
@@ -66,15 +55,8 @@
             <div v-if="file" class="selected-file-pill">
               <span>已选择备份文件：{{ file.name }}</span>
             </div>
-            <label
-              >导出时的备份密码<input
-                v-model="restorePassword"
-                name="restore_password"
-                class="form-input"
-                type="password"
-                autocomplete="off"
-                @input="preview = null"
-            /></label>
+            <SecretInput id="local-restore-password" name="restore_password" label="导出时的备份密码" :maxlength="null"
+              secret-name="密码" v-model="restorePassword" autocomplete="off" placeholder="" @update:model-value="preview = null" />
             <p class="report-note">先验证密码、格式和端口，再确认恢复；预检不会替换运行数据。</p>
             <button class="btn btn-secondary" type="submit">
               {{ busy === 'inspect' ? '正在检查…' : '检查备份' }}
@@ -100,17 +82,24 @@
       </div>
       <form @submit.prevent="saveRemote">
         <fieldset :disabled="!!busy || remote?.busy">
-          <div class="report-form">
-            <label class="wide"
-              >WebDAV 目录地址<input
-                v-model.trim="draft.url"
-                name="webdav_url"
-                type="url"
-                class="form-input"
-                placeholder="https://storage.example.com/dav/GateHome/"
-                maxlength="2048"
-            /></label>
-            <label
+          <div class="report-form webdav-form">
+            <div class="wide webdav-address">
+              <label>
+                WebDAV 目录地址
+                <input
+                  v-model.trim="draft.url"
+                  name="webdav_url"
+                  type="url"
+                  class="form-input"
+                  placeholder="https://storage.example.com/dav/GateHome/"
+                  maxlength="2048"
+                />
+              </label>
+              <button ref="browseButton" class="btn btn-secondary" type="button" :disabled="!draft.url" @click="openDirectories">
+                选择目录
+              </button>
+            </div>
+            <label class="credential-field"
               >账号<input
                 v-model="draft.username"
                 name="webdav_username"
@@ -118,43 +107,21 @@
                 maxlength="255"
                 autocomplete="off"
             /></label>
-            <label
-              >存储密码（{{ remote.password_configured ? '已配置' : '未配置' }}）<input
-                v-model="secrets.password"
-                name="webdav_password"
-                class="form-input"
-                type="password"
-                autocomplete="new-password"
-                placeholder="留空保留"
-            /></label>
-            <label class="check-row"
-              ><input
-                v-model="secrets.clearPassword"
-                name="clear_webdav_password"
-                type="checkbox"
-              />清除存储密码，使用匿名连接</label
-            >
+            <SecretInput :key="`storage-${snapshot.revision}`" id="webdav-storage-password"
+              name="webdav_password" class="credential-field" :maxlength="null"
+              label="存储密码" secret-name="密码" kind="webdav" v-model="secrets.password"
+              :configured="!!remote.password_configured"
+              :placeholder="remote.password_configured ? '已保存，点击小眼睛查看' : '填写 WebDAV 密码'" />
             <p class="report-note wide">
-              变更目录或账号会清除旧存储密码，请按需重新填写。连接和备份使用已保存设置；地址不包含账号密码，支持内网
-              HTTP 和公网 HTTPS。
+              同一账号可在当前目录及其子目录使用已保存密码。更换位置或账号时，请按需重新填写。
             </p>
-            <label
-              >备份加密密码（{{ remote.backup_password_configured ? '已配置' : '未配置' }}）<input
-                v-model="secrets.backupPassword"
-                name="webdav_backup_password"
-                class="form-input"
-                type="password"
-                autocomplete="new-password"
-                placeholder="留空保留；远程备份必须设置"
-            /></label>
-            <label
-              >再次输入加密密码<input
-                v-model="secrets.confirmPassword"
-                name="webdav_confirm_password"
-                class="form-input"
-                type="password"
-                autocomplete="new-password"
-            /></label>
+            <SecretInput :key="`encryption-${snapshot.revision}`" id="webdav-encryption-password"
+              name="webdav_backup_password" :maxlength="null"
+              label="备份加密密码" secret-name="密码" kind="webdav-backup" v-model="secrets.backupPassword"
+              :configured="!!remote.backup_password_configured"
+              :placeholder="remote.backup_password_configured ? '已保存，点击小眼睛查看' : '远程备份必填'" />
+            <SecretInput id="webdav-encryption-confirm-password" name="webdav_confirm_password" :maxlength="null"
+              label="再次输入加密密码" secret-name="密码" v-model="secrets.confirmPassword" placeholder="" />
             <label
               >保留份数<input
                 v-model.number="draft.keep"
@@ -173,45 +140,47 @@
                 type="checkbox"
               />
             </label>
-            <label
-              >频率<select v-model="draft.schedule_mode" name="schedule_mode" class="form-select">
-                <option value="daily">每天</option>
-                <option value="weekly">每周</option>
-              </select></label
-            >
-            <label v-if="draft.schedule_mode === 'weekly'"
-              >每周日期<select v-model.number="draft.weekday" name="weekday" class="form-select">
-                <option v-for="(day, index) in weekdays" :key="index" :value="index">{{ day }}</option>
-              </select></label
-            >
-            <label
-              >时间<input v-model="draft.time" name="time" class="form-input" type="time" required
-            /></label>
-            <label
-              >时区<input
-                v-model.trim="draft.timezone"
-                name="timezone"
-                class="form-input"
-                required
-                placeholder="Asia/Shanghai"
-            /></label>
+            <div class="wide schedule-fields">
+              <label>
+                频率<select v-model="draft.schedule_mode" name="schedule_mode" class="form-select">
+                  <option value="daily">每天</option>
+                  <option value="weekly">每周</option>
+                </select>
+              </label>
+              <label v-if="draft.schedule_mode === 'weekly'">
+                每周日期<select v-model.number="draft.weekday" name="weekday" class="form-select">
+                  <option v-for="(day, index) in weekdays" :key="index" :value="index">{{ day }}</option>
+                </select>
+              </label>
+              <label>
+                时间<input v-model="draft.time" name="time" class="form-input" type="time" required />
+              </label>
+              <label>
+                时区<input
+                  v-model.trim="draft.timezone"
+                  name="timezone"
+                  class="form-input"
+                  required
+                  placeholder="Asia/Shanghai"
+                />
+              </label>
+            </div>
             <p class="report-note wide">
               仅在新文件上传并校验成功后，清理本实例超出保留份数的备份。旧备份仍需原加密密码。
             </p>
-            <button class="btn btn-primary" type="submit">
-              {{ busy === 'save' ? '保存中…' : '保存 WebDAV 设置' }}
-            </button>
+            <div class="report-actions wide">
+              <button class="btn btn-secondary" type="button" :disabled="!draft.url" @click="testRemote">
+                {{ busy === 'test' ? '测试中…' : '测试连接' }}
+              </button>
+              <button class="btn btn-primary" type="submit">
+                {{ busy === 'save' ? '保存中…' : '保存 WebDAV 设置' }}
+              </button>
+            </div>
           </div>
         </fieldset>
       </form>
       <div class="report-actions">
         <button
-          class="btn btn-secondary"
-          :disabled="!!busy || remote?.busy || !remote?.config.url"
-          @click="testRemote"
-        >
-          测试已保存连接</button
-        ><button
           class="btn btn-secondary"
           :disabled="!!busy || remote?.busy || !remote?.config.url || !capacity?.can_proceed"
           @click="runRemote"
@@ -227,6 +196,37 @@
       </p>
       <p v-if="remote.last_error" class="report-error" role="alert">{{ remote.last_error }}</p>
     </SpotlightCard>
+    <dialog ref="directoryDialog" class="modal-dialog webdav-directory-dialog" aria-labelledby="webdav-directory-title" @close="closeDirectories">
+      <header class="modal-header">
+        <h2 id="webdav-directory-title">选择 WebDAV 目录</h2>
+        <button class="btn btn-secondary btn-sm" type="button" autofocus @click="directoryDialog.close()">取消</button>
+      </header>
+      <div class="modal-body webdav-directories" :aria-busy="directoryLoading">
+        <div class="report-actions">
+          <button type="button" class="btn btn-secondary btn-sm" :disabled="directoryLoading || directoryHistory.length < 2" @click="parentDirectory">
+            上一级
+          </button>
+          <code ref="directoryLocation" tabindex="-1">{{ currentDirectory?.url || draft?.url }}</code>
+        </div>
+        <p v-if="directoryError" class="report-error" role="alert">{{ directoryError }}</p>
+        <p v-if="directoryLoading" role="status">正在读取目录…</p>
+        <ul v-else-if="currentDirectory?.directories.length">
+          <li v-for="directory in currentDirectory.directories" :key="directory.url">
+            <button type="button" class="btn btn-secondary directory-entry" @click="readDirectories(directory.url)">
+              <FolderClosed :size="16" aria-hidden="true" />
+              <span>{{ directory.name }}</span>
+              <ChevronRight :size="15" aria-hidden="true" />
+            </button>
+          </li>
+        </ul>
+        <p v-else-if="currentDirectory" class="report-note">此目录没有子目录</p>
+      </div>
+      <footer class="modal-footer">
+        <button type="button" class="btn btn-primary" :disabled="directoryLoading || !currentDirectory" @click="selectDirectory">
+          使用此目录
+        </button>
+      </footer>
+    </dialog>
     <SpotlightCard class="report-panel"
       ><div class="report-heading">
         <h2>远程备份</h2>
@@ -252,15 +252,10 @@
             <option value="stored">使用已保存的备份加密密码</option>
             <option value="custom">使用该备份的其他密码</option>
           </select></label
-        ><label v-if="remotePasswordMode === 'custom'"
-          >备份密码（支持空密码）<input
-            v-model="remotePassword"
-            name="remote_restore_password"
-            class="form-input"
-            type="password"
-            autocomplete="off"
-            @input="preview = null"
-        /></label>
+        >
+        <SecretInput v-if="remotePasswordMode === 'custom'" id="webdav-restore-password" :maxlength="null"
+          name="remote_restore_password" label="备份密码（支持空密码）" secret-name="密码" class="wide"
+          v-model="remotePassword" autocomplete="off" placeholder="" @update:model-value="preview = null" />
       </div>
       <div v-if="files.length" class="report-table-wrap" tabindex="0" role="region" aria-label="WebDAV 备份列表，可横向滚动">
         <table class="report-table">
@@ -295,13 +290,15 @@
   </div>
 </template>
 <script setup>
-import { onMounted, onBeforeUnmount, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, onBeforeUnmount, reactive, ref } from 'vue'
+import { ChevronRight, FolderClosed } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import SpotlightCard from '@/components/SpotlightCard.vue'
+import SecretInput from '@/components/SecretInput.vue'
 import BackupCapacity from '@/components/BackupCapacity.vue'
 import MaintenancePreview from '@/components/MaintenancePreview.vue'
 import { adminApi } from '@/api/admin'
-import { maintenanceApi, webDAVPayload, maintenancePhase, downloadBackup } from '@/api/maintenance'
+import { maintenanceApi, webDAVConnectionPayload, webDAVPayload, maintenancePhase, downloadBackup } from '@/api/maintenance'
 import { formatBytes, reportDate } from '@/api/reports'
 import { useGatewayStatus } from '@/composables/useGatewayStatus'
 import { useSession } from '@/composables/useSession'
@@ -333,13 +330,21 @@ const remote = ref(null),
   pollError = ref(''),
   remotePasswordMode = ref('stored'),
   remotePassword = ref('')
-const secrets = reactive({ password: '', backupPassword: '', confirmPassword: '', clearPassword: false })
+const secrets = reactive({ password: undefined, backupPassword: undefined, confirmPassword: '' })
+const browseButton = ref(null)
+const directoryDialog = ref(null)
+const directoryLocation = ref(null)
+const directoryLoading = ref(false)
+const directoryError = ref('')
+const directoryHistory = ref([])
+const currentDirectory = computed(() => directoryHistory.value.at(-1))
+let directoryRequest
 const weekdays = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六']
 let timer,
   remoteGeneration = 0,
   listGeneration = 0
 function clearSecrets() {
-  Object.assign(secrets, { password: '', backupPassword: '', confirmPassword: '', clearPassword: false })
+  Object.assign(secrets, { password: undefined, backupPassword: undefined, confirmPassword: '' })
 }
 async function action(name, fn) {
   if (busy.value) return
@@ -459,19 +464,57 @@ async function saveRemote() {
     const body = webDAVPayload(snapshot.value, draft.value, secrets)
     await maintenanceApi.saveWebDAV(body)
     if (controller.signal.aborted) return
+    clearSecrets()
     listGeneration++
     files.value = []
     preview.value = null
     await Promise.all([readRemote(true), refreshConfig(controller.signal)])
     toast.success('WebDAV 设置已保存')
   })
-  clearSecrets()
 }
 async function testRemote() {
   await action('test', async () => {
-    const result = await maintenanceApi.testWebDAV(controller.signal)
+    const result = await maintenanceApi.testWebDAV(webDAVConnectionPayload(draft.value, secrets), controller.signal)
     if (!controller.signal.aborted) toast.info(result.message)
   })
+}
+function openDirectories() {
+  directoryDialog.value.showModal()
+  readDirectories(draft.value.url)
+}
+async function readDirectories(url) {
+  if (directoryLoading.value) return
+  const request = new AbortController()
+  directoryRequest = request
+  directoryLoading.value = true
+  directoryError.value = ''
+  try {
+    const result = await maintenanceApi.webDAVDirectories(webDAVConnectionPayload(draft.value, secrets, url), request.signal)
+    if (!request.signal.aborted) directoryHistory.value.push(result)
+  } catch (err) {
+    if (!request.signal.aborted) directoryError.value = err.message
+  } finally {
+    if (directoryRequest === request) directoryLoading.value = false
+  }
+  await nextTick()
+  if (!request.signal.aborted && directoryDialog.value?.open) directoryLocation.value?.focus()
+}
+function parentDirectory() {
+  directoryError.value = ''
+  directoryHistory.value.pop()
+  directoryLocation.value?.focus()
+}
+function closeDirectories() {
+  directoryRequest?.abort()
+  directoryRequest = undefined
+  directoryLoading.value = false
+  directoryError.value = ''
+  directoryHistory.value = []
+  browseButton.value?.focus()
+}
+function selectDirectory() {
+  draft.value.url = currentDirectory.value.url
+  directoryDialog.value.close()
 }
 async function runRemote() {
   await action('run', async () => {
@@ -520,6 +563,7 @@ async function restore() {
 onMounted(reload)
 onBeforeUnmount(() => {
   controller.abort()
+  directoryRequest?.abort()
   clearTimeout(timer)
   remoteGeneration++
   listGeneration++
@@ -554,21 +598,38 @@ fieldset {
 h2 {
   margin-bottom: 0;
 }
-label:not(.toggle-row):not(.check-row) {
+label:not(.toggle-row) {
   display: grid;
   gap: 7px;
   font-size: 12px;
   color: var(--ink-secondary);
   min-width: 0;
 }
-.check-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+.report-form.webdav-form {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  align-items: start;
 }
+.webdav-form > :is(label, .secret-field) { grid-column: span 2; }
+.webdav-form > .credential-field { grid-column: span 3; }
+.webdav-form > .wide { grid-column: 1 / -1; }
+.webdav-form label { min-width: 0; }
+.webdav-address, .schedule-fields { display: grid; gap: 12px; }
+.webdav-address { grid-template-columns: minmax(0, 1fr) auto; align-items: end; }
+.schedule-fields { grid-template-columns: repeat(auto-fit, minmax(min(100%, 130px), 1fr)); }
+.webdav-directories code, .directory-entry span { min-width: 0; overflow-wrap: anywhere; }
+.webdav-directories ul { display: grid; gap: 6px; padding: 0; margin: 0; list-style: none; }
+.directory-entry { width: 100%; min-height: 44px; justify-content: flex-start; text-align: left; }
+.directory-entry svg { flex-shrink: 0; }
+.directory-entry svg:last-child { margin-left: auto; }
 .report-page :deep(button:disabled) {
   opacity: 0.5;
   cursor: not-allowed;
+}
+@media (max-width: 640px) {
+  .report-form.webdav-form, .webdav-address, .schedule-fields { grid-template-columns: minmax(0, 1fr); }
+  .webdav-form > :is(label, .secret-field, .credential-field) { grid-column: 1 / -1; }
+  .webdav-directory-dialog .btn { min-height: 44px; }
 }
 @media (max-width: 850px) {
   .backup-grid {

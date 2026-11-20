@@ -37,6 +37,12 @@ async function loginPanel(target, origin) {
   await target.goto(origin + '/sunpanel/#/login')
   await target.locator('.login-card input:not([type=password])').fill('browser-fixture@example.test')
   await target.locator('.login-card input[type=password]').fill(password)
+  const passwordField = target.locator('.login-card .n-input').filter({ has: target.locator('.n-input__eye') })
+  const passwordEye = passwordField.locator('.n-input__eye')
+  await passwordEye.click()
+  assert.equal(await passwordField.locator('input').getAttribute('type'), 'text')
+  await passwordEye.click()
+  assert.equal(await passwordField.locator('input').getAttribute('type'), 'password')
   await target.locator('.login-card button[type=button]').filter({ hasText: /^登录$|^Login$/ }).click()
   await target.getByRole('button', { name: 'GateHome 联动', exact: true }).waitFor()
 }

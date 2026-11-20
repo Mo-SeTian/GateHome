@@ -9,3 +9,8 @@ button,a.primary,a.secondary{font:inherit;text-align:center;display:flex;align-i
 @keyframes enter{from{opacity:.3;transform:translateY(8px)}to{opacity:1;transform:none}}@media(max-width:480px){.auth-card{padding:28px 24px}.brand{margin-bottom:28px}h1{font-size:25px}}@media(prefers-reduced-motion:reduce){.auth-card{animation:none}button,a.primary,a.secondary{transition:none}button:active,a.primary:active{transform:none}}
 
 .auth-icon{width:18px;height:18px;flex-shrink:0}
+.password-field{position:relative}
+.password-field input{padding-inline-end:54px}
+.password-field button{position:absolute;inset:0 2px 0 auto;width:44px;min-height:44px;padding:0;border:0;background:transparent;color:#53647d}
+.password-field button:hover,.password-field button[aria-pressed="true"]{color:#325dca}
+.password-field button[hidden]{display:none}

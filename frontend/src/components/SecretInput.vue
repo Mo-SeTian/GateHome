@@ -3,15 +3,16 @@
     <label :for="id">{{ label }}</label>
     <div class="secret-control">
       <input
+        ref="input"
         :id="id" :name="name" class="form-input"
         :type="visible ? 'text' : 'password'"
-        :value="modelValue || savedValue" :placeholder="placeholder"
-        :readonly="readonly" :disabled="disabled || loading" :maxlength="maxlength"
-        autocomplete="new-password" spellcheck="false" @input="edit"
+        :value="modelValue ?? savedValue" :placeholder="configured && modelValue === '' ? '' : placeholder"
+        :readonly="readonly" :disabled="disabled || loading" :maxlength="maxlength" :required="required"
+        :autocomplete="autocomplete" spellcheck="false" @input="edit"
       />
       <button type="button" class="secret-eye"
-        :disabled="disabled || loading || (!modelValue && !(configured && revealable))"
-        :aria-label="visible ? '隐藏 Token' : configured && !modelValue ? '显示已保存的 Token' : '显示 Token'"
+        :disabled="disabled || loading || (!visible && !modelValue && !canReadSaved && !canShowEmpty)"
+        :aria-label="visible ? `隐藏${eyeName}` : canReadSaved ? `显示已保存的${eyeName}` : `显示${eyeName}`"
         :aria-pressed="visible" :aria-controls="id" :aria-busy="loading" @click="toggle">
         <LoaderCircle v-if="loading" :size="16" class="secret-spinner" aria-hidden="true" />
         <EyeOff v-else-if="visible" :size="16" aria-hidden="true" />
@@ -23,22 +24,29 @@
 </template>
 
 <script setup>
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Eye, EyeOff, LoaderCircle } from 'lucide-vue-next'
 import { adminApi } from '@/api/admin'
 
 const props = defineProps({
   id: { type: String, required: true }, name: { type: String, default: 'token' },
-  label: { type: String, default: 'API Token' }, modelValue: { type: String, default: '' },
+  label: { type: String, default: 'API Token' }, modelValue: String,
   kind: { type: String, default: '' }, credentialId: { type: String, default: '' },
-  configured: Boolean, disabled: Boolean, readonly: Boolean,
+  configured: Boolean, disabled: Boolean, readonly: Boolean, required: Boolean,
+  secretName: { type: String, default: 'Token' },
+  autocomplete: { type: String, default: 'new-password' },
   revealable: { type: Boolean, default: true },
   placeholder: { type: String, default: '留空保留已保存的 Token' },
   maxlength: { type: Number, default: 512 },
   modelModifiers: { type: Object, default: () => ({}) }
 })
 const emit = defineEmits(['update:modelValue'])
+const input = ref(null)
+defineExpose({ focus: () => input.value?.focus() })
 const visible = ref(false), savedValue = ref(''), error = ref(''), loading = ref(false)
+const canReadSaved = computed(() => props.modelValue === undefined && props.kind && props.configured && props.revealable)
+const canShowEmpty = computed(() => props.secretName === '密码' && !props.readonly)
+const eyeName = computed(() => props.secretName === '密码' ? '密码' : ' ' + props.secretName)
 let controller, generation = 0
 function reset() {
   generation++
@@ -59,6 +67,10 @@ async function toggle() {
   if (visible.value) return reset()
   error.value = ''
   if (props.modelValue) { visible.value = true; return }
+  if (!canReadSaved.value) {
+    if (canShowEmpty.value) visible.value = true
+    return
+  }
   const request = ++generation
   controller = new AbortController()
   loading.value = true

@@ -25,6 +25,10 @@ type webDAVFile struct {
 	Size      int64     `json:"size"`
 	CreatedAt time.Time `json:"created_at"`
 }
+type webDAVDirectory struct {
+	Name string `json:"name"`
+	URL  string `json:"url"`
+}
 type webDAVClient struct {
 	base                   *url.URL
 	client                 *http.Client
@@ -33,7 +37,7 @@ type webDAVClient struct {
 
 func webDAVBase(raw string) (*url.URL, error) {
 	u, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil || u.Hostname() == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.RawQuery != "" || u.Fragment != "" || len(raw) > 2048 {
+	if err != nil || u.Hostname() == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || len(raw) > 2048 {
 		return nil, errors.New("请填写不含账号密码、参数或片段的 HTTP(S) WebDAV 目录地址")
 	}
 	if strings.ContainsAny(u.Path, "\x00\\") || path.Clean(u.Path) != strings.TrimSuffix(u.Path, "/") && u.Path != "" && u.Path != "/" {
@@ -139,7 +143,19 @@ func webDAVStatus(response *http.Response, allowed ...int) error {
 			return nil
 		}
 	}
-	return fmt.Errorf("WebDAV 返回 HTTP %d，请检查地址、账号与目录权限", response.StatusCode)
+	return webDAVStatusError(response.StatusCode)
+}
+func webDAVStatusError(status int) error {
+	switch status {
+	case http.StatusUnauthorized:
+		return errors.New("WebDAV 认证失败（HTTP 401），请核对账号和存储密码。坚果云需要第三方应用密码")
+	case http.StatusForbidden:
+		return errors.New("WebDAV 拒绝访问（HTTP 403），请检查目录权限")
+	case http.StatusNotFound:
+		return errors.New("WebDAV 路径不存在或该目录不支持此操作（HTTP 404），请检查所选目录")
+	default:
+		return fmt.Errorf("WebDAV 返回 HTTP %d", status)
+	}
 }
 
 const webDAVProps = `<?xml version="1.0" encoding="utf-8"?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/><d:getcontentlength/></d:prop></d:propfind>`
@@ -149,7 +165,7 @@ type davResponse struct {
 	PropStats []struct {
 		Status string `xml:"status"`
 		Prop   struct {
-			Type struct {
+			Type *struct {
 				Collection *struct{} `xml:"collection"`
 			} `xml:"resourcetype"`
 			Length string `xml:"getcontentlength"`
@@ -182,15 +198,65 @@ func (d *webDAVClient) propfind(ctx context.Context, target *url.URL, depth stri
 	return result.Responses, 207, nil
 }
 func davProperty(row davResponse) (bool, int64, bool) {
+	var collection, valid bool
+	var size int64
 	for _, stat := range row.PropStats {
 		parts := strings.Fields(stat.Status)
 		if len(parts) < 2 || parts[1] != "200" {
 			continue
 		}
-		size, _ := strconv.ParseInt(strings.TrimSpace(stat.Prop.Length), 10, 64)
-		return stat.Prop.Type.Collection != nil, size, true
+		valid = true
+		if stat.Prop.Type != nil {
+			collection = stat.Prop.Type.Collection != nil
+		}
+		if stat.Prop.Length != "" {
+			size, _ = strconv.ParseInt(strings.TrimSpace(stat.Prop.Length), 10, 64)
+		}
 	}
-	return false, 0, false
+	return collection, size, valid
+}
+
+func webDAVSameOrigin(a, b *url.URL) bool {
+	return a.Scheme == b.Scheme && strings.EqualFold(a.Host, b.Host)
+}
+
+func (d *webDAVClient) directories(ctx context.Context) ([]webDAVDirectory, error) {
+	rows, status, err := d.propfind(ctx, d.base, "1")
+	if err != nil {
+		return nil, err
+	}
+	if status == http.StatusNotFound {
+		return nil, webDAVStatusError(status)
+	}
+	folders := []webDAVDirectory{}
+	seen := make(map[string]bool)
+	for _, row := range rows {
+		isDir, _, valid := davProperty(row)
+		if !valid {
+			continue
+		}
+		href, err := url.Parse(strings.TrimSpace(row.Href))
+		if err != nil || href.User != nil || href.RawQuery != "" || href.ForceQuery || href.Fragment != "" {
+			continue
+		}
+		target, err := webDAVBase(d.base.ResolveReference(href).String())
+		if err != nil || !webDAVSameOrigin(target, d.base) {
+			continue
+		}
+		if target.Path == d.base.Path {
+			if !isDir {
+				return nil, errors.New("WebDAV 地址必须指向目录")
+			}
+			continue
+		}
+		if !isDir || path.Dir(path.Clean(target.Path)) != path.Clean(d.base.Path) || seen[target.Path] {
+			continue
+		}
+		seen[target.Path] = true
+		folders = append(folders, webDAVDirectory{Name: path.Base(target.Path), URL: target.String()})
+	}
+	sort.Slice(folders, func(i, j int) bool { return folders[i].Name < folders[j].Name })
+	return folders, nil
 }
 func (d *webDAVClient) ensureCollection(ctx context.Context, target *url.URL, remaining int) error {
 	rows, status, err := d.propfind(ctx, target, "0")
@@ -231,9 +297,12 @@ func (d *webDAVClient) owns(name string) bool {
 	return len(d.id) == 24 && webDAVBackupName.MatchString(name) && strings.HasPrefix(name, "gatehome-backup-"+d.id+"-")
 }
 func (d *webDAVClient) list(ctx context.Context) ([]webDAVFile, error) {
-	rows, _, err := d.propfind(ctx, d.base, "1")
+	rows, status, err := d.propfind(ctx, d.base, "1")
 	if err != nil {
 		return nil, err
+	}
+	if status == http.StatusNotFound {
+		return nil, webDAVStatusError(status)
 	}
 	files := []webDAVFile{}
 	seen := map[string]bool{}
@@ -243,7 +312,7 @@ func (d *webDAVClient) list(ctx context.Context) ([]webDAVFile, error) {
 			continue
 		}
 		target := d.base.ResolveReference(relative)
-		if target.Scheme != d.base.Scheme || !strings.EqualFold(target.Host, d.base.Host) || path.Dir(target.Path) != path.Clean(d.base.Path) {
+		if !webDAVSameOrigin(target, d.base) || path.Dir(target.Path) != path.Clean(d.base.Path) {
 			continue
 		}
 		name := path.Base(target.Path)
@@ -303,17 +372,17 @@ func (d *webDAVClient) upload(ctx context.Context, name string, data []byte, kee
 		return "", errors.New("备份名称无效")
 	}
 	if err := d.ensureCollection(ctx, d.base, 12); err != nil {
-		return "", err
+		return "", fmt.Errorf("检查备份目录失败：%w", err)
 	}
 	staged := name + ".part"
 	response, err := d.request(ctx, "PUT", d.target(staged), data, map[string]string{"If-None-Match": "*", "Content-Type": "application/octet-stream"})
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("上传临时备份失败：%w", err)
 	}
 	err = webDAVStatus(response, 200, 201, 204)
 	response.Body.Close()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("上传临时备份失败：%w", err)
 	}
 	cleanup := func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -326,21 +395,24 @@ func (d *webDAVClient) upload(ctx context.Context, name string, data []byte, kee
 	response, err = d.request(ctx, "MOVE", d.target(staged), nil, map[string]string{"Destination": d.target(name).String(), "Overwrite": "F"})
 	if err != nil {
 		cleanup()
-		return "", err
+		return "", fmt.Errorf("提交备份文件失败（MOVE）：%w", err)
 	}
 	err = webDAVStatus(response, 201, 204)
 	response.Body.Close()
 	if err != nil {
 		cleanup()
-		return "", err
+		return "", fmt.Errorf("提交备份文件失败（MOVE）：%w", err)
 	}
 	verified, err := d.get(ctx, name)
-	if err != nil || sha256.Sum256(verified) != sha256.Sum256(data) {
+	if err != nil {
+		return name, fmt.Errorf("读取备份进行校验失败，旧备份保留：%w", err)
+	}
+	if sha256.Sum256(verified) != sha256.Sum256(data) {
 		return name, errors.New("远程备份校验失败，旧备份保留，请检查后重新备份")
 	}
 	files, err := d.list(ctx)
 	if err != nil {
-		return name, errors.New("备份已上传并校验，但无法读取目录进行保留清理")
+		return name, fmt.Errorf("备份已上传并校验，但无法读取目录进行保留清理：%w", err)
 	}
 	kept := 1
 	for _, file := range files {
@@ -349,7 +421,7 @@ func (d *webDAVClient) upload(ctx context.Context, name string, data []byte, kee
 		}
 		if kept >= keep {
 			if err := d.remove(ctx, file.Name); err != nil {
-				return name, errors.New("备份已上传并校验，但旧备份清理失败，请检查删除权限")
+				return name, fmt.Errorf("备份已上传并校验，但旧备份清理失败：%w", err)
 			}
 		} else {
 			kept++
