@@ -44,9 +44,9 @@ const parts = computed(() => {
 
 <template>
   <div class="mt-5 footer whitespace-pre-line text-center text-slate-300">
-    <template v-for="(part, index) in parts" :key="index">
+    <span v-for="(part, index) in parts" :key="index">
       <a v-if="part.href" :href="part.href" target="_blank" rel="noopener noreferrer">{{ part.text }}</a>
       <template v-else>{{ part.text }}</template>
-    </template>
+    </span>
   </div>
 </template>
