@@ -1,6 +1,7 @@
 package database
 
 import (
+	"errors"
 	"log"
 	"os"
 	"path"
@@ -127,29 +128,31 @@ func CreateDatabase(driver string, db *gorm.DB) error {
 	return err
 }
 
-// 初始化一个用户,一个用户都没有的时候创建一个
+// A pending account has no valid password hash. Only the trusted operator can finish setup.
+const PendingPassword = "!setup-required"
+
 func NotFoundAndCreateUser(db *gorm.DB) error {
-	fUser := models.User{}
-	if err := db.First(&fUser).Error; err != nil {
-		if err != gorm.ErrRecordNotFound {
-			return err
+	return db.Transaction(func(tx *gorm.DB) error {
+		var first models.User
+		err := tx.Select("id").First(&first).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			const username = "admin@sun.cc"
+			return tx.Create(&models.User{Username: username, Mail: username, Name: username, Role: 1, Status: 1, Password: PendingPassword}).Error
 		}
-		username := "admin@sun.cc"
-		fUser.Mail = username
-		fUser.Username = username
-		fUser.Name = username
-		fUser.Status = 1
-		fUser.Role = 1
-		hash, err := cmn.HashPassword("12345678")
 		if err != nil {
 			return err
 		}
-		fUser.Password = hash
-
-		if errCreate := db.Create(&fUser).Error; errCreate != nil {
-			return errCreate
+		var admins []models.User
+		if err := tx.Select("id", "password").Where("role = ?", 1).Find(&admins).Error; err != nil {
+			return err
 		}
-	}
-
-	return nil
+		for _, admin := range admins {
+			if cmn.UsesFactoryPassword(admin.Password) {
+				if err := tx.Model(&admin).Where("password = ?", admin.Password).Updates(map[string]any{"password": PendingPassword, "token": ""}).Error; err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
 }

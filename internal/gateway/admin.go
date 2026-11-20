@@ -1,10 +1,8 @@
 package gateway
 
 import (
-	"crypto/rand"
 	"crypto/sha256"
 	"embed"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -22,39 +20,42 @@ import (
 var webFiles embed.FS
 
 type Admin struct {
-	webDAV       remoteBackupRuntime
-	sunPanel     *SunPanel
-	store        *Store
-	proxy        *Proxy
-	forwarder    *PortForwarder
-	certs        *Certificates
-	jobs         *Jobs
-	started      time.Time
-	ports        Config
-	adminPort    int
-	updateMu     sync.Mutex
-	mu           sync.Mutex
-	authMu       sync.RWMutex
-	sessions     map[[32]byte]time.Time
-	attempts     map[string]routeAttempts
-	activeLogins int
-	logs         *Logs
-	maintenance  *Maintenance
-	onlineUpdate onlineUpdateJob
-	releaseCache onlineReleaseCache
-	dashboard    dashboardCache
-	telemetry    telemetryCollector
-	domainDNS    *domainDNS
-	discovery    serviceDiscovery
-	health       serviceHealthCache
-	icons        iconLibrary
+	webDAV        remoteBackupRuntime
+	sunPanel      *SunPanel
+	store         *Store
+	proxy         *Proxy
+	forwarder     *PortForwarder
+	certs         *Certificates
+	jobs          *Jobs
+	started       time.Time
+	ports         Config
+	adminPort     int
+	updateMu      sync.Mutex
+	mu            sync.Mutex
+	authMu        sync.RWMutex
+	sessions      map[[32]byte]adminSession
+	passkeyFlows  map[string]passkeyFlow
+	adminAddress  string
+	httpAddresses map[int]string
+	attempts      map[string]routeAttempts
+	activeLogins  int
+	logs          *Logs
+	maintenance   *Maintenance
+	onlineUpdate  onlineUpdateJob
+	releaseCache  onlineReleaseCache
+	dashboard     dashboardCache
+	telemetry     telemetryCollector
+	domainDNS     *domainDNS
+	discovery     serviceDiscovery
+	health        serviceHealthCache
+	icons         iconLibrary
 }
 
 func NewAdmin(store *Store, proxy *Proxy, certs *Certificates, jobs *Jobs, adminPort int) *Admin {
 	proxy.adminPort = adminPort
 	proxy.defense = newIPDefense(store)
 	proxy.ConfigureState(store.Snapshot())
-	return &Admin{store: store, proxy: proxy, certs: certs, jobs: jobs, started: time.Now(), ports: store.Snapshot().Config, adminPort: adminPort, sessions: map[[32]byte]time.Time{}, attempts: map[string]routeAttempts{}, domainDNS: newDomainDNS(store)}
+	return &Admin{store: store, proxy: proxy, certs: certs, jobs: jobs, started: time.Now(), ports: store.Snapshot().Config, adminPort: adminPort, sessions: map[[32]byte]adminSession{}, passkeyFlows: map[string]passkeyFlow{}, attempts: map[string]routeAttempts{}, domainDNS: newDomainDNS(store)}
 }
 
 // SetPortForwarder connects the running listeners before the admin server starts.
@@ -103,7 +104,12 @@ func (a *Admin) Handler() http.Handler {
 	mux.HandleFunc("POST /api/login", a.login)
 	mux.HandleFunc("POST /api/logout", a.requireAuth(a.logout))
 	a.accountRoutes(mux)
+	a.adminSessionRoutes(mux)
+	a.passkeyRoutes(mux)
+	mux.HandleFunc("GET /api/exposure", a.requireAuth(a.exposureOverview))
 	a.credentialRoutes(mux)
+	mux.HandleFunc("GET /api/sunpanel/admin-setup", a.requireAuth(a.sunPanelAdminSetup))
+	mux.HandleFunc("POST /api/sunpanel/admin-setup", a.requireAuth(a.sunPanelAdminSetup))
 	mux.HandleFunc("GET /api/config", a.requireAuth(a.getConfig))
 	mux.HandleFunc("PUT /api/config", a.requireAuth(a.putConfig))
 	mux.HandleFunc("GET /api/status", a.requireAuth(a.status))
@@ -365,20 +371,8 @@ func (a *Admin) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 			apiError(w, 403, "管理请求来源未获允许")
 			return
 		}
-		cookie, err := r.Cookie("gatehouse_session")
-		if err != nil {
-			apiError(w, 401, "请先登录")
-			return
-		}
-		key := sha256.Sum256([]byte(cookie.Value))
-		a.mu.Lock()
-		expires := a.sessions[key]
-		if !time.Now().Before(expires) {
-			delete(a.sessions, key)
-		}
-		a.mu.Unlock()
-		if !time.Now().Before(expires) {
-			apiError(w, 401, "登录已过期，请重新登录")
+		if _, _, valid := a.managementSession(r, true); !valid {
+			apiError(w, 401, "请先登录或重新登录")
 			return
 		}
 		next(w, r)
@@ -406,19 +400,7 @@ func (a *Admin) login(w http.ResponseWriter, r *http.Request) {
 		apiError(w, 401, "管理员账号或密码不正确")
 		return
 	}
-	secret := make([]byte, 32)
-	if _, err := rand.Read(secret); err != nil {
-		apiError(w, 500, "无法创建会话")
-		return
-	}
-	token := hex.EncodeToString(secret)
-	a.mu.Lock()
-	now := time.Now()
-	pruneSessions(a.sessions, 32, now)
-	a.sessions[sha256.Sum256([]byte(token))] = now.Add(12 * time.Hour)
-	a.mu.Unlock()
-	http.SetCookie(w, &http.Cookie{Name: "gatehouse_session", Value: token, Path: "/", HttpOnly: true, Secure: a.secureSession(r), SameSite: http.SameSiteStrictMode, MaxAge: 43200})
-	jsonResponse(w, 200, map[string]bool{"ok": true})
+	a.issueAdminSession(w, r, "password")
 }
 
 func (a *Admin) logout(w http.ResponseWriter, r *http.Request) {

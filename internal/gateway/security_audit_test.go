@@ -180,7 +180,7 @@ func TestSecurityAuditSessionExpiryAndRestart(t *testing.T) {
 	a, h := testAdmin(t)
 	cookie := loginForTest(t, h)
 	a.mu.Lock()
-	a.sessions[sha256.Sum256([]byte(cookie.Value))] = time.Now().Add(-time.Second)
+	a.sessions[sha256.Sum256([]byte(cookie.Value))] = adminSession{Expires: time.Now().Add(-time.Second)}
 	a.mu.Unlock()
 	if w := adminRequest(h, "GET", "/api/config", nil, cookie, ""); w.Code != 401 {
 		t.Fatal("expired session accepted")

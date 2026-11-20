@@ -214,7 +214,7 @@ func (s *SunPanel) Handler() http.Handler {
 		}
 		// Never forward GateHome's session to the vendored service.
 		r = r.Clone(r.Context())
-		stripSessionCookie(r, "gatehouse_session")
+		stripAdminCookies(r)
 		w.Header().Set("X-Frame-Options", "SAMEORIGIN")
 		w.Header().Set("Content-Security-Policy", "frame-ancestors 'self'")
 		proxy.ServeHTTP(w, r)

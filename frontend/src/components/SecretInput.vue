@@ -20,12 +20,14 @@
       </button>
     </div>
     <p v-if="error" class="report-error" role="alert">{{ error }}</p>
+    <AdminVerification v-if="kind" ref="verification" />
   </div>
 </template>
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Eye, EyeOff, LoaderCircle } from 'lucide-vue-next'
+import AdminVerification from './AdminVerification.vue'
 import { adminApi } from '@/api/admin'
 
 const props = defineProps({
@@ -41,7 +43,7 @@ const props = defineProps({
   modelModifiers: { type: Object, default: () => ({}) }
 })
 const emit = defineEmits(['update:modelValue'])
-const input = ref(null)
+const input = ref(null), verification = ref(null)
 defineExpose({ focus: () => input.value?.focus() })
 const visible = ref(false), savedValue = ref(''), error = ref(''), loading = ref(false)
 const canReadSaved = computed(() => props.modelValue === undefined && props.kind && props.configured && props.revealable)
@@ -75,8 +77,17 @@ async function toggle() {
   controller = new AbortController()
   loading.value = true
   try {
-    const result = await adminApi.revealCredential({ kind: props.kind, id: props.credentialId }, controller.signal)
-    if (request !== generation) return
+    const body = { kind: props.kind, id: props.credentialId }
+    const signal = controller.signal
+    let result
+    try {
+      result = await adminApi.revealCredential(body, signal)
+    } catch (err) {
+      if (err.status !== 428) throw err
+      if (!await verification.value.verify() || signal.aborted) return
+      result = await adminApi.revealCredential(body, signal)
+    }
+    if (request !== generation || document.visibilityState === 'hidden') return
     savedValue.value = result.value
     visible.value = true
   } catch (err) {
@@ -85,7 +96,7 @@ async function toggle() {
     if (request === generation) loading.value = false
   }
 }
-function hidden() { if (document.visibilityState === 'hidden') reset() }
+function hidden() { if (visible.value && document.visibilityState === 'hidden') reset() }
 watch(() => [props.kind, props.credentialId, props.configured, props.revealable], reset)
 watch(() => props.modelValue, value => { if (!value || props.readonly) reset() })
 onMounted(() => document.addEventListener('visibilitychange', hidden))

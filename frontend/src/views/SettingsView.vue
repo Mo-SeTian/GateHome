@@ -116,9 +116,10 @@
         <SpotlightCard class="report-panel"
           ><h2>管理员账户</h2>
           <p class="report-note">当前账号：{{ username }}。修改账号或密码将退出全部管理会话。</p>
-          <button type="button" class="btn btn-secondary" @click="openAccountModal">
-            修改账号与密码
-          </button></SpotlightCard
+          <div class="report-actions">
+            <button type="button" class="btn btn-secondary" @click="openAccountModal">修改账号与密码</button>
+            <RouterLink class="btn btn-secondary" to="/settings/security">通行密钥与会话</RouterLink>
+          </div></SpotlightCard
         >
         <SpotlightCard class="report-panel"
           ><h2>界面外观</h2>
@@ -167,6 +168,7 @@
         >
         <SpotlightCard class="report-panel"
           ><h2>反代监听端口</h2>
+          <RouterLink class="btn btn-secondary" to="/settings/exposure">入口暴露总览</RouterLink>
           <div v-for="group in snapshot?.config.groups || []" :key="group.id" class="listener-row">
             <strong>{{ group.name }}</strong
             ><span

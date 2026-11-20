@@ -32,6 +32,9 @@ func (a *Admin) credentialRoutes(mux *http.ServeMux) {
 		if !decodeBody(w, r, &input) {
 			return
 		}
+		if !a.requireRecentAdmin(w, r) {
+			return
+		}
 		s := a.store.Snapshot()
 		value := ""
 		switch input.Kind {

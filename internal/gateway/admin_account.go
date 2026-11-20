@@ -1,7 +1,6 @@
 package gateway
 
 import (
-	"crypto/sha256"
 	"errors"
 	"net/http"
 	"strings"
@@ -33,6 +32,7 @@ func (s *Store) SetAdminAccount(username, hash string) error {
 	defer s.mu.Unlock()
 	next := s.state
 	next.AdminUsername, next.PasswordHash = username, hash
+	next.Passkeys, next.PasskeyUserID = nil, nil
 	if err := writeJSON(s.path, next); err != nil {
 		return errors.New("管理员账户保存失败，请检查配置目录权限")
 	}
@@ -124,10 +124,7 @@ func (a *Admin) accountRoutes(mux *http.ServeMux) {
 		}
 		a.authMu.Lock()
 		defer a.authMu.Unlock()
-		cookie, _ := r.Cookie("gatehouse_session")
-		a.mu.Lock()
-		validSession := cookie != nil && time.Now().Before(a.sessions[sha256.Sum256([]byte(cookie.Value))])
-		a.mu.Unlock()
+		_, _, validSession := a.managementSession(r, false)
 		if !validSession {
 			apiError(w, 401, "登录已过期，请重新登录")
 			return

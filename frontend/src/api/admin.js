@@ -12,6 +12,10 @@ export const adminApi = {
     method: 'POST', body: { username, password }, notifyUnauthorized: false
   }),
   logout: () => request('/api/logout', { method: 'POST', body: {}, notifyUnauthorized: false }),
+  exposure: signal => request('/api/exposure', { signal }),
+  sessions: signal => request('/api/account/sessions', { signal }),
+  revokeSession: (id, signal) => request('/api/account/sessions/' + encodeURIComponent(id), { method: 'DELETE', body: {}, signal }),
+  verifyAdmin: (password, signal) => request('/api/account/verify', { method: 'POST', body: { password }, signal }),
   updateAccount: (body) => request('/api/account', { method: 'PUT', body }),
   status: (signal) => request('/api/status', { signal }),
   config: (signal) => request('/api/config', { signal }),
@@ -19,6 +23,10 @@ export const adminApi = {
   revealCredential: (body, signal) => request('/api/credentials/reveal', { method: 'POST', body, signal }),
   restart: () => request('/api/maintenance/restart', { method: 'POST', body: {} }),
   maintenance: (signal) => request('/api/maintenance', { signal }),
+  pendingSunPanelAdmins: (signal) => request('/api/sunpanel/admin-setup', { signal }),
+  initializeSunPanelAdmin: (id, password, signal) => request('/api/sunpanel/admin-setup', {
+    method: 'POST', body: { id, password }, signal
+  }),
   sunPanelRoutes: (signal) => request('/api/sunpanel/routes', { signal }),
   connectSunPanel: (origin, signal) => request('/api/sunpanel/connect', { method: 'POST', body: { origin }, signal }),
   mcp: (signal) => request('/api/mcp', { signal }),

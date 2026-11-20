@@ -147,3 +147,21 @@ func TestSavedMCPTokensRevealPersistRotateRevokeAndRedact(t *testing.T) {
 	}
 	read("mcp-client", client.ID, "", 404)
 }
+
+func TestSunPanelInitialPasswordRequiresManagementSession(t *testing.T) {
+	_, handler := testAdmin(t)
+	const path = "/api/sunpanel/admin-setup"
+	if adminRequest(handler, "GET", path, nil, nil, "").Code != 401 || adminRequest(handler, "POST", path, map[string]any{}, nil, "").Code != 401 {
+		t.Fatal("operator setup must require a management session")
+	}
+	if adminRequest(handler, "POST", path, map[string]any{}, loginForTest(t, handler), "https://other.example.test").Code != 403 {
+		t.Fatal("operator setup accepted a cross-origin request")
+	}
+	req := httptest.NewRequest("GET", path, nil)
+	req = req.WithContext(context.WithValue(req.Context(), mcpInternalKey{}, true))
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != 403 {
+		t.Fatal("operator setup was accessible to MCP")
+	}
+}

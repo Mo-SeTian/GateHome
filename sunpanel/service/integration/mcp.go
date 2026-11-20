@@ -13,6 +13,9 @@ import (
 	"strings"
 	panelapi "sun-panel/api/api_v1/panel"
 	"sun-panel/global"
+	"sun-panel/initialize/database"
+	"sun-panel/lib/cmn"
+	"sun-panel/lib/cmn/systemSetting"
 	"sun-panel/models"
 	"sun-panel/models/datatype"
 	"time"
@@ -118,6 +121,53 @@ func MCPBridge(key []byte) http.Handler {
 		}
 		if err != nil || mcpDecode(data, &input) != nil {
 			fail(400, "管理请求格式无效或过大")
+			return
+		}
+		// These actions are used only by GateHome's administrator setup form.
+		if input.Action == "pending_admins" || input.Action == "initialize_admin" {
+			pending := global.Db.Model(&models.User{}).Where("role = 1 AND status = 1 AND password = ?", database.PendingPassword)
+			if input.Action == "pending_admins" {
+				var accounts []struct {
+					ID       uint   `json:"id"`
+					Username string `json:"username"`
+				}
+				if pending.Select("id", "username").Order("id").Find(&accounts).Error != nil {
+					fail(500, "读取待初始化账号失败")
+					return
+				}
+				json.NewEncoder(w).Encode(map[string]any{"data": accounts})
+				return
+			}
+			var setup struct {
+				Password string `json:"password"`
+			}
+			if input.UserID == 0 || mcpDecode(input.Data, &setup) != nil {
+				fail(400, "账号或密码无效")
+				return
+			}
+			hash, err := cmn.HashPassword(setup.Password)
+			if err != nil {
+				fail(400, err.Error())
+				return
+			}
+			result := pending.Where("id = ?", input.UserID).Updates(map[string]any{"password": hash, "token": ""})
+			if result.Error != nil || result.RowsAffected != 1 {
+				fail(409, "账号已完成设置或不可用，请刷新")
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]any{"data": true})
+			return
+		}
+		if input.Action == "public_access" {
+			var userID *uint
+			var count int64
+			if global.SystemSetting.GetValueByInterface(systemSetting.PANEL_PUBLIC_USER_ID, &userID) == nil && userID != nil {
+				if err := global.Db.Model(&models.User{}).Where("id = ? AND status = 1", *userID).Count(&count).Error; err != nil {
+					fail(500, "读取 SunPanel 公开模式失败")
+					return
+				}
+			}
+			json.NewEncoder(w).Encode(map[string]any{"data": count > 0})
 			return
 		}
 		if input.Action == "users" {

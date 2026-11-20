@@ -118,6 +118,17 @@ const routes = [
     meta: { title: '设置', icon: 'Settings' }
   },
 
+  {
+    path: '/settings/exposure',
+    component: () => import('@/views/ExposureView.vue'),
+    meta: { title: '入口暴露总览' }
+  },
+  {
+    path: '/settings/security',
+    component: () => import('@/views/AccountSecurityView.vue'),
+    meta: { title: '账号安全' }
+  },
+
   // Standalone
   {
     path: '/sunpanel-connect',

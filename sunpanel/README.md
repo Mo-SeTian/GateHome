@@ -117,10 +117,9 @@ Github社区板块：https://github.com/hslr-s/sun-panel/discussions
 
 <div id="default-username"></div>
 
-### 默认账号密码
-账号：admin@sun.cc
+### 管理员首次登录
 
-密码：12345678
+在 GateHome 管理台的「浏览器首页」启用并重启服务，再为页面列出的 SunPanel 管理员设置独立密码。升级后仍使用旧出厂密码的管理员也在这里设置新密码。独立运行此源码时，在本地终端执行下方的重置命令设置密码。
 
 ### 命令参数
 |参数|说明|
@@ -146,12 +145,7 @@ Github社区板块：https://github.com/hslr-s/sun-panel/discussions
 ```sh
 ./sun-panel -password-reset
 ```
-输出
-```
-密码已经重置成功，以下是账号信息
-用户名  xxx@qq.com
-密码  12345678
-```
+按终端提示输入两次新密码，输入内容会隐藏。
 
 ### docker 运行
 

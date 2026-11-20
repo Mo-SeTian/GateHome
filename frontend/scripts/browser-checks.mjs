@@ -80,6 +80,34 @@ try {
     ...(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : { channel: 'chromium' }),
     args: ['--host-resolver-rules=MAP gatehome-console.test 127.0.0.1', '--no-proxy-server']
   })
+  const passkeyContext = await browser.newContext()
+  const passkeyPage = await passkeyContext.newPage()
+  passkeyPage.setDefaultTimeout(10000)
+  const cdp = await passkeyContext.newCDPSession(passkeyPage)
+  await cdp.send('WebAuthn.enable')
+  await cdp.send('WebAuthn.addVirtualAuthenticator', { options: {
+    protocol: 'ctap2', transport: 'internal', hasResidentKey: true,
+    hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true
+  } })
+  const passkeyOrigin = `http://localhost:${port}`
+  await passkeyPage.goto(passkeyOrigin + '/console/#/settings/security')
+  await passkeyPage.locator('#admin-username').fill('admin')
+  await passkeyPage.locator('#admin-password').fill(secret)
+  await passkeyPage.locator('.login-form button[type=submit]').click()
+  await passkeyPage.getByRole('button', { name: '添加通行密钥', exact: true }).click()
+  await passkeyPage.getByRole('rowheader', { name: 'localhost', exact: true }).waitFor()
+  await passkeyPage.getByRole('button', { name: '退出当前会话', exact: true }).click()
+  const passkeyLogin = passkeyPage.waitForResponse(response => response.url().endsWith('/api/account/passkeys/login/finish'))
+  await passkeyPage.getByRole('button', { name: '使用通行密钥登录', exact: true }).click()
+  assert.equal((await passkeyLogin).status(), 200)
+  await passkeyPage.waitForURL('**/#/overview')
+  await passkeyPage.goto(passkeyOrigin + '/console/#/settings/security')
+  await passkeyPage.getByRole('cell', { name: '通行密钥', exact: true }).waitFor()
+  await passkeyPage.goto(passkeyOrigin + '/console/#/settings/exposure')
+  await passkeyPage.getByRole('rowheader', { name: '管理台', exact: true }).waitFor()
+  assert.equal(await passkeyPage.getByRole('rowheader', { name: '流量测试转发', exact: true }).count(), 2)
+  await passkeyContext.close()
+  console.log('PASS administrator Passkey registration and login, session metadata and TCP/UDP exposure overview')
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce' })
   const page = await context.newPage()
   page.setDefaultTimeout(10000)
@@ -89,11 +117,18 @@ try {
     if (response.status() < 400) return
     const path = new URL(response.url()).pathname
     if (path === '/api/account' && response.status() === 401) return
+    if (path === '/api/credentials/reveal' && response.status() === 428) return
     if (checkingConflict && path === '/api/config' && response.status() === 400) return
     errors.push(`HTTP ${response.status()} ${path}`)
   })
   page.on('pageerror', () => errors.push('page exception'))
-  page.on('console', message => { if (message.type() === 'error' && !/^Failed to load resource:.*status of (400|401)/.test(message.text())) errors.push(message.text().replaceAll(secret, '<REDACTED>')) })
+  page.on('console', message => {
+    const text = message.text()
+    if (message.type() !== 'error' || /^Failed to load resource:.*status of (400|401)/.test(text)) return
+    if (/^Failed to load resource:.*status of 428/.test(text) &&
+        message.location().url.endsWith('/api/credentials/reveal')) return
+    errors.push(text.replaceAll(secret, '<REDACTED>'))
+  })
   await page.goto(origin + '/console/#/routes')
   await page.locator('#admin-username').fill('admin')
   await page.locator('#admin-password').fill(secret)
@@ -261,7 +296,14 @@ try {
   await page.waitForFunction(() => !document.querySelector('dialog[open]'))
   await credentialDdns.getByRole('button', { name: '编辑组', exact: true }).click()
   assert.equal(await dialog().locator('[name=token]').inputValue(), '')
+  await page.route('**/api/credentials/reveal', route => route.fulfill({
+    status: 428, json: { error: '请验证身份后继续' }
+  }), { times: 1 })
   await dialog().getByRole('button', { name: '显示已保存的 Token', exact: true }).press('Space')
+  const verifyDialog = page.getByRole('dialog', { name: '验证管理员身份' })
+  await verifyDialog.getByLabel('当前管理密码').fill(secret)
+  await verifyDialog.getByRole('button', { name: '验证密码', exact: true }).click()
+  await verifyDialog.waitFor({ state: 'hidden' })
   await dialog().getByRole('button', { name: '隐藏 Token', exact: true }).waitFor()
   assert.ok((await dialog().locator('[name=token]').inputValue()) === fakeTokens.ddns)
   await page.evaluate(() => {

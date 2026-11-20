@@ -1,8 +1,10 @@
 package initialize
 
 import (
+	"bytes"
 	"flag"
 	"fmt"
+	"golang.org/x/term"
 	"os"
 	"sun-panel/global"
 	"sun-panel/initialize/cUserToken"
@@ -65,7 +67,9 @@ func InitApp() error {
 	// 多语言初始化
 	lang.LangInit("zh-cn") // en-us
 
-	DatabaseConnect()
+	if err := DatabaseConnect(); err != nil {
+		return err
+	}
 
 	// Redis 连接
 	{
@@ -102,7 +106,7 @@ func InitApp() error {
 	return nil
 }
 
-func DatabaseConnect() {
+func DatabaseConnect() error {
 	// 数据库连接 - 开始
 	var dbClientInfo database.DbClient
 	databaseDrive := global.Config.GetValueStringOrDefault("base", "database_drive")
@@ -129,9 +133,10 @@ func DatabaseConnect() {
 		models.Db = global.Db
 	}
 
-	database.CreateDatabase(databaseDrive, global.Db)
-
-	database.NotFoundAndCreateUser(global.Db)
+	if err := database.CreateDatabase(databaseDrive, global.Db); err != nil {
+		return err
+	}
+	return database.NotFoundAndCreateUser(global.Db)
 }
 
 // 命令行运行
@@ -168,16 +173,30 @@ func CommandRun() {
 			}
 		}
 
-		DatabaseConnect()
+		if err := DatabaseConnect(); err != nil {
+			fmt.Fprintln(os.Stderr, "管理员数据库初始化失败")
+			os.Exit(1)
+		}
 		userInfo := models.User{}
 		if err := global.Db.Where("role=?", 1).Order("id").First(&userInfo).Error; err != nil {
 			fmt.Println("ERROR", err.Error())
 			os.Exit(0) // 务必退出
 		}
 
-		newPassword := "12345678"
-
-		hash, err := cmn.HashPassword(newPassword)
+		fmt.Fprint(os.Stderr, "输入 SunPanel 管理员新密码：")
+		password, err := term.ReadPassword(int(os.Stdin.Fd()))
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "需要交互终端")
+			os.Exit(1)
+		}
+		fmt.Fprint(os.Stderr, "\n再次输入新密码：")
+		confirmation, err := term.ReadPassword(int(os.Stdin.Fd()))
+		fmt.Fprintln(os.Stderr)
+		if err != nil || !bytes.Equal(password, confirmation) {
+			fmt.Fprintln(os.Stderr, "两次输入不一致")
+			os.Exit(1)
+		}
+		hash, err := cmn.HashPassword(string(password))
 		if err != nil {
 			fmt.Println("Password reset failed")
 			os.Exit(1)
@@ -192,7 +211,7 @@ func CommandRun() {
 			os.Exit(0) // 务必退出
 		}
 
-		fmt.Println("The password has been successfully reset. Here is the account information")
+		fmt.Println("SunPanel 管理员密码已更新")
 
 		os.Exit(0) // 务必退出
 	} else {

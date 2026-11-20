@@ -3,6 +3,7 @@ import { VueDraggable } from 'vue-draggable-plus'
 import { NBackTop, NButton, NButtonGroup, NDropdown, NModal, NSkeleton, NSpin, useDialog, useMessage } from 'naive-ui'
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { AppIcon, AppStarter, EditItem } from './components'
+import SafeFooter from './components/SafeFooter.vue'
 import GateHomeImport from './components/GateHomeImport.vue'
 import { Clock, SearchBox, SystemMonitor } from '@/components/deskModule'
 import { SvgIcon } from '@/components/common'
@@ -614,7 +615,7 @@ function handleAddItem(itemIconGroupId?: number) {
             </div>
           </div>
         </div>
-        <div class="mt-5 footer" v-html="panelState.panelConfig.footerHtml" />
+        <SafeFooter :html="panelState.panelConfig.footerHtml" />
       </div>
     </div>
 

@@ -185,6 +185,8 @@ type Config struct {
 }
 
 type State struct {
+	Passkeys               []adminPasskey           `json:"admin_passkeys,omitempty"`
+	PasskeyUserID          []byte                   `json:"admin_passkey_user_id,omitempty"`
 	WebDAVBackup           WebDAVBackupState        `json:"webdav_backup,omitempty"`
 	MCP                    MCPConfig                `json:"mcp,omitempty"`
 	MCPTokenHash           string                   `json:"mcp_token_hash,omitempty"`

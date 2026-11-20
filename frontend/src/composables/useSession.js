@@ -1,5 +1,6 @@
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { usePasskey } from '@/api/passkeys'
 import { adminApi } from '@/api/admin'
 import { markSessionChanged } from '@/api/client'
 import { useToast } from './useToast'
@@ -36,6 +37,15 @@ function restoreSession() {
 
 async function login(name, password) {
   await adminApi.login(name, password)
+  await adoptLogin()
+}
+
+async function loginWithPasskey(signal) {
+  await usePasskey('login', signal)
+  await adoptLogin()
+}
+
+async function adoptLogin() {
   const account = await adminApi.account()
   setSession(account.username)
 }
@@ -52,7 +62,7 @@ async function updateAdminPassword({ username, currentPassword, newPassword, con
 export function useSession() {
   return {
     username, isAuthenticated, isAccountModalOpen, isLoggingOut,
-    restoreSession, login, endSession, updateAdminPassword,
+    restoreSession, login, loginWithPasskey, endSession, updateAdminPassword,
     openAccountModal: () => { isAccountModalOpen.value = true },
     closeAccountModal: () => { isAccountModalOpen.value = false }
   }

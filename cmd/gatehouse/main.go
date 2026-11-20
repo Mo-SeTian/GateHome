@@ -219,6 +219,7 @@ func run() error {
 	}
 	defer forwards.Close()
 	admin.SetPortForwarder(forwards)
+	admin.SetHTTPListeners(listeners)
 	proxy.StartTrafficSampling(ctx)
 	servers := []*http.Server{}
 	errorsCh := make(chan error, len(listeners))

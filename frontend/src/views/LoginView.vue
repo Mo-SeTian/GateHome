@@ -93,6 +93,8 @@
             <LogIn v-else :size="16" />
             <span>{{ isLoading ? '登录中…' : '登录' }}</span>
           </button>
+          <button v-if="canPasskey" type="button" class="btn btn-secondary" :disabled="isLoading"
+            @click="handleLogin(true)"><KeyRound :size="16" />使用通行密钥登录</button>
         </form>
       </SpotlightCard>
     </div>
@@ -143,13 +145,15 @@ import { useAppStore } from '@/composables/useAppStore'
 import { useSession } from '@/composables/useSession'
 import { useToast } from '@/composables/useToast'
 import { postLoginPath } from '@/router'
+import { passkeySupported } from '@/api/passkeys'
 import { adminApi } from '@/api/admin'
 import { startPolling } from '@/api/polling'
 
 const router = useRouter()
 const route = useRoute()
 const { theme, toggleTheme } = useAppStore()
-const { login } = useSession()
+const { login, loginWithPasskey } = useSession()
+const canPasskey = passkeySupported()
 const { success } = useToast()
 
 const username = ref('')
@@ -170,17 +174,19 @@ onBeforeUnmount(() => {
   controller.abort()
 })
 
-async function handleSubmit() {
+const handleSubmit = () => handleLogin(false)
+async function handleLogin(passkey) {
   if (isLoading.value) return
   errorMessage.value = ''
-  if (!username.value.trim()) {
+  if (!passkey && !username.value.trim()) {
     errorMessage.value = '请输入管理员账号'
     return
   }
 
   isLoading.value = true
   try {
-    await login(username.value.trim(), password.value)
+    if (passkey) await loginWithPasskey(controller.signal)
+    else await login(username.value.trim(), password.value)
     password.value = ''
     success('已登录 GateHome')
     await router.replace(postLoginPath(route.query.redirect))

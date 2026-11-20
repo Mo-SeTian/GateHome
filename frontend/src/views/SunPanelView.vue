@@ -57,6 +57,17 @@
         </div>
       </form>
     </SpotlightCard>
+    <SpotlightCard v-if="pendingAdmins.length && enabled" class="report-panel">
+      <form class="sunpanel-form" @submit.prevent="initializeAdmin">
+        <h2>设置首页管理员密码</h2>
+        <p>账号 <strong>{{ pendingAdmins[0].username }}</strong></p>
+        <SecretInput id="sunpanel-admin-password" name="sunpanel_password" label="新密码"
+          secret-name="密码" placeholder="8–72 字节" required v-model="password" />
+        <SecretInput id="sunpanel-admin-confirm" name="sunpanel_confirm" label="再次输入新密码"
+          secret-name="密码" placeholder="" required v-model="confirmation" />
+        <div class="form-actions"><button class="btn btn-primary" :disabled="settingPassword">设置密码</button></div>
+      </form>
+    </SpotlightCard>
     <SpotlightCard class="report-panel">
       <div class="report-heading">
         <h2>首页预览</h2>
@@ -131,6 +142,7 @@
 import { computed, onMounted, onBeforeUnmount, ref } from 'vue'
 import { ExternalLink } from 'lucide-vue-next'
 import SpotlightCard from '@/components/SpotlightCard.vue'
+import SecretInput from '@/components/SecretInput.vue'
 import RestartNotice from '@/components/RestartNotice.vue'
 import { adminApi } from '@/api/admin'
 import { sunPanelLaunchURL } from '@/api/sunpanel'
@@ -141,6 +153,24 @@ const { gatewayConfig, gatewayStatus, isSavingConfig, refreshConfig, refreshStat
   useGatewayStatus()
 const toast = useToast(),
   controller = new AbortController()
+const pendingAdmins = ref([]), password = ref(''), confirmation = ref(''), settingPassword = ref(false)
+async function initializeAdmin() {
+  if (!pendingAdmins.value.length || settingPassword.value) return
+  settingPassword.value = true
+  error.value = ''
+  try {
+    if (password.value !== confirmation.value) throw new Error('两次输入的密码不一致')
+    await adminApi.initializeSunPanelAdmin(pendingAdmins.value[0].id, password.value, controller.signal)
+    password.value = confirmation.value = ''
+    pendingAdmins.value = pendingAdmins.value.slice(1)
+    frameKey.value++
+    toast.success('首页管理员密码已设置')
+  } catch (err) {
+    if (!controller.signal.aborted) error.value = err.message
+  } finally {
+    settingPassword.value = false
+  }
+}
 const snapshot = ref(null),
   draft = ref(null),
   routes = ref([]),
@@ -166,6 +196,9 @@ async function reload() {
     snapshot.value = config
     draft.value = { ...config.config.sunpanel }
     routes.value = items
+    if (enabled.value && !gatewayStatus.value?.restart_required) {
+      pendingAdmins.value = await adminApi.pendingSunPanelAdmins(controller.signal)
+    }
   } catch (err) {
     if (!controller.signal.aborted) error.value = err.message
   } finally {

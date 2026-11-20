@@ -92,6 +92,37 @@ func (a *Admin) sunPanelRouteImage(w http.ResponseWriter, r *http.Request) {
 	w.Write(data)
 }
 
+// Available only on the authenticated management listener.
+func (a *Admin) sunPanelAdminSetup(w http.ResponseWriter, r *http.Request) {
+	if r.Context().Value(mcpInternalKey{}) == true {
+		apiError(w, 403, "请使用 GateHome 管理账号设置首页密码")
+		return
+	}
+	if a.sunPanel == nil {
+		apiError(w, 503, "首页服务尚未启动")
+		return
+	}
+	action := "pending_admins"
+	var input struct {
+		ID       uint   `json:"id"`
+		Password string `json:"password"`
+	}
+	var data any
+	if r.Method == http.MethodPost {
+		if !decodeBody(w, r, &input) {
+			return
+		}
+		action = "initialize_admin"
+		data = map[string]string{"password": input.Password}
+	}
+	result, err := a.sunPanel.bridgeCall(r.Context(), action, input.ID, data)
+	if err != nil {
+		apiError(w, 400, err.Error())
+		return
+	}
+	jsonResponse(w, 200, result)
+}
+
 // The standalone Sun-Panel port exposes just this authenticated integration API.
 func (a *Admin) SunPanelHandler() http.Handler {
 	mux := http.NewServeMux()

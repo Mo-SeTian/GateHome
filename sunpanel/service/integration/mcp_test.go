@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sun-panel/global"
+	"sun-panel/initialize/database"
 	"sun-panel/models"
 	"testing"
 	"time"
@@ -129,4 +130,23 @@ func TestMCPPreferencesAndLinkedImport(t *testing.T) {
 	}
 	operation(t, db, "sync_routes", rows, true)
 	operation(t, db, "save_group", MCPGroup{ID: one.ID, Title: "Stale", UpdatedAt: time.Time{}}, true)
+}
+
+func TestOperatorCanOnlyInitializePendingAdminOnce(t *testing.T) {
+	db, _, _ := mcpFixture(t)
+	if err := db.Model(&models.User{}).Where("id = 1").Updates(map[string]any{"role": 1, "password": database.PendingPassword}).Error; err != nil {
+		t.Fatal(err)
+	}
+	key := bytes.Repeat([]byte{3}, 32)
+	bridge := MCPBridge(key)
+	for attempt, want := range []int{200, 409} {
+		payload, _ := json.Marshal(map[string]any{"action": "initialize_admin", "userId": 1, "data": map[string]string{"password": "TEST_ONLY_OPERATOR_PASSWORD"}})
+		r := httptest.NewRequest("POST", "/sunpanel/integration/mcp", bytes.NewReader(payload))
+		r.Header.Set("Authorization", "Bearer "+hex.EncodeToString(key))
+		w := httptest.NewRecorder()
+		bridge.ServeHTTP(w, r)
+		if w.Code != want || strings.Contains(w.Body.String(), "TEST_ONLY_OPERATOR_PASSWORD") {
+			t.Fatalf("unexpected setup response on attempt %d", attempt+1)
+		}
+	}
 }

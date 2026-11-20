@@ -36,7 +36,10 @@ func isAdminUpstream(u *url.URL, adminPort int, addresses map[netip.Addr]bool) b
 }
 
 // Business upstreams must not receive or overwrite the management session.
-func stripAdminCookies(r *http.Request) { stripSessionCookie(r, "gatehouse_session") }
+func stripAdminCookies(r *http.Request) {
+	stripSessionCookie(r, "gatehouse_session")
+	stripSessionCookie(r, passkeyCookie)
+}
 
 func stripSessionCookie(r *http.Request, protected string) {
 	values := []string{}
@@ -56,6 +59,7 @@ func stripSessionCookie(r *http.Request, protected string) {
 
 func stripAdminResponseCookies(response *http.Response) {
 	stripSessionResponseCookie(response, "gatehouse_session")
+	stripSessionResponseCookie(response, passkeyCookie)
 }
 
 func stripSessionResponseCookie(response *http.Response, protected string) {

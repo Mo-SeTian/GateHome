@@ -9,8 +9,18 @@ import (
 	"strings"
 )
 
+const legacyFactoryPassword = "12345678"
+
+// Recognize the upstream bootstrap password during migration, including legacy hashes.
+func UsesFactoryPassword(hash string) bool {
+	return VerifyPassword(hash, legacyFactoryPassword)
+}
+
 // New passwords use a random salt and an adaptive work factor.
 func HashPassword(password string) (string, error) {
+	if password == legacyFactoryPassword {
+		return "", errors.New("请选择与旧版出厂密码不同的密码")
+	}
 	if len(password) < 8 || len(password) > 72 {
 		return "", errors.New("密码长度须为 8–72 字节")
 	}
