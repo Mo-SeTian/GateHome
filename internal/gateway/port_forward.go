@@ -188,6 +188,10 @@ func StartPortForwards(ctx context.Context, c Config, proxy *Proxy, traffic *Tra
 				b.tcp, err = net.Listen("tcp", address)
 			} else {
 				b.udp, err = net.ListenUDP("udp", &net.UDPAddr{Port: rule.ListenPort})
+				if err == nil {
+					_ = b.udp.SetReadBuffer(1 << 20)
+					_ = b.udp.SetWriteBuffer(1 << 20)
+				}
 			}
 			if err != nil {
 				p.Close()

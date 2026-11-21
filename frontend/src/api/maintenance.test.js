@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { setUnauthorizedHandler } from './client.js'
-import { maintenanceApi, webDAVPayload, onlineUpdateActive } from './maintenance.js'
+import { maintenanceApi, webDAVPayload, onlineUpdateActive, defaultUpdateChannel } from './maintenance.js'
 
 test('WebDAV edits preserve the captured revision and omit unchanged write-only secrets', () => {
   const snapshot = { revision: 17, config: { url: 'http://storage.test/dav/', keep: 7, future_field: true } }
@@ -61,4 +61,11 @@ test('queued, verifying and restarting online updates remain pending until the r
   for (const phase of ['checking', 'downloading', 'verifying', 'restarting'])
     assert.equal(onlineUpdateActive(phase), true)
   for (const phase of ['', 'error', undefined]) assert.equal(onlineUpdateActive(phase), false)
+})
+
+test('beta builds default update checks to the beta channel while stable builds default to stable', () => {
+  assert.equal(defaultUpdateChannel('v1.0.1-beta.11'), 'beta')
+  assert.equal(defaultUpdateChannel('1.0.1-beta.1'), 'beta')
+  assert.equal(defaultUpdateChannel('v1.0.1'), 'stable')
+  assert.equal(defaultUpdateChannel(''), 'stable')
 })

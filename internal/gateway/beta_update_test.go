@@ -139,3 +139,93 @@ func TestUpdateChannelAPIRejectsInvalidSelection(t *testing.T) {
 		t.Fatal("unknown channel triggered a check")
 	}
 }
+
+func TestBetaDefaultsToBetaAndPromotesToHigherStable(t *testing.T) {
+	originalVersion := Version
+	Version = "1.0.1-beta.11"
+	t.Cleanup(func() { Version = originalVersion })
+
+	if got := defaultUpdateChannel(); got != betaChannel {
+		t.Fatalf("expected default channel %q for beta build, got %q", betaChannel, got)
+	}
+
+	archive := []byte("TEST_ONLY_ARCHIVE")
+	cases := []struct {
+		name        string
+		betaVersion string
+		stableVer   string
+		stableErr   error
+		wantChannel updateChannel
+		wantVersion string
+	}{
+		{
+			name:        "promotes to stable when stable beats beta",
+			betaVersion: "1.0.1-beta.12",
+			stableVer:   "1.0.1",
+			wantChannel: stableChannel,
+			wantVersion: "1.0.1",
+		},
+		{
+			name:        "stays on beta when newer beta beats stable",
+			betaVersion: "1.0.2-beta.1",
+			stableVer:   "1.0.1",
+			wantChannel: betaChannel,
+			wantVersion: "1.0.2-beta.1",
+		},
+		{
+			name:        "stays on beta when stable is older than running beta",
+			betaVersion: "1.0.1-beta.11",
+			stableVer:   "1.0.0",
+			wantChannel: betaChannel,
+			wantVersion: "1.0.1-beta.11",
+		},
+		{
+			name:        "falls back to beta when stable check errors",
+			betaVersion: "1.0.1-beta.12",
+			stableErr:   errors.New("GitHub 未返回有效的正式版本"),
+			wantChannel: betaChannel,
+			wantVersion: "1.0.1-beta.12",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			a, _ := testAdmin(t)
+			key := onlineReleaseCacheKey(a.store.Snapshot())
+			expires := time.Now().Add(time.Minute)
+			betaCmp, _ := compareVersions(tc.betaVersion, Version)
+			a.releaseCache.beta = onlineReleaseCacheEntry{
+				key: key,
+				release: onlineRelease{
+					Channel: betaChannel, Version: tc.betaVersion, UpdateAvailable: betaCmp > 0, digest: digestBytes(archive),
+				},
+				expires: expires,
+			}
+			if tc.stableErr != nil {
+				a.releaseCache.stable = onlineReleaseCacheEntry{key: key, err: tc.stableErr, expires: expires}
+			} else {
+				stableCmp, _ := compareVersions(tc.stableVer, Version)
+				a.releaseCache.stable = onlineReleaseCacheEntry{
+					key: key,
+					release: onlineRelease{
+						Channel: stableChannel, Version: tc.stableVer, UpdateAvailable: stableCmp > 0, digest: digestBytes(archive),
+					},
+					expires: expires,
+				}
+			}
+			h := a.Handler()
+			cookie := loginForTest(t, h)
+			w := adminRequest(h, "POST", "/api/maintenance/check-online-update", map[string]string{}, cookie, "")
+			if w.Code != 200 {
+				t.Fatalf("expected HTTP 200, got %d: %s", w.Code, w.Body.String())
+			}
+			var got onlineRelease
+			if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+				t.Fatal(err)
+			}
+			if got.Channel != tc.wantChannel || got.Version != tc.wantVersion {
+				t.Fatalf("got channel=%q version=%q, want channel=%q version=%q", got.Channel, got.Version, tc.wantChannel, tc.wantVersion)
+			}
+		})
+	}
+}

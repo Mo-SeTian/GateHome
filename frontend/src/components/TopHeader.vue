@@ -38,22 +38,33 @@
         <Moon v-else :size="18" />
       </button>
 
-      <!-- Notification Center Button -->
-      <router-link to="/notifications"
-        class="icon-action-btn notification-btn" 
-        :class="{ 'has-unread': unreadCount > 0, active: route.path === '/notifications' }"
-        :title="unreadCount > 0 ? `通知中心 (${unreadCount} 条未读)` : '通知中心'" 
-        :aria-label="unreadCount ? `打开通知中心，${unreadCount} 条未读` : '打开通知中心'"
-      >
-        <Bell :size="18" aria-hidden="true" />
-        <span v-if="unreadCount > 0" class="notification-count" aria-hidden="true">{{ unreadCount > 99 ? '99+' : unreadCount }}</span>
-      </router-link>
+      <!-- Notification Center Popover Trigger -->
+      <div class="notification-wrapper" ref="notificationRef">
+        <button
+          ref="bellBtnRef"
+          type="button"
+          class="icon-action-btn notification-btn"
+          :class="{ 'has-unread': unreadCount > 0, active: isNotificationOpen || route.path === '/notifications' }"
+          :title="unreadCount > 0 ? `通知中心 (${unreadCount} 条未读)` : '通知中心'"
+          :aria-label="unreadCount ? `打开通知中心，${unreadCount} 条未读` : '打开通知中心'"
+          aria-haspopup="dialog"
+          :aria-expanded="isNotificationOpen"
+          @click="toggleNotificationPopover"
+        >
+          <Bell :size="18" aria-hidden="true" />
+          <span v-if="unreadCount > 0" class="notification-count" aria-hidden="true">{{ unreadCount > 99 ? '99+' : unreadCount }}</span>
+        </button>
+
+        <transition name="popover-fade">
+          <NotificationPopover v-if="isNotificationOpen" @close="closeNotificationPopover(false)" />
+        </transition>
+      </div>
 
       <!-- User Profile Dropdown Menu -->
       <div class="user-menu-wrapper" ref="menuRef">
         <button 
           class="user-profile-badge" 
-          @click="isDropdownOpen = !isDropdownOpen"
+          @click="toggleUserMenu"
           :aria-label="`账户菜单，${username}`"
           :aria-expanded="isDropdownOpen"
         >
@@ -111,12 +122,13 @@
 </template>
 
 <script setup>
-import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { 
   Menu, Search, Sun, Moon, ChevronDown, 
   KeyRound, LogOut, Terminal, Bell
 } from 'lucide-vue-next'
+import NotificationPopover from '@/components/NotificationPopover.vue'
 import { useAppStore } from '@/composables/useAppStore'
 import { useGatewayStatus } from '@/composables/useGatewayStatus'
 import { useLogout, useSession } from '@/composables/useSession'
@@ -130,11 +142,29 @@ const { unreadCount } = useToast()
 const logout = useLogout()
 
 const isDropdownOpen = ref(false)
+const isNotificationOpen = ref(false)
 const menuRef = ref(null)
+const notificationRef = ref(null)
+const bellBtnRef = ref(null)
 
 const currentTitle = computed(() => {
   return route.meta?.title || '控制中心'
 })
+
+const toggleNotificationPopover = () => {
+  isNotificationOpen.value = !isNotificationOpen.value
+  if (isNotificationOpen.value) isDropdownOpen.value = false
+}
+
+const closeNotificationPopover = (restoreFocus = false) => {
+  isNotificationOpen.value = false
+  if (restoreFocus) bellBtnRef.value?.focus()
+}
+
+const toggleUserMenu = () => {
+  isDropdownOpen.value = !isDropdownOpen.value
+  if (isDropdownOpen.value) isNotificationOpen.value = false
+}
 
 const handleOpenAccount = () => {
   isDropdownOpen.value = false
@@ -159,14 +189,31 @@ const handleClickOutside = (e) => {
   if (menuRef.value && !menuRef.value.contains(e.target)) {
     isDropdownOpen.value = false
   }
+  if (notificationRef.value && !notificationRef.value.contains(e.target)) {
+    isNotificationOpen.value = false
+  }
 }
+
+const handleKeydown = (e) => {
+  if (e.key === 'Escape' && isNotificationOpen.value) {
+    e.stopPropagation()
+    closeNotificationPopover(true)
+  }
+}
+
+watch(() => route.fullPath, () => {
+  isDropdownOpen.value = false
+  isNotificationOpen.value = false
+})
 
 onMounted(() => {
   document.addEventListener('click', handleClickOutside)
+  document.addEventListener('keydown', handleKeydown)
 })
 
 onUnmounted(() => {
   document.removeEventListener('click', handleClickOutside)
+  document.removeEventListener('keydown', handleKeydown)
 })
 </script>
 
@@ -355,7 +402,8 @@ onUnmounted(() => {
   background: var(--card-hover-bg, var(--strip-bg));
 }
 
-/* Profile Dropdown Wrapper */
+/* Profile Dropdown & Notification Popover Wrapper */
+.notification-wrapper,
 .user-menu-wrapper {
   position: relative;
 }

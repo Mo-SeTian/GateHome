@@ -44,6 +44,10 @@ export function webDAVPayload(snapshot, config, secrets) {
   return body
 }
 
+export function defaultUpdateChannel(version) {
+  return String(version || '').includes('-beta.') ? 'beta' : 'stable'
+}
+
 export function onlineUpdateActive(phase) {
   return ['checking', 'downloading', 'verifying', 'restarting'].includes(phase)
 }

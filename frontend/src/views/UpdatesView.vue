@@ -20,12 +20,15 @@
             name="channel"
             class="form-select"
             :disabled="!!busy || active"
-            @change="resetRelease"
+            @change="selectChannel"
           >
             <option value="stable">正式稳定版</option>
             <option value="beta">Beta 公测版</option>
           </select></label
         >
+        <p v-if="autoSwitchedToStable && release?.version" class="report-note switch-notice" role="status">
+          检测到更高的正式稳定版 v{{ release.version }}，已自动切换为正式稳定版渠道。
+        </p>
         <p v-if="release" class="report-note" data-release>
           <template v-if="release.version">
             最新发行：v{{ release.version }} · {{ formatBytes(release.size) }}<br />发布于
@@ -202,13 +205,13 @@
   </div>
 </template>
 <script setup>
-import { computed, onMounted, onBeforeUnmount, ref } from 'vue'
+import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import SpotlightCard from '@/components/SpotlightCard.vue'
 import BackupCapacity from '@/components/BackupCapacity.vue'
 import MaintenancePreview from '@/components/MaintenancePreview.vue'
 import { adminApi } from '@/api/admin'
-import { maintenanceApi, maintenancePhase, onlineUpdateActive } from '@/api/maintenance'
+import { defaultUpdateChannel, maintenanceApi, maintenancePhase, onlineUpdateActive } from '@/api/maintenance'
 import { formatBytes, reportDate } from '@/api/reports'
 import { useGatewayStatus } from '@/composables/useGatewayStatus'
 import { useSession } from '@/composables/useSession'
@@ -225,7 +228,9 @@ const maintenance = ref(null),
   capacity = ref(null),
   capacityLoading = ref(false),
   capacityError = ref(''),
-  channel = ref('stable'),
+  channel = ref(defaultUpdateChannel(gatewayVersion.value)),
+  channelTouched = ref(false),
+  autoSwitchedToStable = ref(false),
   release = ref(null),
   job = ref(null),
   busy = ref(''),
@@ -309,8 +314,10 @@ async function poll() {
     if (controller.signal.aborted || generation !== pollGeneration) return
     job.value = result
     pollError.value = ''
-    if (onlineUpdateActive(result.phase) && ['stable', 'beta'].includes(result.channel))
+    if (onlineUpdateActive(result.phase) && ['stable', 'beta'].includes(result.channel)) {
       channel.value = result.channel
+      channelTouched.value = true
+    }
     if (result.phase === 'restarting')
       await loginAgain('更新包已校验，服务正在重启；恢复后将自动载入新界面，请重新登录查看维护结果')
   } catch (err) {
@@ -346,13 +353,26 @@ async function reload() {
 }
 function resetRelease() {
   release.value = null
+  autoSwitchedToStable.value = false
   error.value = ''
+}
+function selectChannel() {
+  channelTouched.value = true
+  resetRelease()
 }
 async function checkUpdate() {
   resetRelease()
   await action('check', async () => {
-    const result = await maintenanceApi.checkRelease(channel.value, controller.signal)
-    if (!controller.signal.aborted) release.value = result
+    const requested = channel.value
+    const result = await maintenanceApi.checkRelease(requested, controller.signal)
+    if (!controller.signal.aborted) {
+      release.value = result
+      if (result.channel && result.channel !== requested) {
+        channel.value = result.channel
+        channelTouched.value = true
+        autoSwitchedToStable.value = result.channel === 'stable' && requested === 'beta'
+      }
+    }
   })
 }
 async function updateOnline() {
@@ -420,6 +440,11 @@ async function saveToken() {
     }
   })
 }
+watch(gatewayVersion, value => {
+  if (!channelTouched.value && !release.value && !active.value) {
+    channel.value = defaultUpdateChannel(value)
+  }
+}, { immediate: true })
 onMounted(reload)
 onBeforeUnmount(() => {
   controller.abort()
@@ -465,6 +490,10 @@ label:not(.toggle-row) {
 }
 .version-label strong {
   color: var(--ink);
+}
+.switch-notice {
+  color: var(--ok) !important;
+  font-weight: 500;
 }
 .online-job {
   display: grid;

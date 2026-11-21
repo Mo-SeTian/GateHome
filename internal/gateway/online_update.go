@@ -27,6 +27,17 @@ const (
 	betaChannel   updateChannel = "beta"
 )
 
+func isBetaVersion(version string) bool {
+	return strings.Contains(version, "-beta.")
+}
+
+func defaultUpdateChannel() updateChannel {
+	if isBetaVersion(Version) {
+		return betaChannel
+	}
+	return stableChannel
+}
+
 func parseUpdateChannel(channel updateChannel) (updateChannel, error) {
 	switch channel {
 	case "", stableChannel:
@@ -39,7 +50,7 @@ func parseUpdateChannel(channel updateChannel) (updateChannel, error) {
 }
 
 func (channel updateChannel) acceptsVersion(version string) bool {
-	return versionPattern.MatchString(version) && (channel == betaChannel) == strings.Contains(version, "-beta.")
+	return versionPattern.MatchString(version) && (channel == betaChannel) == isBetaVersion(version)
 }
 
 type onlineRelease struct {
@@ -319,6 +330,34 @@ func downloadOnlineReleaseProgress(ctx context.Context, c *http.Client, release 
 	return data, nil
 }
 
+func shouldPromoteBetaToStable(currentVersion, betaVersion string, stable onlineRelease) bool {
+	if stable.Version == "" || !stable.UpdateAvailable {
+		return false
+	}
+	if cmpCurrent, err := compareVersions(stable.Version, currentVersion); err != nil || cmpCurrent <= 0 {
+		return false
+	}
+	if betaVersion != "" {
+		if cmpBeta, err := compareVersions(stable.Version, betaVersion); err != nil || cmpBeta <= 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func (a *Admin) checkOnlineRelease(ctx context.Context, client *http.Client, state State, channel updateChannel) (onlineRelease, error) {
+	release, err := a.releaseCache.latest(ctx, client, state, channel)
+	if err != nil {
+		return onlineRelease{}, err
+	}
+	if channel == betaChannel && isBetaVersion(Version) {
+		if stable, stableErr := a.releaseCache.latest(ctx, client, state, stableChannel); stableErr == nil && shouldPromoteBetaToStable(Version, release.Version, stable) {
+			return stable, nil
+		}
+	}
+	return release, nil
+}
+
 func (a *Admin) onlineUpdateRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/maintenance/online-update-status", a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
 		jsonResponse(w, 200, a.onlineUpdate.snapshot())
@@ -330,7 +369,11 @@ func (a *Admin) onlineUpdateRoutes(mux *http.ServeMux) {
 		if !decodeBody(w, r, &input) {
 			return
 		}
-		channel, err := parseUpdateChannel(input.Channel)
+		channel := input.Channel
+		if channel == "" {
+			channel = defaultUpdateChannel()
+		}
+		channel, err := parseUpdateChannel(channel)
 		if err != nil {
 			apiError(w, 400, err.Error())
 			return
@@ -340,7 +383,7 @@ func (a *Admin) onlineUpdateRoutes(mux *http.ServeMux) {
 		state := a.store.Snapshot()
 		client := onlineUpdateClient(state)
 		defer closeClient(client)
-		release, err := a.releaseCache.latest(ctx, client, state, channel)
+		release, err := a.checkOnlineRelease(ctx, client, state, channel)
 		if err != nil {
 			onlineCheckError(w, err)
 			return

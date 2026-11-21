@@ -187,6 +187,8 @@ func TestPortForwardUDPClientsAndDatagrams(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	_ = backend.SetReadBuffer(1 << 20)
+	_ = backend.SetWriteBuffer(1 << 20)
 	defer backend.Close()
 	go func() {
 		buffer := make([]byte, 65535)
@@ -236,17 +238,31 @@ func TestPortForwardUDPClientsAndDatagrams(t *testing.T) {
 			}
 			for _, size := range sizes {
 				payload := bytes.Repeat([]byte{byte(i + 1)}, size)
-				client.SetDeadline(time.Now().Add(3 * time.Second))
-				if _, err := client.Write(payload); err != nil {
-					t.Error(err)
-					return
+				var n int
+				var readErr error
+				// Concurrent 60 KiB UDP datagrams can exceed Linux's default 208 KiB rmem_max under -race;
+				// retry only on UDP timeout while failing immediately on any corruption or session cross-over.
+				for attempt := range 3 {
+					client.SetDeadline(time.Now().Add(1500 * time.Millisecond))
+					if _, err := client.Write(payload); err != nil {
+						t.Error(err)
+						return
+					}
+					n, readErr = client.Read(buffer)
+					if readErr == nil {
+						break
+					}
+					var netErr net.Error
+					if attempt == 2 || !errors.As(readErr, &netErr) || !netErr.Timeout() {
+						break
+					}
 				}
-				n, err := client.Read(buffer)
-				if err != nil || !bytes.Equal(buffer[:n], payload) {
-					t.Errorf("client %d datagram %d corrupted or crossed sessions: %v", i, size, err)
+				if readErr != nil || !bytes.Equal(buffer[:n], payload) {
+					t.Errorf("client %d datagram %d corrupted or crossed sessions: %v", i, size, readErr)
 					return
 				}
 			}
+			client.SetDeadline(time.Now().Add(3 * time.Second))
 			for sequence := range 12 {
 				client.Write([]byte{byte(i), byte(sequence), 0, 255})
 			}

@@ -1293,8 +1293,16 @@ try {
   await page.reload()
   await page.setViewportSize({ width: 1440, height: 1000 })
   const notificationTrigger = page.locator('.notification-btn')
+  const popover = page.locator('.notification-popover')
   const center = page.locator('.notice-page')
   await notificationTrigger.click()
+  await popover.waitFor()
+  assert.ok(!new URL(page.url()).hash.startsWith('#/notifications'))
+  await page.keyboard.press('Escape')
+  await popover.waitFor({ state: 'hidden' })
+  assert.equal(await notificationTrigger.evaluate(el => el === document.activeElement), true)
+  await notificationTrigger.click()
+  await popover.getByRole('link', { name: '查看全部通知' }).click()
   await center.getByRole('heading', { name: '通知中心' }).waitFor()
   assert.ok(await page.locator('.nav-link.active[href$="/notifications"]').isVisible())
   const rows = center.locator('.notice-item')
@@ -1305,6 +1313,7 @@ try {
   await rows.filter({ hasText: 'WebDAV 定时备份' }).getByRole('link', { name: '查看详情' }).click()
   await page.waitForURL('**/#/backups')
   await notificationTrigger.click()
+  await popover.getByRole('link', { name: '查看全部通知' }).click()
   await center.getByLabel('搜索通知').fill('定时备份')
   assert.equal(await rows.count(), 1)
   await center.getByLabel('搜索通知').press('Escape')
@@ -1314,6 +1323,12 @@ try {
     await page.setViewportSize({ width, height: 844 })
     await page.locator('.main-wrapper').evaluate(el => Promise.all(el.getAnimations().map(animation => animation.finished.catch(() => {}))))
     assert.ok(await center.evaluate(el => el.scrollWidth <= el.clientWidth))
+    await notificationTrigger.click()
+    await popover.waitFor()
+    const box = await popover.boundingBox()
+    assert.ok(box.x >= 0 && box.x + box.width <= width + 1)
+    await page.keyboard.press('Escape')
+    await popover.waitFor({ state: 'hidden' })
     await center.getByRole('link', { name: '故障推送' }).click()
     await center.getByLabel('启用推送').waitFor()
     assert.ok(await center.evaluate(el => el.scrollWidth <= el.clientWidth))
@@ -1427,6 +1442,31 @@ try {
     await page.screenshot({ path: path.join(process.env.GATEHOME_BROWSER_ARTIFACTS, 'runtime-wxpusher.png') })
   console.log('PASS runtime status: shared TCP/UDP port, session data, history range and keyboard, WxPusher setup')
   await route('updates')
+  const updateChannelSelect = page.locator('select[name=channel]')
+  await updateChannelSelect.waitFor()
+  if ((await api('status')).version.includes('-beta.')) {
+    assert.equal(await updateChannelSelect.inputValue(), 'beta')
+    let checkedChannel = ''
+    await page.route('**/api/maintenance/check-online-update', async route => {
+      checkedChannel = JSON.parse(route.request().postData() || '{}').channel
+      await route.fulfill({
+        json: {
+          channel: 'stable',
+          version: '99.0.0',
+          size: 1024,
+          published_at: new Date().toISOString(),
+          update_available: true,
+          checked_at: new Date().toISOString(),
+          release_url: 'https://github.com/Mo-SeTian/GateHome/releases/tag/v99.0.0'
+        }
+      })
+    })
+    await button('检查更新').click()
+    await page.getByText('检测到更高的正式稳定版 v99.0.0').waitFor()
+    assert.equal(checkedChannel, 'beta')
+    assert.equal(await updateChannelSelect.inputValue(), 'stable')
+    await page.unroute('**/api/maintenance/check-online-update')
+  }
   await page.evaluate(() => { window.upgradeDocumentMarker = 'old document' })
   const runningStatus = await api('status')
   let switched = false

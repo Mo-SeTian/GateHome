@@ -311,7 +311,7 @@ func (a *Admin) mcpRoutes(mux *http.ServeMux) http.Handler {
 		return a.mcpAPI(ctx, mux, "DELETE", "/api/ip-blocks", map[string]string{"rule": args.Rule, "ip": args.IP})
 	})
 	addMCPTool(a, server, "gatehome_check_update", "查询 GitHub 最新正式版本，复用现有版本缓存，不下载或安装。", mcpRead, func(ctx context.Context, _ mcpEmpty) (any, error) {
-		return a.mcpAPI(ctx, mux, "POST", "/api/maintenance/check-online-update", mcpEmpty{})
+		return a.mcpAPI(ctx, mux, "POST", "/api/maintenance/check-online-update", map[string]string{"channel": "stable"})
 	})
 	type maintenanceArgs struct {
 		Operation string `json:"operation" jsonschema:"restart download_update apply_update restore_backup 之一"`
