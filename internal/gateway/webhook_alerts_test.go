@@ -147,3 +147,43 @@ func TestWebhookDestinationAndQueue(t *testing.T) {
 		t.Fatal("unexpected queue retention")
 	}
 }
+
+func TestNotificationHistoryAndChannelSubscriptions(t *testing.T) {
+	a, h := testAdmin(t)
+	cookie := loginForTest(t, h)
+	const path = "/api/notifications/history"
+	if adminRequest(h, "GET", path, nil, nil, "").Code != http.StatusUnauthorized {
+		t.Fatal("anonymous access to history")
+	}
+	setup := func(events []string) {
+		input := map[string]any{"enabled": true, "url": "https://fixture.example.test/", "revision": a.store.Snapshot().Revision, "events": events}
+		if adminRequest(h, "PUT", "/api/notifications/webhook", input, cookie, "").Code != 200 {
+			t.Fatal("could not update subscriptions")
+		}
+	}
+	observe := func(key, kind string, failed bool) {
+		a.observeAlert(key, kind, "fixture", failed, "failed", "resolved", time.Now())
+	}
+	observe("webdav", "backup", true)
+	setup([]string{"upstream", "certificate"})
+	observe("route/a", "upstream", true)
+	observe("cert/a", "certificate", true)
+	setup([]string{"upstream"})
+	for i := 0; i < 100; i++ {
+		observe("route/a", "upstream", true)
+	}
+	observe("route/a", "upstream", false)
+	state := a.store.Snapshot()
+	if len(state.Alerts.Pending) != 2 || state.Alerts.Pending[0].Status != "firing" || state.Alerts.Pending[1].Status != "resolved" {
+		t.Fatal("filtered queue lost or repeated a transition")
+	}
+	var events []webhookEvent
+	response := adminRequest(h, "GET", path, nil, cookie, "")
+	if response.Code != 200 || json.Unmarshal(response.Body.Bytes(), &events) != nil || len(events) != 4 || events[0].Type != "backup" || events[3].Status != "resolved" {
+		t.Fatal("history lost independent transitions")
+	}
+	store, err := OpenStore(a.store.paths.Config)
+	if err != nil || len(store.Snapshot().NoticeHistory.Events) != 4 {
+		t.Fatal("notification history not persisted")
+	}
+}

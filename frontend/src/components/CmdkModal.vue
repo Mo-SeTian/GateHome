@@ -92,7 +92,7 @@ import { adminApi } from '@/api/admin'
 import { 
   Search, AlertCircle, LayoutDashboard, Network, ArrowLeftRight, Compass,
   Globe, Lock, Download, ShieldAlert, FileSearch, ScrollText, Ban,
-  BarChart3, Activity, Bot, RefreshCw, HardDriveDownload, Settings, Moon, Sun, PlusCircle,
+  Bell, BarChart3, Activity, Bot, RefreshCw, HardDriveDownload, Settings, Moon, Sun, PlusCircle,
   KeyRound, LogOut
 } from 'lucide-vue-next'
 
@@ -135,6 +135,7 @@ const pages = [
   { title: '日志 (Logs)', path: '/logs', icon: ScrollText },
   { title: 'IP 拦截名单 (IP Blocks)', path: '/ip-blocks', icon: Ban },
   { title: '统计 (Statistics)', path: '/statistics', icon: BarChart3 },
+  { title: '通知中心 (Notifications)', path: '/notifications', icon: Bell },
   { title: '运行状态 (Runtime)', path: '/runtime', icon: Activity },
   { title: '流量统计 (Traffic)', path: '/traffic', icon: Activity },
   { title: 'AI 管理 (MCP)', path: '/mcp', icon: Bot },

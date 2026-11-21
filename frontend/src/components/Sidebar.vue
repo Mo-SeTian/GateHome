@@ -81,6 +81,11 @@
             <Activity :size="14" class="nav-icon" />
             <span class="nav-text">运行状态</span>
           </router-link>
+          <router-link to="/notifications" class="nav-link" active-class="active" @click="onNavClick">
+            <Bell :size="14" class="nav-icon" />
+            <span class="nav-text">通知中心</span>
+            <span v-if="unreadCount" class="nav-badge">{{ unreadCount }}</span>
+          </router-link>
           <router-link to="/firewall-logs" class="nav-link" active-class="active" @click="onNavClick">
             <FileSearch :size="14" class="nav-icon" />
             <span class="nav-text">防火墙拦截记录</span>
@@ -144,16 +149,18 @@
 </template>
 
 <script setup>
+import { useToast } from '@/composables/useToast'
 import { computed } from 'vue'
 import { 
   X, LayoutDashboard, Network, ArrowLeftRight, Compass, Images,
   Globe, Lock, Download, ShieldAlert, FileSearch, ScrollText, Ban,
-  BarChart3, Activity, Bot, RefreshCw, HardDriveDownload, Settings, LogOut
+  Bell, BarChart3, Activity, Bot, RefreshCw, HardDriveDownload, Settings, LogOut
 } from 'lucide-vue-next'
 import { useAppStore } from '@/composables/useAppStore'
 import { useGatewayStatus } from '@/composables/useGatewayStatus'
 import { useLogout, useSession } from '@/composables/useSession'
 
+const { unreadCount } = useToast()
 const { isSidebarOpen, closeSidebar } = useAppStore()
 const { gatewayStatus, gatewayVersion, gatewayState } = useGatewayStatus()
 const { isLoggingOut } = useSession()

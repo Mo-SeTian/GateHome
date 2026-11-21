@@ -5,7 +5,7 @@
       <label class="toggle-row">
         <span>启用推送</span><input v-model="enabled" type="checkbox" :disabled="busy" />
       </label>
-      <template v-if="wx">
+      <div v-if="wx" class="push-target">
         <SecretInput :key="saved.revision" id="alert-wxpusher-token" v-model.trim="secret" name="app_token"
           label="AppToken" kind="alert-wxpusher" secret-name="AppToken" :configured="saved.token_configured"
           :placeholder="saved.token_configured ? '已保存，可直接输入新值' : 'AT_…'"
@@ -15,17 +15,17 @@
           <input id="wxpusher-uid" v-model.trim="uid" class="form-input" placeholder="UID_…" maxlength="256"
             :disabled="busy" :required="enabled" autocomplete="off" spellcheck="false" />
         </div>
-        <fieldset class="events">
-          <legend>通知事件</legend>
-          <label v-for="option in eventOptions" :key="option.id">
-            <input v-model="events" type="checkbox" :value="option.id" :disabled="busy" />{{ option.label }}
-          </label>
-        </fieldset>
-      </template>
+      </div>
       <SecretInput v-else :key="saved.revision" id="alert-webhook-url" v-model.trim="secret" name="webhook_url"
         label="Webhook 地址" kind="alert-webhook" secret-name="Webhook 地址" :configured="saved.configured"
         :placeholder="saved.configured ? '已保存，可直接输入新地址' : 'https://…'" :maxlength="2048" :disabled="busy" />
-      <p v-if="!wx" class="form-note">反代上游连续两次检测失败、WebDAV 备份失败、正式证书将在 7 天内到期时发送 JSON POST，恢复后再通知。</p>
+      <fieldset class="events">
+        <legend>通知事件</legend>
+        <label class="toggle-row" v-for="option in eventOptions" :key="option.id">
+          <span>{{ option.label }}</span><input v-model="events" type="checkbox" :value="option.id" :disabled="busy" />
+        </label>
+      </fieldset>
+      <p class="form-note">同一故障首次触发时推送一次，恢复后再通知。</p>
       <p v-if="saved.pending" class="form-note">待发送 {{ saved.pending }} 条。{{ wx ? '停用推送或更换接收配置会清空待发通知。' : '关闭推送或更换地址会清空待发通知。' }}</p>
       <p v-if="saved.last_error" class="report-error">{{ saved.last_error }}，稍后自动重试。</p>
       <p v-if="saved.dropped" class="report-error">队列已满时丢弃了 {{ saved.dropped }} 条较早的通知。</p>
@@ -47,6 +47,7 @@ import SecretInput from './SecretInput.vue'
 import { adminApi } from '@/api/admin'
 
 const props = defineProps({ channel: { type: String, default: 'webhook' } })
+const emit = defineEmits(['loaded'])
 const wx = props.channel === 'wxpusher'
 const eventOptions = [
   { id: 'upstream', label: '反代上游连续失败' },
@@ -57,15 +58,16 @@ const saved = ref(null), enabled = ref(false), secret = ref(), uid = ref(''), ev
 const busy = ref(false), retryLoad = ref(false), notice = ref(''), error = ref('')
 const controller = new AbortController()
 const changed = computed(() => saved.value && (
-  saved.value.enabled !== enabled.value || secret.value !== undefined || (wx && (
-    uid.value !== saved.value.uid || events.value.length !== saved.value.events.length ||
+  saved.value.enabled !== enabled.value || secret.value !== undefined || (wx && uid.value !== saved.value.uid) || (
+    events.value.length !== saved.value.events.length ||
     events.value.some(event => !saved.value.events.includes(event))
-  ))
+  )
 ))
 const canTest = computed(() => wx ? saved.value?.token_configured && saved.value?.uid : saved.value?.configured)
 
 function populate(data) {
   saved.value = data
+  emit('loaded', data.enabled)
   enabled.value = data.enabled
   secret.value = undefined
   uid.value = data.uid ?? ''
@@ -89,9 +91,9 @@ async function run(action) {
 function load() { return run(async () => populate(await (wx ? adminApi.wxPusher : adminApi.webhook)(controller.signal))) }
 function save() {
   return run(async () => {
-    const shared = { enabled: enabled.value, revision: saved.value.revision }
+    const shared = { enabled: enabled.value, revision: saved.value.revision, events: events.value }
     const result = wx
-      ? await adminApi.saveWxPusher({ ...shared, app_token: secret.value, uid: uid.value, events: events.value }, controller.signal)
+      ? await adminApi.saveWxPusher({ ...shared, app_token: secret.value, uid: uid.value }, controller.signal)
       : await adminApi.saveWebhook({ ...shared, url: secret.value }, controller.signal)
     populate(result)
     notice.value = '推送设置已保存'
@@ -109,6 +111,8 @@ onBeforeUnmount(() => controller.abort())
 
 <style scoped>
 form { display: grid; gap: 14px; margin-block: 14px; }
+.push-target { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 14px; }
+@media (max-width: 650px) { .push-target { grid-template-columns: 1fr; } }
 .actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .uid-field { display: grid; gap: 5px; }
 .uid-field label, .events legend { font-size: 12px; font-weight: 600; color: var(--muted); }

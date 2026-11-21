@@ -98,6 +98,9 @@ func validateCredentials(s State) error {
 	if err := s.WxPusher.validate(); err != nil {
 		return err
 	}
+	if err := s.Alerts.validateSelection(); err != nil {
+		return err
+	}
 	if err := validateWebhook(s.Alerts.URL, s.Alerts.Enabled); err != nil {
 		return err
 	}

@@ -10,9 +10,27 @@ let toastIdCounter = 0
 // Historical notifications in Notification Center
 const notifications = ref(loadStoredNotifications())
 
-// Notification Center drawer visibility
-const isCenterOpen = ref(false)
-const showPushSettings = ref(false)
+const CURSOR_KEY = 'gatehome_notification_cursor'
+let cursor
+try { cursor = localStorage.getItem(CURSOR_KEY) } catch { /* storage disabled */ }
+
+function mergeFaultHistory(events) {
+  if (!events.length || events.at(-1).id === cursor) return
+  const start = events.findIndex(event => event.id === cursor) + 1
+  const incoming = events.slice(start).map(event => ({
+    id: event.id, message: event.message, resource: event.resource,
+    type: event.status === 'resolved' ? 'success' : event.type === 'certificate' ? 'warning' : 'error',
+    category: event.type === 'certificate' ? 'cert' : event.type,
+    path: { upstream: '/runtime', backup: '/backups', certificate: '/certificates' }[event.type],
+    createdAt: event.time, unread: true
+  }))
+  const known = new Set(notifications.value.map(item => item.id))
+  notifications.value = [...notifications.value, ...incoming.filter(item => !known.has(item.id))]
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)).slice(0, MAX_NOTIFICATIONS)
+  saveNotifications(notifications.value)
+  cursor = events.at(-1).id
+  try { localStorage.setItem(CURSOR_KEY, cursor) } catch { /* storage disabled */ }
+}
 
 function loadStoredNotifications() {
   try {
@@ -133,13 +151,6 @@ export function useToast() {
   }
 
   // Notification Center controls
-  const openCenter = (settings = false) => {
-    showPushSettings.value = settings === true
-    isCenterOpen.value = true
-  }
-  const closeCenter = () => { isCenterOpen.value = false }
-  const toggleCenter = () => { isCenterOpen.value = !isCenterOpen.value }
-
   const markAllAsRead = () => {
     notifications.value.forEach(item => { item.unread = false })
     saveNotifications(notifications.value)
@@ -170,16 +181,12 @@ export function useToast() {
   return {
     toasts,
     notifications,
-    isCenterOpen,
-    showPushSettings,
+    mergeFaultHistory,
     unreadCount,
     showToast,
     removeToast,
     pauseToast,
     resumeToast,
-    openCenter,
-    closeCenter,
-    toggleCenter,
     markAllAsRead,
     markAsRead,
     removeNotification,

@@ -34,15 +34,22 @@ func (s wxPusherState) validate() error {
 	if s.UID != "" && (!strings.HasPrefix(s.UID, "UID_") || len(s.UID) < 5 || !wxPushIdentifier.MatchString(s.UID)) {
 		return errors.New("请填写 WxPusher 接收用户 UID（UID_ 开头）")
 	}
+	if err := validateEventSelection(s.Events); err != nil {
+		return err
+	}
+	if s.Enabled && (s.AppToken == "" || s.UID == "" || len(s.Events) == 0) {
+		return errors.New("启用 WxPusher 需要 AppToken、接收用户 UID 和至少一项通知事件")
+	}
+	return nil
+}
+
+func validateEventSelection(events []string) error {
 	seen := map[string]bool{}
-	for _, kind := range s.Events {
+	for _, kind := range events {
 		if seen[kind] || (kind != "upstream" && kind != "backup" && kind != "certificate") {
 			return errors.New("通知事件无效")
 		}
 		seen[kind] = true
-	}
-	if s.Enabled && (s.AppToken == "" || s.UID == "" || len(s.Events) == 0) {
-		return errors.New("启用 WxPusher 需要 AppToken、接收用户 UID 和至少一项通知事件")
 	}
 	return nil
 }
@@ -51,8 +58,37 @@ func (s wxPusherState) accepts(kind string) bool {
 	return s.Enabled && slices.Contains(s.Events, kind)
 }
 
+func (q *alertQueue) filterEvents(accepts func(string) bool) {
+	beforeActive := q.Active
+	q.Active = make(map[string]bool)
+	for key, active := range beforeActive {
+		prefix, _, _ := strings.Cut(key, "/")
+		kind := alertKinds[prefix]
+		if accepts(kind) {
+			q.Active[key] = active
+		}
+	}
+	q.Pending = slices.DeleteFunc(slices.Clone(q.Pending), func(event webhookEvent) bool {
+		return !accepts(event.Type)
+	})
+	if len(q.Pending) == 0 {
+		q.LastError = ""
+	}
+}
+
 func (s *State) observeNotification(key, kind, resource string, failing bool, failure, recovery string, now time.Time) bool {
-	changed := s.Alerts.observe(key, kind, resource, failing, failure, recovery, now)
+	history := &s.NoticeHistory
+	event, changed := history.Active.transition(key, kind, resource, failing, failure, recovery, now)
+	if changed {
+		const historyLimit = 60
+		history.Events = append(slices.Clip(history.Events), event)
+		if len(history.Events) > historyLimit {
+			history.Events = history.Events[len(history.Events)-historyLimit:]
+		}
+	}
+	if s.Alerts.accepts(kind) {
+		changed = s.Alerts.observe(key, kind, resource, failing, failure, recovery, now) || changed
+	}
 	if s.WxPusher.accepts(kind) {
 		changedWx := s.WxPusher.observe(key, kind, resource, failing, failure, recovery, now)
 		return changed || changedWx
@@ -162,20 +198,7 @@ func (a *Admin) wxPusherRoutes(mux *http.ServeMux) {
 			}
 			if before.Enabled && settings.Enabled && before.AppToken == token && before.UID == settings.UID {
 				settings.alertQueue = before.alertQueue
-				settings.Active = make(map[string]bool)
-				for key, active := range before.Active {
-					prefix, _, _ := strings.Cut(key, "/")
-					kind := alertKinds[prefix]
-					if settings.accepts(kind) {
-						settings.Active[key] = active
-					}
-				}
-				settings.Pending = slices.DeleteFunc(slices.Clone(before.Pending), func(event webhookEvent) bool {
-					return !settings.accepts(event.Type)
-				})
-				if len(settings.Pending) == 0 {
-					settings.LastError = ""
-				}
+				settings.filterEvents(settings.accepts)
 			}
 			if settings.accepts("backup") && next.WebDAVBackup.Config.URL != "" && next.WebDAVBackup.LastError != "" {
 				settings.observe("webdav", "backup", "WebDAV", true, "远程备份失败", "远程备份已恢复", time.Now())

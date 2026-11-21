@@ -39,20 +39,15 @@
       </button>
 
       <!-- Notification Center Button -->
-      <button 
+      <router-link to="/notifications"
         class="icon-action-btn notification-btn" 
-        :class="{ 'has-unread': unreadCount > 0, active: isCenterOpen }"
+        :class="{ 'has-unread': unreadCount > 0, active: route.path === '/notifications' }"
         :title="unreadCount > 0 ? `通知中心 (${unreadCount} 条未读)` : '通知中心'" 
-        type="button"
-        aria-haspopup="dialog"
-        aria-controls="notification-center"
-        :aria-expanded="isCenterOpen"
         :aria-label="unreadCount ? `打开通知中心，${unreadCount} 条未读` : '打开通知中心'"
-        @click="toggleCenter"
       >
         <Bell :size="18" aria-hidden="true" />
         <span v-if="unreadCount > 0" class="notification-count" aria-hidden="true">{{ unreadCount > 99 ? '99+' : unreadCount }}</span>
-      </button>
+      </router-link>
 
       <!-- User Profile Dropdown Menu -->
       <div class="user-menu-wrapper" ref="menuRef">
@@ -131,7 +126,7 @@ const route = useRoute()
 const { toggleSidebar, openCmdk, theme, toggleTheme } = useAppStore()
 const { username, openAccountModal } = useSession()
 const { gatewayState } = useGatewayStatus()
-const { unreadCount, toggleCenter, isCenterOpen } = useToast()
+const { unreadCount } = useToast()
 const logout = useLogout()
 
 const isDropdownOpen = ref(false)

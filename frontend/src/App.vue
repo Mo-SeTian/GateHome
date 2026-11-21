@@ -35,8 +35,6 @@
     <!-- Toast Notifications -->
     <ToastNotification />
 
-    <!-- Notification Management Center (macOS Drawer / Mobile Bottom Sheet) -->
-    <NotificationCenter v-if="isAuthenticated" />
   </div>
 </template>
 
@@ -48,7 +46,8 @@ import TopHeader from '@/components/TopHeader.vue'
 import CmdkModal from '@/components/CmdkModal.vue'
 import AccountModal from '@/components/AccountModal.vue'
 import ToastNotification from '@/components/ToastNotification.vue'
-import NotificationCenter from '@/components/NotificationCenter.vue'
+import { adminApi } from '@/api/admin'
+import { startPolling } from '@/api/polling'
 import { useAppStore } from '@/composables/useAppStore'
 import { useGatewayStatus, subscribeStatus } from '@/composables/useGatewayStatus'
 import { useSession } from '@/composables/useSession'
@@ -58,22 +57,30 @@ const route = useRoute()
 const { theme, closeCmdk, closeSidebar } = useAppStore()
 const { isAuthenticated } = useSession()
 const { refreshStatus, refreshConfig, resetGatewayStatus } = useGatewayStatus()
-const { closeCenter } = useToast()
+const { mergeFaultHistory } = useToast()
 
 watch(isAuthenticated, (authenticated, _, onCleanup) => {
   if (!authenticated) {
     closeCmdk()
     closeSidebar()
-    closeCenter()
     resetGatewayStatus()
     return
   }
   const controller = new AbortController()
+  let stopNotifications
+  async function readNotifications() {
+    const events = await adminApi.notificationHistory(controller.signal)
+    if (!controller.signal.aborted) mergeFaultHistory(events)
+  }
+  readNotifications().catch(() => {}).finally(() => {
+    if (!controller.signal.aborted) stopNotifications = startPolling(readNotifications, 15000)
+  })
   const pollStatus = () => refreshStatus(controller.signal).catch(() => {})
   pollStatus()
   refreshConfig(controller.signal).catch(() => {})
   const stopPolling = subscribeStatus(10000)
   onCleanup(() => {
+    stopNotifications?.()
     stopPolling()
     controller.abort()
   })

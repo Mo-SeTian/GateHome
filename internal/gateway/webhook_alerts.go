@@ -29,16 +29,42 @@ type webhookEvent struct {
 }
 
 type webhookState struct {
-	URL string `json:"url,omitempty"`
+	URL    string   `json:"url,omitempty"`
+	Events []string `json:"events"`
 	alertQueue
 }
 
+func (s webhookState) eventSelection() []string {
+	if s.Events == nil {
+		return []string{"upstream", "backup", "certificate"}
+	}
+	return s.Events
+}
+
+func (s webhookState) accepts(kind string) bool {
+	return s.Enabled && slices.Contains(s.eventSelection(), kind)
+}
+
+func (s webhookState) validateSelection() error {
+	if s.Enabled && len(s.eventSelection()) == 0 {
+		return errors.New("启用推送需至少选择一项通知事件")
+	}
+	return validateEventSelection(s.Events)
+}
+
+type alertHistory struct {
+	Active activeAlerts   `json:"active,omitempty"`
+	Events []webhookEvent `json:"events,omitempty"`
+}
+
+type activeAlerts map[string]bool
+
 type alertQueue struct {
-	Enabled   bool            `json:"enabled"`
-	Active    map[string]bool `json:"active,omitempty"`
-	Pending   []webhookEvent  `json:"pending,omitempty"`
-	LastError string          `json:"last_error,omitempty"`
-	Dropped   int             `json:"dropped,omitempty"`
+	Enabled   bool           `json:"enabled"`
+	Active    activeAlerts   `json:"active,omitempty"`
+	Pending   []webhookEvent `json:"pending,omitempty"`
+	LastError string         `json:"last_error,omitempty"`
+	Dropped   int            `json:"dropped,omitempty"`
 }
 
 func validateWebhook(raw string, enabled bool) error {
@@ -64,52 +90,65 @@ func validateWebhook(raw string, enabled bool) error {
 	return errors.New("请填写 HTTPS Webhook 地址，内网 IP 也可使用 HTTP；地址不能包含用户信息或片段")
 }
 
-// Copy on write: previous Store snapshots may still be in use by readers.
-func (s *alertQueue) observe(key, kind, resource string, failing bool, failure, recovery string, now time.Time) bool {
-	if !s.Enabled || s.Active[key] == failing {
-		return false
+// Snapshots share their maps until a transition is recorded.
+func (active *activeAlerts) transition(key, kind, resource string, failing bool, failure, recovery string, now time.Time) (webhookEvent, bool) {
+	if (*active)[key] == failing {
+		return webhookEvent{}, false
 	}
-	s.Active = maps.Clone(s.Active)
+	next := maps.Clone(*active)
 	status, message := "resolved", recovery
 	if failing {
-		if s.Active == nil {
-			s.Active = make(map[string]bool)
+		if next == nil {
+			next = make(activeAlerts)
 		}
-		s.Active[key] = true
+		next[key] = true
 		status, message = "firing", failure
 	} else {
-		delete(s.Active, key)
+		delete(next, key)
+	}
+	*active = next
+	return webhookEvent{rand.Text(), kind, status, resource, message, now.UTC()}, true
+}
+
+// Copy on write: previous Store snapshots may still be in use by readers.
+func (s *alertQueue) observe(key, kind, resource string, failing bool, failure, recovery string, now time.Time) bool {
+	if !s.Enabled {
+		return false
+	}
+	event, changed := s.Active.transition(key, kind, resource, failing, failure, recovery, now)
+	if !changed {
+		return false
 	}
 	if len(s.Pending) >= webhookQueueLimit {
 		s.Pending = s.Pending[len(s.Pending)-webhookQueueLimit+1:]
 		s.Dropped++
 	}
-	s.Pending = append(slices.Clip(s.Pending), webhookEvent{rand.Text(), kind, status, resource, message, now.UTC()})
+	s.Pending = append(slices.Clip(s.Pending), event)
 	return true
 }
 
 // Removing a monitored service ends tracking without announcing a recovery.
-func (s *alertQueue) pruneRemoved(c Config) {
-	if len(s.Active) == 0 {
+func (active *activeAlerts) pruneRemoved(c Config) {
+	if len(*active) == 0 {
 		return
 	}
 	retained := make(map[string]bool)
-	if s.Active["webdav"] {
+	if (*active)["webdav"] {
 		retained["webdav"] = true
 	}
 	for _, route := range c.Routes {
 		key := "route/" + route.ID
-		if s.Active[key] {
+		if (*active)[key] {
 			retained[key] = true
 		}
 	}
 	for _, cert := range c.ACME.Requests {
 		key := "cert/" + cert.ID
-		if s.Active[key] {
+		if (*active)[key] {
 			retained[key] = true
 		}
 	}
-	s.Active = retained
+	*active = retained
 }
 
 // Delivery bookkeeping does not change the revision of editable configuration.
@@ -130,7 +169,7 @@ func (s *Store) changeWebhook(change func(*State) bool) error {
 func (a *Admin) observeAlert(key, kind, resource string, failing bool, failure, recovery string, now time.Time) {
 	state := a.store.Snapshot()
 	current, wx := state.Alerts, state.WxPusher
-	if (!current.Enabled || current.Active[key] == failing) && (!wx.accepts(kind) || wx.Active[key] == failing) {
+	if state.NoticeHistory.Active[key] == failing && (!current.accepts(kind) || current.Active[key] == failing) && (!wx.accepts(kind) || wx.Active[key] == failing) {
 		return
 	}
 	err := a.store.changeWebhook(func(s *State) bool {
@@ -222,10 +261,7 @@ func (a *Admin) deliverNotification(ctx context.Context, queue func(*State) *ale
 
 func (a *Admin) StartWebhookAlerts(ctx context.Context) {
 	go runAlertTicker(ctx, time.Minute, func() {
-		s := a.store.Snapshot()
-		if s.Alerts.Enabled || s.WxPusher.accepts("certificate") {
-			a.checkCertificateAlerts(a.certs.Status(), time.Now())
-		}
+		a.checkCertificateAlerts(a.certs.Status(), time.Now())
 	})
 	go a.runAlertDelivery(ctx, a.deliverWebhook, func(s State) int { return len(s.Alerts.Pending) })
 	go a.runAlertDelivery(ctx, a.deliverWxPusher, func(s State) int { return len(s.WxPusher.Pending) })
@@ -261,18 +297,22 @@ func (a *Admin) runAlertDelivery(ctx context.Context, deliver func(context.Conte
 
 func webhookSummary(w http.ResponseWriter, s State) {
 	h := s.Alerts
-	jsonResponse(w, 200, map[string]any{"enabled": h.Enabled, "configured": h.URL != "", "pending": len(h.Pending), "last_error": h.LastError, "dropped": h.Dropped, "revision": s.Revision})
+	jsonResponse(w, 200, map[string]any{"events": h.eventSelection(), "enabled": h.Enabled, "configured": h.URL != "", "pending": len(h.Pending), "last_error": h.LastError, "dropped": h.Dropped, "revision": s.Revision})
 }
 
 func (a *Admin) webhookRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/notifications/history", a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
+		jsonResponse(w, 200, append([]webhookEvent{}, a.store.Snapshot().NoticeHistory.Events...))
+	}))
 	mux.HandleFunc("GET /api/notifications/webhook", a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
 		webhookSummary(w, a.store.Snapshot())
 	}))
 	mux.HandleFunc("PUT /api/notifications/webhook", a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
 		var input struct {
-			Enabled  bool    `json:"enabled"`
-			URL      *string `json:"url"`
-			Revision int     `json:"revision"`
+			Enabled  bool     `json:"enabled"`
+			Events   []string `json:"events"`
+			URL      *string  `json:"url"`
+			Revision int      `json:"revision"`
 		}
 		if !decodeBody(w, r, &input) {
 			return
@@ -292,15 +332,27 @@ func (a *Admin) webhookRoutes(mux *http.ServeMux) {
 			if invalid = validateWebhook(raw, input.Enabled); invalid != nil {
 				return false
 			}
-			if raw != next.Alerts.URL || input.Enabled != next.Alerts.Enabled {
-				next.Alerts = webhookState{URL: raw, alertQueue: alertQueue{Enabled: input.Enabled}}
-				if next.WebDAVBackup.LastError != "" {
-					next.Alerts.observe("webdav", "backup", "WebDAV", true, "远程备份失败", "远程备份已恢复", time.Now())
-				}
-				next.Revision++
-				return true
+			before := next.Alerts
+			settings := webhookState{URL: raw, Events: before.Events, alertQueue: alertQueue{Enabled: input.Enabled}}
+			if input.Events != nil {
+				settings.Events = input.Events
 			}
-			return false
+			if invalid = settings.validateSelection(); invalid != nil {
+				return false
+			}
+			if raw == before.URL && settings.Enabled == before.Enabled {
+				if slices.Equal(settings.eventSelection(), before.eventSelection()) {
+					return false
+				}
+				settings.alertQueue = before.alertQueue
+				settings.filterEvents(settings.accepts)
+			}
+			if settings.accepts("backup") && next.WebDAVBackup.LastError != "" {
+				settings.observe("webdav", "backup", "WebDAV", true, "远程备份失败", "远程备份已恢复", time.Now())
+			}
+			next.Alerts = settings
+			next.Revision++
+			return true
 		})
 		if invalid != nil {
 			apiError(w, code, invalid.Error())

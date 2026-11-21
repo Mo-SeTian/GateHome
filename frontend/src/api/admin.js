@@ -37,6 +37,7 @@ export const adminApi = {
   dashboard: (signal) => request('/api/dashboard', { signal }),
   runtime: signal => request('/api/runtime', { signal }),
   routeHistory: (id, signal) => request('/api/service-health/' + encodeURIComponent(id) + '/history', { signal }),
+  notificationHistory: signal => request('/api/notifications/history', { signal }),
   wxPusher: signal => request('/api/notifications/wxpusher', { signal }),
   saveWxPusher: (body, signal) => request('/api/notifications/wxpusher', { method: 'PUT', body, signal }),
   testWxPusher: signal => request('/api/notifications/wxpusher/test', { method: 'POST', body: {}, signal }),

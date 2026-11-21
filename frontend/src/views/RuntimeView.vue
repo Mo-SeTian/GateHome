@@ -4,7 +4,7 @@
       <h1>运行状态</h1>
       <div class="report-actions">
         <button type="button" class="btn btn-secondary" :disabled="loading" @click="load">刷新数据</button>
-        <button type="button" class="btn btn-primary" @click="openCenter(true)">故障推送</button>
+        <router-link class="btn btn-primary" to="/notifications?tab=push">故障推送</router-link>
       </div>
     </header>
     <p v-if="runtimeError" class="report-error" role="alert">{{ runtimeError }}</p>
@@ -97,10 +97,8 @@ import SpotlightCard from '@/components/SpotlightCard.vue'
 import RouteHealthHistory from '@/components/RouteHealthHistory.vue'
 import { adminApi } from '@/api/admin'
 import { deviceName, formatBytes, reportDate } from '@/api/reports'
-import { useToast } from '@/composables/useToast'
 import '@/styles/reports.css'
 
-const { openCenter } = useToast()
 const data = ref(null), sessions = ref(null), runtimeError = ref(''), sessionError = ref('')
 const loading = ref(false), openRoute = ref('')
 const controller = new AbortController()

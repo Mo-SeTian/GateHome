@@ -64,6 +64,10 @@ const routes = [
 
   // Group 2: 观察与管理
   {
+    path: '/notifications', name: 'Notifications', component: () => import('@/views/NotificationsView.vue'),
+    meta: { title: '通知中心', icon: 'Bell' }
+  },
+  {
     path: '/runtime', name: 'Runtime', component: () => import('@/views/RuntimeView.vue'),
     meta: { title: '运行状态', icon: 'Activity' }
   },
