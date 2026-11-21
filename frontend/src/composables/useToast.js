@@ -57,6 +57,7 @@ function detectCategory(message) {
   if (/DDNS|动态域名|DNS|解析/i.test(message)) return 'ddns'
   if (/备份|WebDAV|快照|恢复/i.test(message)) return 'backup'
   if (/证书|SSL|TLS|续期|续签/i.test(message)) return 'cert'
+  if (/反代|上游|代理|端口转发/i.test(message)) return 'upstream'
   if (/MCP|AI/i.test(message)) return 'mcp'
   return 'system'
 }
@@ -67,13 +68,19 @@ function detectPath(category) {
     case 'ddns': return '/ddns'
     case 'backup': return '/backups'
     case 'cert': return '/certificates'
+    case 'upstream': return '/runtime'
     case 'mcp': return '/mcp'
     default: return null
   }
 }
 
+function shouldPersistNotification(type, options) {
+  if (typeof options?.persist === 'boolean') return options.persist
+  return type === 'warn' || type === 'warning' || type === 'error'
+}
+
 export function useToast() {
-  const showToast = (message, type = 'info', duration = 3500, category = null, path = null) => {
+  const showToast = (message, type = 'info', duration = 3500, category = null, path = null, options = {}) => {
     if (!message) return null
     const id = ++toastIdCounter
     const cat = category || detectCategory(message)
@@ -101,22 +108,24 @@ export function useToast() {
 
     toasts.value.push(toastItem)
 
-    // 2. Add to Notification Center history
-    const notificationItem = {
-      id: `n_${id}_${Date.now()}`,
-      message,
-      type,
-      category: cat,
-      path: targetPath,
-      createdAt: now.toISOString(),
-      unread: true
-    }
+    // 2. Persist only warnings, errors, or explicit notifications into Notification Center
+    if (shouldPersistNotification(type, options)) {
+      const notificationItem = {
+        id: `n_${id}_${Date.now()}`,
+        message,
+        type,
+        category: cat,
+        path: targetPath,
+        createdAt: now.toISOString(),
+        unread: true
+      }
 
-    notifications.value.unshift(notificationItem)
-    if (notifications.value.length > MAX_NOTIFICATIONS) {
-      notifications.value = notifications.value.slice(0, MAX_NOTIFICATIONS)
+      notifications.value.unshift(notificationItem)
+      if (notifications.value.length > MAX_NOTIFICATIONS) {
+        notifications.value = notifications.value.slice(0, MAX_NOTIFICATIONS)
+      }
+      saveNotifications(notifications.value)
     }
-    saveNotifications(notifications.value)
 
     return id
   }
@@ -191,9 +200,9 @@ export function useToast() {
     markAsRead,
     removeNotification,
     clearAllNotifications,
-    success: (msg, cat, p) => showToast(msg, 'success', 3500, cat, p),
-    error: (msg, cat, p) => showToast(msg, 'error', 4500, cat, p),
-    info: (msg, cat, p) => showToast(msg, 'info', 3500, cat, p),
-    warn: (msg, cat, p) => showToast(msg, 'warn', 4000, cat, p)
+    success: (msg, cat, p, opts) => showToast(msg, 'success', 3500, cat, p, opts),
+    error: (msg, cat, p, opts) => showToast(msg, 'error', 4500, cat, p, opts),
+    info: (msg, cat, p, opts) => showToast(msg, 'info', 3500, cat, p, opts),
+    warn: (msg, cat, p, opts) => showToast(msg, 'warn', 4000, cat, p, opts)
   }
 }
