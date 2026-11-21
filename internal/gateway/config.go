@@ -185,6 +185,7 @@ type Config struct {
 }
 
 type State struct {
+	AssistantProviders     []assistantEndpoint      `json:"assistant_providers,omitempty"`
 	Assistant              assistantEndpoint        `json:"assistant,omitzero"`
 	NoticeHistory          alertHistory             `json:"notification_history,omitzero"`
 	WxPusher               wxPusherState            `json:"alert_wxpusher,omitzero"`

@@ -16,14 +16,15 @@
         <TopHeader />
 
         <!-- View Content Area with Smooth Page Transition -->
-        <main class="page-viewport" :class="{ 'with-assistant': showAssistant }">
+        <main :inert="assistantOverlay" class="page-viewport" :class="{ 'with-assistant': showAssistant }">
           <router-view v-slot="{ Component }">
             <transition name="page-fade" mode="out-in">
               <component :is="Component" />
             </transition>
           </router-view>
         </main>
-        <aside v-if="showAssistant" class="assistant-drawer" aria-label="网关助手侧边栏">
+        <aside v-if="showAssistant" ref="assistantDrawer" class="assistant-drawer" aria-label="网关助手侧边栏"
+          tabindex="-1" @keydown.esc.stop="panelOpen = false">
           <AssistantChat />
         </aside>
       </div>
@@ -42,9 +43,8 @@
 </template>
 
 <script setup>
-import { computed, onMounted, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import AssistantChat from '@/components/AssistantChat.vue'
 import { useAssistant } from '@/composables/useAssistant'
 import Sidebar from '@/components/Sidebar.vue'
 import TopHeader from '@/components/TopHeader.vue'
@@ -58,9 +58,28 @@ import { useGatewayStatus, subscribeStatus } from '@/composables/useGatewayStatu
 import { useSession } from '@/composables/useSession'
 import { useToast } from '@/composables/useToast'
 
+const AssistantChat = defineAsyncComponent(() => import('@/components/AssistantChat.vue'))
 const route = useRoute()
 const { panelOpen, resetAssistant } = useAssistant()
 const showAssistant = computed(() => panelOpen.value && route.name !== 'Assistant' && route.name !== 'AssistantSettings')
+const assistantDrawer = ref(null)
+const overlayLayout = window.matchMedia('(max-width: 1279px)')
+const narrowLayout = ref(overlayLayout.matches)
+const assistantOverlay = computed(() => narrowLayout.value && showAssistant.value)
+const updateOverlay = event => { narrowLayout.value = event.matches }
+onMounted(() => overlayLayout.addEventListener('change', updateOverlay))
+onUnmounted(() => overlayLayout.removeEventListener('change', updateOverlay))
+watch(assistantOverlay, async (open, old, onCleanup) => {
+  const owner = document.activeElement
+  const returnFocus = !open && assistantDrawer.value?.contains(owner)
+  let current = true
+  onCleanup(() => { current = false })
+  await nextTick()
+  if (!current) return
+  if (open) assistantDrawer.value?.focus()
+  else if (returnFocus && !panelOpen.value && route.name !== 'Assistant' && route.name !== 'AssistantSettings')
+    document.querySelector('button[aria-label="网关助手"]')?.focus()
+})
 watch(() => route.name, name => {
   if (name === 'Assistant' || name === 'AssistantSettings') panelOpen.value = false
 })

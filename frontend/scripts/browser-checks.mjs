@@ -18,7 +18,30 @@ let linkedRequests = 0
 let webhookTests = 0
 let assistantTarget = ''
 let assistantCredentialAccepted = false
+let responseRequest
+let claudeRequest
 const upstream = createServer((req, res) => {
+  if (req.url === '/assistant-fixture/v1/models' && req.method === 'GET') {
+    res.setHeader('Content-Type', 'application/json')
+    res.end(JSON.stringify({ data: [{ id: 'browser-fixture' }, { id: 'browser-reasoning' }] }))
+    return
+  }
+  if (['/assistant-fixture/v1/responses', '/anthropic-fixture/v1/messages'].includes(req.url) && req.method === 'POST') {
+    let body = ''
+    req.on('data', chunk => { body += chunk })
+    req.on('end', () => {
+      const text = JSON.stringify({ text: '### 模型已连接\n\n**加粗**与 `代码`' })
+      res.setHeader('Content-Type', 'application/json')
+      if (req.url.endsWith('/responses')) {
+        responseRequest = JSON.parse(body)
+        res.end(JSON.stringify({ output: [{ content: [{ type: 'output_text', text }] }] }))
+      } else {
+        claudeRequest = { payload: JSON.parse(body), version: req.headers['anthropic-version'] }
+        res.end(JSON.stringify({ content: [{ type: 'text', text }] }))
+      }
+    })
+    return
+  }
   if (req.url === '/assistant-fixture/v1/chat/completions' && req.method === 'POST') {
     let body = ''
     req.on('data', chunk => { body += chunk })
@@ -641,7 +664,15 @@ try {
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true)
       assert.ok((await httpsFold().boundingBox()).height >= 44)
       assert.equal(await httpsSection.locator('.domain-text').textContent(), createdURL)
-      if (width <= 640) assert.ok(await httpsSection.locator('.group-actions button').evaluateAll(buttons => buttons.every(button => button.getBoundingClientRect().height >= 44)))
+      if (width <= 640) {
+        assert.ok(await httpsSection.locator('.group-actions button').evaluateAll(buttons => buttons.every(button => button.getBoundingClientRect().height >= 44)))
+        assert.ok(await page.locator('.proxy-metrics .metric-icon').evaluateAll(icons => icons.every(icon => {
+          const parent = icon.getBoundingClientRect()
+          const child = icon.firstElementChild.getBoundingClientRect()
+          return parent.width === parent.height && child.width === child.height && child.width <= parent.width
+        })))
+        assert.ok(await httpsSection.locator('.service-active').count(), 'per-route active connections missing')
+      }
       if (process.env.GATEHOME_BROWSER_ARTIFACTS) {
         await page.screenshot({ path: path.join(process.env.GATEHOME_BROWSER_ARTIFACTS, `route-groups-${width}-${theme}.png`), animations: 'disabled', fullPage: true })
       }
@@ -1631,8 +1662,10 @@ try {
   await route('assistant/settings')
   await page.getByLabel('接入点名称').fill('测试模型')
   await page.getByLabel('接口地址（Base URL）').fill(`http://127.0.0.1:${upstreamPort}/assistant-fixture/v1`)
-  await page.getByLabel('模型 ID').fill('browser-fixture')
   await page.getByLabel('API Key').fill('TEST_ONLY_MODEL_KEY')
+  await button('获取模型').click()
+  await page.getByLabel('选择获取到的模型').selectOption('browser-fixture')
+  assert.equal(await page.getByLabel('模型 ID').inputValue(), 'browser-fixture')
   await button('测试连接').click()
   await page.getByText('连接成功，模型已回复。', { exact: true }).waitFor()
   assert.ok(assistantCredentialAccepted)
@@ -1661,10 +1694,12 @@ try {
   if (process.env.GATEHOME_BROWSER_ARTIFACTS)
     await page.screenshot({ path: path.join(process.env.GATEHOME_BROWSER_ARTIFACTS, 'gatehome-assistant-drawer.png'), animations: 'disabled' })
   assert.equal((await api('config')).config.routes.find(route => route.id === assistantTarget).upstream, assistantRoute.upstream)
+  await composer.fill('保留未发送草稿')
   await assistant.getByRole('link', { name: '打开独立页面' }).click()
   await page.waitForURL('**/#/assistant')
   await assistant.getByRole('heading', { name: '网关助手', exact: true }).waitFor()
   await assistant.getByText('已读取反代运行状态', { exact: true }).waitFor()
+  assert.equal(await composer.inputValue(), '保留未发送草稿')
   await assistant.getByRole('button', { name: '确认应用' }).click()
   await assistant.getByText('已应用', { exact: true }).waitFor()
   snapshot = await api('config')
@@ -1683,8 +1718,50 @@ try {
   for (const width of [390, 320]) {
     await page.setViewportSize({ width, height: 844 })
     await drawer.getByRole('button', { name: '收起网关助手' }).waitFor()
-    await page.waitForFunction(() => document.documentElement.scrollWidth <= innerWidth)
+    await page.waitForFunction(() => document.documentElement.scrollWidth <= innerWidth && document.querySelector('.page-viewport').inert)
+    assert.equal(await page.locator('.page-viewport').evaluate(el => el.contains(document.activeElement)), false)
   }
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await route('assistant/settings')
+  for (const [protocol, name, base] of [
+    ['responses', 'Responses 测试', '/assistant-fixture/v1'],
+    ['anthropic', 'Claude 测试', '/anthropic-fixture/v1']
+  ]) {
+    await button('添加供应商').click()
+    await page.getByLabel('接入点名称').fill(name)
+    await page.getByLabel('请求方式').selectOption(protocol)
+    await page.getByLabel('接口地址（Base URL）').fill('http://127.0.0.1:' + upstreamPort + base)
+    await page.getByLabel('模型 ID').fill(protocol + '-fixture')
+    await page.getByLabel('默认思考强度').selectOption('medium')
+    await button('测试连接').click()
+    await page.getByText('连接成功，模型已回复。', { exact: true }).waitFor()
+    await button('保存接入点').click()
+    await page.getByText('接入点已保存。', { exact: true }).waitFor()
+  }
+  assert.equal(claudeRequest.version, '2023-06-01')
+  assert.equal(claudeRequest.payload.thinking.type, 'adaptive')
+  assert.equal(claudeRequest.payload.output_config.effort, 'medium')
+  assert.equal(responseRequest.reasoning.effort, 'medium')
+  await route('assistant')
+  await assistant.getByRole('button', { name: '历史对话', exact: true }).click()
+  await assistant.getByRole('region', { name: '历史对话', exact: true }).getByRole('button', { name: /^查看反代状态/ }).click()
+  await assistant.getByText('已应用', { exact: true }).waitFor()
+  const configured = await api('assistant/settings')
+  const alternate = configured.providers.find(row => row.protocol === 'responses')
+  await assistant.getByLabel('模型', { exact: true }).selectOption(JSON.stringify([alternate.id, alternate.model]))
+  assert.equal(await assistant.getByText('已应用', { exact: true }).count(), 0)
+  await assistant.getByLabel('思考强度').selectOption('high')
+  await composer.fill('检查 Markdown')
+  await composer.press('Enter')
+  await assistant.getByRole('heading', { name: '模型已连接' }).waitFor()
+  assert.equal(await assistant.locator('.assistant-markdown strong').textContent(), '加粗')
+  assert.equal(responseRequest.reasoning.effort, 'high')
+  assert.equal(responseRequest.input.length, 2, 'history from another provider reached Responses')
+  if (process.env.GATEHOME_BROWSER_ARTIFACTS) {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.screenshot({ path: path.join(process.env.GATEHOME_BROWSER_ARTIFACTS, 'assistant-markdown-390.png'), animations: 'disabled' })
+  }
+  console.log('PASS assistant models, protocols, Markdown, saved conversations, provider isolation and effort')
   console.log('PASS built-in assistant: endpoint test, shared conversation, settings link, confirmations, real save and mobile drawer')
 
   assert.deepEqual(errors, [], 'browser emitted errors during regression')

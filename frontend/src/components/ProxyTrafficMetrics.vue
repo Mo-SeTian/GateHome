@@ -54,7 +54,7 @@ const metrics = computed(() => [
 .metric { display: flex; align-items: center; gap: 12px; padding: 0 14px; border-left: 1px solid var(--line); min-width: 0; }
 .metric:first-child { border-left: 0; padding-left: 0; }
 .metric:last-child { padding-right: 0; }
-.metric-icon { display: grid; place-items: center; flex: 0 0 40px; height: 40px; border-radius: 50%; background: color-mix(in srgb, var(--muted) 12%, var(--card-bg)); color: var(--ink-secondary); }
+.metric-icon { display: grid; place-items: center; flex: none; inline-size: 40px; block-size: 40px; border-radius: 50%; background: color-mix(in srgb, var(--muted) 12%, var(--card-bg)); color: var(--ink-secondary); }
 .metric-reading { min-width: 0; }
 .metric dt { color: var(--muted); font-size: 12px; }
 .metric dd { margin: 2px 0 0; font-size: 19px; font-weight: 650; font-variant-numeric: tabular-nums; }
@@ -64,13 +64,13 @@ const metrics = computed(() => [
 .metric-trend :deep(.sparkline-svg) { height: 28px; }
 @container routes (max-width: 650px) {
   .metric { gap: 6px; padding-inline: 8px; }
-  .metric-icon { flex-basis: 29px; height: 29px; }
-  .metric-icon svg { width: 15px; }
+  .metric-icon { inline-size: 29px; block-size: 29px; }
+  .metric-icon svg { inline-size: 16px; block-size: 16px; }
   .metric dd { font-size: 15px; }
   .metric-trend { display: none; }
 }
 @container routes (max-width: 385px) {
-  .metric { align-items: flex-start; flex-direction: column; }
+  .metric, .metric:first-child, .metric:last-child { align-items: center; flex-direction: column; padding-inline: 4px; text-align: center; }
   .metric dt { font-size: 11px; }
   .metric dd { overflow-wrap: anywhere; }
 }

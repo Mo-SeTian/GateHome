@@ -194,6 +194,10 @@
                   <span><ArrowDown :size="13" class="traffic-down" aria-hidden="true" /><span class="sr-only">下载</span>{{ routeBytes(route, 'download_bytes') }}</span>
                 </div>
               </div>
+              <div class="service-fact">
+                <Users :size="15" aria-hidden="true" /><span>活跃连接</span>
+                <strong class="service-active">{{ routeActive(route) }}</strong>
+              </div>
             </div>
             <div class="card-actions">
               <span class="service-protocol">{{ route.tls ? 'HTTPS' : 'HTTP' }}</span>
@@ -534,7 +538,7 @@ import {
   Server,
   Shield,
   Tv,
-  HeartPulse,
+  HeartPulse, Users,
   ChevronDown,
   Copy,
   Edit3,
@@ -691,6 +695,10 @@ function healthTone(route) {
 }
 function routeBytes(route, field) {
   return traffic24h.value ? formatBytes(traffic24h.value.get(route.id)?.[field] ?? 0) : '—'
+}
+function routeActive(route) {
+  if (!liveTraffic.value) return '—'
+  return (liveTraffic.value.routes?.[route.id || routeKey(route)]?.active ?? 0).toLocaleString()
 }
 function routeLiveTitle(route) {
   const sample = liveTraffic.value?.routes[route.id || routeKey(route)] ?? idleTraffic
@@ -1218,13 +1226,14 @@ onUnmounted(() => {
 .card-head .switch { flex: none; }
 .service-group, .service-protocol { font-size: 12px; color: var(--muted); }
 .service-facts { display: grid; gap: 7px; margin-bottom: 11px; }
-.service-fact { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; color: var(--muted); font-size: 12px; }
-.service-fact > span { min-width: 73px; }
+.service-fact { display: grid; grid-template-columns: 15px 73px minmax(0, 1fr); align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
+.service-fact > svg { display: block; }
+.service-active { color: var(--ink); font-variant-numeric: tabular-nums; }
 .service-counts, .service-counts > span { display: inline-flex; align-items: center; gap: 4px; color: var(--ink); }
 .service-counts { flex-wrap: wrap; column-gap: 11px; }
 .traffic-up { color: var(--ok); }
 .traffic-down { color: var(--brand-cyan); }
-.health-detail { cursor: pointer; white-space: normal; text-align: left; }
+.health-detail { cursor: pointer; white-space: normal; justify-self: start; text-align: center; }
 .health-detail:hover { filter: brightness(1.2); }
 
 .card-actions {
@@ -1267,7 +1276,13 @@ onUnmounted(() => {
   .group-actions .btn { min-height: 44px; flex: 1; justify-content: center; }
   .route-group-body { padding: 0 12px 12px; }
   .domain-row { min-height: 44px; }
-  .health-detail { min-height: 44px; }
+  .health-detail { min-height: 30px; position: relative; }
+  .health-detail::before { content: ''; position: absolute; inset: -7px 0; }
+  .service-facts { row-gap: 9px; }
+  .service-fact { grid-template-columns: 15px minmax(60px, 28%) minmax(0, 1fr); column-gap: 7px; }
+  .service-counts { min-width: 0; }
+  .endpoint-info .info-row > svg { flex: none; }
+  .action-btn-group { margin-inline-start: auto; flex-wrap: wrap; justify-content: end; }
   .routes-grid { grid-template-columns: 1fr; }
   .filter-bar { flex-direction: column; align-items: stretch; }
   .search-box { width: 100%; }
