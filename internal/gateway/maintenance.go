@@ -14,11 +14,12 @@ import (
 )
 
 type maintenanceOperation struct {
-	Kind        string `json:"kind"`
-	Version     string `json:"version"`
-	Digest      string `json:"digest,omitempty"`
-	FromVersion string `json:"from_version,omitempty"`
-	BackupID    string `json:"backup_id,omitempty"`
+	Kind            string `json:"kind"`
+	Version         string `json:"version"`
+	Digest          string `json:"digest,omitempty"`
+	FromVersion     string `json:"from_version,omitempty"`
+	BackupID        string `json:"backup_id,omitempty"`
+	CreatedBackupID string `json:"created_backup_id,omitempty"`
 }
 type maintenanceStage struct {
 	ID, Kind, Version, Digest string
@@ -336,9 +337,11 @@ func (m *Maintenance) beginTransition() (bool, error) {
 		return false, err
 	}
 	if op.Kind == "update" && op.FromVersion != "" {
-		if err := m.saveUpdateBackup(op.FromVersion, op.Version, snapshot); err != nil {
+		createdID, err := m.saveUpdateBackupUnpruned(op.FromVersion, op.Version, snapshot)
+		if err != nil {
 			return false, errors.New("更新前自动备份失败，已取消更新")
 		}
+		op.CreatedBackupID = createdID
 	}
 	// Persist the transaction before any mutation, so interrupted startups can roll back.
 	if err := writeJSON(filepath.Join(m.dir, "transition.json"), op); err != nil {
@@ -390,10 +393,31 @@ func (m *Maintenance) rollbackTransition() error {
 	if err := copyProgram(filepath.Join(m.appDir, "gatehouse.previous"), filepath.Join(m.appDir, "gatehouse")); err != nil {
 		return err
 	}
-	return m.finishTransition()
+	if tb, err := os.ReadFile(filepath.Join(m.dir, "transition.json")); err == nil {
+		var op maintenanceOperation
+		if json.Unmarshal(tb, &op) == nil && validUpdateBackupID(op.CreatedBackupID) {
+			_ = os.RemoveAll(filepath.Join(m.updateBackupDir(), op.CreatedBackupID))
+			_ = syncUpdateDir(m.updateBackupDir())
+		}
+	}
+	return m.finishTransitionFiles(false)
 }
 
 func (m *Maintenance) finishTransition() error {
+	return m.finishTransitionFiles(true)
+}
+
+func (m *Maintenance) finishTransitionFiles(prune bool) error {
+	if prune {
+		if tb, err := os.ReadFile(filepath.Join(m.dir, "transition.json")); err == nil {
+			var op maintenanceOperation
+			if json.Unmarshal(tb, &op) == nil && op.CreatedBackupID != "" {
+				if err := m.pruneUpdateBackups(); err != nil {
+					return err
+				}
+			}
+		}
+	}
 	for _, name := range []string{"operation.json", "transition.json", "rollback.json", "restore-staged.json", "update-staged"} {
 		if err := os.Remove(filepath.Join(m.dir, name)); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err

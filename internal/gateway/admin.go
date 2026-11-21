@@ -301,6 +301,14 @@ func (a *Admin) Handler() http.Handler {
 		http.NotFound(w, r)
 	})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var trusted []netip.Prefix
+		if a.proxy != nil {
+			trusted, _ = a.proxy.trustedProxies.Load().([]netip.Prefix)
+		}
+		if len(trusted) == 0 {
+			trusted, _ = parseTrustedProxies(a.store.Snapshot().Config.TrustedProxies)
+		}
+		r = proxySourceRequest(r, trusted)
 		w.Header().Set("X-GateHome-Version", Version)
 		if r.URL.Path == "/mcp" {
 			mcpHandler.ServeHTTP(w, r)

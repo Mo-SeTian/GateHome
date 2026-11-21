@@ -1,12 +1,15 @@
 package gateway
 
 import (
+	"context"
 	"errors"
 	"net"
 	"net/http"
 	"net/netip"
 	"strings"
 )
+
+type trustedProxyKey struct{}
 
 func parseTrustedProxies(values []string) ([]netip.Prefix, error) {
 	if len(values) > 32 {
@@ -60,13 +63,13 @@ func proxySourceRequest(r *http.Request, trusted []netip.Prefix) *http.Request {
 	// entries to the left of the first untrusted address, including invalid ones.
 	for hops := 0; isTrusted(current); hops++ {
 		if remaining == "" || hops == 32 {
-			return r
+			return r.Clone(context.WithValue(r.Context(), trustedProxyKey{}, true))
 		}
 		index := strings.LastIndexByte(remaining, ',')
 		value := remaining[index+1:]
 		next, err := netip.ParseAddr(strings.TrimSpace(value))
 		if err != nil || next.Zone() != "" || next.IsUnspecified() || next.IsMulticast() {
-			return r
+			return r.Clone(context.WithValue(r.Context(), trustedProxyKey{}, true))
 		}
 		current = next.Unmap()
 		if index < 0 {
@@ -74,7 +77,7 @@ func proxySourceRequest(r *http.Request, trusted []netip.Prefix) *http.Request {
 		}
 		remaining = remaining[:index]
 	}
-	request := r.Clone(r.Context())
+	request := r.Clone(context.WithValue(r.Context(), trustedProxyKey{}, true))
 	request.RemoteAddr = net.JoinHostPort(current.String(), port)
 	return request
 }

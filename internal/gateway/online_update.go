@@ -347,13 +347,17 @@ func shouldPromoteBetaToStable(currentVersion, betaVersion string, stable online
 
 func (a *Admin) checkOnlineRelease(ctx context.Context, client *http.Client, state State, channel updateChannel) (onlineRelease, error) {
 	release, err := a.releaseCache.latest(ctx, client, state, channel)
-	if err != nil {
-		return onlineRelease{}, err
-	}
 	if channel == betaChannel && isBetaVersion(Version) {
-		if stable, stableErr := a.releaseCache.latest(ctx, client, state, stableChannel); stableErr == nil && shouldPromoteBetaToStable(Version, release.Version, stable) {
+		betaVersion := ""
+		if err == nil {
+			betaVersion = release.Version
+		}
+		if stable, stableErr := a.releaseCache.latest(ctx, client, state, stableChannel); stableErr == nil && shouldPromoteBetaToStable(Version, betaVersion, stable) {
 			return stable, nil
 		}
+	}
+	if err != nil {
+		return onlineRelease{}, err
 	}
 	return release, nil
 }
@@ -398,7 +402,11 @@ func (a *Admin) onlineUpdateRoutes(mux *http.ServeMux) {
 		if !decodeBody(w, r, &input) {
 			return
 		}
-		channel, err := parseUpdateChannel(input.Channel)
+		channel := input.Channel
+		if channel == "" {
+			channel = defaultUpdateChannel()
+		}
+		channel, err := parseUpdateChannel(channel)
 		if err != nil {
 			apiError(w, 400, err.Error())
 			return

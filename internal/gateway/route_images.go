@@ -11,7 +11,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -187,7 +186,7 @@ func downloadRouteImageWithProxy(ctx context.Context, raw string, state State) (
 			}
 			for _, ip := range addresses {
 				ip = ip.Unmap()
-				if !ip.IsGlobalUnicast() && !ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip == netip.MustParseAddr("100.100.100.200") {
+				if !allowedServiceIP(ip) {
 					return nil, errors.New("不允许此图片地址")
 				}
 			}
@@ -211,7 +210,7 @@ func downloadRouteImageWithProxy(ctx context.Context, raw string, state State) (
 			local := false
 			for _, ip := range addresses {
 				ip = ip.Unmap()
-				if !ip.IsGlobalUnicast() && !ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip == netip.MustParseAddr("100.100.100.200") {
+				if !allowedServiceIP(ip) {
 					return nil, errors.New("不允许此图片地址")
 				}
 				local = local || ip.IsPrivate() || ip.IsLoopback()
@@ -341,7 +340,7 @@ func (a *Admin) routeImageRoutes(mux *http.ServeMux) {
 			}
 		} else {
 			var err error
-			data, err = downloadRouteImage(r.Context(), body.URL)
+			data, err = downloadRouteImageWithProxy(r.Context(), body.URL, a.store.Snapshot())
 			if err != nil {
 				apiError(w, 400, err.Error())
 				return

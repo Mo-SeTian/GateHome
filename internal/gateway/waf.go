@@ -100,6 +100,9 @@ func inspectWAF(waf coraza.WAF, p Protection, r *http.Request, consumed func()) 
 			if err != nil {
 				return []SecurityHit{{Engine: "waf", RuleID: 1001, Name: "请求体读取失败", Action: "block"}}, http.StatusBadRequest
 			}
+			if len(body) == 0 && consumed != nil {
+				consumed()
+			}
 			if len(body) > p.bodyLimit() {
 				if p.WAF.Mode == "block" {
 					return []SecurityHit{{Engine: "waf", RuleID: 1002, Name: "请求体超出检查上限，未完成内容检查", Action: "block"}}, http.StatusRequestEntityTooLarge
@@ -109,11 +112,18 @@ func inspectWAF(waf coraza.WAF, p Protection, r *http.Request, consumed func()) 
 				partial = true
 			}
 			if _, _, err := tx.WriteRequestBody(body); err != nil && !partial {
-				return []SecurityHit{{Engine: "waf", RuleID: 1003, Name: "请求体检测失败", Action: "block"}}, http.StatusBadRequest
+				if p.WAF.Mode == "block" {
+					return []SecurityHit{{Engine: "waf", RuleID: 1003, Name: "请求体检测失败", Action: "block"}}, http.StatusBadRequest
+				}
+				hits = append(hits, SecurityHit{Engine: "waf", RuleID: 1003, Name: "请求体检测失败", Action: "detect"})
+				partial = true
 			}
 		}
 		if _, err := tx.ProcessRequestBody(); err != nil && !partial {
-			return []SecurityHit{{Engine: "waf", RuleID: 1003, Name: "请求体检测失败", Action: "block"}}, http.StatusBadRequest
+			if p.WAF.Mode == "block" {
+				return []SecurityHit{{Engine: "waf", RuleID: 1003, Name: "请求体检测失败", Action: "block"}}, http.StatusBadRequest
+			}
+			hits = append(hits, SecurityHit{Engine: "waf", RuleID: 1003, Name: "请求体检测失败", Action: "detect"})
 		}
 	}
 	if tx.IsInterrupted() {

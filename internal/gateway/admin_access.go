@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"errors"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -65,6 +66,21 @@ func allowedAdminOrigin(c AdminAccessConfig, value string) bool {
 	return false
 }
 
+func hasForwardedHeaders(r *http.Request) bool {
+	return r.Header.Get("X-Forwarded-For") != "" ||
+		r.Header.Get("X-Forwarded-Proto") != "" ||
+		r.Header.Get("X-Forwarded-Host") != "" ||
+		r.Header.Get("Forwarded") != ""
+}
+
+func isNativeAdminHost(host string, adminPort int) bool {
+	if adminPort < 1 {
+		return false
+	}
+	_, port, err := net.SplitHostPort(host)
+	return err == nil && port == strconv.Itoa(adminPort)
+}
+
 func (a *Admin) requestOriginAllowed(r *http.Request) bool {
 	value := r.Header.Get("Origin")
 	if value == "" {
@@ -77,6 +93,9 @@ func (a *Admin) requestOriginAllowed(r *http.Request) bool {
 	access := a.store.Snapshot().Config.AdminAccess
 	if allowedAdminOrigin(access, value) {
 		return true
+	}
+	if r.Header.Get("X-Forwarded-Host") != "" || (hasForwardedHeaders(r) && !isNativeAdminHost(r.Host, a.adminPort)) {
+		return false
 	}
 	if access.Enabled {
 		source, _ := url.Parse(origin)

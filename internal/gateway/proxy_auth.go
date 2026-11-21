@@ -123,9 +123,20 @@ func safeRouteReturn(value string) string {
 	return value
 }
 
+func routeRequestHTTPS(r *http.Request) bool {
+	if r.TLS != nil {
+		return true
+	}
+	if r.Context().Value(trustedProxyKey{}) == true {
+		proto := strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-Proto"), ",")[0])
+		return strings.EqualFold(proto, "https")
+	}
+	return false
+}
+
 func routeLoginOriginAllowed(r *http.Request) bool {
 	scheme := "http"
-	if r.TLS != nil {
+	if routeRequestHTTPS(r) {
 		scheme = "https"
 	}
 	origin, ok := adminOrigin(r.Header.Get("Origin"))
@@ -190,7 +201,7 @@ func (g *routeGate) authorize(w http.ResponseWriter, r *http.Request, route Rout
 				delete(g.sessions, sha256.Sum256([]byte(cookie.Value)))
 				g.mu.Unlock()
 			}
-			http.SetCookie(w, &http.Cookie{Name: g.cookieName, Path: "/", MaxAge: -1, HttpOnly: true, Secure: r.TLS != nil, SameSite: http.SameSiteStrictMode})
+			http.SetCookie(w, &http.Cookie{Name: g.cookieName, Path: "/", MaxAge: -1, HttpOnly: true, Secure: routeRequestHTTPS(r), SameSite: http.SameSiteStrictMode})
 			http.Redirect(w, r, routeAuthPath, http.StatusSeeOther)
 			return false
 		}
@@ -273,7 +284,7 @@ func (g *routeGate) login(w http.ResponseWriter, r *http.Request, route Route) {
 	pruneSessions(g.sessions, 256, now)
 	g.sessions[sha256.Sum256([]byte(token))] = now.Add(12 * time.Hour)
 	g.mu.Unlock()
-	http.SetCookie(w, &http.Cookie{Name: g.cookieName, Value: token, Path: "/", HttpOnly: true, Secure: r.TLS != nil, SameSite: http.SameSiteStrictMode, MaxAge: 43200})
+	http.SetCookie(w, &http.Cookie{Name: g.cookieName, Value: token, Path: "/", HttpOnly: true, Secure: routeRequestHTTPS(r), SameSite: http.SameSiteStrictMode, MaxAge: 43200})
 	w.Header().Set("Cache-Control", "no-store")
 	authEvent(w, "auth_success", "独立访问账号验证成功", false)
 	http.Redirect(w, r, destination, http.StatusSeeOther)

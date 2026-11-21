@@ -907,6 +907,25 @@ function changeRouteGroup() {
 }
 
 watch(
+  [() => currentRoute.query.q, () => currentRoute.query.group],
+  ([q, group]) => {
+    if (typeof q !== 'string' && typeof group !== 'string') return
+    if (typeof q === 'string') {
+      searchQuery.value = q
+      if (typeof group !== 'string') selectedGroup.value = 'ALL'
+    }
+    if (typeof group === 'string' && group) {
+      selectedGroup.value = group
+      if (typeof q !== 'string') searchQuery.value = ''
+      collapsedGroups.value.delete(group)
+      saveCollapsedGroups()
+    }
+    router.replace({ query: { ...currentRoute.query, q: undefined, group: undefined } })
+  },
+  { immediate: true }
+)
+
+watch(
   [() => currentRoute.query.new, gatewayConfig],
   ([requested, config]) => {
     if (requested !== '1' || !config || routeOpen.value) return

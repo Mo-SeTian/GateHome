@@ -48,13 +48,19 @@ func (a *Admin) ipBlockRoutes(mux *http.ServeMux) {
 		if !decodeBody(w, r, &req) {
 			return
 		}
-		if !a.proxy.defense.remove(req.Rule, req.IP) {
+		ipStr := strings.TrimSpace(req.IP)
+		if addr, err := netip.ParseAddr(ipStr); err == nil && addr.Zone() == "" {
+			ipStr = addr.Unmap().String()
+		}
+		if !a.proxy.defense.remove(req.Rule, ipStr) {
 			apiError(w, 404, "冻结记录不存在或已自动到期")
 			return
 		}
-		if routes, ok := a.proxy.routes.Load().(map[string]proxyRoute); ok {
-			if route, ok := routes[req.Rule]; ok && route.firewall != nil && route.firewall.counters != nil {
-				route.firewall.counters.clear(req.Rule, req.IP)
+		if firewalls, ok := a.proxy.firewalls.Load().(map[string]*compiledFirewall); ok {
+			for _, fw := range firewalls {
+				if fw != nil && fw.counters != nil {
+					fw.counters.clear(req.Rule, ipStr)
+				}
 			}
 		}
 		respond(w)

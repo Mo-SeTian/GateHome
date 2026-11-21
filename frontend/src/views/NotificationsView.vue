@@ -187,7 +187,7 @@
 
 <script setup>
 import { computed, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { Search, Trash2 } from 'lucide-vue-next'
 import SpotlightCard from '@/components/SpotlightCard.vue'
 import WebhookSettings from '@/components/WebhookSettings.vue'
@@ -197,6 +197,7 @@ import { reportDate } from '@/api/reports'
 import '@/styles/reports.css'
 
 const route = useRoute()
+const router = useRouter()
 const push = computed(() => route.query.tab === 'push')
 const { notifications, unreadCount, markAllAsRead, markAsRead, clearAllNotifications, removeNotification } = useToast()
 
@@ -239,6 +240,19 @@ function relativeTime(iso) {
 const category = ref('')
 const filter = ref('all')
 const searchQuery = ref('')
+
+watch(
+  () => route.query.q,
+  (q) => {
+    if (typeof q === 'string') {
+      searchQuery.value = q.trim()
+      filter.value = 'all'
+      category.value = ''
+      router.replace({ query: { ...route.query, q: undefined } })
+    }
+  },
+  { immediate: true }
+)
 
 const alertCount = computed(() =>
   notifications.value.filter(item => item.type === 'error' || item.type === 'warning' || item.type === 'warn').length

@@ -9,7 +9,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/netip"
 	"net/url"
 	"sync"
 	"time"
@@ -112,7 +111,7 @@ func probeServiceHealth(ctx context.Context, raw string) serviceHealthResult {
 		}
 		for _, ip := range ips {
 			ip = ip.Unmap()
-			if (!ip.IsGlobalUnicast() && !ip.IsLoopback()) || ip.IsLinkLocalUnicast() || ip == netip.MustParseAddr("100.100.100.200") {
+			if !allowedServiceIP(ip) {
 				return nil, errors.New("restricted address")
 			}
 		}
@@ -206,28 +205,37 @@ func (a *Admin) cachedServiceHealth(ctx context.Context, raw string, ttl time.Du
 	cache.pending[raw] = pending
 	slots := cache.slots
 	cache.mu.Unlock()
-	var result serviceHealthResult
-	select {
-	case slots <- struct{}{}:
-		result = probeServiceHealth(ctx, raw)
-		<-slots
-	case <-ctx.Done():
-		result = serviceHealthResult{State: "cancelled", Label: "已取消"}
-	}
-	cache.mu.Lock()
-	pending.result = result
-	if result.State != "cancelled" {
-		cache.results[raw] = result
-	}
-	for key, row := range cache.results {
-		if time.Since(row.CheckedAt) > 30*time.Minute {
-			delete(cache.results, key)
+	go func() {
+		probeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		var result serviceHealthResult
+		select {
+		case slots <- struct{}{}:
+			result = probeServiceHealth(probeCtx, raw)
+			<-slots
+		case <-probeCtx.Done():
+			result = serviceHealthResult{State: "cancelled", Label: "已取消"}
 		}
+		cache.mu.Lock()
+		pending.result = result
+		if result.State != "cancelled" {
+			cache.results[raw] = result
+		}
+		for key, row := range cache.results {
+			if time.Since(row.CheckedAt) > 30*time.Minute {
+				delete(cache.results, key)
+			}
+		}
+		delete(cache.pending, raw)
+		close(pending.done)
+		cache.mu.Unlock()
+	}()
+	select {
+	case <-pending.done:
+		return pending.result
+	case <-ctx.Done():
+		return serviceHealthResult{State: "cancelled", Label: "已取消"}
 	}
-	delete(cache.pending, raw)
-	close(pending.done)
-	cache.mu.Unlock()
-	return result
 }
 
 func (a *Admin) routeServiceHealth(ctx context.Context) map[string]serviceHealthResult {
@@ -271,7 +279,7 @@ func (a *Admin) recordHealthTransition(route Route, result serviceHealthResult) 
 		return
 	}
 	if previous.upstream != route.Upstream {
-		previous = healthEventState{upstream: route.Upstream}
+		previous = healthEventState{upstream: route.Upstream, down: previous.down}
 	}
 	previous.result = result
 	a.recordHealthSample(route, result)

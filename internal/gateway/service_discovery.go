@@ -70,7 +70,7 @@ type serviceDiscovery struct {
 
 func discoveryIP(raw string) (netip.Addr, error) {
 	ip, err := netip.ParseAddr(strings.TrimSpace(raw))
-	if err != nil || ip.Zone() != "" || !(ip.Unmap().IsPrivate() || ip.Unmap().IsLoopback()) {
+	if err != nil || ip.Zone() != "" || !(ip.Unmap().IsPrivate() || ip.Unmap().IsLoopback()) || !allowedServiceIP(ip.Unmap()) {
 		return netip.Addr{}, errors.New("请输入单个内网或回环 IPv4 / IPv6 地址")
 	}
 	return ip.Unmap(), nil

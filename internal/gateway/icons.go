@@ -20,6 +20,7 @@ import (
 	"unicode"
 
 	"github.com/mozillazg/go-pinyin"
+	"sun-panel/lib/imageasset"
 )
 
 //go:embed icon_builtin/*.svg
@@ -196,33 +197,23 @@ func prepareIconDirs(data string) error {
 func iconDimensions(r io.Reader, format string) (int, int, error) {
 	switch format {
 	case "svg":
-		d := xml.NewDecoder(r)
-		var depth, width, height int
-		seenRoot := false
+		data, err := io.ReadAll(io.LimitReader(r, maxImageUpload+1))
+		if err != nil || len(data) == 0 || len(data) > maxImageUpload {
+			return 0, 0, fs.ErrInvalid
+		}
+		trimmed := bytes.TrimPrefix(data, []byte("\xef\xbb\xbf"))
+		if !imageasset.Validate("icon.svg", trimmed) {
+			return 0, 0, fs.ErrInvalid
+		}
+		d := xml.NewDecoder(bytes.NewReader(trimmed))
 		for {
 			token, err := d.Token()
-			if errors.Is(err, io.EOF) && seenRoot && depth == 0 {
-				return width, height, nil
-			}
 			if err != nil {
 				return 0, 0, fs.ErrInvalid
 			}
-			switch t := token.(type) {
-			case xml.StartElement:
-				if depth == 0 {
-					if seenRoot || t.Name.Local != "svg" || (t.Name.Space != "" && t.Name.Space != "http://www.w3.org/2000/svg") {
-						return 0, 0, fs.ErrInvalid
-					}
-					seenRoot = true
-					width, height = svgIconSize(t.Attr)
-				}
-				depth++
-			case xml.EndElement:
-				depth--
-			case xml.CharData:
-				if depth == 0 && len(bytes.TrimSpace(bytes.TrimPrefix(t, []byte("\xef\xbb\xbf")))) > 0 {
-					return 0, 0, fs.ErrInvalid
-				}
+			if t, ok := token.(xml.StartElement); ok {
+				width, height := svgIconSize(t.Attr)
+				return width, height, nil
 			}
 		}
 	case "ico":

@@ -124,9 +124,20 @@ func validSVG(data []byte, requireNamespace bool) bool {
 				if name == "style" && (strings.Contains(value, "url") || strings.ContainsAny(value, "\\@")) {
 					return false
 				}
-				// Only local fragment references are supported in SVG paint/filter attributes.
-				if strings.Contains(value, "url(") && !strings.HasPrefix(value, "url(#") {
+				if (name == "filter" || name == "fill" || name == "stroke" || name == "mask" || name == "clip-path" || strings.HasPrefix(name, "marker")) && strings.Contains(value, "\\") {
 					return false
+				}
+				// Only local fragment references are supported in SVG paint/filter attributes.
+				for rest := value; ; {
+					idx := strings.Index(rest, "url(")
+					if idx < 0 {
+						break
+					}
+					after := strings.TrimSpace(rest[idx+4:])
+					if !strings.HasPrefix(after, "#") {
+						return false
+					}
+					rest = after[1:]
 				}
 			}
 			depth++

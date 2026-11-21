@@ -15,7 +15,7 @@
         aria-keyshortcuts="Meta+K Control+K" @click="openCmdk"
       >
         <Search :size="15" class="search-icon" aria-hidden="true" />
-        <span class="search-placeholder">搜索页面与操作</span>
+        <span class="search-placeholder">全局搜索页面、反代、转发与操作…</span>
         <kbd class="shortcut-pill" aria-hidden="true">⌘K</kbd>
       </button>
     </div>
@@ -27,6 +27,18 @@
         <span class="pulse-dot" />
         <span class="live-text">{{ gatewayState.label }}</span>
       </div>
+
+      <!-- Mobile Search Button -->
+      <button
+        type="button"
+        class="icon-action-btn mobile-search-btn"
+        title="全局搜索 (⌘K)"
+        aria-label="打开全局搜索"
+        aria-haspopup="dialog"
+        @click="openCmdk"
+      >
+        <Search :size="18" aria-hidden="true" />
+      </button>
 
       <!-- Theme Switch Button -->
       <button 
@@ -371,6 +383,10 @@ onUnmounted(() => {
   border-color: var(--card-border-hover);
 }
 
+.mobile-search-btn {
+  display: none;
+}
+
 .notification-btn {
   position: relative;
 }
@@ -596,6 +612,9 @@ body.theme-dark .user-dropdown-popover {
   }
   .header-center {
     display: none;
+  }
+  .mobile-search-btn {
+    display: flex;
   }
   .header-right {
     gap: 8px;

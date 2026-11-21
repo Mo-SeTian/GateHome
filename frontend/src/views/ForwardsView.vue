@@ -12,16 +12,29 @@
     <RestartNotice />
     <p v-if="loading" role="status">正在读取转发配置…</p>
     <p v-if="loadError" class="page-error" role="alert">{{ loadError }}</p>
-    <div class="protocol-filters" role="group" aria-label="筛选协议">
-      <button
-        v-for="item in protocols"
-        :key="item.value"
-        class="btn btn-secondary btn-sm"
-        :aria-pressed="protocolFilter === item.value"
-        @click="protocolFilter = item.value"
-      >
-        {{ item.label }}
-      </button>
+    <div class="forwards-toolbar">
+      <div class="protocol-filters" role="group" aria-label="筛选协议">
+        <button
+          v-for="item in protocols"
+          :key="item.value"
+          class="btn btn-secondary btn-sm"
+          :aria-pressed="protocolFilter === item.value"
+          @click="protocolFilter = item.value"
+        >
+          {{ item.label }}
+        </button>
+      </div>
+      <div class="search-box">
+        <Search :size="14" aria-hidden="true" />
+        <input
+          v-model="searchQuery"
+          type="search"
+          class="search-input"
+          aria-label="搜索端口转发"
+          placeholder="按名称、监听端口或目标地址搜索"
+          @keydown.esc="searchQuery = ''"
+        />
+      </div>
     </div>
     <details class="live-listeners ref-details">
       <summary>
@@ -201,8 +214,9 @@
 
 <script setup>
 import { newID } from '@/api/ids'
-import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef } from 'vue'
-import { ArrowRight, Edit3, Plus, Trash2, X } from 'lucide-vue-next'
+import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { ArrowRight, Edit3, Plus, Search, Trash2, X } from 'lucide-vue-next'
 import SpotlightCard from '@/components/SpotlightCard.vue'
 import RestartNotice from '@/components/RestartNotice.vue'
 import { forwardState, replaceConfigItem } from '@/api/configuration'
@@ -221,6 +235,8 @@ const {
   saveConfig
 } = useGatewayStatus()
 const toast = useToast()
+const currentRoute = useRoute()
+const router = useRouter()
 const forwards = computed(() => gatewayConfig.value?.forwards ?? [])
 const runningListeners = computed(() =>
   (gatewayStatus.value?.forward_listeners ?? []).filter((item) => item.enabled)
@@ -253,14 +269,26 @@ const protocols = [
   { value: 'tcp+udp', label: 'TCP + UDP' }
 ]
 const protocolFilter = ref('')
-const filteredForwards = computed(() =>
-  forwards.value.filter(
-    (item) =>
+const searchQuery = ref('')
+const filteredForwards = computed(() => {
+  const q = searchQuery.value.trim().toLowerCase()
+  return forwards.value.filter((item) => {
+    const protoMatch =
       !protocolFilter.value ||
       item.protocol === protocolFilter.value ||
       (item.protocol === 'tcp+udp' && protocolFilter.value !== 'tcp+udp')
-  )
-)
+    if (!protoMatch) return false
+    if (!q) return true
+    return [
+      item.name,
+      String(item.listen_port || ''),
+      `:${item.listen_port}`,
+      item.upstream,
+      item.protocol,
+      firewallName(item.firewall_id)
+    ].some((val) => (val || '').toLowerCase().includes(q))
+  })
+})
 const loading = ref(false)
 const loadError = ref('')
 const dialog = ref(null)
@@ -358,12 +386,62 @@ async function deleteForward(forward) {
     toast.error(err.message)
   }
 }
+watch(
+  () => currentRoute.query.q,
+  (q) => {
+    if (typeof q !== 'string') return
+    searchQuery.value = q
+    protocolFilter.value = ''
+    router.replace({ query: { ...currentRoute.query, q: undefined } })
+  },
+  { immediate: true }
+)
+
+watch(
+  [() => currentRoute.query.new, gatewayConfig],
+  ([requested, config]) => {
+    if (requested !== '1' || !config || dialog.value?.open) return
+    router.replace({ query: { ...currentRoute.query, new: undefined } })
+    openForward()
+  },
+  { immediate: true }
+)
+
 onMounted(reload)
 useStatusPolling()
 onUnmounted(() => controller.abort())
 </script>
 
 <style scoped>
+.forwards-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.search-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: var(--input-bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  min-width: 240px;
+  max-width: 100%;
+  flex: 1 1 240px;
+}
+.search-input {
+  width: 100%;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  color: var(--ink);
+  font-size: 13px;
+  outline: none;
+}
 .header-actions, .protocol-filters { display: flex; flex-wrap: wrap; gap: 8px; }
 .protocol-filters [aria-pressed="true"] { border-color: var(--brand-light); color: var(--ink); }
 .live-listeners { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }

@@ -348,6 +348,8 @@ func (p *PortForwarder) forwardTCP(b *forwardBinding, client net.Conn) {
 			return
 		}
 		dst.(*net.TCPConn).CloseWrite()
+		// Bound half-closed TCP connections so stalled peers cannot pin global forwarding slots indefinitely.
+		_ = dst.SetReadDeadline(time.Now().Add(30 * time.Second))
 	}
 	done := make(chan struct{})
 	go func() {
@@ -430,12 +432,13 @@ func (p *PortForwarder) forwardUDP(b *forwardBinding, remote netip.AddrPort, ses
 			if err != nil {
 				return
 			}
-			if p.allowed(b.rule, remote.String()) {
-				written, err := b.udp.WriteToUDPAddrPort(buffer[:n], remote)
-				b.traffic.record(time.Now(), trafficBytes{Download: uint64(written)})
-				if err != nil {
-					return
-				}
+			if !p.allowed(b.rule, remote.String()) {
+				return
+			}
+			written, err := b.udp.WriteToUDPAddrPort(buffer[:n], remote)
+			b.traffic.record(time.Now(), trafficBytes{Download: uint64(written)})
+			if err != nil {
+				return
 			}
 		}
 	}()
@@ -447,6 +450,11 @@ func (p *PortForwarder) forwardUDP(b *forwardBinding, remote netip.AddrPort, ses
 			return
 		case packet := <-session.queue:
 			p.pending.Release(int64(len(packet)))
+			if !p.allowed(b.rule, remote.String()) {
+				upstream.Close()
+				<-done
+				return
+			}
 			upstream.SetWriteDeadline(time.Now().Add(5 * time.Second))
 			upstream.SetReadDeadline(time.Now().Add(forwardUDPTimeout(b.rule)))
 			written, err := upstream.Write(packet)

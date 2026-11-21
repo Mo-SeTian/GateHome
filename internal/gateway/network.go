@@ -138,8 +138,10 @@ func queryPublicIP(ctx context.Context, endpoint, kind string, iface *net.Interf
 		metadataMu.Unlock()
 	}()
 	network := "tcp4"
+	ipNetwork := "ip4"
 	if kind == "AAAA" {
 		network = "tcp6"
+		ipNetwork = "ip6"
 	}
 	dialer := &net.Dialer{Timeout: 5 * time.Second}
 	if iface != nil {
@@ -147,7 +149,31 @@ func queryPublicIP(ctx context.Context, endpoint, kind string, iface *net.Interf
 		metadata.Interface = iface.Name
 	}
 	transport := &http.Transport{DialContext: func(ctx context.Context, _, addr string) (net.Conn, error) {
-		conn, err := dialer.DialContext(ctx, network, addr)
+		host, port, err := net.SplitHostPort(addr)
+		if err != nil {
+			return nil, err
+		}
+		ips, err := net.DefaultResolver.LookupNetIP(ctx, ipNetwork, host)
+		if err != nil {
+			return nil, err
+		}
+		if len(ips) == 0 {
+			return nil, errors.New("公网 IP 查询地址无法解析")
+		}
+		for _, ip := range ips {
+			if !allowedServiceIP(ip.Unmap()) {
+				return nil, errors.New("公网 IP 查询地址不允许访问")
+			}
+		}
+		var conn net.Conn
+		var dialErr error
+		for _, ip := range ips {
+			conn, dialErr = dialer.DialContext(ctx, network, net.JoinHostPort(ip.Unmap().String(), port))
+			if dialErr == nil {
+				break
+			}
+		}
+		err = dialErr
 		if err == nil {
 			observed := DetectedIP{LocalAddress: conn.LocalAddr().(*net.TCPAddr).IP.String()}
 			if iface != nil {

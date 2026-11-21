@@ -177,19 +177,27 @@ func (b trafficRequestBody) Read(p []byte) (int, error) {
 
 type proxyUpgradeTraffic struct {
 	io.ReadWriteCloser
-	live *proxyLiveTraffic
-	id   string
+	live    *proxyLiveTraffic
+	history *Traffic
+	route   *Route
+	id      string
 }
 
 func (b proxyUpgradeTraffic) Read(p []byte) (int, error) {
 	n, err := b.ReadWriteCloser.Read(p)
 	b.live.record(b.id, 0, n)
+	if b.route != nil {
+		b.history.add(b.route, 0, n, time.Now())
+	}
 	return n, err
 }
 
 func (b proxyUpgradeTraffic) Write(p []byte) (int, error) {
 	n, err := b.ReadWriteCloser.Write(p)
 	b.live.record(b.id, n, 0)
+	if b.route != nil {
+		b.history.add(b.route, n, 0, time.Now())
+	}
 	return n, err
 }
 

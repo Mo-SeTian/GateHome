@@ -27,12 +27,49 @@ func validateOutboundProxy(p OutboundProxyConfig) error {
 	if err != nil || port < 1 || port > 65535 {
 		return errors.New("代理地址需填写 1–65535 的端口")
 	}
+	if ip, err := netip.ParseAddr(u.Hostname()); err == nil {
+		if ip.Zone() != "" || !allowedServiceIP(ip.Unmap()) {
+			return errors.New("代理地址不允许使用受限或元数据 IP")
+		}
+	}
 	return nil
+}
+
+func safeDialContext(dial func(context.Context, string, string) (net.Conn, error)) func(context.Context, string, string) (net.Conn, error) {
+	return func(ctx context.Context, network, address string) (net.Conn, error) {
+		host, port, err := net.SplitHostPort(address)
+		if err != nil {
+			return nil, err
+		}
+		ips, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+		if err != nil {
+			return nil, err
+		}
+		for _, ip := range ips {
+			ip = ip.Unmap()
+			if !allowedServiceIP(ip) {
+				return nil, errors.New("目标地址不允许访问")
+			}
+		}
+		var last error
+		for _, ip := range ips {
+			connection, err := dial(ctx, network, net.JoinHostPort(ip.String(), port))
+			if err == nil {
+				return connection, nil
+			}
+			last = err
+		}
+		if last == nil {
+			last = errors.New("目标地址无法连接")
+		}
+		return nil, last
+	}
 }
 
 func outboundClient(s State, timeout time.Duration) *http.Client {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.Proxy = nil
+	transport.DialContext = safeDialContext(transport.DialContext)
 	if s.Config.OutboundProxy.Enabled {
 		u, err := url.Parse(s.Config.OutboundProxy.URL)
 		if err == nil && u.Hostname() != "" {
@@ -106,36 +143,6 @@ func serviceEndpointClient(state State, timeout time.Duration) *http.Client {
 			}
 			return proxy(r)
 		}
-	}
-	// Pin the checked address at connection time, including DNS-rebinding checks.
-	dial := transport.DialContext
-	transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
-		host, port, err := net.SplitHostPort(address)
-		if err != nil {
-			return nil, err
-		}
-		ips, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
-		if err != nil {
-			return nil, err
-		}
-		for _, ip := range ips {
-			ip = ip.Unmap()
-			if !allowedServiceIP(ip) {
-				return nil, errors.New("目标地址不允许访问")
-			}
-		}
-		var last error
-		for _, ip := range ips {
-			connection, err := dial(ctx, network, net.JoinHostPort(ip.String(), port))
-			if err == nil {
-				return connection, nil
-			}
-			last = err
-		}
-		if last == nil {
-			last = errors.New("目标地址无法连接")
-		}
-		return nil, last
 	}
 	return client
 }

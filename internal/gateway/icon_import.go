@@ -301,13 +301,16 @@ func (a *Admin) publishIconPack(stage, pack string) error {
 		if _, err := plainIconPath(root, path.Dir(target), true, true); err != nil {
 			return err
 		}
-		if _, err := plainIconPath(root, target, false, false); !errors.Is(err, fs.ErrNotExist) {
-			return err
+		_, statErr := plainIconPath(root, target, false, false)
+		if statErr != nil && !errors.Is(statErr, fs.ErrNotExist) {
+			return statErr
 		}
 		if err := root.Rename(filepath.ToSlash(stageRel)+"/"+rel, target); err != nil {
 			return err
 		}
-		installed = append(installed, target)
+		if errors.Is(statErr, fs.ErrNotExist) {
+			installed = append(installed, target)
+		}
 		return nil
 	})
 	if err == nil {

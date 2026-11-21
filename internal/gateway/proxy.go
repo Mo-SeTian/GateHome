@@ -114,7 +114,8 @@ func (p *Proxy) configurePrepared(c Config, hashes map[string]string, firewalls 
 				}
 				if response.StatusCode == http.StatusSwitchingProtocols {
 					if body, ok := response.Body.(io.ReadWriteCloser); ok {
-						response.Body = proxyUpgradeTraffic{ReadWriteCloser: body, live: &p.liveTraffic, id: trafficID}
+						routeCopy := r
+						response.Body = proxyUpgradeTraffic{ReadWriteCloser: body, live: &p.liveTraffic, history: p.traffic, route: &routeCopy, id: trafficID}
 					}
 				}
 				return nil

@@ -101,55 +101,67 @@ func (m *Maintenance) listUpdateBackups() ([]updateBackup, error) {
 }
 
 func (m *Maintenance) saveUpdateBackup(from, to string, snapshot []byte) error {
-	root := m.updateBackupDir()
-	if err := os.MkdirAll(root, 0700); err != nil {
+	if _, err := m.saveUpdateBackupUnpruned(from, to, snapshot); err != nil {
 		return err
 	}
+	return m.pruneUpdateBackups()
+}
+
+func (m *Maintenance) saveUpdateBackupUnpruned(from, to string, snapshot []byte) (string, error) {
+	root := m.updateBackupDir()
+	if err := os.MkdirAll(root, 0700); err != nil {
+		return "", err
+	}
 	if info, err := os.Lstat(root); err != nil || !info.IsDir() {
-		return errors.New("更新备份目录无效")
+		return "", errors.New("更新备份目录无效")
 	}
 	program, err := readUpdateFile(filepath.Join(m.appDir, "gatehouse.previous"), maxUpdateExpandedBytes)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if err := validateELF(program, releaseArch()); err != nil {
-		return err
+		return "", err
 	}
 	if len(snapshot) > maxBackupBytes {
-		return errors.New("更新备份超过大小限制")
+		return "", errors.New("更新备份超过大小限制")
 	}
 	id, err := stageID()
 	if err != nil {
-		return err
+		return "", err
 	}
 	stage, err := os.MkdirTemp(root, ".pending-")
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer os.RemoveAll(stage)
 	b := updateBackup{ID: id, Version: from, TargetVersion: to, CreatedAt: time.Now().UTC(),
 		Bytes: int64(len(program) + len(snapshot)), ProgramSHA: digestBytes(program), SnapshotSHA: digestBytes(snapshot)}
 	if err := atomicWrite(filepath.Join(stage, "gatehouse"), program); err != nil {
-		return err
+		return "", err
 	}
 	if err := atomicWrite(filepath.Join(stage, "snapshot.json"), snapshot); err != nil {
-		return err
+		return "", err
 	}
 	if err := writeJSON(filepath.Join(stage, "metadata.json"), b); err != nil {
-		return err
+		return "", err
 	}
 	if err := syncUpdateDir(stage); err != nil {
-		return err
+		return "", err
 	}
 	if err := os.Rename(stage, filepath.Join(root, id)); err != nil {
-		return err
+		return "", err
 	}
 	if err := syncUpdateDir(root); err != nil {
-		return err
+		return "", err
 	}
 	if err := syncUpdateDir(m.dir); err != nil {
-		return err
+		return "", err
 	}
+	return id, nil
+}
+
+func (m *Maintenance) pruneUpdateBackups() error {
+	root := m.updateBackupDir()
 	list, err := m.listUpdateBackups()
 	if err != nil {
 		return err

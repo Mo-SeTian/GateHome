@@ -49,8 +49,19 @@ func (p *Proxy) inspectRouteWAF(w http.ResponseWriter, route proxyRoute, r *http
 	}
 	var release func()
 	if r.Body != nil && r.Body != http.NoBody {
-		// Account for input growth, Coraza buffering and parser allocations.
-		reserve := int64(route.firewall.protection.bodyLimit()) * 4
+		// Account for input growth, Coraza buffering and parser allocations without letting
+		// a single high-BodyLimit route reserve 100% of the global pool for a tiny request.
+		limit := int64(route.firewall.protection.bodyLimit())
+		reserve := limit * 4
+		if r.ContentLength >= 0 {
+			expected := min(r.ContentLength, limit)
+			if expected < 64<<10 {
+				expected = 64 << 10
+			}
+			reserve = expected * 4
+		} else if reserve > 32<<20 {
+			reserve = 32 << 20
+		}
 		if !p.wafMemory.TryAcquire(reserve) {
 			return []SecurityHit{{Engine: "system", RuleID: 2, Name: "请求体检查繁忙，请稍后重试", Action: "block"}}, 503, nil
 		}
