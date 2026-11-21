@@ -203,7 +203,7 @@ onMounted(() => {
 .composer-selects { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1; }
 .composer-selects select { color: var(--ink-secondary); background: var(--strip-bg); border: 1px solid var(--line); border-radius: 7px; min-height: 34px; padding: 0 5px; font: inherit; font-size: 12px; }
 .composer-selects select:first-of-type { flex: 1; min-width: 0; max-width: 245px; text-overflow: ellipsis; }
-.composer-selects select:last-of-type { flex: none; width: 86px; }
+.composer-selects select:last-of-type { flex: none; width: 86px !important; }
 .composer-actions button { margin-left: auto; }
 .assistant-full { border: 1px solid var(--line); border-radius: var(--radius-card); overflow: hidden; min-height: 490px; height: calc(100dvh - var(--topbar-h) - 48px); }
 .assistant-full .assistant-timeline, .assistant-full .assistant-footer { width: min(100%, 820px); margin-inline: auto; }
@@ -237,7 +237,8 @@ onMounted(() => {
 @media (max-width: 600px) {
   .assistant-header { padding: 10px 14px; }
   .assistant-timeline { padding: 14px; }
-  .assistant-actions .icon-action-btn, .composer-selects select { min-height: 44px; }
+  .assistant-actions .icon-action-btn { min-height: 44px; }
+  .composer-selects select { min-height: 44px !important; }
   .assistant-actions .icon-action-btn { width: 36px; }
   .assistant-footer { padding-inline: 12px; }
   .assistant-suggestions { flex-wrap: nowrap; overflow: auto; scrollbar-width: thin; }

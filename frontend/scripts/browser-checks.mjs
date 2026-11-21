@@ -1757,10 +1757,14 @@ try {
   assert.equal(await assistant.locator('.assistant-markdown strong').textContent(), '加粗')
   assert.equal(responseRequest.reasoning.effort, 'high')
   assert.equal(responseRequest.input.length, 2, 'history from another provider reached Responses')
-  if (process.env.GATEHOME_BROWSER_ARTIFACTS) {
-    await page.setViewportSize({ width: 390, height: 844 })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.waitForFunction(() => {
+    const model = document.querySelector('#assistant-model-select').getBoundingClientRect()
+    const effort = document.querySelector('#assistant-effort-select').getBoundingClientRect()
+    return model.width > effort.width && model.width >= 125 && model.height >= 44 && effort.height >= 44
+  }, null, { timeout: 3000 })
+  if (process.env.GATEHOME_BROWSER_ARTIFACTS)
     await page.screenshot({ path: path.join(process.env.GATEHOME_BROWSER_ARTIFACTS, 'assistant-markdown-390.png'), animations: 'disabled' })
-  }
   console.log('PASS assistant models, protocols, Markdown, saved conversations, provider isolation and effort')
   console.log('PASS built-in assistant: endpoint test, shared conversation, settings link, confirmations, real save and mobile drawer')
 
