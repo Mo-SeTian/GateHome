@@ -1015,7 +1015,51 @@ try {
     await explorer.getByRole('button', { name: '更多筛选', expanded: false }).click()
     await explorer.getByRole('button', { name: '收起', expanded: true }).waitFor()
     await explorer.getByRole('combobox', { name: field }).waitFor()
+    const drawerLayout = await explorer.evaluate(el => {
+      const bar = el.querySelector('.report-filter-bar')?.getBoundingClientRect()
+      const drawer = el.querySelector('.filter-advanced-drawer')?.getBoundingClientRect()
+      const cols = [...el.querySelectorAll('.advanced-grid .filter-col')].map(node => node.getBoundingClientRect())
+      return {
+        barWidth: bar?.width || 0,
+        drawerWidth: drawer?.width || 0,
+        drawerLeftGap: drawer && bar ? drawer.left - bar.left : 999,
+        distinctRows: new Set(cols.map(rect => Math.round(rect.top / 10))).size,
+        colCount: cols.length
+      }
+    })
+    assert.ok(drawerLayout.drawerWidth >= drawerLayout.barWidth - 48, `advanced filter drawer collapsed: ${JSON.stringify(drawerLayout)}`)
+    assert.ok(drawerLayout.drawerLeftGap < 40, `advanced filter drawer shifted right: ${JSON.stringify(drawerLayout)}`)
+    assert.ok(drawerLayout.distinctRows < drawerLayout.colCount, `advanced filter fields stacked vertically: ${JSON.stringify(drawerLayout)}`)
   }
+  await page.route('**/api/logs?*', async reqRoute => {
+    const url = reqRoute.request().url()
+    if (!url.includes('scope=access')) return reqRoute.continue()
+    await reqRoute.fulfill({
+      json: {
+        total: 1, page: 1, pages: 1, size: 20, through: 1,
+        entries: [{
+          id: 9901, time: new Date().toISOString(), category: 'access', action: '反向代理请求',
+          target: 'scan.home.example.test', rule: 'test-https/scan.home.example.test',
+          method: 'GET', path: '/wp-login.php', remote: '198.51.100.77', remote_region: '测试网络',
+          status: 403, ok: false, duration_ms: 4, message: '恶意扫描探测', outcome: 'blocked'
+        }]
+      }
+    })
+  })
+  await route('logs')
+  const quickBanBtn = page.locator('.log-explorer .quick-ban-btn').first()
+  await quickBanBtn.waitFor()
+  await quickBanBtn.click()
+  const logDialog = page.locator('dialog.report-dialog[open]')
+  await logDialog.waitFor()
+  await logDialog.getByRole('button', { name: '15 分钟', exact: true }).click()
+  await logDialog.getByRole('button', { name: '封禁此 IP', exact: true }).click()
+  await page.waitForFunction(() => !document.querySelector('dialog.report-dialog[open]'))
+  await page.locator('.log-explorer .quick-unblock-btn').first().waitFor()
+  await page.locator('.log-explorer .quick-unblock-btn').first().click()
+  await quickBanBtn.waitFor()
+  await page.unroute('**/api/logs?*')
+  console.log('PASS log explorer quick IP ban/unblock loop on access logs')
   await page.getByRole('button', { name: '关闭此通知' }).evaluateAll(buttons => buttons.forEach(button => button.click()))
   await page.getByRole('link', { name: '图标库', exact: true }).click()
   await page.locator('.icons-page h1').waitFor()
@@ -1412,10 +1456,32 @@ try {
   console.log('PASS sidebar: both themes, 19 links, 320px–1440px, scrollable groups and 44px mobile targets')
 
   await page.setViewportSize({ width: 1440, height: 1000 })
+  const baseRuntime = await api('runtime')
+  let runtimeSampleTick = 0
+  await page.route('**/api/runtime', async reqRoute => {
+    const payload = structuredClone(baseRuntime)
+    runtimeSampleTick++
+    if (payload?.resources?.cpu_error || payload?.resources?.cpu_percent == null) {
+      payload.resources.cpu_error = ''
+      payload.resources.cpu_percent = runtimeSampleTick === 1 ? 18.4 : 26.8
+    }
+    if (payload?.resources?.memory_error || !payload?.resources?.memory_total) {
+      payload.resources.memory_error = ''
+      payload.resources.memory_total = 8 * 1024 * 1024 * 1024
+      payload.resources.memory_used = (runtimeSampleTick === 1 ? 3.2 : 3.6) * 1024 * 1024 * 1024
+    }
+    payload.sampled_at = new Date(Date.now() + runtimeSampleTick * 1000).toISOString()
+    await reqRoute.fulfill({ json: payload })
+  })
   await route('runtime')
   const runtime = page.locator('.runtime-page')
   const ports = runtime.getByRole('list', { name: 'GateHome 监听端口' })
   await runtime.getByText('当前会话', { exact: true }).waitFor()
+  await runtime.locator('.sparkline-svg').first().waitFor()
+  assert.equal(await runtime.locator('.sparkline-svg').count(), 2, 'CPU and memory sparklines did not both render')
+  await runtime.getByRole('button', { name: '刷新数据', exact: true }).click()
+  await page.waitForFunction(() => [...document.querySelectorAll('.runtime-page .sparkline-meta')].some(el => el.textContent.includes('2/30')))
+  await page.unroute('**/api/runtime')
   for (const protocol of ['TCP', 'UDP']) {
     const row = ports.locator('.listener-row').filter({ hasText: '流量测试转发' }).filter({ hasText: protocol })
     assert.equal(await row.count(), 1)

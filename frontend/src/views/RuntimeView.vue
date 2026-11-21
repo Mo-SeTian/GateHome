@@ -43,6 +43,12 @@
           max="100"
           aria-label="CPU 占用"
         />
+        <ResourceSparkline
+          v-if="cpuHistory.length && !resources.cpu_error"
+          :samples="cpuHistory"
+          label="CPU 占用"
+          :tone="progressTone(resources.cpu_percent) || 'brand'"
+        />
         <p v-if="resources.cpu_error" class="kpi-foot error-text">{{ resources.cpu_error }}</p>
       </SpotlightCard>
 
@@ -59,6 +65,12 @@
           :value="memoryPercent"
           max="100"
           aria-label="内存占用"
+        />
+        <ResourceSparkline
+          v-if="memoryHistory.length && !resources.memory_error"
+          :samples="memoryHistory"
+          label="内存占用"
+          :tone="progressTone(memoryPercent) || 'cyan'"
         />
         <p v-if="resources.memory_error" class="kpi-foot error-text">{{ resources.memory_error }}</p>
       </SpotlightCard>
@@ -262,13 +274,23 @@
   </div>
 </template>
 
+<script>
+import { ref as moduleRef } from 'vue'
+
+// Keep up to 30 recent samples in memory across view switches within the same session.
+const cpuHistory = moduleRef([])
+const memoryHistory = moduleRef([])
+</script>
+
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { ChevronRight, Search } from 'lucide-vue-next'
 import SpotlightCard from '@/components/SpotlightCard.vue'
 import RouteHealthHistory from '@/components/RouteHealthHistory.vue'
+import ResourceSparkline from '@/components/ResourceSparkline.vue'
 import { adminApi } from '@/api/admin'
 import { deviceName, formatByteRate, formatBytes, reportDate } from '@/api/reports'
+import { pushSparklineSample } from '@/api/sparkline'
 import '@/styles/reports.css'
 
 const data = ref(null)
@@ -427,7 +449,18 @@ async function load(force = false) {
   try {
     const [runtime, account] = await Promise.allSettled([adminApi.runtime(signal), adminApi.sessions(signal)])
     if (signal.aborted) return
-    if (runtime.status === 'fulfilled') { data.value = runtime.value; runtimeError.value = '' }
+    if (runtime.status === 'fulfilled') {
+      data.value = runtime.value
+      runtimeError.value = ''
+      const res = runtime.value?.resources || {}
+      const stamp = runtime.value?.sampled_at || new Date().toISOString()
+      if (!res.cpu_error && typeof res.cpu_percent === 'number') {
+        cpuHistory.value = pushSparklineSample(cpuHistory.value, res.cpu_percent, stamp)
+      }
+      if (!res.memory_error && res.memory_total > 0) {
+        memoryHistory.value = pushSparklineSample(memoryHistory.value, (100 * res.memory_used) / res.memory_total, stamp)
+      }
+    }
     else runtimeError.value = runtime.reason.message
     if (account.status === 'fulfilled') { sessions.value = account.value; sessionError.value = '' }
     else sessionError.value = account.reason.message

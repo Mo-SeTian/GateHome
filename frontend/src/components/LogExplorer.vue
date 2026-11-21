@@ -259,7 +259,12 @@
               ><small v-if="entry.rule">{{ ruleName(entry.rule) }}</small>
             </td>
             <td v-if="scope !== 'project'" class="mono-text">
-              {{ entry.remote || '—' }}<small>{{ entry.remote_region || '归属地未知' }}</small>
+              <div class="remote-ip-cell">
+                <span>{{ entry.remote || '—' }}</span>
+                <span v-if="isEntryFrozen(entry)" class="badge badge-bad ip-mini-badge">已封禁</span>
+                <span v-else-if="isEntryAllowlisted(entry)" class="badge badge-ok ip-mini-badge">已加白</span>
+              </div>
+              <small>{{ entry.remote_region || '归属地未知' }}</small>
             </td>
             <td>
               <span class="badge" :class="entry.ok ? 'badge-ok' : 'badge-bad'">{{ outcome(entry) }}</span
@@ -274,13 +279,36 @@
               >
             </td>
             <td>
-              <button
-                class="btn btn-secondary btn-sm"
-                :aria-label="`查看日志 ${entry.id}`"
-                @click="show(entry)"
-              >
-                详情
-              </button>
+              <div class="row-action-btns">
+                <button
+                  class="btn btn-secondary btn-sm"
+                  :aria-label="`查看日志 ${entry.id}`"
+                  @click="show(entry)"
+                >
+                  详情
+                </button>
+                <button
+                  v-if="scope !== 'project' && canManageLogIP(entry, gatewayConfig) && isEntryFrozen(entry)"
+                  type="button"
+                  class="btn btn-secondary btn-sm quick-unblock-btn"
+                  :disabled="Boolean(ipActionBusy)"
+                  :aria-label="`解除封禁 ${entry.remote}`"
+                  @click="quickUnblock(entry)"
+                >
+                  解封
+                </button>
+                <button
+                  v-else-if="scope !== 'project' && canManageLogIP(entry, gatewayConfig)"
+                  type="button"
+                  class="btn btn-secondary btn-sm quick-ban-btn"
+                  :disabled="Boolean(ipActionBusy)"
+                  :aria-label="`封禁或加白 ${entry.remote}`"
+                  @click="show(entry, true)"
+                >
+                  <Ban :size="12" aria-hidden="true" />
+                  <span>封禁</span>
+                </button>
+              </div>
             </td>
           </tr>
         </tbody>
@@ -295,7 +323,7 @@
     >
       <header>
         <h2 id="log-detail-title">调用详情 #{{ selected?.id }}</h2>
-        <button class="close-modal-btn" aria-label="关闭" :disabled="freezing" @click="detailDialog.close()">
+        <button class="close-modal-btn" aria-label="关闭" :disabled="Boolean(ipActionBusy)" @click="detailDialog.close()">
           <X :size="18" />
         </button>
       </header>
@@ -326,40 +354,108 @@
         </section>
         <div class="report-actions">
           <button v-if="selected.rule" class="btn btn-secondary btn-sm" @click="filterRule">
-            按此反代规则查询</button
-          ><router-link to="/ip-blocks" class="btn btn-secondary btn-sm">IP 拦截名单</router-link>
+            按此反代规则查询
+          </button>
+          <button
+            v-if="scope !== 'project' && normalizeIPAddress(selected.remote)"
+            type="button"
+            class="btn btn-secondary btn-sm"
+            @click="filterIP"
+          >
+            按此 IP 筛选
+          </button>
+          <router-link to="/ip-blocks" class="btn btn-secondary btn-sm">IP 拦截名单</router-link>
         </div>
-        <form
-          v-if="securityScope && hasRoute(selected.rule) && selected.remote && selected.remote !== '未知'"
+        <div
+          v-if="scope !== 'project' && canManageLogIP(selected, gatewayConfig)"
+          ref="ipActionSection"
           class="detail-freeze-form glass-section"
-          @submit.prevent="freeze"
         >
-          <h3>在此反代规则手动冻结 {{ selected.remote }}</h3>
+          <div class="ip-action-head">
+            <h3>来源 IP 快速处置 · <span class="mono-text">{{ selected.remote }}</span></h3>
+            <span v-if="isEntryFrozen(selected)" class="badge badge-bad">当前已封禁</span>
+            <span v-else-if="isEntryAllowlisted(selected)" class="badge badge-ok">已在防火墙白名单</span>
+          </div>
           <p v-if="freezeError" ref="freezeErrorElement" class="report-error" role="alert" tabindex="-1">
             {{ freezeError }}
           </p>
-          <fieldset :disabled="freezing" class="freeze-fieldset">
-            <label class="form-field"
-              >冻结时长 分钟<input
-                v-model.number="freezeMinutes"
-                name="freeze_minutes"
-                type="number"
-                min="1"
-                max="10080"
-                class="form-input"
-                required /></label
-            ><label class="form-field"
-              >备注原因<input
-                v-model="freezeReason"
-                name="freeze_reason"
-                maxlength="500"
-                class="form-input" /></label
-            ><button type="submit" class="btn btn-danger">{{ freezing ? '正在冻结…' : '冻结此 IP' }}</button>
-          </fieldset>
-        </form>
+          <div class="ip-quick-bar">
+            <button
+              v-if="isEntryFrozen(selected)"
+              type="button"
+              class="btn btn-secondary btn-sm"
+              :disabled="Boolean(ipActionBusy)"
+              @click="unblockSelected"
+            >
+              <Unlock :size="13" aria-hidden="true" />
+              <span>{{ ipActionBusy === 'unblock' ? '正在解封…' : '解除此 IP 封禁' }}</span>
+            </button>
+            <button
+              v-if="selectedFirewall"
+              type="button"
+              class="btn btn-secondary btn-sm whitelist-btn"
+              :disabled="Boolean(ipActionBusy) || isSavingConfig || (isEntryAllowlisted(selected) && !isEntryFrozen(selected))"
+              @click="whitelistSelected"
+            >
+              <ShieldCheck :size="13" aria-hidden="true" />
+              <span>{{
+                ipActionBusy === 'whitelist'
+                  ? '正在加白…'
+                  : isEntryAllowlisted(selected) && !isEntryFrozen(selected)
+                    ? `已在「${selectedFirewall.name}」白名单`
+                    : `加入「${selectedFirewall.name}」白名单`
+              }}</span>
+            </button>
+            <span v-else class="ip-quick-hint">
+              当前反代规则未绑定防火墙策略，可直接封禁或解封此 IP。
+            </span>
+          </div>
+          <form class="freeze-subform" @submit.prevent="freeze">
+            <fieldset :disabled="Boolean(ipActionBusy)" class="freeze-fieldset">
+              <div class="preset-row" role="group" aria-label="快捷封禁时长">
+                <span class="preset-label">快捷时长</span>
+                <button
+                  v-for="preset in freezePresets"
+                  :key="preset.minutes"
+                  type="button"
+                  class="preset-chip"
+                  :class="{ active: freezeMinutes === preset.minutes }"
+                  @click="freezeMinutes = preset.minutes"
+                >
+                  {{ preset.label }}
+                </button>
+              </div>
+              <div class="freeze-inputs-row">
+                <label class="form-field"
+                  >封禁时长（分钟）<input
+                    v-model.number="freezeMinutes"
+                    name="freeze_minutes"
+                    type="number"
+                    min="1"
+                    max="10080"
+                    class="form-input"
+                    required
+                /></label>
+                <label class="form-field"
+                  >备注原因<input
+                    v-model="freezeReason"
+                    name="freeze_reason"
+                    maxlength="500"
+                    class="form-input"
+                /></label>
+              </div>
+              <div class="freeze-submit-row">
+                <button type="submit" class="btn btn-danger">
+                  <Ban :size="14" aria-hidden="true" />
+                  <span>{{ ipActionBusy === 'freeze' ? '正在封禁…' : '封禁此 IP' }}</span>
+                </button>
+              </div>
+            </fieldset>
+          </form>
+        </div>
       </div>
       <div class="modal-footer">
-        <button type="button" class="btn btn-secondary" :disabled="freezing" @click="detailDialog.close()">关闭</button>
+        <button type="button" class="btn btn-secondary" :disabled="Boolean(ipActionBusy)" @click="detailDialog.close()">关闭</button>
       </div>
     </dialog>
   </section>
@@ -368,15 +464,25 @@
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, useId } from 'vue'
 import {
+  Ban,
   ChevronDown,
   RefreshCw,
   RotateCcw,
   Search,
+  ShieldCheck,
   SlidersHorizontal,
+  Unlock,
   X
 } from 'lucide-vue-next'
 import { adminApi } from '@/api/admin'
 import { routeKey } from '@/api/configuration'
+import {
+  applyFirewallWhitelist,
+  canManageLogIP,
+  isIPAllowlistedInFirewall,
+  normalizeIPAddress,
+  routeFirewallForEntry
+} from '@/api/logActions'
 import { engineLabel, logQuery, reportDate } from '@/api/reports'
 import { useGatewayStatus } from '@/composables/useGatewayStatus'
 import { useToast } from '@/composables/useToast'
@@ -384,7 +490,7 @@ import '@/styles/reports.css'
 
 const filterId = useId()
 const props = defineProps({ scope: { type: String, required: true }, title: String })
-const { gatewayConfig, refreshConfig } = useGatewayStatus()
+const { gatewayConfig, gatewayConfigSnapshot, isSavingConfig, refreshConfig, saveConfig } = useGatewayStatus()
 const toast = useToast()
 const categories = {
   access: '反代访问',
@@ -422,12 +528,21 @@ const loading = ref(false),
   errorElement = ref(null),
   resultElement = ref(null)
 const detailDialog = ref(null),
+  ipActionSection = ref(null),
   selected = shallowRef(null),
-  freezing = ref(false)
+  ipActionBusy = ref('')
 const freezeMinutes = ref(60),
-  freezeReason = ref('管理员根据日志手动冻结'),
+  freezeReason = ref('管理员根据日志手动封禁'),
   freezeError = ref(''),
   freezeErrorElement = ref(null)
+const freezePresets = [
+  { label: '15 分钟', minutes: 15 },
+  { label: '1 小时', minutes: 60 },
+  { label: '24 小时', minutes: 1440 },
+  { label: '7 天', minutes: 10080 }
+]
+const activeBlocks = ref(new Set())
+const selectedFirewall = computed(() => routeFirewallForEntry(selected.value, gatewayConfig.value))
 const dirty = computed(() => JSON.stringify(form.value) !== JSON.stringify(applied.value))
 
 const activeAdvancedCount = computed(() => {
@@ -524,6 +639,7 @@ function applyFilters() {
   return load(1, false, { ...form.value })
 }
 function refresh() {
+  refreshBlocks()
   return load()
 }
 function changeSize() {
@@ -540,15 +656,58 @@ async function goPage(page) {
     resultElement.value?.focus()
   }
 }
-function show(entry) {
+function blockKeyFor(rule, ip) {
+  const normalized = normalizeIPAddress(ip)
+  return rule && normalized ? `${rule}|${normalized}` : ''
+}
+function isEntryFrozen(entry) {
+  const key = blockKeyFor(entry?.rule, entry?.remote)
+  return Boolean(key && activeBlocks.value.has(key))
+}
+function isEntryAllowlisted(entry) {
+  const fw = routeFirewallForEntry(entry, gatewayConfig.value)
+  return Boolean(fw && isIPAllowlistedInFirewall(fw, entry?.remote))
+}
+function syncActiveBlocks(payload) {
+  const now = Date.parse(payload?.now) || Date.now()
+  const next = new Set()
+  for (const item of payload?.entries ?? []) {
+    if (Date.parse(item.until) > now) {
+      const key = blockKeyFor(item.rule, item.ip)
+      if (key) next.add(key)
+    }
+  }
+  activeBlocks.value = next
+}
+async function refreshBlocks() {
+  if (props.scope === 'project') return
+  try {
+    const result = await adminApi.ipBlocks(controller.signal)
+    if (!controller.signal.aborted) syncActiveBlocks(result)
+  } catch {
+    // Non-fatal: block status badges are best-effort hints.
+  }
+}
+function show(entry, focusIPAction = false) {
   selected.value = entry
   freezeError.value = ''
   freezeMinutes.value = 60
-  freezeReason.value = '管理员根据日志手动冻结'
-  nextTick(() => detailDialog.value.showModal())
+  freezeReason.value = '管理员根据日志手动封禁'
+  nextTick(() => {
+    detailDialog.value.showModal()
+    if (focusIPAction) {
+      ipActionSection.value?.scrollIntoView?.({ behavior: 'smooth', block: 'nearest' })
+    }
+  })
 }
 function filterRule() {
   form.value.rule = selected.value.rule
+  detailDialog.value.close()
+  applyFilters()
+}
+function filterIP() {
+  form.value.ip = selected.value.remote
+  showAdvanced.value = true
   detailDialog.value.close()
   applyFilters()
 }
@@ -559,11 +718,11 @@ function filterFirewall() {
   applyFilters()
 }
 function blockBusyClose(event) {
-  if (freezing.value) event.preventDefault()
+  if (ipActionBusy.value) event.preventDefault()
 }
 async function freeze() {
-  if (freezing.value) return
-  freezing.value = true
+  if (ipActionBusy.value) return
+  ipActionBusy.value = 'freeze'
   freezeError.value = ''
   try {
     const result = await adminApi.freezeIP({
@@ -573,8 +732,9 @@ async function freeze() {
       reason: freezeReason.value.trim()
     })
     if (controller.signal.aborted) return
-    if (result.write_error) toast.warn('已冻结，但持久化失败，请检查磁盘与权限')
-    else toast.success('已冻结此 IP 在所选反代规则的访问')
+    syncActiveBlocks(result)
+    if (result.write_error) toast.warn('已封禁，但持久化失败，请检查磁盘与权限')
+    else toast.success(`已封禁 ${selected.value.remote} 在当前反代规则的访问`)
     detailDialog.value.close()
   } catch (err) {
     if (!controller.signal.aborted) {
@@ -583,11 +743,80 @@ async function freeze() {
       freezeErrorElement.value?.focus()
     }
   } finally {
-    freezing.value = false
+    ipActionBusy.value = ''
+  }
+}
+async function releaseBlock(rule, ip) {
+  const result = await adminApi.releaseIP({ rule, ip })
+  if (!controller.signal.aborted) syncActiveBlocks(result)
+  return result
+}
+async function quickUnblock(entry) {
+  if (ipActionBusy.value) return
+  ipActionBusy.value = 'unblock'
+  try {
+    await releaseBlock(entry.rule, entry.remote)
+    if (!controller.signal.aborted) toast.success(`已解除 ${entry.remote} 的封禁`)
+  } catch (err) {
+    if (!controller.signal.aborted) toast.error(err.message)
+  } finally {
+    ipActionBusy.value = ''
+  }
+}
+async function unblockSelected() {
+  if (ipActionBusy.value || !selected.value) return
+  ipActionBusy.value = 'unblock'
+  freezeError.value = ''
+  try {
+    await releaseBlock(selected.value.rule, selected.value.remote)
+    if (!controller.signal.aborted) toast.success(`已解除 ${selected.value.remote} 的封禁`)
+  } catch (err) {
+    if (!controller.signal.aborted) {
+      freezeError.value = err.message
+      await nextTick()
+      freezeErrorElement.value?.focus()
+    }
+  } finally {
+    ipActionBusy.value = ''
+  }
+}
+async function whitelistSelected() {
+  if (ipActionBusy.value || isSavingConfig.value || !selected.value || !selectedFirewall.value) return
+  ipActionBusy.value = 'whitelist'
+  freezeError.value = ''
+  try {
+    const snapshot = gatewayConfigSnapshot.value || (await refreshConfig(controller.signal))
+    const { changed, config, cidr, firewallName } = applyFirewallWhitelist(
+      snapshot,
+      selectedFirewall.value.id,
+      selected.value.remote
+    )
+    if (changed) {
+      await saveConfig(snapshot, config)
+    }
+    if (isEntryFrozen(selected.value)) {
+      await releaseBlock(selected.value.rule, selected.value.remote)
+    }
+    if (!controller.signal.aborted) {
+      toast.success(
+        changed
+          ? `已将 ${cidr} 加入防火墙「${firewallName}」白名单并放行`
+          : `已放行白名单 IP ${selected.value.remote}`
+      )
+    }
+  } catch (err) {
+    if (!controller.signal.aborted) {
+      freezeError.value = err.message
+      await nextTick()
+      freezeErrorElement.value?.focus()
+    }
+  } finally {
+    ipActionBusy.value = ''
   }
 }
 onMounted(() => {
   load()
+  refreshBlocks()
   refreshConfig(controller.signal).catch((err) => {
     if (!controller.signal.aborted) error.value = err.message
   })
@@ -604,7 +833,9 @@ onUnmounted(() => controller.abort())
 /* 现代化紧凑筛选栏容器 */
 .report-filter-bar {
   display: flex !important;
-  flex-direction: column;
+  flex-direction: column !important;
+  align-items: stretch !important;
+  flex-wrap: nowrap !important;
   gap: 12px;
   padding: 14px 16px !important;
   border: 1px solid var(--line);
@@ -612,6 +843,7 @@ onUnmounted(() => controller.abort())
   background: var(--surface);
   box-shadow: var(--shadow-sm);
   min-width: 0;
+  width: 100%;
 }
 
 .filter-primary-row {
@@ -656,6 +888,8 @@ onUnmounted(() => controller.abort())
   font-weight: 600;
   color: var(--muted);
   user-select: none;
+  min-width: 0 !important;
+  flex: 0 0 auto !important;
 }
 
 .search-box {
@@ -772,18 +1006,26 @@ onUnmounted(() => controller.abort())
 
 /* 高级筛选抽屉 */
 .filter-advanced-drawer {
+  width: 100%;
   padding-top: 14px;
   border-top: 1px dashed var(--line);
   display: flex;
   flex-direction: column;
   gap: 12px;
+  min-width: 0;
 }
 
 .advanced-grid {
+  width: 100%;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 12px;
   align-items: flex-end;
+  min-width: 0;
+}
+
+.advanced-grid .filter-col {
+  min-width: 0;
 }
 
 /* 抽屉过渡动画 */
@@ -848,6 +1090,124 @@ onUnmounted(() => controller.abort())
 
 .detail-freeze-form {
   margin-top: 6px;
+}
+
+.remote-ip-cell {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ip-mini-badge {
+  font-size: 10px;
+  padding: 1px 6px;
+}
+
+.row-action-btns {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: nowrap;
+}
+
+.quick-ban-btn {
+  color: var(--bad) !important;
+  border-color: rgba(244, 63, 94, 0.28) !important;
+}
+.quick-ban-btn:hover {
+  background: rgba(244, 63, 94, 0.12) !important;
+}
+
+.quick-unblock-btn {
+  color: var(--ok) !important;
+  border-color: rgba(16, 185, 129, 0.3) !important;
+}
+
+.ip-action-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ip-quick-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-bottom: 10px;
+  border-bottom: 1px dashed var(--line);
+}
+
+.whitelist-btn {
+  color: var(--ok) !important;
+  border-color: rgba(16, 185, 129, 0.3) !important;
+}
+.whitelist-btn:hover:not(:disabled) {
+  background: rgba(16, 185, 129, 0.12) !important;
+}
+
+.ip-quick-hint {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.freeze-subform {
+  display: flex;
+  flex-direction: column;
+}
+
+.preset-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.preset-label {
+  font-size: 12px;
+  color: var(--muted);
+  margin-right: 4px;
+}
+
+.preset-chip {
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--strip-bg);
+  color: var(--muted);
+  font-size: 11.5px;
+  cursor: pointer;
+  transition: var(--transition-smooth);
+}
+.preset-chip:hover {
+  color: var(--ink);
+  border-color: var(--card-border-hover);
+}
+.preset-chip.active {
+  color: var(--ink);
+  background: rgba(99, 102, 241, 0.16);
+  border-color: rgba(99, 102, 241, 0.45);
+  font-weight: 600;
+}
+
+.freeze-inputs-row {
+  display: grid;
+  grid-template-columns: minmax(140px, 180px) minmax(0, 1fr);
+  gap: 10px;
+}
+
+.freeze-submit-row {
+  display: flex;
+  justify-content: flex-end;
+}
+
+@media (max-width: 600px) {
+  .freeze-inputs-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .freeze-fieldset {
