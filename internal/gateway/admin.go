@@ -128,6 +128,8 @@ func (a *Admin) Handler() http.Handler {
 	a.serviceDiscoveryRoutes(mux)
 	a.serviceHealthRoutes(mux)
 	a.webhookRoutes(mux)
+	a.wxPusherRoutes(mux)
+	mux.HandleFunc("GET /api/runtime", a.requireAuth(a.runtimeStatus))
 	a.routeImageRoutes(mux)
 	a.iconRoutes(mux)
 	mcpHandler := a.mcpRoutes(mux)
@@ -304,7 +306,7 @@ func (a *Admin) Handler() http.Handler {
 			mcpHandler.ServeHTTP(w, r)
 			return
 		}
-		if strings.HasPrefix(r.URL.Path, "/api/") && r.URL.Path != "/api/status" && r.URL.Path != "/api/dashboard" && r.URL.Path != "/api/service-health" && !(r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/api/backups/")) && r.URL.Path != "/api/logs" && r.URL.Path != "/api/statistics" && r.URL.Path != "/api/ddns/records" && r.URL.Path != "/api/maintenance/online-update-status" && !(r.Method == "GET" && (r.URL.Path == "/api/ip-blocks" || strings.HasPrefix(r.URL.Path, "/api/service-discovery/") || strings.HasPrefix(r.URL.Path, "/api/route-images/") || r.URL.Path == "/api/icons" || strings.HasPrefix(r.URL.Path, "/api/icons/"))) {
+		if strings.HasPrefix(r.URL.Path, "/api/") && r.URL.Path != "/api/status" && r.URL.Path != "/api/dashboard" && r.URL.Path != "/api/service-health" && !(r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/api/backups/")) && r.URL.Path != "/api/logs" && r.URL.Path != "/api/statistics" && r.URL.Path != "/api/ddns/records" && r.URL.Path != "/api/maintenance/online-update-status" && !(r.Method == "GET" && (r.URL.Path == "/api/ip-blocks" || r.URL.Path == "/api/runtime" || r.URL.Path == "/api/account/sessions" || strings.HasPrefix(r.URL.Path, "/api/service-health/") || strings.HasPrefix(r.URL.Path, "/api/service-discovery/") || strings.HasPrefix(r.URL.Path, "/api/route-images/") || r.URL.Path == "/api/icons" || strings.HasPrefix(r.URL.Path, "/api/icons/"))) {
 			started := time.Now()
 			logged := &loggedResponseWriter{ResponseWriter: w}
 			w = logged

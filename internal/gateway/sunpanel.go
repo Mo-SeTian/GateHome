@@ -146,6 +146,7 @@ func (s *SunPanel) start() error {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		if s.cmd == cmd {
+			s.bridgeURL = ""
 			select {
 			case s.failure <- errors.New("Sun-Panel 子进程意外退出"):
 			default:

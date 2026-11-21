@@ -19,13 +19,13 @@
             <span v-if="unreadCount" class="unread-count">{{ unreadCount }} 条未读</span>
           </div>
           <div class="header-actions">
-            <button type="button" class="header-action" :aria-pressed="showWebhook" @click="showWebhook = !showWebhook">
-              {{ showWebhook ? '返回通知' : '故障推送' }}
+            <button type="button" class="header-action" :aria-pressed="showPushSettings" @click="showPushSettings = !showPushSettings">
+              {{ showPushSettings ? '返回通知' : '故障推送' }}
             </button>
-            <button v-if="!showWebhook" type="button" class="header-action" :disabled="!unreadCount" @click="markAllAsRead">
+            <button v-if="!showPushSettings" type="button" class="header-action" :disabled="!unreadCount" @click="markAllAsRead">
               全部已读
             </button>
-            <button v-if="!showWebhook" type="button" class="header-action" :disabled="!notifications.length" @click="clearAllNotifications">
+            <button v-if="!showPushSettings" type="button" class="header-action" :disabled="!notifications.length" @click="clearAllNotifications">
               清空
             </button>
             <button type="button" class="drawer-close" aria-label="关闭通知中心" autofocus @click="closeCenter">
@@ -34,7 +34,15 @@
           </div>
         </div>
 
-        <WebhookSettings v-if="showWebhook" class="drawer-body" />
+        <div v-if="showPushSettings" class="drawer-body">
+          <div class="channel-tabs" role="group" aria-label="推送渠道">
+            <button v-for="channel in channels" :key="channel.id" type="button" class="tab-btn"
+              :aria-pressed="selectedChannel === channel.id" @click="selectedChannel = channel.id">
+              {{ channel.label }}
+            </button>
+          </div>
+          <WebhookSettings :key="selectedChannel" :channel="selectedChannel" />
+        </div>
         <div v-else class="category-tabs" role="group" aria-label="通知分类">
           <button
             v-for="tab in filterTabs"
@@ -49,7 +57,7 @@
           </button>
         </div>
 
-        <div v-if="!showWebhook" class="drawer-body">
+        <div v-if="!showPushSettings" class="drawer-body">
           <div v-if="!filteredList.length" class="empty-state">
             <Inbox :size="30" aria-hidden="true" />
             <p>暂无通知记录</p>
@@ -111,6 +119,7 @@ const router = useRouter()
 const {
   notifications,
   isCenterOpen,
+  showPushSettings,
   unreadCount,
   closeCenter,
   markAllAsRead,
@@ -129,13 +138,17 @@ const categories = {
 }
 const typeLabels = { info: '信息', success: '成功', warning: '警告', error: '错误' }
 const drawer = ref(null)
-const showWebhook = ref(false)
+const channels = [{ id: 'webhook', label: 'Webhook' }, { id: 'wxpusher', label: 'WxPusher' }]
+const selectedChannel = ref('webhook')
 const currentCategory = ref('all')
 let dragStart = 0
 
 watch(isCenterOpen, open => {
   if (open) drawer.value.showModal()
-  else { drawer.value.close(); showWebhook.value = false }
+  else {
+    drawer.value.close()
+    showPushSettings.value = false
+  }
 }, { flush: 'post' })
 
 const entries = computed(() => notifications.value.map(item => {
@@ -358,6 +371,8 @@ dialog.notification-drawer {
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
+
+.channel-tabs { display: flex; gap: 6px; margin: 4px 0 16px; }
 
 .drawer-body {
   flex: 1;

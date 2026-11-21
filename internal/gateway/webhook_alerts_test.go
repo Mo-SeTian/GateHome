@@ -139,7 +139,7 @@ func TestWebhookDestinationAndQueue(t *testing.T) {
 			t.Fatal("valid destination rejected")
 		}
 	}
-	s := webhookState{Enabled: true}
+	s := alertQueue{Enabled: true}
 	for i := 0; i < webhookQueueLimit+1; i++ {
 		s.observe("webdav", "backup", "WebDAV", i%2 == 0, "failure", "recovery", time.Now())
 	}

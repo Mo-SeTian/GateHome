@@ -12,6 +12,7 @@ const notifications = ref(loadStoredNotifications())
 
 // Notification Center drawer visibility
 const isCenterOpen = ref(false)
+const showPushSettings = ref(false)
 
 function loadStoredNotifications() {
   try {
@@ -132,7 +133,10 @@ export function useToast() {
   }
 
   // Notification Center controls
-  const openCenter = () => { isCenterOpen.value = true }
+  const openCenter = (settings = false) => {
+    showPushSettings.value = settings === true
+    isCenterOpen.value = true
+  }
   const closeCenter = () => { isCenterOpen.value = false }
   const toggleCenter = () => { isCenterOpen.value = !isCenterOpen.value }
 
@@ -167,6 +171,7 @@ export function useToast() {
     toasts,
     notifications,
     isCenterOpen,
+    showPushSettings,
     unreadCount,
     showToast,
     removeToast,

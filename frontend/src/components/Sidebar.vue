@@ -77,6 +77,10 @@
         <!-- 分组 2: 观察与管理 -->
         <div class="nav-group">
           <div class="nav-section-title">观察与管理</div>
+          <router-link to="/runtime" class="nav-link" active-class="active" @click="onNavClick">
+            <Activity :size="14" class="nav-icon" />
+            <span class="nav-text">运行状态</span>
+          </router-link>
           <router-link to="/firewall-logs" class="nav-link" active-class="active" @click="onNavClick">
             <FileSearch :size="14" class="nav-icon" />
             <span class="nav-text">防火墙拦截记录</span>

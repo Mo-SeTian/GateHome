@@ -224,7 +224,7 @@ func (s *Store) recordWebDAVBackup(slot, name, message string, success bool) err
 		next.WebDAVBackup.LastAttempt = time.Now().UTC()
 	} else {
 		next.WebDAVBackup.LastError = message
-		next.Alerts.observe("webdav", "backup", "WebDAV", !success, "远程备份失败", "远程备份已恢复", time.Now().UTC())
+		next.observeNotification("webdav", "backup", "WebDAV", !success, "远程备份失败", "远程备份已恢复", time.Now().UTC())
 		if success {
 			next.WebDAVBackup.LastSuccess = time.Now().UTC()
 			next.WebDAVBackup.LastFile = name

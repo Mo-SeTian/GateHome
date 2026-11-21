@@ -185,6 +185,7 @@ type Config struct {
 }
 
 type State struct {
+	WxPusher               wxPusherState            `json:"alert_wxpusher,omitzero"`
 	Alerts                 webhookState             `json:"alert_webhook,omitzero"`
 	Passkeys               []adminPasskey           `json:"admin_passkeys,omitempty"`
 	PasskeyUserID          []byte                   `json:"admin_passkey_user_id,omitempty"`
@@ -627,6 +628,7 @@ func (s *Store) UpdateRouteCredentials(c Config, tokens, certificateTokens map[s
 	}
 	next.Config = c
 	next.Alerts.pruneRemoved(c)
+	next.WxPusher.pruneRemoved(c)
 	next.RoutePasswordHashes = map[string]string{}
 	for _, route := range c.Routes {
 		key := routeKey(route)

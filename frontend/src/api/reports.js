@@ -59,3 +59,14 @@ export function formatByteRate(value) {
 export function engineLabel(engine) {
   return { ip: 'IP 规则', waf: 'CRS', custom: 'HTTP 规则', rate: '访问限速', system: '系统保护', auth: '账号验证', freeze: 'IP 冻结' }[engine] || engine
 }
+
+export function deviceName(agent) {
+  const os = [
+    [/Android/, 'Android'], [/iPhone|iPad/, 'iOS / iPadOS'], [/Windows/, 'Windows'],
+    [/Macintosh/, 'macOS'], [/CrOS/, 'ChromeOS'], [/Linux/, 'Linux']
+  ].find(([pattern]) => pattern.test(agent))?.[1]
+  const browser = [
+    [/Edg|EdgiOS/, 'Edge'], [/Firefox|FxiOS/, 'Firefox'], [/Chrome|CriOS/, 'Chrome'], [/Safari/, 'Safari']
+  ].find(([pattern]) => pattern.test(agent))?.[1]
+  return [os, browser].filter(Boolean).join(' · ') || '未知设备'
+}

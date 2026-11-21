@@ -135,6 +135,7 @@ const pages = [
   { title: '日志 (Logs)', path: '/logs', icon: ScrollText },
   { title: 'IP 拦截名单 (IP Blocks)', path: '/ip-blocks', icon: Ban },
   { title: '统计 (Statistics)', path: '/statistics', icon: BarChart3 },
+  { title: '运行状态 (Runtime)', path: '/runtime', icon: Activity },
   { title: '流量统计 (Traffic)', path: '/traffic', icon: Activity },
   { title: 'AI 管理 (MCP)', path: '/mcp', icon: Bot },
   { title: '更新 (Updates)', path: '/updates', icon: RefreshCw },

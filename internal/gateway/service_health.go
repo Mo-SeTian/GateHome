@@ -53,16 +53,19 @@ type healthPending struct {
 }
 type healthEventState struct {
 	upstream string
+	result   serviceHealthResult
 	failures int
 	down     bool
 }
 type serviceHealthCache struct {
-	mu      sync.Mutex
-	results map[string]serviceHealthResult
-	pending map[string]*healthPending
-	events  map[string]healthEventState
-	slots   chan struct{}
-	notices []healthNotice
+	mu           sync.Mutex
+	results      map[string]serviceHealthResult
+	pending      map[string]*healthPending
+	events       map[string]healthEventState
+	slots        chan struct{}
+	notices      []healthNotice
+	history      map[string]routeHealthHistory
+	historyDirty bool
 }
 
 func healthError(err error) (string, string) {
@@ -184,7 +187,6 @@ func (a *Admin) cachedServiceHealth(ctx context.Context, raw string, ttl time.Du
 	if cache.results == nil {
 		cache.results = map[string]serviceHealthResult{}
 		cache.pending = map[string]*healthPending{}
-		cache.events = map[string]healthEventState{}
 		cache.slots = make(chan struct{}, 6)
 	}
 	if result, ok := cache.results[raw]; ok && time.Since(result.CheckedAt) < ttl {
@@ -263,17 +265,16 @@ func (a *Admin) recordHealthTransition(route Route, result serviceHealthResult) 
 	cache := &a.health
 	cache.mu.Lock()
 	previous := cache.events[route.ID]
-	if previous.upstream != route.Upstream {
-		previous = healthEventState{upstream: route.Upstream}
-	}
 	// Only one observation per completed check counts toward the failure threshold.
-	key := "event:" + route.ID
-	last := cache.results[key]
-	if !result.CheckedAt.After(last.CheckedAt) {
+	if !result.CheckedAt.After(previous.result.CheckedAt) {
 		cache.mu.Unlock()
 		return
 	}
-	cache.results[key] = result
+	if previous.upstream != route.Upstream {
+		previous = healthEventState{upstream: route.Upstream}
+	}
+	previous.result = result
+	a.recordHealthSample(route, result)
 	message := ""
 	if result.Healthy {
 		if previous.down {
@@ -287,6 +288,9 @@ func (a *Admin) recordHealthTransition(route Route, result serviceHealthResult) 
 			previous.down = true
 			message = "服务连续检测失败"
 		}
+	}
+	if cache.events == nil {
+		cache.events = make(map[string]healthEventState)
 	}
 	cache.events[route.ID] = previous
 	if message != "" {
@@ -308,8 +312,10 @@ func (a *Admin) recordHealthTransition(route Route, result serviceHealthResult) 
 func (a *Admin) StartServiceHealth(ctx context.Context) {
 	go func() {
 		a.routeServiceHealth(ctx)
+		a.flushHealthHistory()
 		ticker := time.NewTicker(10 * time.Second)
 		defer ticker.Stop()
+		defer a.flushHealthHistory()
 		for {
 			select {
 			case <-ctx.Done():
@@ -318,12 +324,14 @@ func (a *Admin) StartServiceHealth(ctx context.Context) {
 				if serviceHealthOptions(a.store.Snapshot().Config).Enabled {
 					a.routeServiceHealth(ctx)
 				}
+				a.flushHealthHistory()
 			}
 		}
 	}()
 }
 
 func (a *Admin) serviceHealthRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/service-health/{id}/history", a.requireAuth(a.routeHistory))
 	mux.HandleFunc("GET /api/service-health", a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
 		routes := a.routeServiceHealth(r.Context())
 		a.health.mu.Lock()

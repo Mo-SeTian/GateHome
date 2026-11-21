@@ -64,6 +64,10 @@ const routes = [
 
   // Group 2: 观察与管理
   {
+    path: '/runtime', name: 'Runtime', component: () => import('@/views/RuntimeView.vue'),
+    meta: { title: '运行状态', icon: 'Activity' }
+  },
+  {
     path: '/firewall-logs',
     name: 'FirewallLogs',
     component: () => import('@/views/FirewallLogsView.vue'),

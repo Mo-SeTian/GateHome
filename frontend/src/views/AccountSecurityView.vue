@@ -66,6 +66,7 @@ import AdminVerification from '@/components/AdminVerification.vue'
 import { adminApi } from '@/api/admin'
 import { listPasskeys, passkeySupported, removePasskey, usePasskey } from '@/api/passkeys'
 import { useSession } from '@/composables/useSession'
+import { deviceName } from '@/api/reports'
 import '@/styles/reports.css'
 
 const keys = ref([]), sessions = ref([]), current = ref(''), verification = ref(null)
@@ -75,17 +76,6 @@ const dateFormat = new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeS
 const date = value => value ? dateFormat.format(new Date(value)) : '—'
 const router = useRouter()
 const { endSession } = useSession()
-
-function deviceName(agent) {
-  const os = [
-    [/Android/, 'Android'], [/iPhone|iPad/, 'iOS / iPadOS'], [/Windows/, 'Windows'],
-    [/Macintosh/, 'macOS'], [/CrOS/, 'ChromeOS'], [/Linux/, 'Linux']
-  ].find(([pattern]) => pattern.test(agent))?.[1]
-  const browser = [
-    [/Edg|EdgiOS/, 'Edge'], [/Firefox|FxiOS/, 'Firefox'], [/Chrome|CriOS/, 'Chrome'], [/Safari/, 'Safari']
-  ].find(([pattern]) => pattern.test(agent))?.[1]
-  return [os, browser].filter(Boolean).join(' · ') || '未知设备'
-}
 
 async function refresh() {
   const [keyList, data] = await Promise.all([listPasskeys(controller.signal), adminApi.sessions(controller.signal)])

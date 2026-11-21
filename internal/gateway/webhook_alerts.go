@@ -29,8 +29,12 @@ type webhookEvent struct {
 }
 
 type webhookState struct {
+	URL string `json:"url,omitempty"`
+	alertQueue
+}
+
+type alertQueue struct {
 	Enabled   bool            `json:"enabled"`
-	URL       string          `json:"url,omitempty"`
 	Active    map[string]bool `json:"active,omitempty"`
 	Pending   []webhookEvent  `json:"pending,omitempty"`
 	LastError string          `json:"last_error,omitempty"`
@@ -61,7 +65,7 @@ func validateWebhook(raw string, enabled bool) error {
 }
 
 // Copy on write: previous Store snapshots may still be in use by readers.
-func (s *webhookState) observe(key, kind, resource string, failing bool, failure, recovery string, now time.Time) bool {
+func (s *alertQueue) observe(key, kind, resource string, failing bool, failure, recovery string, now time.Time) bool {
 	if !s.Enabled || s.Active[key] == failing {
 		return false
 	}
@@ -85,7 +89,7 @@ func (s *webhookState) observe(key, kind, resource string, failing bool, failure
 }
 
 // Removing a monitored service ends tracking without announcing a recovery.
-func (s *webhookState) pruneRemoved(c Config) {
+func (s *alertQueue) pruneRemoved(c Config) {
 	if len(s.Active) == 0 {
 		return
 	}
@@ -124,12 +128,13 @@ func (s *Store) changeWebhook(change func(*State) bool) error {
 }
 
 func (a *Admin) observeAlert(key, kind, resource string, failing bool, failure, recovery string, now time.Time) {
-	current := a.store.Snapshot().Alerts
-	if !current.Enabled || current.Active[key] == failing {
+	state := a.store.Snapshot()
+	current, wx := state.Alerts, state.WxPusher
+	if (!current.Enabled || current.Active[key] == failing) && (!wx.accepts(kind) || wx.Active[key] == failing) {
 		return
 	}
 	err := a.store.changeWebhook(func(s *State) bool {
-		return s.Alerts.observe(key, kind, resource, failing, failure, recovery, now)
+		return s.observeNotification(key, kind, resource, failing, failure, recovery, now)
 	})
 	if err != nil && a.logs != nil {
 		a.logs.Add(LogEntry{Category: "admin", Action: "Webhook 通知", Message: err.Error()})
@@ -178,18 +183,23 @@ func postWebhook(ctx context.Context, s State, event webhookEvent) error {
 	return nil
 }
 
-func (a *Admin) deliverWebhook(ctx context.Context) (retry bool) {
+func (a *Admin) deliverWebhook(ctx context.Context) bool {
+	return a.deliverNotification(ctx, func(s *State) *alertQueue { return &s.Alerts.alertQueue }, postWebhook)
+}
+
+func (a *Admin) deliverNotification(ctx context.Context, queue func(*State) *alertQueue, send func(context.Context, State, webhookEvent) error) bool {
 	s := a.store.Snapshot()
-	if !s.Alerts.Enabled || len(s.Alerts.Pending) == 0 {
+	settings := queue(&s)
+	if !settings.Enabled || len(settings.Pending) == 0 {
 		return false
 	}
-	event := s.Alerts.Pending[0]
-	sendErr := postWebhook(ctx, s, event)
+	event := settings.Pending[0]
+	sendErr := send(ctx, s, event)
 	if ctx.Err() != nil {
 		return true
 	}
 	err := a.store.changeWebhook(func(next *State) bool {
-		settings := &next.Alerts
+		settings := queue(next)
 		if len(settings.Pending) == 0 || settings.Pending[0].ID != event.ID {
 			return false
 		}
@@ -205,37 +215,48 @@ func (a *Admin) deliverWebhook(ctx context.Context) (retry bool) {
 		return true
 	})
 	if err != nil && a.logs != nil {
-		a.logs.Add(LogEntry{Category: "admin", Action: "Webhook 投递", Message: err.Error()})
+		a.logs.Add(LogEntry{Category: "admin", Action: "故障通知投递", Message: err.Error()})
 	}
 	return err != nil || sendErr != nil
 }
 
 func (a *Admin) StartWebhookAlerts(ctx context.Context) {
-	go func() {
-		ticker := time.NewTicker(5 * time.Second)
-		defer ticker.Stop()
-		var nextCheck, nextAttempt time.Time
-		for ctx.Err() == nil {
-			now := time.Now()
-			if a.store.Snapshot().Alerts.Enabled && !now.Before(nextCheck) {
-				a.checkCertificateAlerts(a.certs.Status(), now)
-				nextCheck = now.Add(time.Minute)
-			}
-			if !now.Before(nextAttempt) {
-				for i := 0; i < 16 && ctx.Err() == nil && len(a.store.Snapshot().Alerts.Pending) > 0; i++ {
-					if a.deliverWebhook(ctx) {
-						nextAttempt = time.Now().Add(time.Minute)
-						break
-					}
-				}
-			}
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
+	go runAlertTicker(ctx, time.Minute, func() {
+		s := a.store.Snapshot()
+		if s.Alerts.Enabled || s.WxPusher.accepts("certificate") {
+			a.checkCertificateAlerts(a.certs.Status(), time.Now())
+		}
+	})
+	go a.runAlertDelivery(ctx, a.deliverWebhook, func(s State) int { return len(s.Alerts.Pending) })
+	go a.runAlertDelivery(ctx, a.deliverWxPusher, func(s State) int { return len(s.WxPusher.Pending) })
+}
+
+func runAlertTicker(ctx context.Context, interval time.Duration, check func()) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for ctx.Err() == nil {
+		check()
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func (a *Admin) runAlertDelivery(ctx context.Context, deliver func(context.Context) bool, pending func(State) int) {
+	var retryAt time.Time
+	runAlertTicker(ctx, 5*time.Second, func() {
+		if time.Now().Before(retryAt) {
+			return
+		}
+		for i := 0; i < 16 && ctx.Err() == nil && pending(a.store.Snapshot()) > 0; i++ {
+			if deliver(ctx) {
+				retryAt = time.Now().Add(time.Minute)
+				break
 			}
 		}
-	}()
+	})
 }
 
 func webhookSummary(w http.ResponseWriter, s State) {
@@ -272,7 +293,7 @@ func (a *Admin) webhookRoutes(mux *http.ServeMux) {
 				return false
 			}
 			if raw != next.Alerts.URL || input.Enabled != next.Alerts.Enabled {
-				next.Alerts = webhookState{Enabled: input.Enabled, URL: raw}
+				next.Alerts = webhookState{URL: raw, alertQueue: alertQueue{Enabled: input.Enabled}}
 				if next.WebDAVBackup.LastError != "" {
 					next.Alerts.observe("webdav", "backup", "WebDAV", true, "远程备份失败", "远程备份已恢复", time.Now())
 				}
