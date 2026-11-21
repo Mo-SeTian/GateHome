@@ -8,9 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
-	"net/netip"
 	"net/url"
 	"path"
 	"regexp"
@@ -60,55 +58,7 @@ func newWebDAVClient(state State) (*webDAVClient, error) {
 	if err != nil {
 		return nil, err
 	}
-	client := outboundClient(state, 90*time.Second)
-	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	// Follow the project's rule: LAN storage is direct, public storage may use the outbound proxy.
-	transport := client.Transport.(*http.Transport)
-	if transport.Proxy != nil {
-		proxy := transport.Proxy
-		transport.Proxy = func(r *http.Request) (*url.URL, error) {
-			addresses, err := net.DefaultResolver.LookupNetIP(r.Context(), "ip", r.URL.Hostname())
-			if err != nil {
-				return nil, errors.New("WebDAV 域名解析失败")
-			}
-			for _, ip := range addresses {
-				if ip.Unmap().IsPrivate() || ip.Unmap().IsLoopback() {
-					return nil, nil
-				}
-			}
-			return proxy(r)
-		}
-	}
-	// Pin the checked address at connection time, including DNS-rebinding checks.
-	dial := transport.DialContext
-	transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
-		host, port, err := net.SplitHostPort(address)
-		if err != nil {
-			return nil, err
-		}
-		ips, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
-		if err != nil {
-			return nil, err
-		}
-		for _, ip := range ips {
-			ip = ip.Unmap()
-			if (!ip.IsGlobalUnicast() && !ip.IsLoopback()) || ip.IsLinkLocalUnicast() || ip == netip.MustParseAddr("100.100.100.200") || ip == netip.MustParseAddr("fd00:ec2::254") {
-				return nil, errors.New("WebDAV 地址不允许访问")
-			}
-		}
-		var last error
-		for _, ip := range ips {
-			connection, err := dial(ctx, network, net.JoinHostPort(ip.String(), port))
-			if err == nil {
-				return connection, nil
-			}
-			last = err
-		}
-		if last == nil {
-			last = errors.New("WebDAV 地址无法连接")
-		}
-		return nil, last
-	}
+	client := serviceEndpointClient(state, 90*time.Second)
 	return &webDAVClient{base: base, client: client, username: settings.Config.Username, password: settings.Password, id: settings.InstanceID}, nil
 }
 func (d *webDAVClient) close() { closeClient(d.client) }

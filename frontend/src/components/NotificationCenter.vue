@@ -19,10 +19,13 @@
             <span v-if="unreadCount" class="unread-count">{{ unreadCount }} 条未读</span>
           </div>
           <div class="header-actions">
-            <button type="button" class="header-action" :disabled="!unreadCount" @click="markAllAsRead">
+            <button type="button" class="header-action" :aria-pressed="showWebhook" @click="showWebhook = !showWebhook">
+              {{ showWebhook ? '返回通知' : '故障推送' }}
+            </button>
+            <button v-if="!showWebhook" type="button" class="header-action" :disabled="!unreadCount" @click="markAllAsRead">
               全部已读
             </button>
-            <button type="button" class="header-action" :disabled="!notifications.length" @click="clearAllNotifications">
+            <button v-if="!showWebhook" type="button" class="header-action" :disabled="!notifications.length" @click="clearAllNotifications">
               清空
             </button>
             <button type="button" class="drawer-close" aria-label="关闭通知中心" autofocus @click="closeCenter">
@@ -31,7 +34,8 @@
           </div>
         </div>
 
-        <div class="category-tabs" role="group" aria-label="通知分类">
+        <WebhookSettings v-if="showWebhook" class="drawer-body" />
+        <div v-else class="category-tabs" role="group" aria-label="通知分类">
           <button
             v-for="tab in filterTabs"
             :key="tab.key"
@@ -45,7 +49,7 @@
           </button>
         </div>
 
-        <div class="drawer-body">
+        <div v-if="!showWebhook" class="drawer-body">
           <div v-if="!filteredList.length" class="empty-state">
             <Inbox :size="30" aria-hidden="true" />
             <p>暂无通知记录</p>
@@ -98,6 +102,7 @@
 
 <script setup>
 import { computed, ref, watch } from 'vue'
+import WebhookSettings from './WebhookSettings.vue'
 import { useRouter } from 'vue-router'
 import { ArrowUpRight, Bell, Bot, Globe, HardDrive, Inbox, Lock, Shield, X } from 'lucide-vue-next'
 import { useToast } from '@/composables/useToast'
@@ -124,12 +129,13 @@ const categories = {
 }
 const typeLabels = { info: '信息', success: '成功', warning: '警告', error: '错误' }
 const drawer = ref(null)
+const showWebhook = ref(false)
 const currentCategory = ref('all')
 let dragStart = 0
 
 watch(isCenterOpen, open => {
   if (open) drawer.value.showModal()
-  else drawer.value.close()
+  else { drawer.value.close(); showWebhook.value = false }
 }, { flush: 'post' })
 
 const entries = computed(() => notifications.value.map(item => {
@@ -533,6 +539,10 @@ dialog.notification-drawer {
   .tab-btn {
     min-height: 36px;
   }
+}
+
+@media (max-width: 360px) {
+  .header-action { padding-inline: 4px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

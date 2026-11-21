@@ -50,6 +50,10 @@ func (a *Admin) credentialRoutes(mux *http.ServeMux) {
 			if input.ID == "" {
 				value = s.ProxyPassword
 			}
+		case "alert-webhook":
+			if input.ID == "" {
+				value = s.Alerts.URL
+			}
 		case "webdav":
 			if input.ID == "" {
 				value = s.WebDAVBackup.Password

@@ -127,6 +127,7 @@ func (a *Admin) Handler() http.Handler {
 	a.ipBlockRoutes(mux)
 	a.serviceDiscoveryRoutes(mux)
 	a.serviceHealthRoutes(mux)
+	a.webhookRoutes(mux)
 	a.routeImageRoutes(mux)
 	a.iconRoutes(mux)
 	mcpHandler := a.mcpRoutes(mux)

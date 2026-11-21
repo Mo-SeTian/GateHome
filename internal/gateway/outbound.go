@@ -1,8 +1,11 @@
 package gateway
 
 import (
+	"context"
 	"errors"
+	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strconv"
 	"strings"
@@ -72,4 +75,67 @@ func (t loggedTransport) CloseIdleConnections() {
 func instrumentClient(c *http.Client, logs *Logs, category, action string) *http.Client {
 	c.Transport = loggedTransport{base: c.Transport, logs: logs, category: category, action: action}
 	return c
+}
+
+func allowedServiceIP(ip netip.Addr) bool {
+	return (ip.IsGlobalUnicast() || ip.IsLoopback()) && !ip.IsLinkLocalUnicast() && ip != netip.MustParseAddr("100.100.100.200") && ip != netip.MustParseAddr("fd00:ec2::254")
+}
+
+func serviceEndpointClient(state State, timeout time.Duration) *http.Client {
+	client := outboundClient(state, timeout)
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	// Connect directly to LAN services and pin resolved addresses when dialing.
+	transport := client.Transport.(*http.Transport)
+	if transport.Proxy != nil {
+		proxy := transport.Proxy
+		transport.Proxy = func(r *http.Request) (*url.URL, error) {
+			addresses, err := net.DefaultResolver.LookupNetIP(r.Context(), "ip", r.URL.Hostname())
+			if err != nil {
+				return nil, errors.New("目标域名解析失败")
+			}
+			local := false
+			for _, ip := range addresses {
+				ip = ip.Unmap()
+				if !allowedServiceIP(ip) {
+					return nil, errors.New("目标地址不允许访问")
+				}
+				local = local || ip.IsPrivate() || ip.IsLoopback()
+			}
+			if local {
+				return nil, nil
+			}
+			return proxy(r)
+		}
+	}
+	// Pin the checked address at connection time, including DNS-rebinding checks.
+	dial := transport.DialContext
+	transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+		host, port, err := net.SplitHostPort(address)
+		if err != nil {
+			return nil, err
+		}
+		ips, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+		if err != nil {
+			return nil, err
+		}
+		for _, ip := range ips {
+			ip = ip.Unmap()
+			if !allowedServiceIP(ip) {
+				return nil, errors.New("目标地址不允许访问")
+			}
+		}
+		var last error
+		for _, ip := range ips {
+			connection, err := dial(ctx, network, net.JoinHostPort(ip.String(), port))
+			if err == nil {
+				return connection, nil
+			}
+			last = err
+		}
+		if last == nil {
+			last = errors.New("目标地址无法连接")
+		}
+		return nil, last
+	}
+	return client
 }

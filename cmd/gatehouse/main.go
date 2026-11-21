@@ -236,6 +236,7 @@ func run() error {
 			go func() { errorsCh <- server.Serve(listener) }()
 		}
 	}
+	admin.StartWebhookAlerts(ctx)
 	admin.StartServiceHealth(ctx)
 	admin.StartWebDAVBackups(ctx)
 	jobs.Start(ctx)

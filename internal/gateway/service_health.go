@@ -295,6 +295,10 @@ func (a *Admin) recordHealthTransition(route Route, result serviceHealthResult) 
 			cache.notices = append([]healthNotice{}, cache.notices[len(cache.notices)-60:]...)
 		}
 	}
+	// Record in observation order, including the first healthy sample after a restart.
+	if (result.Healthy || previous.down) && a.store != nil {
+		a.observeAlert("route/"+route.ID, "upstream", route.Host, !result.Healthy, "反代上游连续检测失败 · "+result.Label, "反代上游已恢复", result.CheckedAt)
+	}
 	cache.mu.Unlock()
 	if message != "" && a.logs != nil {
 		a.logs.Add(LogEntry{Category: "admin", Action: "服务健康", Target: route.ID, OK: result.Healthy, DurationMS: result.DurationMS, Message: message + " · " + result.Label})

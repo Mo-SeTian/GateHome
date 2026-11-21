@@ -185,6 +185,7 @@ type Config struct {
 }
 
 type State struct {
+	Alerts                 webhookState             `json:"alert_webhook,omitzero"`
 	Passkeys               []adminPasskey           `json:"admin_passkeys,omitempty"`
 	PasskeyUserID          []byte                   `json:"admin_passkey_user_id,omitempty"`
 	WebDAVBackup           WebDAVBackupState        `json:"webdav_backup,omitempty"`
@@ -625,6 +626,7 @@ func (s *Store) UpdateRouteCredentials(c Config, tokens, certificateTokens map[s
 		return err
 	}
 	next.Config = c
+	next.Alerts.pruneRemoved(c)
 	next.RoutePasswordHashes = map[string]string{}
 	for _, route := range c.Routes {
 		key := routeKey(route)

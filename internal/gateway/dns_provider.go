@@ -95,6 +95,9 @@ func (c Config) CertificateDNSGroup(host string) (DDNSGroup, error) {
 }
 
 func validateCredentials(s State) error {
+	if err := validateWebhook(s.Alerts.URL, s.Alerts.Enabled); err != nil {
+		return err
+	}
 	if !validStoredMCPToken(s.MCPToken, s.MCPTokenHash) {
 		return errors.New("MCP 令牌原值与摘要不一致")
 	}

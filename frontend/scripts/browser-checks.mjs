@@ -15,7 +15,17 @@ const secret = randomBytes(24).toString('hex')
 const linkedSVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 24"><style>.mark{fill:#6754ed}</style><rect class="mark" width="48" height="24"/></svg>'
 let linkedContent = linkedSVG
 let linkedRequests = 0
+let webhookTests = 0
 const upstream = createServer((req, res) => {
+  if (req.url === '/test-webhook' && req.method === 'POST') {
+    let body = ''
+    req.on('data', chunk => { body += chunk })
+    req.on('end', () => {
+      if (JSON.parse(body).type === 'test') webhookTests++
+      res.writeHead(204).end()
+    })
+    return
+  }
   if (req.url.startsWith('/linked-icon')) {
     linkedRequests++
     res.setHeader('Content-Type', 'application/octet-stream')
@@ -1326,6 +1336,17 @@ try {
     assert.equal(new Set(presentation.map(row => row.ink)).size, 4, 'notification severity colors are not distinct')
     assert.ok(presentation.every(row => row.contrast >= 4.5), 'notification badge text contrast fell below 4.5:1')
   }
+  await center.getByRole('button', { name: '故障推送' }).click()
+  await center.getByLabel('启用推送').check()
+  await center.getByLabel('Webhook 地址', { exact: true }).fill(`http://127.0.0.1:${upstreamPort}/test-webhook`)
+  await center.getByRole('button', { name: '保存', exact: true }).click()
+  await center.getByText('推送设置已保存').waitFor()
+  assert.equal(await center.getByLabel('Webhook 地址', { exact: true }).inputValue(), '')
+  await center.getByRole('button', { name: '发送测试通知' }).click()
+  await center.getByText('接收端已接受测试通知').waitFor()
+  assert.equal(webhookTests, 1)
+  console.log('PASS notification webhook: saved address stays masked and the local receiver accepts the test POST')
+  await center.getByRole('button', { name: '返回通知' }).click()
   await checkNotificationColors()
   if (process.env.GATEHOME_BROWSER_ARTIFACTS) {
     await page.screenshot({ path: path.join(process.env.GATEHOME_BROWSER_ARTIFACTS, 'notifications-desktop-dark.png') })
@@ -1374,6 +1395,11 @@ try {
       if (theme === 'light') await page.getByTitle('切换为浅色模式').click()
       await notificationTrigger.click()
       await center.waitFor()
+      await center.getByRole('button', { name: '故障推送' }).click()
+      await center.getByLabel('启用推送').waitFor()
+      assert.ok(await center.locator('.drawer-body').evaluate(el => el.scrollWidth <= el.clientWidth))
+      await center.getByRole('button', { name: '返回通知' }).click()
+      assert.ok(await center.locator('.drawer-header').evaluate(el => el.scrollWidth <= el.clientWidth))
       const bounds = await center.boundingBox()
       assert.equal(bounds.x, 0)
       assert.equal(bounds.width, width)
