@@ -314,7 +314,21 @@ const pages = [
     keywords: ['流量', '带宽', '网速', '上传', '下载', 'traffic']
   },
   {
-    title: 'AI 管理 (MCP)',
+    title: '网关助手',
+    subtitle: '查看网关状态、提出配置变更与查找设置',
+    path: '/assistant',
+    icon: Bot,
+    keywords: ['AI', '聊天', '智能助手']
+  },
+  {
+    title: '模型接入点',
+    subtitle: '配置并测试 OpenAI 兼容接口',
+    path: '/assistant/settings',
+    icon: Settings,
+    keywords: ['AI', '模型', 'API', '接入']
+  },
+  {
+    title: 'MCP 授权',
     subtitle: 'Model Context Protocol 接入凭证、权限范围与审计',
     path: '/mcp',
     icon: Bot,

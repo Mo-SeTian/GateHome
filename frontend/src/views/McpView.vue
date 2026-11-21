@@ -1,7 +1,7 @@
 <template>
   <div class="report-page animate-fade-in">
     <header class="report-heading">
-      <h1>AI 管理 · MCP</h1>
+      <h1>MCP 授权</h1>
       <div class="report-actions">
         <button class="btn btn-secondary" :disabled="busy || loading" @click="load">刷新设置</button
         ><button class="btn btn-secondary" :disabled="busy || loadingUsers" @click="loadUsers">

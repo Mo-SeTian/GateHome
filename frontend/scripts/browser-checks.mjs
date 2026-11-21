@@ -16,7 +16,30 @@ const linkedSVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 24"><
 let linkedContent = linkedSVG
 let linkedRequests = 0
 let webhookTests = 0
+let assistantTarget = ''
+let assistantCredentialAccepted = false
 const upstream = createServer((req, res) => {
+  if (req.url === '/assistant-fixture/v1/chat/completions' && req.method === 'POST') {
+    let body = ''
+    req.on('data', chunk => { body += chunk })
+    req.on('end', () => {
+      assistantCredentialAccepted = req.headers.authorization === 'Bearer TEST_ONLY_MODEL_KEY'
+      const { messages } = JSON.parse(body)
+      const prompt = messages.at(-1).content
+      let content = 'OK'
+      if (prompt === '查看反代状态') {
+        const snapshot = JSON.parse(messages[0].content.split('\n网关快照：')[1])
+        content = JSON.stringify({ text: snapshot.routes.some(route => route.id === assistantTarget) ? '已读取反代运行状态' : '反代状态缺失' })
+      } else if (prompt === '打开健康检查设置') {
+        content = JSON.stringify({ text: '可以打开反向代理的健康检查设置。', action: 'health_settings' })
+      } else if (prompt.startsWith('修改上游端口')) {
+        content = JSON.stringify({ text: '请确认上游端口修改。', action: 'route_port', target: assistantTarget, value: prompt.split(' ').at(-1) })
+      }
+      res.setHeader('Content-Type', 'application/json')
+      res.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content } }] }))
+    })
+    return
+  }
   if (req.url === '/test-webhook' && req.method === 'POST') {
     let body = ''
     req.on('data', chunk => { body += chunk })
@@ -1003,7 +1026,7 @@ try {
   await page.setViewportSize({ width: 1440, height: 1000 })
   for (const view of [
     'overview', 'routes', 'forwards', 'sunpanel', 'ddns', 'certificates', 'subscriptions', 'access',
-    'firewall-logs', 'logs', 'ip-blocks', 'statistics', 'traffic', 'mcp', 'updates', 'backups', 'settings'
+    'firewall-logs', 'logs', 'ip-blocks', 'statistics', 'traffic', 'assistant', 'assistant/settings', 'mcp', 'updates', 'backups', 'settings'
   ]) {
     await route(view)
     await page.waitForFunction(view => document.querySelector('.sidebar-nav a.active')?.hash === '#/' + view, view)
@@ -1428,10 +1451,19 @@ try {
         await page.waitForFunction(() => Math.abs(document.querySelector('.app-sidebar').getBoundingClientRect().x) < 1)
         const close = await page.getByRole('button', { name: '关闭侧边栏导航' }).boundingBox()
         assert.ok(close.width >= 44 && close.height >= 44)
-        assert.ok(await navigation.locator('.nav-link').evaluateAll(links => links.every(link => link.getBoundingClientRect().height >= 44)))
       }
-      assert.equal(await navigation.locator('.nav-group').count(), 2)
-      assert.equal(await navigation.getByRole('link').count(), 20)
+      const groups = navigation.locator('.nav-group')
+      assert.equal(await groups.count(), 6)
+      const service = navigation.getByRole('button', { name: '服务接入', exact: true })
+      await service.click()
+      assert.equal(await service.getAttribute('aria-expanded'), 'false')
+      for (const group of await groups.all()) {
+        const toggle = group.getByRole('button')
+        if (await toggle.getAttribute('aria-expanded') === 'false') await toggle.click()
+      }
+      assert.equal(await navigation.getByRole('link').count(), 22)
+      if (width < 1024)
+        assert.ok(await navigation.locator('.nav-link, .nav-section-title').evaluateAll(controls => controls.every(control => control.getBoundingClientRect().height >= 44)))
       if (theme === 'light') await page.waitForFunction(() => {
         const active = document.querySelector('.sidebar-nav .nav-link.active')
         return active && getComputedStyle(active).color !== 'rgb(255, 255, 255)'
@@ -1453,7 +1485,7 @@ try {
       }
     }
   }
-  console.log('PASS sidebar: both themes, 19 links, 320px–1440px, scrollable groups and 44px mobile targets')
+  console.log('PASS sidebar: both themes, 22 links in six collapsible groups and 44px mobile targets from 320px to 1440px')
 
   await page.setViewportSize({ width: 1440, height: 1000 })
   const baseRuntime = await api('runtime')
@@ -1595,6 +1627,65 @@ try {
   assert.equal(new URL(loginPage.url()).hash, '#/updates')
   await loginContext.close()
   console.log('PASS restart login: readiness polling reloads stale resources before login and retains the update redirect')
+
+  await route('assistant/settings')
+  await page.getByLabel('接入点名称').fill('测试模型')
+  await page.getByLabel('接口地址（Base URL）').fill(`http://127.0.0.1:${upstreamPort}/assistant-fixture/v1`)
+  await page.getByLabel('模型 ID').fill('browser-fixture')
+  await page.getByLabel('API Key').fill('TEST_ONLY_MODEL_KEY')
+  await button('测试连接').click()
+  await page.getByText('连接成功，模型已回复。', { exact: true }).waitFor()
+  assert.ok(assistantCredentialAccepted)
+  await button('保存接入点').click()
+  await page.getByText('接入点已保存。', { exact: true }).waitFor()
+  const endpointState = await api('assistant/settings')
+  assert.equal(endpointState.key_configured, true)
+  assert.ok(!JSON.stringify(endpointState).includes('TEST_ONLY_MODEL_KEY'))
+  await route('routes')
+  let snapshot = await api('config')
+  const assistantRoute = snapshot.config.routes[0]
+  assistantTarget = assistantRoute.id
+  const nextPort = Number(new URL(assistantRoute.upstream).port) === 2284 ? 2285 : 2284
+  await button('网关助手').click()
+  const assistant = page.getByRole('region', { name: '网关助手对话' })
+  await assistant.getByRole('button', { name: '查看反代状态', exact: true }).click()
+  await assistant.getByText('已读取反代运行状态', { exact: true }).waitFor()
+  await assistant.getByRole('button', { name: '打开健康检查设置', exact: true }).click()
+  await assistant.getByRole('link', { name: '服务健康检查', exact: true }).click()
+  await dialog().getByRole('heading', { name: '服务健康检查' }).waitFor()
+  await page.keyboard.press('Escape')
+  const composer = assistant.getByRole('textbox', { name: '给网关助手发送消息' })
+  await composer.fill('修改上游端口 ' + nextPort)
+  await composer.press('Enter')
+  await assistant.getByText('待确认', { exact: true }).waitFor()
+  if (process.env.GATEHOME_BROWSER_ARTIFACTS)
+    await page.screenshot({ path: path.join(process.env.GATEHOME_BROWSER_ARTIFACTS, 'gatehome-assistant-drawer.png'), animations: 'disabled' })
+  assert.equal((await api('config')).config.routes.find(route => route.id === assistantTarget).upstream, assistantRoute.upstream)
+  await assistant.getByRole('link', { name: '打开独立页面' }).click()
+  await page.waitForURL('**/#/assistant')
+  await assistant.getByRole('heading', { name: '网关助手', exact: true }).waitFor()
+  await assistant.getByText('已读取反代运行状态', { exact: true }).waitFor()
+  await assistant.getByRole('button', { name: '确认应用' }).click()
+  await assistant.getByText('已应用', { exact: true }).waitFor()
+  snapshot = await api('config')
+  assert.equal(new URL(snapshot.config.routes.find(route => route.id === assistantTarget).upstream).port, String(nextPort))
+  await composer.fill('修改上游端口 ' + (nextPort + 1))
+  await composer.press('Enter')
+  await assistant.getByRole('button', { name: '取消', exact: true }).click()
+  await assistant.getByText('已取消', { exact: true }).waitFor()
+  assert.equal((await api('config')).revision, snapshot.revision)
+  if (process.env.GATEHOME_BROWSER_ARTIFACTS)
+    await page.screenshot({ path: path.join(process.env.GATEHOME_BROWSER_ARTIFACTS, 'gatehome-assistant-page.png'), animations: 'disabled' })
+  await page.getByRole('link', { name: '反向代理', exact: true }).click()
+  await button('网关助手').click()
+  const drawer = page.getByRole('complementary', { name: '网关助手侧边栏' })
+  await drawer.getByText('已应用', { exact: true }).waitFor()
+  for (const width of [390, 320]) {
+    await page.setViewportSize({ width, height: 844 })
+    await drawer.getByRole('button', { name: '收起网关助手' }).waitFor()
+    await page.waitForFunction(() => document.documentElement.scrollWidth <= innerWidth)
+  }
+  console.log('PASS built-in assistant: endpoint test, shared conversation, settings link, confirmations, real save and mobile drawer')
 
   assert.deepEqual(errors, [], 'browser emitted errors during regression')
   console.log('PASS mobile layout and zero browser errors; disposable fixture cleaned')

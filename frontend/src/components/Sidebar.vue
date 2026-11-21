@@ -26,102 +26,22 @@
         </button>
       </div>
 
-      <!-- Navigation Menus (严格 1:1 对齐 GateHome 实际两大分组) -->
       <nav class="sidebar-nav" aria-label="主导航">
-        <!-- 分组 1: 工作空间 -->
-        <div class="nav-group">
-          <div class="nav-section-title">工作空间</div>
-          <router-link to="/overview" class="nav-link" active-class="active" @click="onNavClick">
-            <LayoutDashboard :size="14" class="nav-icon" />
-            <span class="nav-text">概览</span>
-          </router-link>
-          <router-link to="/routes" class="nav-link" active-class="active" @click="onNavClick">
-            <Network :size="14" class="nav-icon" />
-            <span class="nav-text">反向代理</span>
-          </router-link>
-          <router-link to="/icons" class="nav-link" active-class="active" @click="onNavClick">
-            <Images :size="14" class="nav-icon" />
-            <span class="nav-text">图标库</span>
-          </router-link>
-          <router-link to="/forwards" class="nav-link" active-class="active" @click="onNavClick">
-            <ArrowLeftRight :size="14" class="nav-icon" />
-            <span class="nav-text">端口转发</span>
-          </router-link>
-          <router-link to="/sunpanel" class="nav-link" active-class="active" @click="onNavClick">
-            <Compass :size="14" class="nav-icon" />
-            <span class="nav-text">浏览器首页</span>
-          </router-link>
-          <router-link to="/ddns" class="nav-link" active-class="active" @click="onNavClick">
-            <Globe :size="14" class="nav-icon" />
-            <span class="nav-text">动态域名</span>
-          </router-link>
-          <router-link
-            to="/certificates" class="nav-link" active-class="active"
-            :aria-label="certificatesExpiring ? `SSL 证书，${certificatesExpiring} 张即将到期或已过期` : undefined"
-            @click="onNavClick"
-          >
-            <Lock :size="14" class="nav-icon" />
-            <span class="nav-text">SSL 证书</span>
-            <span v-if="certificatesExpiring" class="nav-badge" title="30 天内到期或已过期">{{ certificatesExpiring }}</span>
-          </router-link>
-          <router-link to="/subscriptions" class="nav-link" active-class="active" @click="onNavClick">
-            <Download :size="14" class="nav-icon" />
-            <span class="nav-text">订阅管理</span>
-          </router-link>
-          <router-link to="/access" class="nav-link" active-class="active" @click="onNavClick">
-            <ShieldAlert :size="14" class="nav-icon" />
-            <span class="nav-text">防火墙管理</span>
-          </router-link>
-        </div>
-
-        <!-- 分组 2: 观察与管理 -->
-        <div class="nav-group">
-          <div class="nav-section-title">观察与管理</div>
-          <router-link to="/runtime" class="nav-link" active-class="active" @click="onNavClick">
-            <Activity :size="14" class="nav-icon" />
-            <span class="nav-text">运行状态</span>
-          </router-link>
-          <router-link to="/notifications" class="nav-link" active-class="active" @click="onNavClick">
-            <Bell :size="14" class="nav-icon" />
-            <span class="nav-text">通知中心</span>
-            <span v-if="unreadCount" class="nav-badge">{{ unreadCount }}</span>
-          </router-link>
-          <router-link to="/firewall-logs" class="nav-link" active-class="active" @click="onNavClick">
-            <FileSearch :size="14" class="nav-icon" />
-            <span class="nav-text">防火墙拦截记录</span>
-          </router-link>
-          <router-link to="/logs" class="nav-link" active-class="active" @click="onNavClick">
-            <ScrollText :size="14" class="nav-icon" />
-            <span class="nav-text">日志</span>
-          </router-link>
-          <router-link to="/ip-blocks" class="nav-link" active-class="active" @click="onNavClick">
-            <Ban :size="14" class="nav-icon" />
-            <span class="nav-text">IP 拦截名单</span>
-          </router-link>
-          <router-link to="/statistics" class="nav-link" active-class="active" @click="onNavClick">
-            <BarChart3 :size="14" class="nav-icon" />
-            <span class="nav-text">统计</span>
-          </router-link>
-          <router-link to="/traffic" class="nav-link" active-class="active" @click="onNavClick">
-            <Activity :size="14" class="nav-icon" />
-            <span class="nav-text">流量统计</span>
-          </router-link>
-          <router-link to="/mcp" class="nav-link" active-class="active" @click="onNavClick">
-            <Bot :size="14" class="nav-icon" />
-            <span class="nav-text">AI 管理</span>
-          </router-link>
-          <router-link to="/updates" class="nav-link" active-class="active" @click="onNavClick">
-            <RefreshCw :size="14" class="nav-icon" />
-            <span class="nav-text">更新</span>
-          </router-link>
-          <router-link to="/backups" class="nav-link" active-class="active" @click="onNavClick">
-            <HardDriveDownload :size="14" class="nav-icon" />
-            <span class="nav-text">备份与恢复</span>
-          </router-link>
-          <router-link to="/settings" class="nav-link" active-class="active" @click="onNavClick">
-            <Settings :size="14" class="nav-icon" />
-            <span class="nav-text">设置</span>
-          </router-link>
+        <div v-for="(group, index) in groups" :key="group.label" class="nav-group">
+          <button type="button" class="nav-section-title" :class="{ 'section-active': group.items.some(item => item[0] === route.path) }"
+            :aria-expanded="openGroups.has(group.label)" :aria-controls="'nav-group-' + index" @click="toggleGroup(group.label)">
+            <component :is="group.icon" :size="16" /><span>{{ group.label }}</span><ChevronDown :size="15" class="section-chevron" />
+          </button>
+          <div v-show="openGroups.has(group.label)" :id="'nav-group-' + index">
+            <router-link v-for="[path, label, icon] in group.items" :key="path" :to="path" class="nav-link" exact-active-class="active"
+              :aria-label="path === '/certificates' && certificatesExpiring ? `SSL 证书，${certificatesExpiring} 张即将到期或已过期` : undefined"
+              @click="onNavClick">
+              <component :is="icon" :size="14" class="nav-icon" />
+              <span class="nav-text">{{ label }}</span>
+              <span v-if="path === '/certificates' && certificatesExpiring" class="nav-badge" title="30 天内到期或已过期">{{ certificatesExpiring }}</span>
+              <span v-if="path === '/notifications' && unreadCount" class="nav-badge">{{ unreadCount }}</span>
+            </router-link>
+          </div>
         </div>
       </nav>
 
@@ -150,15 +70,50 @@
 
 <script setup>
 import { useToast } from '@/composables/useToast'
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { 
-  X, LayoutDashboard, Network, ArrowLeftRight, Compass, Images,
+  X, ChevronDown, Sparkles, Cable, LayoutDashboard, Network, ArrowLeftRight, Compass, Images,
   Globe, Lock, Download, ShieldAlert, FileSearch, ScrollText, Ban,
   Bell, BarChart3, Activity, Bot, RefreshCw, HardDriveDownload, Settings, LogOut
 } from 'lucide-vue-next'
 import { useAppStore } from '@/composables/useAppStore'
 import { useGatewayStatus } from '@/composables/useGatewayStatus'
 import { useLogout, useSession } from '@/composables/useSession'
+
+const route = useRoute()
+const groups = [
+  { label: '工作台', icon: LayoutDashboard, items: [
+    ['/overview', '概览', LayoutDashboard], ['/sunpanel', '浏览器首页', Compass], ['/icons', '图标库', Images]
+  ] },
+  { label: '服务接入', icon: Network, items: [
+    ['/routes', '反向代理', Network], ['/forwards', '端口转发', ArrowLeftRight],
+    ['/ddns', '动态域名', Globe], ['/certificates', 'SSL 证书', Lock]
+  ] },
+  { label: '访问安全', icon: ShieldAlert, items: [
+    ['/access', '防火墙管理', ShieldAlert], ['/subscriptions', '订阅管理', Download],
+    ['/ip-blocks', 'IP 拦截名单', Ban], ['/firewall-logs', '防火墙拦截记录', FileSearch]
+  ] },
+  { label: '监控与日志', icon: Activity, items: [
+    ['/runtime', '运行状态', Activity], ['/notifications', '通知中心', Bell], ['/logs', '日志', ScrollText],
+    ['/statistics', '统计', BarChart3], ['/traffic', '流量统计', Activity]
+  ] },
+  { label: 'AI 与集成', icon: Sparkles, items: [
+    ['/assistant', '网关助手', Sparkles], ['/assistant/settings', '模型接入点', Cable], ['/mcp', 'MCP 授权', Bot]
+  ] },
+  { label: '系统维护', icon: Settings, items: [
+    ['/updates', '更新', RefreshCw], ['/backups', '备份与恢复', HardDriveDownload], ['/settings', '设置', Settings]
+  ] }
+]
+const openGroups = ref(new Set(['工作台', '服务接入', 'AI 与集成']))
+function toggleGroup(label) {
+  if (openGroups.value.has(label)) openGroups.value.delete(label)
+  else openGroups.value.add(label)
+}
+watch(() => route.path, path => {
+  const group = groups.find(({ items }) => items.some(([target]) => target === path))
+  if (group) openGroups.value.add(group.label)
+}, { immediate: true })
 
 const { unreadCount } = useToast()
 const { isSidebarOpen, closeSidebar } = useAppStore()
@@ -265,34 +220,36 @@ const handleLogout = () => {
 .sidebar-nav {
   flex: 1;
   overflow-y: auto;
-  padding: 10px 12px 16px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
+  padding: 8px 12px 16px;
 }
-
 .nav-group {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
 }
-
 .nav-section-title {
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  color: var(--faint);
-  letter-spacing: 0.6px;
-  padding: 0 10px 6px 10px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  background: transparent;
+  border: 0;
+  text-align: left;
+  padding: 9px 10px;
+  color: var(--ink-secondary);
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
   user-select: none;
 }
-
+.nav-section-title:hover, .section-active { color: var(--ink); }
+.section-chevron { margin-left: auto; color: var(--muted); transform: rotate(-90deg); }
+.nav-section-title[aria-expanded="true"] .section-chevron { transform: none; }
 .nav-link {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 8px 10px;
-  min-height: 36px;
+  padding: 7px 10px 7px 25px;
+  min-height: 33px;
   border-radius: var(--radius-sm);
   color: var(--muted);
   font-size: 13px;
@@ -473,7 +430,7 @@ const handleLogout = () => {
     color: var(--ink);
     background: rgba(148, 163, 184, 0.12);
   }
-  .nav-link {
+  .nav-link, .nav-section-title {
     min-height: 44px;
   }
   .login-link-btn {

@@ -102,10 +102,18 @@ const routes = [
     meta: { title: '流量统计', icon: 'Activity' }
   },
   {
+    path: '/assistant', name: 'Assistant', component: () => import('@/components/AssistantChat.vue'),
+    props: { full: true }, meta: { title: '网关助手', icon: 'Sparkles' }
+  },
+  {
+    path: '/assistant/settings', name: 'AssistantSettings', component: () => import('@/views/AssistantSettingsView.vue'),
+    meta: { title: '模型接入点', icon: 'Settings' }
+  },
+  {
     path: '/mcp',
     name: 'Mcp',
     component: () => import('@/views/McpView.vue'),
-    meta: { title: 'AI 管理', icon: 'Bot' }
+    meta: { title: 'MCP 授权', icon: 'Bot' }
   },
   {
     path: '/updates',

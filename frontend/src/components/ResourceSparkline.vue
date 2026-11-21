@@ -4,8 +4,9 @@
       class="sparkline-svg"
       viewBox="0 0 180 38"
       preserveAspectRatio="none"
-      role="img"
-      :aria-label="ariaSummary"
+      :role="compact ? undefined : 'img'"
+      :aria-hidden="compact || undefined"
+      :aria-label="compact ? undefined : ariaSummary"
     >
       <defs>
         <linearGradient :id="gradientId" x1="0" y1="0" x2="0" y2="1">
@@ -13,7 +14,7 @@
           <stop offset="100%" stop-color="currentColor" stop-opacity="0.01" />
         </linearGradient>
       </defs>
-      <line
+      <line v-if="!compact"
         x1="2"
         y1="19"
         x2="178"
@@ -29,14 +30,14 @@
         vector-effect="non-scaling-stroke"
       />
       <circle
-        v-if="geometry.lastPoint"
+        v-if="geometry.lastPoint && !compact"
         :cx="geometry.lastPoint.x"
         :cy="geometry.lastPoint.y"
         r="2.5"
         class="sparkline-dot"
       />
     </svg>
-    <div class="sparkline-meta mono">
+    <div v-if="!compact" class="sparkline-meta mono">
       <span>近 {{ geometry.count }}/{{ maxSamples }} 次</span>
       <span>峰 {{ geometry.max.toFixed(1) }}% · 均 {{ geometry.avg.toFixed(1) }}%</span>
     </div>
@@ -48,6 +49,7 @@ import { computed, useId } from 'vue'
 import { buildSparklineGeometry, MAX_SPARKLINE_SAMPLES } from '@/api/sparkline'
 
 const props = defineProps({
+  compact: Boolean,
   samples: { type: Array, default: () => [] },
   label: { type: String, required: true },
   tone: { type: String, default: 'brand' },
@@ -63,6 +65,7 @@ const geometry = computed(() =>
 const toneClass = computed(() => {
   if (props.tone === 'bad') return 'tone-bad'
   if (props.tone === 'warn') return 'tone-warn'
+  if (props.tone === 'ok') return 'tone-ok'
   if (props.tone === 'cyan') return 'tone-cyan'
   return 'tone-brand'
 })
@@ -84,10 +87,14 @@ const ariaSummary = computed(() => {
   overflow: hidden;
 }
 
+.tone-ok { color: var(--ok); }
+
 .tone-brand {
   color: var(--brand-light, #818cf8);
 }
-.theme-light .tone-brand {
+.theme-light .tone-ok { color: var(--ok); }
+
+.tone-brand {
   color: var(--brand, #4f46e5);
 }
 .tone-cyan {

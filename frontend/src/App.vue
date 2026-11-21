@@ -16,13 +16,16 @@
         <TopHeader />
 
         <!-- View Content Area with Smooth Page Transition -->
-        <main class="page-viewport">
+        <main class="page-viewport" :class="{ 'with-assistant': showAssistant }">
           <router-view v-slot="{ Component }">
             <transition name="page-fade" mode="out-in">
               <component :is="Component" />
             </transition>
           </router-view>
         </main>
+        <aside v-if="showAssistant" class="assistant-drawer" aria-label="网关助手侧边栏">
+          <AssistantChat />
+        </aside>
       </div>
     </div>
 
@@ -39,8 +42,10 @@
 </template>
 
 <script setup>
-import { onMounted, watch } from 'vue'
+import { computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import AssistantChat from '@/components/AssistantChat.vue'
+import { useAssistant } from '@/composables/useAssistant'
 import Sidebar from '@/components/Sidebar.vue'
 import TopHeader from '@/components/TopHeader.vue'
 import CmdkModal from '@/components/CmdkModal.vue'
@@ -54,6 +59,11 @@ import { useSession } from '@/composables/useSession'
 import { useToast } from '@/composables/useToast'
 
 const route = useRoute()
+const { panelOpen, resetAssistant } = useAssistant()
+const showAssistant = computed(() => panelOpen.value && route.name !== 'Assistant' && route.name !== 'AssistantSettings')
+watch(() => route.name, name => {
+  if (name === 'Assistant' || name === 'AssistantSettings') panelOpen.value = false
+})
 const { theme, closeCmdk, closeSidebar } = useAppStore()
 const { isAuthenticated } = useSession()
 const { refreshStatus, refreshConfig, resetGatewayStatus } = useGatewayStatus()
@@ -64,6 +74,7 @@ watch(isAuthenticated, (authenticated, _, onCleanup) => {
     closeCmdk()
     closeSidebar()
     resetGatewayStatus()
+    resetAssistant()
     return
   }
   const controller = new AbortController()
@@ -125,6 +136,27 @@ onMounted(() => {
   max-width: 1540px;
   width: 100%;
   margin: 0 auto;
+}
+
+.assistant-drawer {
+  position: fixed;
+  inset: var(--topbar-h) 0 0 auto;
+  width: min(100vw, clamp(380px, 28vw, 460px));
+  display: flex;
+  flex-direction: column;
+  background: var(--sidebar-bg);
+  border-left: 1px solid var(--line);
+  box-shadow: -14px 0 35px rgba(0, 0, 0, 0.14);
+  z-index: 95;
+}
+@media (min-width: 1280px) {
+  .page-viewport.with-assistant {
+    max-width: calc(100% - clamp(380px, 28vw, 460px));
+    margin-inline: 0 auto;
+  }
+}
+@media (max-width: 600px) {
+  .assistant-drawer { width: 100%; }
 }
 
 /* Page transitions */

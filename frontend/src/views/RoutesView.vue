@@ -1,7 +1,10 @@
 <template>
   <div class="routes-page animate-fade-in">
-    <header class="report-heading">
-      <h1>反向代理</h1>
+    <header class="routes-heading">
+      <div>
+        <h1>反向代理</h1>
+        <p class="routes-description">管理反代组、域名路由、来源 IP 防火墙与独立访问账户</p>
+      </div>
       <div class="header-actions">
         <button class="btn btn-secondary" :disabled="loading || isSavingConfig" @click="reload">刷新</button>
         <button
@@ -36,11 +39,8 @@
     <p v-if="loading" role="status">正在读取反代配置…</p>
 
     <section class="proxy-live-summary" aria-labelledby="proxy-live-title">
-      <header>
-        <h2 id="proxy-live-title">反代实时汇总</h2>
-        <span v-if="statusError" role="status">实时数据暂不可用</span>
-        <span v-else>速率 · 近 5 秒平均</span>
-      </header>
+      <h2 id="proxy-live-title" class="sr-only">反代实时汇总</h2>
+      <p v-if="statusError" class="routes-description" role="status">实时数据暂不可用</p>
       <ProxyTrafficMetrics :sample="liveTraffic?.total" :sampled="liveTraffic?.sampled" />
     </section>
 
@@ -142,9 +142,12 @@
                   width="32"
                   height="32"
                   alt=""
-                /><Network v-else :size="18" />
+                /><component :is="routeFallbackIcons[routeCategoryClass(route)] || Network" v-else :size="19" />
               </div>
-              <span class="service-name" :title="route.name || route.host">{{ route.name || route.host }}</span>
+              <div class="service-heading">
+                <span class="service-name" :title="route.name || route.host">{{ route.name || route.host }}</span>
+                <span class="service-group">所属组 {{ group.name }}</span>
+              </div>
               <label class="switch"
                 ><input
                   type="checkbox"
@@ -164,7 +167,7 @@
                 @click="copyURL(accessURL(route))"
               >
                 <Globe :size="14" aria-hidden="true" /><span class="info-text mono-text domain-text">{{ accessURL(route) || route.host }}</span
-                ><Copy :size="12" aria-hidden="true" />
+                ><Copy :size="13" aria-hidden="true" />
               </button>
               <div class="info-row target-row">
                 <ArrowRight :size="14" /><span class="info-text mono-text">{{ route.upstream }}</span>
@@ -177,19 +180,23 @@
               <span v-if="route.firewall_id" class="feature-badge fw">{{ firewallName(route.firewall_id) }}</span>
               <span v-if="route.auth.enabled" class="feature-badge auth"><Key :size="10" /> 账号保护</span>
             </div>
-            <ProxyTrafficMetrics
-              class="route-traffic-metrics"
-              :sample="liveTraffic ? (liveTraffic.routes[route.id || routeKey(route)] ?? idleTraffic) : undefined"
-              :sampled="liveTraffic?.sampled"
-            />
+            <div class="service-facts">
+              <div class="service-fact">
+                <HeartPulse :size="15" aria-hidden="true" /><span>健康状态</span>
+                <button type="button" class="health-detail badge" :class="healthTone(route)" aria-haspopup="dialog"
+                  :aria-label="`${routeHealth(route)}，查看 ${route.name || route.host} 的健康诊断`"
+                  @click="showHealth(route)">{{ routeHealth(route) }}</button>
+              </div>
+              <div class="service-fact" :title="routeLiveTitle(route)">
+                <BarChart3 :size="15" aria-hidden="true" /><span>流量（24h）</span>
+                <div class="service-counts">
+                  <span><ArrowUp :size="13" class="traffic-up" aria-hidden="true" /><span class="sr-only">上传</span>{{ routeBytes(route, 'upload_bytes') }}</span>
+                  <span><ArrowDown :size="13" class="traffic-down" aria-hidden="true" /><span class="sr-only">下载</span>{{ routeBytes(route, 'download_bytes') }}</span>
+                </div>
+              </div>
+            </div>
             <div class="card-actions">
-              <button
-                type="button" class="health-detail" aria-haspopup="dialog"
-                :aria-label="`${routeHealth(route)}，查看 ${route.name || route.host} 的健康诊断`"
-                @click="showHealth(route)"
-              >
-                {{ routeHealth(route) }}
-              </button>
+              <span class="service-protocol">{{ route.tls ? 'HTTPS' : 'HTTP' }}</span>
               <div class="action-btn-group">
                 <RouterLink class="btn btn-ghost btn-sm" :to="{ path: '/traffic', query: { rule: route.id } }">查看流量</RouterLink>
                 <button class="btn btn-ghost btn-sm" :disabled="isSavingConfig" @click="openRoute(route)">
@@ -518,6 +525,16 @@ import { useRoute, useRouter } from 'vue-router'
 import {
   AlertCircle,
   ArrowRight,
+  ArrowUp,
+  ArrowDown,
+  BarChart3,
+  Code2,
+  Download,
+  Images,
+  Server,
+  Shield,
+  Tv,
+  HeartPulse,
   ChevronDown,
   Copy,
   Edit3,
@@ -536,6 +553,7 @@ import RouteImagePicker from '@/components/RouteImagePicker.vue'
 import ProxyTrafficMetrics from '@/components/ProxyTrafficMetrics.vue'
 import { routeImageUrl } from '@/api/icons'
 import ServiceDiscovery from '@/components/ServiceDiscovery.vue'
+import { formatByteRate, formatBytes } from '@/api/reports'
 import { adminApi } from '@/api/admin'
 import { defaultRouteTLS, replaceConfigItem, routeAccessURL, routeHost, routeKey, routeUsesFullHost } from '@/api/configuration'
 import { useGatewayStatus, useStatusPolling } from '@/composables/useGatewayStatus'
@@ -558,6 +576,7 @@ const routes = computed(() => gatewayConfig.value?.routes ?? [])
 const proxyGroups = computed(() => gatewayConfig.value?.groups ?? [])
 const liveTraffic = computed(() => statusError.value ? null : gatewayStatus.value?.proxy_traffic)
 const idleTraffic = { upload_bytes_per_second: 0, download_bytes_per_second: 0, active: 0 }
+const traffic24h = shallowRef(null)
 const selectedGroup = ref('ALL')
 const searchQuery = ref('')
 const loading = ref(false)
@@ -664,6 +683,29 @@ function routeHealth(route) {
   const result = health.value?.routes?.[route.id]
   return result ? `${result.label}${result.healthy ? ` · ${result.duration_ms} ms` : ''}` : '等待上游探测'
 }
+function healthTone(route) {
+  const result = health.value?.routes?.[route.id]
+  if (!route.enabled || !proxyGroups.value.find(group => group.id === route.group_id)?.enabled || !result?.checked_at || result.state === 'disabled')
+    return 'badge-neutral'
+  return result.healthy ? 'badge-ok' : 'badge-bad'
+}
+function routeBytes(route, field) {
+  return traffic24h.value ? formatBytes(traffic24h.value.get(route.id)?.[field] ?? 0) : '—'
+}
+function routeLiveTitle(route) {
+  const sample = liveTraffic.value?.routes[route.id || routeKey(route)] ?? idleTraffic
+  return liveTraffic.value?.sampled
+    ? `实时上传 ${formatByteRate(sample.upload_bytes_per_second)} · 下载 ${formatByteRate(sample.download_bytes_per_second)} · 活跃连接 ${sample.active}`
+    : '实时流量采样尚不可用'
+}
+async function refreshTraffic() {
+  try {
+    const report = await adminApi.traffic({ hours: 24 }, controller.signal)
+    traffic24h.value = report.storage_error ? null : new Map(report.rules.map(item => [item.id, item]))
+  } catch {
+    traffic24h.value = null
+  }
+}
 async function refreshHealth() {
   try {
     const value = await adminApi.serviceHealth(controller.signal)
@@ -677,7 +719,7 @@ async function reload() {
   loading.value = true
   loadError.value = ''
   try {
-    await Promise.all([refreshConfig(controller.signal), refreshStatus(controller.signal), refreshHealth()])
+    await Promise.all([refreshConfig(controller.signal), refreshStatus(controller.signal), refreshHealth(), refreshTraffic()])
   } catch (err) {
     if (!controller.signal.aborted) loadError.value = err.message
   } finally {
@@ -891,12 +933,16 @@ function discoverySaved() {
   discoveryDialog.value.close()
   saved('已创建所选服务的反代路由')
 }
+const routeFallbackIcons = { storage: Server, photo: Images, download: Download, media: Tv, security: Shield, dev: Code2 }
+
 function routeCategoryClass(route) {
-  const name = (route.name || route.host || '').toLowerCase()
-  if (name.includes('cloud') || name.includes('nas') || name.includes('storage') || name.includes('pan') || name.includes('drive')) return 'storage'
+  const name = `${route.name || ''} ${(route.host || '').split('.')[0]}`.toLowerCase()
+  if (/相册|照片|photo|album|immich/.test(name)) return 'photo'
+  if (/下载|download|transmission|qbittorrent/.test(name)) return 'download'
+  if (name.includes('存储') || name.includes('cloud') || name.includes('nas') || name.includes('storage') || name.includes('pan') || name.includes('drive')) return 'storage'
   if (name.includes('vault') || name.includes('pass') || name.includes('auth') || name.includes('key') || name.includes('safe')) return 'security'
   if (name.includes('home') || name.includes('iot') || name.includes('hass') || name.includes('zigbee')) return 'iot'
-  if (name.includes('media') || name.includes('plex') || name.includes('jelly') || name.includes('emby') || name.includes('video') || name.includes('music')) return 'media'
+  if (name.includes('影音') || name.includes('media') || name.includes('plex') || name.includes('jelly') || name.includes('emby') || name.includes('video') || name.includes('music')) return 'media'
   if (name.includes('git') || name.includes('code') || name.includes('dev') || name.includes('gitea')) return 'dev'
   return 'system'
 }
@@ -935,11 +981,32 @@ watch(
   },
   { immediate: true }
 )
+watch(
+  [() => currentRoute.query.health, gatewayConfig, healthDialog, healthDetailDialog, loading],
+  ([target, config, settingsDialog, detailDialog, busy]) => {
+    if (currentRoute.path !== '/routes' || typeof target !== 'string' || !config || !settingsDialog || !detailDialog || busy) return
+    const matched = config.routes.find(item => item.id === target)
+    if (target === ':settings') openHealthSettings()
+    else if (matched) showHealth(matched)
+    router.replace({ query: { ...currentRoute.query, health: undefined } })
+  },
+  { flush: 'post' }
+)
+
+watch(() => routes.value.map(({ id, upstream }) => id + ' ' + upstream).join('\n'), (current, previous) => {
+  if (previous && current !== previous && !loading.value) {
+    health.value = null
+    refreshHealth()
+  }
+})
 let healthTimer
 useStatusPolling()
 onMounted(() => {
   reload()
-  healthTimer = setInterval(refreshHealth, 30000)
+  healthTimer = setInterval(() => {
+    refreshHealth()
+    refreshTraffic()
+  }, 30000)
 })
 onUnmounted(() => {
   clearInterval(healthTimer)
@@ -949,6 +1016,8 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+.routes-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+.routes-heading h1 { margin: 0; font-size: 24px; line-height: 1.3; }
 .header-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .page-error { color: var(--bad); font-size: 13px; overflow-wrap: anywhere; }
 .form-note { color: var(--muted); font-size: 12px; margin: 0; overflow-wrap: anywhere; }
@@ -1046,26 +1115,16 @@ onUnmounted(() => {
   font-size: 11.5px;
   color: var(--faint);
 }
-.routes-page { display: flex; flex-direction: column; gap: 20px; }
+.routes-page { display: flex; flex-direction: column; gap: 18px; container: routes / inline-size; }
+.routes-description { color: var(--muted); font-size: 13px; margin: 5px 0 0; }
 .proxy-live-summary {
-  --proxy-metric-size: clamp(17px, 2vw, 24px);
   display: grid;
-  gap: 12px;
+  gap: 7px;
   padding: 14px 16px;
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
   background: var(--card-bg);
 }
-.proxy-live-summary header {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 4px 12px;
-  flex-wrap: wrap;
-}
-.proxy-live-summary h2 { color: var(--ink); font-size: 15px; }
-.proxy-live-summary header span { color: var(--muted); font-size: 12px; }
-.route-traffic-metrics { padding-bottom: 8px; }
 
 .filter-bar { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
 .chips-group { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
@@ -1096,14 +1155,14 @@ onUnmounted(() => {
 /* Grid */
 .routes-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 295px), 1fr));
   gap: 16px;
 }
 .route-card {
   padding: 18px;
   display: flex;
   flex-direction: column;
-  min-height: 240px;
+  min-height: 218px;
 }
 .route-card :deep(.card-inner) {
   display: flex;
@@ -1120,10 +1179,12 @@ onUnmounted(() => {
 }
 .app-icon-wrap img { display: block; object-fit: contain; flex-shrink: 0; }
 .app-icon-wrap.system { background: rgba(99, 102, 241, 0.12); color: var(--brand-light); }
-.app-icon-wrap.storage { background: rgba(6, 182, 212, 0.12); color: var(--brand-cyan); }
+.app-icon-wrap.storage { background: #1955c1; color: #fff; }
+.app-icon-wrap.photo { background: #6734c4; color: #fff; }
+.app-icon-wrap.download { background: #047655; color: #fff; }
 .app-icon-wrap.security { background: rgba(245, 158, 11, 0.12); color: var(--warn); }
 .app-icon-wrap.iot { background: rgba(16, 185, 129, 0.12); color: var(--ok); }
-.app-icon-wrap.media { background: rgba(244, 63, 94, 0.12); color: var(--bad); }
+.app-icon-wrap.media { background: #bf235e; color: #fff; }
 .app-icon-wrap.dev { background: rgba(168, 85, 247, 0.12); color: #c084fc; }
 .app-icon-wrap.ops { background: rgba(56, 189, 248, 0.12); color: #38bdf8; }
 
@@ -1153,26 +1214,18 @@ onUnmounted(() => {
 .feature-badge.auth { background: rgba(245, 158, 11, 0.12); color: var(--warn); border: 1px solid rgba(245, 158, 11, 0.2); }
 .feature-badge.ws { background: rgba(6, 182, 212, 0.12); color: var(--brand-cyan); border: 1px solid rgba(6, 182, 212, 0.2); }
 
-.health-detail {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 9px;
-  background: var(--strip-bg);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-pill);
-  color: var(--muted);
-  font-size: 11px;
-  width: fit-content;
-  cursor: pointer;
-  transition: var(--transition-smooth);
-  text-align: left;
-}
-.health-detail:hover {
-  border-color: var(--card-border-hover);
-  color: var(--ink);
-  background: var(--card-hover-bg);
-}
+.service-heading { min-width: 0; flex: 1; display: grid; gap: 3px; }
+.card-head .switch { flex: none; }
+.service-group, .service-protocol { font-size: 12px; color: var(--muted); }
+.service-facts { display: grid; gap: 7px; margin-bottom: 11px; }
+.service-fact { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; color: var(--muted); font-size: 12px; }
+.service-fact > span { min-width: 73px; }
+.service-counts, .service-counts > span { display: inline-flex; align-items: center; gap: 4px; color: var(--ink); }
+.service-counts { flex-wrap: wrap; column-gap: 11px; }
+.traffic-up { color: var(--ok); }
+.traffic-down { color: var(--brand-cyan); }
+.health-detail { cursor: pointer; white-space: normal; text-align: left; }
+.health-detail:hover { filter: brightness(1.2); }
 
 .card-actions {
   margin-top: auto;

@@ -132,6 +132,7 @@ func (a *Admin) Handler() http.Handler {
 	mux.HandleFunc("GET /api/runtime", a.requireAuth(a.runtimeStatus))
 	a.routeImageRoutes(mux)
 	a.iconRoutes(mux)
+	a.assistantRoutes(mux)
 	mcpHandler := a.mcpRoutes(mux)
 	mux.HandleFunc("GET /api/logs", a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
 		category, result := r.URL.Query().Get("category"), r.URL.Query().Get("result")

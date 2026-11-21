@@ -40,6 +40,11 @@
         <Search :size="18" aria-hidden="true" />
       </button>
 
+      <button v-if="!['Assistant', 'AssistantSettings'].includes(route.name)" class="icon-action-btn assistant-toggle"
+        type="button" title="网关助手" aria-label="网关助手" :aria-expanded="panelOpen" @click="panelOpen = !panelOpen">
+        <Sparkles :size="17" /><span>网关助手</span>
+      </button>
+
       <!-- Theme Switch Button -->
       <button 
         class="icon-action-btn" 
@@ -138,15 +143,17 @@ import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { 
   Menu, Search, Sun, Moon, ChevronDown, 
-  KeyRound, LogOut, Terminal, Bell
+  KeyRound, LogOut, Terminal, Bell, Sparkles
 } from 'lucide-vue-next'
 import NotificationPopover from '@/components/NotificationPopover.vue'
+import { useAssistant } from '@/composables/useAssistant'
 import { useAppStore } from '@/composables/useAppStore'
 import { useGatewayStatus } from '@/composables/useGatewayStatus'
 import { useLogout, useSession } from '@/composables/useSession'
 import { useToast } from '@/composables/useToast'
 
 const route = useRoute()
+const { panelOpen } = useAssistant()
 const { toggleSidebar, openCmdk, theme, toggleTheme } = useAppStore()
 const { username, openAccountModal } = useSession()
 const { gatewayState } = useGatewayStatus()
@@ -593,6 +600,17 @@ body.theme-dark .user-dropdown-popover {
 .popover-fade-leave-to {
   opacity: 0;
   transform: translateY(-6px) scale(0.97);
+}
+
+.assistant-toggle { color: var(--brand-light); }
+.assistant-toggle[aria-expanded="true"] { border-color: var(--card-border-hover); background: var(--strip-bg); }
+.assistant-toggle span { display: none; }
+@media (min-width: 1280px) {
+  .assistant-toggle { width: auto; gap: 6px; padding-inline: 9px; }
+  .assistant-toggle span { display: inline; font-size: 12px; white-space: nowrap; }
+}
+@media (max-width: 420px) {
+  .top-header .gateway-live-pill { display: none; }
 }
 
 /* Responsive */
