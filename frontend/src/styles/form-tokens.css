@@ -521,6 +521,8 @@ dialog footer,
 }
 
 /* 弹窗内 fieldset 清除原生浏览器边框 */
+.modal-submit-error { padding: 8px 24px; flex-shrink: 0; }
+
 dialog fieldset,
 .modal-dialog fieldset,
 .report-dialog fieldset,

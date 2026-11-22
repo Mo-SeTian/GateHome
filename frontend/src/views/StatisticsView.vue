@@ -208,7 +208,7 @@
       </p>
       <SpotlightCard class="report-panel"
         ><h2>安全规则命中汇总</h2>
-        <div v-if="data.security_rules?.length" class="report-table-wrap">
+        <ReportTableScroll v-if="data.security_rules?.length" label="安全规则统计">
           <table class="report-table">
             <thead>
               <tr>
@@ -229,12 +229,12 @@
               </tr>
             </tbody>
           </table>
-        </div>
+        </ReportTableScroll>
         <p v-else class="report-note">暂无安全规则命中。</p></SpotlightCard
       >
       <SpotlightCard class="report-panel"
         ><h2>防火墙策略命中汇总</h2>
-        <div v-if="data.firewalls.length" class="report-table-wrap">
+        <ReportTableScroll v-if="data.firewalls.length" label="防火墙统计">
           <table class="report-table">
             <thead>
               <tr>
@@ -258,7 +258,7 @@
               </tr>
             </tbody>
           </table>
-        </div>
+        </ReportTableScroll>
         <p v-else class="report-note">暂无防火墙拦截。</p></SpotlightCard
       >
     </template>
@@ -267,6 +267,7 @@
 </template>
 
 <script setup>
+import ReportTableScroll from '@/components/ReportTableScroll.vue'
 import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef } from 'vue'
 import SpotlightCard from '@/components/SpotlightCard.vue'
 import LogExplorer from '@/components/LogExplorer.vue'

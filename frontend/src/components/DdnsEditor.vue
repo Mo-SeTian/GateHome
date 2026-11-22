@@ -12,7 +12,7 @@
         <X :size="18" />
       </button>
     </header>
-    <form @submit.prevent="save">
+    <form id="ddns-editor-form" @submit.prevent="save">
       <p v-if="error" ref="errorElement" class="report-error" role="alert" tabindex="-1">{{ error }}</p>
       <fieldset :disabled="isSavingConfig">
         <template v-if="!hostsOnly">
@@ -82,14 +82,14 @@
             灰云记录可自动修改；双栈中一类失败不影响另一类同步，手动任务有 5 秒冷却。
           </p>
         </template>
-        <footer>
-          <button type="button" class="btn btn-secondary" @click="dialog.close()">取消</button
-          ><button type="submit" class="btn btn-primary">
-            {{ isSavingConfig ? '保存中…' : '保存 DDNS 组' }}
-          </button>
-        </footer>
       </fieldset>
     </form>
+    <footer>
+      <button type="button" class="btn btn-secondary" :disabled="isSavingConfig" @click="dialog.close()">取消</button>
+      <button type="submit" class="btn btn-primary" form="ddns-editor-form" :disabled="isSavingConfig">
+        {{ isSavingConfig ? '保存中…' : '保存 DDNS 组' }}
+      </button>
+    </footer>
   </dialog>
 </template>
 <script setup>

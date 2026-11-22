@@ -11,7 +11,7 @@
     <p v-if="data?.restart_required" class="report-note">监听配置待重启，表中显示当前运行的入口。</p>
     <SpotlightCard class="report-panel">
       <p class="report-note">此表显示 GateHome 运行中的入口。外部代理、路由器端口映射和主机防火墙会影响实际可达范围。</p>
-      <div class="report-table-wrap" tabindex="0" aria-label="运行中的入口">
+      <ReportTableScroll label="运行中的入口">
         <table class="report-table">
           <thead><tr>
             <th scope="col">服务</th><th scope="col">入口</th><th scope="col">监听地址</th>
@@ -27,11 +27,12 @@
           </tbody>
         </table>
         <p v-if="loading && !data" class="report-empty" role="status">正在读取入口…</p>
-      </div>
+      </ReportTableScroll>
     </SpotlightCard>
   </div>
 </template>
 <script setup>
+import ReportTableScroll from '@/components/ReportTableScroll.vue'
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import SpotlightCard from '@/components/SpotlightCard.vue'
 import { adminApi } from '@/api/admin'

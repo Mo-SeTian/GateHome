@@ -164,7 +164,7 @@
       >
         {{ reportDate(history.last_result.at) }} · {{ history.last_result.message }}
       </p>
-      <div v-if="history?.backups.length" class="report-table-wrap">
+      <ReportTableScroll v-if="history?.backups.length" label="升级备份">
         <table class="report-table">
           <thead>
             <tr>
@@ -199,12 +199,13 @@
             </tr>
           </tbody>
         </table>
-      </div>
+      </ReportTableScroll>
       <p v-else class="report-empty">{{ historyLoading ? '正在读取更新历史…' : '暂无更新前备份' }}</p>
     </SpotlightCard>
   </div>
 </template>
 <script setup>
+import ReportTableScroll from '@/components/ReportTableScroll.vue'
 import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import SpotlightCard from '@/components/SpotlightCard.vue'

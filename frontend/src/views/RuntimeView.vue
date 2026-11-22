@@ -82,6 +82,7 @@
         </div>
         <div class="kpi-val mono">{{ data ? uniqueListenerPorts : '—' }}</div>
         <p class="kpi-foot mono">{{ data ? `全部 ${data.listeners.length} 条绑定` : '' }}</p>
+        <button v-if="data" type="button" class="listener-jump" @click="focusListeners">查看监听清单 →</button>
       </SpotlightCard>
 
       <SpotlightCard class="kpi-card" :class="{ 'kpi-card-bad': failingRoutesCount > 0 }">
@@ -191,7 +192,7 @@
       <SpotlightCard v-if="data" class="report-panel">
         <div class="runtime-section-head">
           <div class="section-title-wrap">
-            <h2>GateHome 监听端口</h2>
+            <h2 ref="listenersHeading" class="listener-heading" tabindex="-1">GateHome 监听端口</h2>
             <span class="badge badge-neutral mono">{{ filteredListeners.length }} / {{ data.listeners.length }}</span>
           </div>
           <div class="listener-tools">
@@ -305,6 +306,7 @@ const routeQuery = ref('')
 const listenerFilter = ref('all')
 const listenerProto = ref('all')
 const routesSectionRef = ref(null)
+const listenersHeading = ref(null)
 const controller = new AbortController()
 
 const resources = computed(() => data.value?.resources || {})
@@ -438,6 +440,13 @@ function focusFailingRoutes() {
   routesSectionRef.value?.$el?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
 }
 
+function focusListeners() {
+  const heading = listenersHeading.value
+  if (!heading) return
+  heading.focus({ preventScroll: true })
+  heading.scrollIntoView({ block: 'start' })
+}
+
 function togglePolling() {
   pollingPaused.value = !pollingPaused.value
   if (!pollingPaused.value) load(true)
@@ -509,6 +518,12 @@ onBeforeUnmount(() => {
   color: var(--bad); cursor: pointer; text-align: left;
 }
 .kpi-filter-btn:hover { text-decoration: underline; }
+.listener-jump {
+  align-self: flex-start; min-height: 28px; border: 0; background: transparent; padding: 0;
+  color: var(--brand-light); font-size: 12px; font-weight: 600; cursor: pointer;
+}
+.listener-jump:hover { text-decoration: underline; }
+.listener-heading { scroll-margin-top: calc(var(--topbar-h) + 16px); }
 
 .gh-progress { margin: 2px 0 0 !important; }
 .gh-progress.warn::-webkit-progress-value { background: var(--warn) !important; }

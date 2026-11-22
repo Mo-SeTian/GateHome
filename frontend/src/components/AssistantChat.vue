@@ -14,7 +14,7 @@
       </div>
       <div class="assistant-model">
         <span v-if="provider" class="model-dot" aria-hidden="true"></span>
-        <span>{{ provider ? provider.name : '模型未配置' }}</span>
+        <span class="provider-name">{{ provider ? provider.name : '模型未配置' }}</span>
         <RouterLink to="/assistant/settings" class="model-settings"><Settings2 :size="14" /> 接入设置</RouterLink>
       </div>
     </header>
@@ -78,7 +78,7 @@
         <textarea v-model="draft" aria-label="给网关助手发送消息" placeholder="询问网关状态，或描述想修改的配置…" maxlength="4000" rows="2"
           :disabled="!provider" @keydown.enter="handleEnter" />
         <div class="composer-actions">
-          <div v-if="provider" class="composer-selects">
+          <template v-if="provider">
             <label class="sr-only" for="assistant-model-select">模型</label>
             <select id="assistant-model-select" :title="model" :value="JSON.stringify([provider.id, model])" :disabled="sending || applying" @change="changeModel">
               <optgroup v-for="row in providers" :key="row.id" :label="row.name">
@@ -91,7 +91,7 @@
               <option value="">模型默认</option>
               <option value="low">低</option><option value="medium">中</option><option value="high">高</option>
             </select>
-          </div>
+          </template>
           <button class="btn btn-primary btn-sm" type="submit" aria-label="发送消息" :disabled="sending || applying || !draft.trim() || !provider"><ArrowUp :size="16" /></button>
         </div>
       </form>
@@ -165,8 +165,9 @@ onMounted(() => {
 .assistant-chat { display: flex; flex-direction: column; min-height: 0; min-width: 0; background: var(--sidebar-bg); height: 100%; }
 .assistant-header { padding: 16px 20px 12px; border-bottom: 1px solid var(--line); }
 .assistant-heading, .assistant-model, .assistant-actions, .assistant-byline, .assistant-link, .plan-head, .plan-actions, .composer-actions, .assistant-suggestions, .model-settings { display: flex; align-items: center; gap: 8px; }
-.assistant-heading h1, .assistant-heading h2 { margin: 0; font-size: 20px; line-height: 1.3; }
+.assistant-heading h1, .assistant-heading h2 { margin: 0; font-size: 20px; line-height: 1.3; white-space: nowrap; }
 .assistant-mark, .assistant-byline, .assistant-link { color: var(--brand-light); }
+.assistant-heading .assistant-mark, .model-dot { flex: none; }
 .assistant-actions { margin-left: auto; }
 .assistant-actions .icon-action-btn {
   display: grid; place-items: center; width: 32px; height: 32px;
@@ -175,6 +176,7 @@ onMounted(() => {
 .assistant-actions .icon-action-btn:disabled { opacity: .45; }
 .assistant-actions .icon-action-btn:hover { border-color: var(--line); color: var(--ink); background: var(--strip-bg); }
 .assistant-model { margin-top: 9px; color: var(--muted); font-size: 12px; }
+.provider-name { min-width: 0; overflow-wrap: anywhere; }
 .model-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); }
 .model-settings { margin-left: auto; color: var(--ink-secondary); white-space: nowrap; }
 .assistant-timeline { flex: 1; min-height: 0; overflow: auto; padding: 20px; }
@@ -200,10 +202,9 @@ onMounted(() => {
 .assistant-suggestions .btn { border-radius: var(--radius-pill); font-size: 11px; }
 .assistant-composer { border: 1px solid var(--card-border-hover); background: var(--input-bg); border-radius: var(--radius-md); padding: 8px; }
 .assistant-composer textarea { width: 100%; padding: 4px; border: 0; background: transparent; color: var(--ink); resize: vertical; min-height: 42px; max-height: 130px; font: inherit; }
-.composer-selects { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1; }
-.composer-selects select { color: var(--ink-secondary); background: var(--strip-bg); border: 1px solid var(--line); border-radius: 7px; min-height: 34px; padding: 0 5px; font: inherit; font-size: 12px; }
-.composer-selects select:first-of-type { flex: 1; min-width: 0; max-width: 245px; text-overflow: ellipsis; }
-.composer-selects select:last-of-type { flex: none; width: 86px !important; }
+.composer-actions select { color: var(--ink-secondary); background: var(--strip-bg); border: 1px solid var(--line); border-radius: 7px; min-height: 34px; padding: 0 5px; font: inherit; font-size: 12px; }
+#assistant-model-select { flex: 1; min-width: 0; max-width: 245px; text-overflow: ellipsis; }
+#assistant-effort-select { flex: none; width: 86px !important; }
 .composer-actions button { margin-left: auto; }
 .assistant-full { border: 1px solid var(--line); border-radius: var(--radius-card); overflow: hidden; min-height: 490px; height: calc(100dvh - var(--topbar-h) - 48px); }
 .assistant-full .assistant-timeline, .assistant-full .assistant-footer { width: min(100%, 820px); margin-inline: auto; }
@@ -235,14 +236,22 @@ onMounted(() => {
 @keyframes reveal-reply { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .assistant-wait i, .fresh { animation: none; } }
 @media (max-width: 600px) {
-  .assistant-header { padding: 10px 14px; }
+  .assistant-header { padding: 10px 12px; }
+  .assistant-heading { gap: 6px; }
+  .assistant-heading h2 { font-size: 18px; }
+  .assistant-actions { gap: 2px; }
   .assistant-timeline { padding: 14px; }
-  .assistant-actions .icon-action-btn { min-height: 44px; }
-  .composer-selects select { min-height: 44px !important; }
-  .assistant-actions .icon-action-btn { width: 36px; }
+  .assistant-actions .icon-action-btn { width: 44px; min-height: 44px; }
+  .composer-actions select, .composer-actions button { min-height: 44px !important; }
+  .composer-actions button { min-width: 44px; }
   .assistant-footer { padding-inline: 12px; }
   .assistant-suggestions { flex-wrap: nowrap; overflow: auto; scrollbar-width: thin; }
   .assistant-suggestions .btn { flex: none; }
   .assistant-full { min-height: 0; height: calc(100dvh - var(--topbar-h) - 32px); }
+}
+@media (max-width: 400px) {
+  .composer-actions { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }
+  #assistant-model-select { grid-column: 1 / -1; width: 100%; max-width: none; }
+  .composer-actions button { grid-column: 2; }
 }
 </style>

@@ -77,7 +77,7 @@
             <span class="node-label">所有网卡监听</span
             ><span class="node-val mono-text">:{{ forward.listen_port }}</span>
           </div>
-          <ArrowRight :size="15" />
+          <ArrowRight :size="15" class="pipeline-arrow" aria-hidden="true" />
           <div class="pipeline-node">
             <span class="node-label">转发目标</span
             ><span class="node-val mono-text">{{ forward.upstream }}</span>
@@ -520,6 +520,7 @@ onUnmounted(() => controller.abort())
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 10px;
 }
 
 .pipeline-node {
@@ -527,13 +528,13 @@ onUnmounted(() => controller.abort())
   flex-direction: column;
   gap: 3px;
 }
-.node-label { font-size: 10.5px; color: var(--faint); }
-.node-val { font-size: 13px; font-weight: 600; color: var(--ink); }
+.node-label { font-size: 10.5px; color: var(--faint); white-space: nowrap; }
+.node-val { font-size: 13px; font-weight: 600; color: var(--ink); overflow-wrap: anywhere; }
+.pipeline-node:first-child { flex: none; }
 
 .pipeline-arrow {
   color: var(--brand-light);
-  display: flex;
-  align-items: center;
+  flex: none;
 }
 
 .card-footer {
@@ -551,7 +552,9 @@ onUnmounted(() => controller.abort())
   gap: 6px;
   font-size: 11.5px;
   color: var(--muted);
+  white-space: nowrap;
 }
+.card-footer .header-actions { width: auto; }
 
 .text-bad { color: var(--bad) !important; }
 
@@ -584,5 +587,10 @@ onUnmounted(() => controller.abort())
   .header-actions .btn { flex: 1; justify-content: center; }
   .protocol-filters { width: 100%; display: flex; }
   .protocol-filters .btn { flex: 1; text-align: center; padding-inline: 6px; }
+}
+@media (max-width: 400px) {
+  .pipeline-box { align-items: stretch; flex-direction: column; gap: 6px; }
+  .pipeline-node { display: grid; grid-template-columns: 68px minmax(0, 1fr); align-items: baseline; }
+  .pipeline-arrow { margin-left: 1px; transform: rotate(90deg); }
 }
 </style>

@@ -405,6 +405,9 @@ td.actions { display:table-cell; white-space:nowrap; }
   .settings-fields { grid-template-columns: minmax(0, 1fr) 86px; }
   .settings-fields > :nth-child(n+3) { grid-column: 1 / -1; }
 }
+@media (max-width: 380px) {
+  .settings-fields { grid-template-columns: minmax(0, 1fr); }
+}
 @media(max-width:760px) {
   .home { gap:16px; }
   .summary { grid-template-columns:1fr; padding:2px 16px; }

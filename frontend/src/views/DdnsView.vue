@@ -84,7 +84,7 @@
               >
             </p>
           </div>
-          <div class="report-table-wrap" tabindex="0" role="region" :aria-label="`${group.name} DNS 记录，可横向滚动`">
+          <ReportTableScroll :label="`${group.name} DNS 记录`">
             <table class="report-table dns-records">
               <thead>
                 <tr>
@@ -108,7 +108,7 @@
                 </tr>
               </tbody>
             </table>
-          </div>
+          </ReportTableScroll>
 
           <details v-if="references(group.id).length" class="ref-details">
             <summary>
@@ -162,6 +162,7 @@
   </div>
 </template>
 <script setup>
+import ReportTableScroll from '@/components/ReportTableScroll.vue'
 import { computed, onMounted, onUnmounted, ref, shallowRef } from 'vue'
 import { Plus, ChevronDown } from 'lucide-vue-next'
 import SpotlightCard from '@/components/SpotlightCard.vue'

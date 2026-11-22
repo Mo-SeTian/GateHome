@@ -286,7 +286,7 @@
           关闭
         </button>
       </header>
-      <form @submit.prevent="saveLayout">
+      <form id="overview-layout-form" @submit.prevent="saveLayout">
         <fieldset :disabled="isSavingConfig">
           <p class="report-note">
             勾选显示组件。拖动行首按钮，或使用方向键、上下移动按钮排序；保存后在其他设备与重启后沿用。
@@ -360,15 +360,15 @@
               </option>
             </select></label
           >
-          <p v-if="formError" class="report-error" role="alert">{{ formError }}</p>
-          <footer>
-            <button class="btn btn-secondary" type="button" @click="defaults">恢复默认布局</button
-            ><button class="btn btn-primary" type="submit">
-              {{ isSavingConfig ? '保存中…' : '保存概览布局' }}
-            </button>
-          </footer>
         </fieldset>
       </form>
+      <p v-if="formError" class="report-error modal-submit-error" role="alert">{{ formError }}</p>
+      <footer>
+        <button class="btn btn-secondary" type="button" :disabled="isSavingConfig" @click="defaults">恢复默认布局</button>
+        <button class="btn btn-primary" type="submit" form="overview-layout-form" :disabled="isSavingConfig">
+          {{ isSavingConfig ? '保存中…' : '保存概览布局' }}
+        </button>
+      </footer>
     </dialog>
   </div>
 </template>

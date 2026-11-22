@@ -17,7 +17,7 @@
       </div>
       <p v-if="!supported" class="report-note">请使用支持通行密钥的浏览器打开 HTTPS 管理域名，或在 localhost 上操作。</p>
       <p v-if="loaded && !keys.length" class="report-empty">尚未添加通行密钥。</p>
-      <div v-if="keys.length" class="report-table-wrap" tabindex="0" aria-label="已注册的通行密钥">
+      <ReportTableScroll v-if="keys.length" label="已注册的通行密钥">
         <table class="report-table">
           <thead><tr><th scope="col">管理域名</th><th scope="col">添加时间</th><th scope="col">最后使用</th><th scope="col">操作</th></tr></thead>
           <tbody>
@@ -29,11 +29,11 @@
             </tr>
           </tbody>
         </table>
-      </div>
+      </ReportTableScroll>
     </SpotlightCard>
     <SpotlightCard class="report-panel">
       <h2>登录会话</h2>
-      <div class="report-table-wrap" tabindex="0" aria-label="登录会话">
+      <ReportTableScroll label="登录会话">
         <table class="report-table">
           <thead><tr>
             <th scope="col">设备 / 浏览器</th><th scope="col">验证方式</th><th scope="col">登录时间</th>
@@ -54,11 +54,12 @@
           </tbody>
         </table>
         <p v-if="busy && !loaded" class="report-empty" role="status">正在读取会话…</p>
-      </div>
+      </ReportTableScroll>
     </SpotlightCard>
   </div>
 </template>
 <script setup>
+import ReportTableScroll from '@/components/ReportTableScroll.vue'
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import SpotlightCard from '@/components/SpotlightCard.vue'

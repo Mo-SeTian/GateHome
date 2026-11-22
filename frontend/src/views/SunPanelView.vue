@@ -114,7 +114,7 @@
       <p class="report-note">
         以下内容来自已启用的反代组和路由。在上方首页内选择导入目标分组并确认导入，重复项会自动跳过。
       </p>
-      <div v-if="routes.length" class="report-table-wrap">
+      <ReportTableScroll v-if="routes.length" label="可导入的反代路由">
         <table class="report-table">
           <thead>
             <tr>
@@ -133,12 +133,13 @@
             </tr>
           </tbody>
         </table>
-      </div>
+      </ReportTableScroll>
       <p v-else class="report-empty">{{ loading ? '正在读取反代…' : '暂无可导入的反代' }}</p>
     </SpotlightCard>
   </div>
 </template>
 <script setup>
+import ReportTableScroll from '@/components/ReportTableScroll.vue'
 import { computed, onMounted, onBeforeUnmount, ref } from 'vue'
 import { ExternalLink } from 'lucide-vue-next'
 import SpotlightCard from '@/components/SpotlightCard.vue'

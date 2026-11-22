@@ -81,7 +81,8 @@
 
       <!-- User Profile Dropdown Menu -->
       <div class="user-menu-wrapper" ref="menuRef">
-        <button 
+        <button
+          ref="accountBtnRef"
           class="user-profile-badge" 
           @click="toggleUserMenu"
           :aria-label="`账户菜单，${username}`"
@@ -165,6 +166,7 @@ const logout = useLogout()
 const isDropdownOpen = ref(false)
 const isNotificationOpen = ref(false)
 const menuRef = ref(null)
+const accountBtnRef = ref(null)
 const notificationRef = ref(null)
 const bellBtnRef = ref(null)
 
@@ -216,9 +218,14 @@ const handleClickOutside = (e) => {
 }
 
 const handleKeydown = (e) => {
-  if (e.key === 'Escape' && isNotificationOpen.value) {
+  if (e.key !== 'Escape' || e.defaultPrevented || e.target.closest?.('dialog[open]')) return
+  if (isNotificationOpen.value) {
     e.stopPropagation()
     closeNotificationPopover(true)
+  } else if (isDropdownOpen.value) {
+    e.stopPropagation()
+    isDropdownOpen.value = false
+    accountBtnRef.value?.focus()
   }
 }
 

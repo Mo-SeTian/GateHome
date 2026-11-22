@@ -208,6 +208,9 @@ try {
   const heights = await wireGuardDialog.locator('.settings-fields input').evaluateAll(inputs =>
     inputs.map(input => input.getBoundingClientRect().height))
   assert.deepEqual(heights, [44, 44, 44, 44])
+  const endpoint = await wireGuardDialog.getByLabel('公网域名或 IP').boundingBox()
+  const udpPort = await wireGuardDialog.getByLabel('UDP 端口').boundingBox()
+  assert.ok(endpoint.width >= 260 && endpoint.y + endpoint.height < udpPort.y, 'WireGuard endpoint and port did not stack')
   const downloadGuide = wireGuardDialog.getByRole('link', { name: '下载连接说明' })
   assert.equal(await downloadGuide.isVisible(), false)
   await wireGuardDialog.getByText('公网入口与端口转发', { exact: true }).click()
@@ -825,6 +828,20 @@ try {
   await page.setViewportSize({ width: 320, height: 844 })
   await page.locator('.main-wrapper').evaluate(el => Promise.all(el.getAnimations().map(animation => animation.finished)))
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1))
+  await route('forwards')
+  const forwardCard = page.locator('.forward-card').filter({ hasText: '流量测试转发' })
+  const pipeline = forwardCard.locator('.pipeline-box')
+  await pipeline.waitFor()
+  assert.ok(await pipeline.evaluate(el => {
+    const values = [...el.querySelectorAll('.node-val')]
+    return values[0].getBoundingClientRect().bottom < values[1].getBoundingClientRect().top &&
+      values.every(value => {
+        const text = document.createRange()
+        text.selectNodeContents(value)
+        return text.getClientRects().length === 1 && value.scrollWidth <= value.clientWidth + 1
+      })
+  }), 'forwarding endpoints did not fit on separate rows')
+  assert.equal(await forwardCard.locator('.status-indicator').evaluate(el => getComputedStyle(el).whiteSpace), 'nowrap')
   await page.setViewportSize({ width: 1440, height: 1000 })
   console.log('PASS port forwarding traffic: real TCP and UDP, live rates, per-rule history link, protocol filter and mobile layout')
 
@@ -1086,6 +1103,41 @@ try {
   }
   console.log('PASS 320px/390px editors: explicit field layouts, single checkboxes, image formats and no overflow')
 
+  for (const [width, height] of [[320, 640], [1280, 640]]) {
+    await page.setViewportSize({ width, height })
+    for (const [view, openLabel, saveLabel] of [
+      ['overview', '配置组件与顺序', '保存概览布局'],
+      ['routes', '新建反代服务', '保存路由'],
+      ['ddns', '添加 DDNS 组', '保存 DDNS 组']
+    ]) {
+      await route(view)
+      await button(openLabel).click()
+      const save = dialog().getByRole('button', { name: saveLabel, exact: true })
+      await save.waitFor()
+      const before = await save.boundingBox()
+      assert.ok(before.y >= 0 && before.y + before.height <= height, `${view}: save is clipped at ${width}px`)
+      const form = dialog().locator('form')
+      const scrolled = await form.evaluate(el => {
+        el.scrollTop = el.scrollHeight
+        return el.scrollTop
+      })
+      assert.ok(scrolled > 0, `${view}: form did not scroll at ${width}px`)
+      assert.deepEqual(await save.boundingBox(), before, `${view}: footer moved with the form`)
+      assert.ok(await save.evaluate(el => !!el.form), `${view}: save is detached from its form`)
+      await closeEditor()
+    }
+    const account = page.getByRole('button', { name: /^账户菜单/ })
+    await account.click()
+    const popup = page.locator('.user-dropdown-popover')
+    await popup.waitFor()
+    await popup.getByRole('button').first().focus()
+    await page.keyboard.press('Escape')
+    await popup.waitFor({ state: 'hidden' })
+    assert.equal(await account.getAttribute('aria-expanded'), 'false')
+    assert.ok(await account.evaluate(el => el === document.activeElement))
+  }
+  console.log('PASS long dialogs and account menu on compact desktop and mobile: anchored form actions and Escape focus return')
+
   await page.setViewportSize({ width: 320, height: 844 })
   await route('mcp')
   const emulation = await context.newCDPSession(page)
@@ -1182,6 +1234,15 @@ try {
   await route('logs')
   const quickBanBtn = page.locator('.log-explorer .quick-ban-btn').first()
   await quickBanBtn.waitFor()
+  const logsViewport = page.getByRole('region', { name: '日志记录' })
+  await page.setViewportSize({ width: 320, height: 844 })
+  await page.getByText('向左滑动查看右侧列', { exact: true }).waitFor()
+  assert.equal(await logsViewport.getAttribute('tabindex'), '0')
+  await logsViewport.focus()
+  await page.keyboard.press('ArrowRight')
+  await page.waitForFunction(() => document.querySelector('.log-explorer .report-table-wrap').scrollLeft > 0)
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.getByText('向左滑动查看右侧列', { exact: true }).waitFor({ state: 'hidden' })
   await quickBanBtn.click()
   const logDialog = page.locator('dialog.report-dialog[open]')
   await logDialog.waitFor()
@@ -1676,6 +1737,12 @@ try {
   const runtime = page.locator('.runtime-page')
   const ports = runtime.getByRole('list', { name: 'GateHome 监听端口' })
   await runtime.getByText('当前会话', { exact: true }).waitFor()
+  await page.setViewportSize({ width: 320, height: 844 })
+  await runtime.getByRole('button', { name: '查看监听清单 →', exact: true }).click()
+  const listenerHeading = runtime.getByRole('heading', { name: 'GateHome 监听端口' })
+  assert.ok(await listenerHeading.evaluate(el => document.activeElement === el &&
+    el.getBoundingClientRect().top >= 60 && el.getBoundingClientRect().bottom <= innerHeight))
+  await page.setViewportSize({ width: 1440, height: 1000 })
   await runtime.locator('.sparkline-svg').first().waitFor()
   assert.equal(await runtime.locator('.sparkline-svg').count(), 2, 'CPU and memory sparklines did not both render')
   await runtime.getByRole('button', { name: '刷新数据', exact: true }).click()
@@ -1871,6 +1938,15 @@ try {
     await drawer.getByRole('button', { name: '收起网关助手' }).waitFor()
     await page.waitForFunction(() => document.documentElement.scrollWidth <= innerWidth && document.querySelector('.page-viewport').inert)
     assert.equal(await page.locator('.page-viewport').evaluate(el => el.contains(document.activeElement)), false)
+    assert.ok(await drawer.locator('.assistant-heading').evaluate(el => {
+      const heading = el.querySelector('h2')
+      const lastControl = el.querySelector('.assistant-actions').lastElementChild
+      return heading.offsetHeight <= Math.ceil(parseFloat(getComputedStyle(heading).lineHeight)) &&
+        lastControl.getBoundingClientRect().right <= el.getBoundingClientRect().right + 1
+    }), 'assistant title or controls did not fit on one line')
+    const model = await drawer.getByLabel('模型', { exact: true }).boundingBox()
+    const effort = await drawer.getByLabel('思考强度').boundingBox()
+    assert.ok(model.width >= 260 && model.y + model.height < effort.y, 'model selector did not get a full row')
   }
   await page.setViewportSize({ width: 1440, height: 1000 })
   await route('assistant/settings')

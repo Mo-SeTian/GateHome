@@ -248,7 +248,7 @@
           <X :size="18" />
         </button>
       </div>
-      <form class="modal-body" @submit.prevent="saveRoute">
+      <form id="route-editor-form" class="modal-body" @submit.prevent="saveRoute">
         <p v-if="formError" ref="routeError" class="page-error" role="alert" tabindex="-1">{{ formError }}</p>
         <label class="form-group"
           >服务名称<input v-model="routeDraft.name" name="name" class="form-input" maxlength="100"
@@ -338,19 +338,15 @@
           /></label>
         </fieldset>
         <RouteImagePicker v-if="routeOpen" v-model="routeDraft.image" @busy="imageBusy = $event" />
-        <div class="modal-footer">
-          <button
-            type="button"
-            class="btn btn-secondary"
-            :disabled="isSavingConfig || imageBusy"
-            @click="routeDialog.close()"
-          >
-            取消</button
-          ><button type="submit" class="btn btn-primary" :disabled="isSavingConfig || imageBusy">
-            {{ isSavingConfig ? '保存中…' : '保存路由' }}
-          </button>
-        </div>
       </form>
+      <footer class="modal-footer">
+        <button type="button" class="btn btn-secondary" :disabled="isSavingConfig || imageBusy" @click="routeDialog.close()">
+          取消
+        </button>
+        <button type="submit" class="btn btn-primary" form="route-editor-form" :disabled="isSavingConfig || imageBusy">
+          {{ isSavingConfig ? '保存中…' : '保存路由' }}
+        </button>
+      </footer>
     </dialog>
 
     <dialog ref="groupDialog" class="modal-dialog" aria-labelledby="group-title" @cancel="blockBusyClose">

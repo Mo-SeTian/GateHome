@@ -234,7 +234,7 @@
         </div>
       </div>
     </div>
-    <div v-if="data?.entries.length" class="report-table-wrap">
+    <ReportTableScroll v-if="data?.entries.length" label="日志记录">
       <table class="report-table log-table">
         <thead>
           <tr>
@@ -313,7 +313,7 @@
           </tr>
         </tbody>
       </table>
-    </div>
+    </ReportTableScroll>
     <p v-else-if="data" class="report-empty">暂无匹配记录，请调整筛选条件或产生新的调用后刷新。</p>
     <dialog
       ref="detailDialog"
@@ -462,6 +462,7 @@
 </template>
 
 <script setup>
+import ReportTableScroll from '@/components/ReportTableScroll.vue'
 import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, useId } from 'vue'
 import {
   Ban,

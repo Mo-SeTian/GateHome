@@ -86,7 +86,7 @@
           <div class="metric-value" data-total="combined">{{ formatBytes(data.upload_bytes + data.download_bytes) }}</div>
         </SpotlightCard>
       </div>
-      <div v-if="data.rules.length" class="report-table-wrap">
+      <ReportTableScroll v-if="data.rules.length" label="流量统计规则">
         <table class="report-table traffic-table">
           <thead>
             <tr>
@@ -121,13 +121,14 @@
             </tr>
           </tbody>
         </table>
-      </div>
+      </ReportTableScroll>
       <p v-else class="report-empty">所选时间和规则暂无{{ applied.source === 'forward' ? '端口转发' : ' HTTP ' }}流量记录。</p>
     </template>
     <p v-else-if="loading" role="status">正在读取流量统计…</p>
   </div>
 </template>
 <script setup>
+import ReportTableScroll from '@/components/ReportTableScroll.vue'
 import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import SpotlightCard from '@/components/SpotlightCard.vue'

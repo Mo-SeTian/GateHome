@@ -257,7 +257,7 @@
           name="remote_restore_password" label="备份密码（支持空密码）" secret-name="密码" class="wide"
           v-model="remotePassword" autocomplete="off" placeholder="" @update:model-value="preview = null" />
       </div>
-      <div v-if="files.length" class="report-table-wrap" tabindex="0" role="region" aria-label="WebDAV 备份列表，可横向滚动">
+      <ReportTableScroll v-if="files.length" label="WebDAV 备份列表">
         <table class="report-table">
           <thead>
             <tr>
@@ -284,12 +284,13 @@
             </tr>
           </tbody>
         </table>
-      </div>
+      </ReportTableScroll>
       <p v-else class="report-empty">{{ listing ? '正在读取目录…' : '尚未读取到远程 GateHome 备份' }}</p>
     </SpotlightCard>
   </div>
 </template>
 <script setup>
+import ReportTableScroll from '@/components/ReportTableScroll.vue'
 import { computed, nextTick, onMounted, onBeforeUnmount, reactive, ref } from 'vue'
 import { ChevronRight, FolderClosed } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'

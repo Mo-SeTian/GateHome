@@ -77,7 +77,7 @@
       <p class="report-note">
         这是已授权客户端列表。每次重新生成会使该客户端旧 Token 失效；撤销后不能重新启用。
       </p>
-      <div v-if="data.clients.length" class="report-table-wrap">
+      <ReportTableScroll v-if="data.clients.length" label="MCP 客户端">
         <table class="report-table">
           <thead>
             <tr>
@@ -130,7 +130,7 @@
             </tr>
           </tbody>
         </table>
-      </div>
+      </ReportTableScroll>
       <p v-else class="report-empty">暂无客户端，创建后获取专用 Token。</p>
     </SpotlightCard>
     <SpotlightCard class="report-panel">
@@ -231,6 +231,7 @@
   </div>
 </template>
 <script setup>
+import ReportTableScroll from '@/components/ReportTableScroll.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import SpotlightCard from '@/components/SpotlightCard.vue'
 import McpPermissions from '@/components/McpPermissions.vue'
