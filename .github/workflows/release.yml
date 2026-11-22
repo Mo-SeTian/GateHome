@@ -142,10 +142,10 @@ jobs:
             fi
             if [ "$PRERELEASE" = true ]; then args+=(--prerelease); fi
             gh release create "$RELEASE_TAG" "${args[@]}"
-            for attempt in {1..10}; do
+            for attempt in {1..30}; do
               metadata=$(find_release)
               if [ "$metadata" != null ]; then break; fi
-              sleep 1
+              sleep 2
             done
           fi
           release_id=$(jq -er --arg tag "$RELEASE_TAG" '
