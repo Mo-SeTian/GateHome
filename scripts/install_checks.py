@@ -24,7 +24,10 @@ with tempfile.TemporaryDirectory(prefix='gatehome-install-checks.') as temporary
     (package / 'dist').mkdir()
     (package / 'deploy').mkdir()
     shutil.copy2(ROOT / 'install.sh', package / 'install.sh')
-    shutil.copy2(ROOT / 'deploy/gatehouse.service', package / 'deploy/gatehouse.service')
+    for name in ('gatehouse.service', 'gatehome-wireguard.service', 'wireguard_host.py'):
+        shutil.copy2(ROOT / 'deploy' / name, package / 'deploy' / name)
+    (package / 'docs').mkdir()
+    shutil.copy2(ROOT / 'docs/wireguard.md', package / 'docs/wireguard.md')
     shutil.copy2(ROOT / 'VERSION', package / 'VERSION')
     checksums = []
     for arch in ('amd64', 'arm64'):
@@ -113,6 +116,7 @@ trap '[[ -z "$DOWNLOAD_DIR" ]] || rm -rf -- "$DOWNLOAD_DIR"' EXIT
 
     execute('install_gatehouse', '\nTEST_ONLY_INSTALL_PASSWORD\nTEST_ONLY_INSTALL_PASSWORD\n')
     assert (prefix / 'config/state.json').is_file() and not (prefix / 'data/state.json').exists()
+    assert (prefix / 'wireguard/deploy/wireguard_host.py').is_file()
     for folder in ('log', 'data', 'sunpanel'): assert (prefix / folder).is_dir()
     (prefix / 'log/calls.jsonl').write_text('{"id":1,"message":"TEST_ONLY_LOG"}\n')
     (prefix / 'log/calls.jsonl.1').write_text('{"id":0,"message":"TEST_ONLY_ROTATED_LOG"}\n')

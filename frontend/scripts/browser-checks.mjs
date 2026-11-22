@@ -190,6 +190,39 @@ try {
   await page.locator('#admin-password').fill(secret)
   await page.locator('.login-form button[type=submit]').click()
   await page.locator('.routes-page').waitFor()
+  await page.emulateMedia({ colorScheme: 'dark' })
+  await page.waitForSelector('body.theme-dark')
+  await page.emulateMedia({ colorScheme: 'light' })
+  await page.waitForSelector('body.theme-light')
+  let remoteHomeState = { available: false }
+  await page.route('**/api/remote-home', r => r.fulfill({ json: remoteHomeState }))
+  await page.locator('.nav-link[href$="/remote-home"]').click()
+  await page.getByRole('button', { name: '配置 WireGuard' }).click()
+  await page.getByRole('dialog').getByRole('heading', { name: 'WireGuard 设置' }).waitFor()
+  assert.equal(await page.getByRole('button', { name: '保存并应用' }).isDisabled(), true)
+  await page.getByRole('dialog').getByRole('button', { name: '关闭', exact: true }).click()
+  remoteHomeState = {
+    available: true, running: true, forwarding: true, listen_port: 51820,
+    settings: { endpoint: 'vpn.example.test', port: 51820, lan: '192.168.2.0/24', tunnel: '10.77.0.0/24', snat: true },
+    devices: [{ id: 'phone', name: '测试手机', address: '10.77.0.2', mode: 'lan', rx: 1024, tx: 2048, handshake: Math.floor(Date.now() / 1000) }]
+  }
+  const refreshRemoteHome = () => page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
+  await refreshRemoteHome()
+  await page.getByRole('button', { name: '测试手机', exact: true }).waitFor()
+  await page.getByText('已收到握手', { exact: true }).waitFor()
+  const connectedState = remoteHomeState
+  remoteHomeState = { available: false }
+  await refreshRemoteHome()
+  await page.getByText('状态不可用', { exact: true }).first().waitFor()
+  assert.equal(await page.getByRole('button', { name: '测试手机', exact: true }).count(), 1)
+  assert.equal(await page.getByRole('button', { name: '添加设备', exact: true }).isDisabled(), true)
+  remoteHomeState = connectedState
+  await page.getByRole('button', { name: '重试', exact: true }).click()
+  await page.getByText('已收到握手', { exact: true }).waitFor()
+  await page.unroute('**/api/remote-home')
+  console.log('PASS WireGuard setup and host outage recovery, with operating system theme updates')
+  await page.locator('.nav-link[href$="/routes"]').click()
+  await page.locator('.routes-page').waitFor()
   assert.equal(await page.evaluate(() => isSecureContext), false)
   assert.equal(await page.evaluate(() => typeof crypto.randomUUID), 'undefined')
   const lifecycleHistoryWrites = await page.evaluate(() => {
@@ -1501,7 +1534,7 @@ try {
         const toggle = group.getByRole('button')
         if (await toggle.getAttribute('aria-expanded') === 'false') await toggle.click()
       }
-      assert.equal(await navigation.getByRole('link').count(), 22)
+      assert.equal(await navigation.getByRole('link').count(), 23)
       if (width < 1024)
         assert.ok(await navigation.locator('.nav-link, .nav-section-title').evaluateAll(controls => controls.every(control => control.getBoundingClientRect().height >= 44)))
       if (theme === 'light') await page.waitForFunction(() => {
@@ -1525,7 +1558,7 @@ try {
       }
     }
   }
-  console.log('PASS sidebar: both themes, 22 links in six collapsible groups and 44px mobile targets from 320px to 1440px')
+  console.log('PASS sidebar: both themes, 23 links in six collapsible groups and 44px mobile targets from 320px to 1440px')
 
   await page.setViewportSize({ width: 1440, height: 1000 })
   const baseRuntime = await api('runtime')

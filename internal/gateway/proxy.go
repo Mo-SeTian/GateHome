@@ -17,12 +17,13 @@ import (
 )
 
 type proxyRoute struct {
-	route     Route
-	trafficID string
-	handler   http.Handler
-	firewall  *compiledFirewall
-	groupName string
-	auth      *routeGate
+	adminUpstream bool
+	route         Route
+	trafficID     string
+	handler       http.Handler
+	firewall      *compiledFirewall
+	groupName     string
+	auth          *routeGate
 }
 
 type Proxy struct {
@@ -130,7 +131,7 @@ func (p *Proxy) configurePrepared(c Config, hashes map[string]string, firewalls 
 			},
 		}
 		group, _ := c.Group(r.GroupID)
-		entry := proxyRoute{route: r, trafficID: trafficID, handler: h, firewall: firewalls[r.FirewallID], groupName: group.Name}
+		entry := proxyRoute{adminUpstream: adminUpstream, route: r, trafficID: trafficID, handler: h, firewall: firewalls[r.FirewallID], groupName: group.Name}
 		if r.Auth.Enabled {
 			key := routeKey(r)
 			entry.auth = previous[key].auth
@@ -159,6 +160,7 @@ func (p *Proxy) Handler(groupID string) http.Handler {
 }
 
 func (p *Proxy) serveGroup(groupID string, w http.ResponseWriter, r *http.Request) {
+	peerAddress := r.RemoteAddr
 	trusted, _ := p.trustedProxies.Load().([]netip.Prefix)
 	r = proxySourceRequest(r, trusted)
 	started := time.Now()
@@ -190,6 +192,10 @@ func (p *Proxy) serveGroup(groupID string, w http.ResponseWriter, r *http.Reques
 	route, ok := p.routes.Load().(map[string]proxyRoute)[groupID+"/"+host]
 	if !ok {
 		http.NotFound(w, r)
+		return
+	}
+	if !wireGuardRouteAllowed(r, peerAddress, route) {
+		http.Error(w, "此设备未授权访问该反代服务", http.StatusForbidden)
 		return
 	}
 	target = route.route.Host

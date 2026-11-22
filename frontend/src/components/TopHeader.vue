@@ -9,6 +9,7 @@
       <span class="current-page">{{ currentTitle }}</span>
     </div>
 
+    <div id="home-breadcrumb"></div>
     <div class="header-center">
       <button
         class="cmdk-trigger-btn" type="button" aria-haspopup="dialog"
@@ -277,6 +278,9 @@ onUnmounted(() => {
   color: var(--ink);
   font-weight: 600;
 }
+
+#home-breadcrumb:empty { display: none; }
+@media (max-width: 1100px) { #home-breadcrumb { display: none; } }
 
 /* Center ⌘K Trigger */
 .header-center {

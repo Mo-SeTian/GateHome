@@ -10,6 +10,7 @@ COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 COPY frontend ./
 COPY VERSION /src/VERSION
+COPY docs/wireguard.md /src/docs/wireguard.md
 RUN npm run build
 
 FROM golang:1.27.1-alpine AS builder

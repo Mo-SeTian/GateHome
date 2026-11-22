@@ -1,0 +1,25 @@
+[Unit]
+Description=GateHome WireGuard host service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/bin/python3 -I /usr/local/lib/gatehome/wireguard_host.py
+Group=gatehouse
+RuntimeDirectory=gatehome-wireguard
+RuntimeDirectoryMode=0750
+# Keep the bind-mounted directory available across service stop/start.
+RuntimeDirectoryPreserve=yes
+StateDirectory=gatehome-wireguard
+StateDirectoryMode=0700
+UMask=0077
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

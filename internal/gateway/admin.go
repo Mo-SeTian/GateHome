@@ -106,6 +106,7 @@ func (a *Admin) Handler() http.Handler {
 	a.accountRoutes(mux)
 	a.adminSessionRoutes(mux)
 	a.passkeyRoutes(mux)
+	a.remoteHomeRoutes(mux)
 	mux.HandleFunc("GET /api/exposure", a.requireAuth(a.exposureOverview))
 	a.credentialRoutes(mux)
 	mux.HandleFunc("GET /api/sunpanel/admin-setup", a.requireAuth(a.sunPanelAdminSetup))
@@ -302,6 +303,10 @@ func (a *Admin) Handler() http.Handler {
 		http.NotFound(w, r)
 	})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !wireGuardAdminAllowed(r, r.RemoteAddr) {
+			http.Error(w, "此设备未授权访问管理后台", http.StatusForbidden)
+			return
+		}
 		var trusted []netip.Prefix
 		if a.proxy != nil {
 			trusted, _ = a.proxy.trustedProxies.Load().([]netip.Prefix)
@@ -315,7 +320,7 @@ func (a *Admin) Handler() http.Handler {
 			mcpHandler.ServeHTTP(w, r)
 			return
 		}
-		if strings.HasPrefix(r.URL.Path, "/api/") && r.URL.Path != "/api/status" && r.URL.Path != "/api/dashboard" && r.URL.Path != "/api/service-health" && !(r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/api/backups/")) && r.URL.Path != "/api/logs" && r.URL.Path != "/api/statistics" && r.URL.Path != "/api/ddns/records" && r.URL.Path != "/api/maintenance/online-update-status" && !(r.Method == "GET" && (r.URL.Path == "/api/ip-blocks" || r.URL.Path == "/api/runtime" || r.URL.Path == "/api/account/sessions" || strings.HasPrefix(r.URL.Path, "/api/service-health/") || strings.HasPrefix(r.URL.Path, "/api/service-discovery/") || strings.HasPrefix(r.URL.Path, "/api/route-images/") || r.URL.Path == "/api/icons" || strings.HasPrefix(r.URL.Path, "/api/icons/"))) {
+		if strings.HasPrefix(r.URL.Path, "/api/") && r.URL.Path != "/api/status" && r.URL.Path != "/api/dashboard" && r.URL.Path != "/api/service-health" && !(r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/api/backups/")) && r.URL.Path != "/api/logs" && r.URL.Path != "/api/statistics" && r.URL.Path != "/api/ddns/records" && r.URL.Path != "/api/maintenance/online-update-status" && !(r.Method == "GET" && (r.URL.Path == "/api/ip-blocks" || r.URL.Path == "/api/runtime" || r.URL.Path == "/api/remote-home" || r.URL.Path == "/api/account/sessions" || strings.HasPrefix(r.URL.Path, "/api/service-health/") || strings.HasPrefix(r.URL.Path, "/api/service-discovery/") || strings.HasPrefix(r.URL.Path, "/api/route-images/") || r.URL.Path == "/api/icons" || strings.HasPrefix(r.URL.Path, "/api/icons/"))) {
 			started := time.Now()
 			logged := &loggedResponseWriter{ResponseWriter: w}
 			w = logged

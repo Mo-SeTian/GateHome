@@ -28,6 +28,7 @@
 
 /* ================= DARK MODE (OBSIDIAN TECH) ================= */
 body.theme-dark {
+  color-scheme: dark;
   --canvas: #090d16;
   --sidebar-bg: rgba(13, 18, 30, 0.95);
   --card-bg: rgba(17, 24, 39, 0.75);
@@ -56,6 +57,7 @@ body.theme-dark {
 
 /* ================= LIGHT MODE (VISIONOS FROSTED WHITE) ================= */
 body.theme-light {
+  color-scheme: light;
   --canvas: #f1f5f9;
   --sidebar-bg: rgba(255, 255, 255, 0.95);
   --card-bg: rgba(255, 255, 255, 0.85);

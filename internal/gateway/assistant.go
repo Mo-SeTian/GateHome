@@ -57,7 +57,7 @@ type assistantChange struct {
 }
 
 var assistantPages = map[string]string{
-	"/overview": "系统概览", "/routes": "反向代理", "/forwards": "端口转发",
+	"/overview": "系统概览", "/routes": "反向代理", "/forwards": "端口转发", "/remote-home": "远程回家",
 	"/icons": "图标库", "/sunpanel": "浏览器首页", "/ddns": "动态域名",
 	"/certificates": "SSL 证书", "/subscriptions": "订阅管理", "/access": "防火墙管理",
 	"/runtime": "运行状态", "/notifications": "通知中心", "/firewall-logs": "防火墙拦截记录",
@@ -372,6 +372,7 @@ func (a *Admin) assistantChat(w http.ResponseWriter, r *http.Request) {
 	traffic := a.proxy.liveTraffic.status()
 	contextData, err := json.Marshal(map[string]any{
 		"page": assistantPages[input.Page], "pages": assistantPages, "routes": routes, "listeners": listeners,
+		"wireguard":  wireGuardAssistant(r.Context()),
 		"sampled_at": now, "health_settings": serviceHealthOptions(state.Config),
 		"proxy_traffic": map[string]any{
 			"total": traffic.Total, "rates_sampled": traffic.Sampled, "routes": assistantProxyConnections(state.Config, traffic),

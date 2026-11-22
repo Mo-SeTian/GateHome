@@ -73,7 +73,7 @@ import { useToast } from '@/composables/useToast'
 import { computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { 
-  X, ChevronDown, Sparkles, Cable, LayoutDashboard, Network, ArrowLeftRight, Compass, Images,
+  House, X, ChevronDown, Sparkles, Cable, LayoutDashboard, Network, ArrowLeftRight, Compass, Images,
   Globe, Lock, Download, ShieldAlert, FileSearch, ScrollText, Ban,
   Bell, BarChart3, Activity, Bot, RefreshCw, HardDriveDownload, Settings, LogOut
 } from 'lucide-vue-next'
@@ -88,7 +88,7 @@ const groups = [
   ] },
   { label: '服务接入', icon: Network, items: [
     ['/routes', '反向代理', Network], ['/forwards', '端口转发', ArrowLeftRight],
-    ['/ddns', '动态域名', Globe], ['/certificates', 'SSL 证书', Lock]
+    ['/remote-home', '远程回家', House], ['/ddns', '动态域名', Globe], ['/certificates', 'SSL 证书', Lock]
   ] },
   { label: '访问安全', icon: ShieldAlert, items: [
     ['/access', '防火墙管理', ShieldAlert], ['/subscriptions', '订阅管理', Download],

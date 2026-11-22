@@ -5,6 +5,7 @@ GateHome 是面向家庭服务器和内网服务的自托管网关。Go 程序�
 ## 主要功能
 
 - **反向代理与端口转发** · 按域名和监听组管理 HTTP、HTTPS、WebSocket 服务，发现内网应用，配置独立的 TCP / UDP 转发。
+- **远程回家** · 使用 WireGuard 从手机访问整个家庭网段、指定内网设备或已授权反代服务。[部署和使用说明](docs/wireguard.md)
 - **动态域名与证书** · 多组 Cloudflare DDNS、IPv4 / IPv6 同步和 Let's Encrypt DNS-01 证书签发及续期。
 - **访问控制与监控** · IP / CIDR 规则、订阅、服务账号、WAF 和限速，支持健康检查、访问日志和流量统计。
 - **故障推送** · 在管理台「通知中心 → 故障推送」保存 Webhook 地址并启用，可发送测试通知。连续两次反代上游检测失败、WebDAV 备份失败或正式证书距到期 7 天内时推送，恢复后再通知。接收端须接受通用 JSON POST 并返回 HTTP 2xx。请求包含 `type`（`upstream`、`backup`、`certificate` 或 `test`）、`status`（`firing`、`resolved` 或 `test`）、`resource`、`message`、`time` 和 `id`。失败约一分钟后重试，接收端可按 `id` 或同值的 `Idempotency-Key` 请求头去重。

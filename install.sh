@@ -110,6 +110,12 @@ install_gatehouse() {
   else
     printf '保留已有配置和管理员账户。\n'
   fi
+  # Keep the optional host-service kit available after a streamed installer cleans up its download.
+  if [[ -f "$SOURCE_DIR/deploy/wireguard_host.py" ]]; then
+    install -d -m 0755 -o root -g root "$INSTALL_DIR/wireguard/deploy" "$INSTALL_DIR/wireguard/docs"
+    install -m 0644 -o root -g root "$SOURCE_DIR/deploy/wireguard_host.py" "$SOURCE_DIR/deploy/gatehome-wireguard.service" "$INSTALL_DIR/wireguard/deploy/"
+    install -m 0644 -o root -g root "$SOURCE_DIR/docs/wireguard.md" "$INSTALL_DIR/wireguard/docs/"
+  fi
   install -m 0644 -o root -g root "$SOURCE_DIR/deploy/gatehouse.service" "$SERVICE_FILE"
   install -d -m 0755 -o root -g root "${SERVICE_FILE}.d"
   cat > "${SERVICE_FILE}.d/admin.conf" <<EOF
@@ -146,10 +152,11 @@ uninstall_gatehouse() {
   printf '卸载会停止服务并移除程序；默认保留 config、log、data、sunpanel 四个目录。\n'
   read -r -p '确认卸载？输入 UNINSTALL：' answer < /dev/tty
   [[ "$answer" == UNINSTALL ]] || { printf '已取消。\n'; return; }
+  systemctl disable --now gatehome-wireguard.service 2>/dev/null || true
   systemctl disable --now gatehouse.service 2>/dev/null || true
   rm -f -- "$SERVICE_FILE" "${SERVICE_FILE}.d/admin.conf" "$INSTALL_DIR/launcher"
   rmdir -- "${SERVICE_FILE}.d" 2>/dev/null || true
-  rm -rf -- "$INSTALL_DIR/app"
+  rm -rf -- "$INSTALL_DIR/app" "$INSTALL_DIR/wireguard"
   systemctl daemon-reload
   printf '程序已卸载，配置、日志和数据保留在 %s。\n' "$INSTALL_DIR"
   read -r -p '永久删除这四个目录请输入 DELETE DATA；回车保留：' answer < /dev/tty

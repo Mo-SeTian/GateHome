@@ -117,7 +117,6 @@ watch(isAuthenticated, (authenticated, _, onCleanup) => {
 }, { immediate: true })
 
 onMounted(() => {
-  document.body.className = `theme-${theme.value}`
 })
 </script>
 

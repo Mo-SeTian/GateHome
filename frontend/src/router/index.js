@@ -37,6 +37,10 @@ const routes = [
     meta: { title: '浏览器首页', icon: 'Compass' }
   },
   {
+    path: '/remote-home', name: 'RemoteHome', component: () => import('@/views/RemoteHomeView.vue'),
+    meta: { title: '远程回家', icon: 'House' }
+  },
+  {
     path: '/ddns',
     name: 'Ddns',
     component: () => import('@/views/DdnsView.vue'),

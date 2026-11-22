@@ -129,10 +129,10 @@
               :key="option.value"
               type="button"
               class="btn btn-secondary"
-              :aria-pressed="theme === option.value"
+              :aria-pressed="themePreference === option.value"
               @click="setTheme(option.value)"
             >
-              {{ option.label }}{{ theme === option.value ? ' · 已选择' : '' }}
+              {{ option.label }}{{ themePreference === option.value ? ' · 已选择' : '' }}
             </button>
           </div></SpotlightCard
         >
@@ -196,12 +196,13 @@ import { useToast } from '@/composables/useToast'
 import '@/styles/reports.css'
 const { gatewayStatus, gatewayVersion, isSavingConfig, refreshConfig, refreshStatus, saveConfig } =
   useGatewayStatus()
-const { theme, setTheme } = useAppStore(),
+const { themePreference, setTheme } = useAppStore(),
   { username, openAccountModal, endSession } = useSession()
 const toast = useToast(),
   router = useRouter(),
   controller = new AbortController()
 const themes = [
+  { value: 'system', label: '跟随系统' },
   { value: 'dark', label: 'Obsidian Tech 黑曜石深色' },
   { value: 'light', label: 'VisionOS 磨砂浅色' }
 ]

@@ -219,6 +219,10 @@ const pages = [
     keywords: ['转发', '端口映射', 'tcp', 'udp', 'forward', 'nat']
   },
   {
+    title: '远程回家 (WireGuard)', subtitle: '管理家庭网段、隧道与授权设备',
+    path: '/remote-home', icon: Network, keywords: ['VPN', 'WireGuard', '家庭局域网', '握手']
+  },
+  {
     title: '浏览器首页 (SunPanel)',
     subtitle: '配置导航页联动与内外部服务卡片同步',
     path: '/sunpanel',

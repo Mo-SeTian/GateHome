@@ -1,22 +1,27 @@
-import { ref } from 'vue'
+import { computed, ref, watchEffect } from 'vue'
 
 // Global UI State
-const theme = ref(localStorage.getItem('gh_theme') || 'dark')
+const media = window.matchMedia('(prefers-color-scheme: dark)')
+const systemDark = ref(media.matches)
+const savedTheme = localStorage.getItem('gh_theme')
+const themePreference = ref(['dark', 'light'].includes(savedTheme) ? savedTheme : 'system')
+const theme = computed(() => themePreference.value === 'system'
+  ? (systemDark.value ? 'dark' : 'light') : themePreference.value)
+media.addEventListener('change', event => { systemDark.value = event.matches })
+watchEffect(() => {
+  document.body.classList.toggle('theme-dark', theme.value === 'dark')
+  document.body.classList.toggle('theme-light', theme.value === 'light')
+})
 const isSidebarOpen = ref(false)
 const isCmdkOpen = ref(false)
 
 export function useAppStore() {
-  const toggleTheme = () => {
-    theme.value = theme.value === 'dark' ? 'light' : 'dark'
-    localStorage.setItem('gh_theme', theme.value)
-    document.body.className = `theme-${theme.value}`
+  const setTheme = value => {
+    themePreference.value = value
+    if (value === 'system') localStorage.removeItem('gh_theme')
+    else localStorage.setItem('gh_theme', value)
   }
-
-  const setTheme = (val) => {
-    theme.value = val
-    localStorage.setItem('gh_theme', val)
-    document.body.className = `theme-${val}`
-  }
+  const toggleTheme = () => setTheme(theme.value === 'dark' ? 'light' : 'dark')
 
   const toggleSidebar = () => {
     isSidebarOpen.value = !isSidebarOpen.value
@@ -40,6 +45,7 @@ export function useAppStore() {
 
   return {
     theme,
+    themePreference,
     toggleTheme,
     setTheme,
     isSidebarOpen,

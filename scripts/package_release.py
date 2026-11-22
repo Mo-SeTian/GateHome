@@ -110,7 +110,7 @@ for arch in ("amd64", "arm64"):
     asset = updates / ("gatehome-linux-" + arch + ".tar.gz")
     with tempfile.TemporaryDirectory(prefix=".install-", dir=updates) as temp:
         package = Path(temp)
-        for name in ("VERSION", "install.sh", "deploy/gatehouse.service", "dist/gatehouse-linux-" + arch):
+        for name in ("VERSION", "install.sh", "deploy/gatehouse.service", "deploy/gatehome-wireguard.service", "deploy/wireguard_host.py", "docs/wireguard.md", "dist/gatehouse-linux-" + arch):
             target = package / name
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(destination / name, target)

@@ -12,6 +12,7 @@ build: frontend
 	go build -trimpath -ldflags='$(LDFLAGS)' -o dist/gatehouse ./cmd/gatehouse
 
 test: frontend
+	python3 -B -m unittest discover -s deploy
 	npm --prefix frontend test
 	npm --prefix sunpanel run test:gatehome
 	npm --prefix sunpanel run type-check
