@@ -506,6 +506,14 @@ func (a *Admin) putConfig(w http.ResponseWriter, r *http.Request) {
 		apiError(w, 400, err.Error())
 		return
 	}
+	if wgPort := a.remoteHome.configuredPort(); wgPort > 0 {
+		for _, f := range input.Config.Forwards {
+			if f.Protocol != "tcp" && f.ListenPort == wgPort {
+				apiError(w, 400, "UDP 转发端口不能与内置 WireGuard 端口相同")
+				return
+			}
+		}
+	}
 	if input.Revision != a.store.Snapshot().Revision {
 		apiError(w, 400, "配置已被修改，请刷新页面后重试")
 		return

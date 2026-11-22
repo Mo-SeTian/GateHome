@@ -1046,7 +1046,7 @@ onUnmounted(() => controller.abort())
 .detail-dl {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   margin: 0;
 }
 
@@ -1055,7 +1055,7 @@ onUnmounted(() => controller.abort())
   grid-template-columns: 110px minmax(0, 1fr);
   gap: 12px;
   font-size: 13px;
-  padding-bottom: 8px;
+  padding-bottom: 6px;
   border-bottom: 1px solid var(--line);
 }
 
@@ -1075,8 +1075,8 @@ onUnmounted(() => controller.abort())
 .glass-section {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 14px 16px;
+  gap: 8px;
+  padding: 12px 14px;
   border-radius: var(--radius-md);
   background: rgba(255, 255, 255, 0.02);
   border: 1px solid var(--line);
@@ -1328,6 +1328,12 @@ onUnmounted(() => controller.abort())
   }
   .filter-actions-group .btn {
     padding-block: 7px;
+  }
+}
+
+@media (max-width: 380px) {
+  .filter-primary-fields {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 </style>

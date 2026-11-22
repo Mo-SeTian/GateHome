@@ -22,6 +22,7 @@
       <button class="btn btn-secondary" @click="refresh">重试</button>
     </p>
     <p v-if="!status && !loadError" class="report-note">正在读取宿主机状态…</p>
+    <p v-if="status?.fault && !managing" role="alert" class="report-error">{{ status.fault }}</p>
     <template v-if="status && !managing">
       <h2>选择接入方式</h2>
       <div class="panel method">
@@ -405,7 +406,7 @@ td.actions { display:table-cell; white-space:nowrap; }
   .settings-fields { grid-template-columns: minmax(0, 1fr) 86px; }
   .settings-fields > :nth-child(n+3) { grid-column: 1 / -1; }
 }
-@media (max-width: 380px) {
+@media (max-width: 420px) {
   .settings-fields { grid-template-columns: minmax(0, 1fr); }
 }
 @media(max-width:760px) {
@@ -414,7 +415,8 @@ td.actions { display:table-cell; white-space:nowrap; }
   .summary > div { padding:10px 0; }
   .summary > div + div { border-left:0; border-top:1px solid var(--line); }
   .summary > div > div { display:flex; align-items:center; justify-content:space-between; gap:10px; flex:1; }
-  .summary strong { font-size:14px; margin:0; text-align:right; }
+  .summary small { white-space: nowrap; flex-shrink: 0; }
+  .summary strong { font-size:14px; margin:0; text-align:right; overflow-wrap: anywhere; }
   .metric-icon { width:32px; height:32px; }
   .metric-icon svg { width:17px; }
   .method { flex-wrap:wrap; }

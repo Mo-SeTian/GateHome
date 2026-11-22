@@ -587,11 +587,13 @@ onUnmounted(() => {
   max-width: none;
   max-height: none;
   background: transparent;
+  box-shadow: none;
+  border-radius: 0;
   z-index: 999;
   display: flex;
   align-items: flex-start;
   justify-content: center;
-  padding-top: 10vh;
+  padding: 10vh 16px 16px;
 }
 .cmdk-backdrop:not([open]) {
   display: none;
@@ -906,10 +908,10 @@ body.theme-light .cmdk-dialog {
 
 @media (max-width: 640px) {
   .cmdk-backdrop {
-    padding-top: 4vh;
+    padding: 6vh 10px 12px;
   }
   .cmdk-dialog {
-    width: 95%;
+    width: 100%;
   }
   .cmdk-results {
     max-height: 60dvh;

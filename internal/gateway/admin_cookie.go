@@ -20,8 +20,29 @@ func localAdminAddresses() map[netip.Addr]bool {
 	return result
 }
 
+func urlEffectivePort(u *url.URL) int {
+	if u == nil {
+		return 0
+	}
+	if portText := u.Port(); portText != "" {
+		port, err := strconv.Atoi(portText)
+		if err != nil {
+			return 0
+		}
+		return port
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "http":
+		return 80
+	case "https":
+		return 443
+	default:
+		return 0
+	}
+}
+
 func isAdminUpstream(u *url.URL, adminPort int, addresses map[netip.Addr]bool) bool {
-	if u == nil || adminPort < 1 || u.Port() != strconv.Itoa(adminPort) {
+	if u == nil || adminPort < 1 || urlEffectivePort(u) != adminPort {
 		return false
 	}
 	if strings.EqualFold(u.Hostname(), "localhost") {
@@ -32,7 +53,23 @@ func isAdminUpstream(u *url.URL, adminPort int, addresses map[netip.Addr]bool) b
 		return false
 	}
 	ip = ip.Unmap()
-	return ip == netip.MustParseAddr("127.0.0.1") || ip == netip.MustParseAddr("::1") || addresses[ip]
+	return ip.IsLoopback() || addresses[ip]
+}
+
+// isAdminAccessBlockedTarget includes unspecified addresses (0.0.0.0 / ::) that
+// are untrusted for session cookies but still connect locally on Linux/BSD hosts.
+func isAdminAccessBlockedTarget(u *url.URL, adminPort int, addresses map[netip.Addr]bool) bool {
+	if isAdminUpstream(u, adminPort, addresses) {
+		return true
+	}
+	if u == nil || adminPort < 1 || urlEffectivePort(u) != adminPort {
+		return false
+	}
+	ip, err := netip.ParseAddr(u.Hostname())
+	if err != nil || ip.Zone() != "" {
+		return false
+	}
+	return ip.IsUnspecified()
 }
 
 // Business upstreams must not receive or overwrite the management session.

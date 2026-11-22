@@ -88,16 +88,26 @@ type homeStatus struct {
 	Devices  []homeStatusPeer `json:"devices"`
 }
 type remoteHome struct {
-	mu      sync.Mutex
-	state   homeState
-	runtime *homeRuntime
-	fault   string
+	mu          sync.Mutex
+	state       homeState
+	runtime     *homeRuntime
+	fault       string
+	loadBlocked bool
 }
 
 func (h *remoteHome) listenPort() int {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.runtime == nil {
+		return 0
+	}
+	return h.state.Settings.Port
+}
+
+func (h *remoteHome) configuredPort() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.state.Settings == nil {
 		return 0
 	}
 	return h.state.Settings.Port
@@ -137,7 +147,7 @@ func localHomeLANs() []string {
 	return slices.Compact(nets)
 }
 
-func normalizeHomeSettings(input homeInput) (homeSettings, error) {
+func normalizeHomeSettingsStatic(input homeInput) (homeSettings, error) {
 	endpoint := strings.TrimSuffix(strings.TrimSpace(input.Endpoint), ".")
 	endpoint = strings.TrimSuffix(strings.TrimPrefix(endpoint, "["), "]")
 	endpoint = strings.ToLower(endpoint)
@@ -153,16 +163,31 @@ func normalizeHomeSettings(input homeInput) (homeSettings, error) {
 	if !ok || tunnel.Bits() < 16 || tunnel.Bits() > 29 || tunnel.Overlaps(lan) || tunnel.Contains(homeServiceIP) {
 		return homeSettings{}, errors.New("隧道应使用独立的 /16 至 /29 私有网段")
 	}
-	for _, cidr := range localHomeLANs() {
-		network, _ := netip.ParsePrefix(cidr)
-		if tunnel.Overlaps(network) {
-			return homeSettings{}, errors.New("隧道网段与本机网段重叠")
-		}
-	}
 	if input.Port < 1024 || input.Port > 65535 {
 		return homeSettings{}, errors.New("内置 WireGuard 的 UDP 端口范围为 1024–65535")
 	}
 	return homeSettings{Endpoint: endpoint, Port: input.Port, LAN: lan, Tunnel: tunnel}, nil
+}
+
+func checkHomeTunnelOverlap(tunnel netip.Prefix) error {
+	for _, cidr := range localHomeLANs() {
+		network, _ := netip.ParsePrefix(cidr)
+		if tunnel.Overlaps(network) {
+			return errors.New("隧道网段与本机网段重叠")
+		}
+	}
+	return nil
+}
+
+func normalizeHomeSettings(input homeInput) (homeSettings, error) {
+	settings, err := normalizeHomeSettingsStatic(input)
+	if err != nil {
+		return homeSettings{}, err
+	}
+	if err := checkHomeTunnelOverlap(settings.Tunnel); err != nil {
+		return homeSettings{}, err
+	}
+	return settings, nil
 }
 
 func homeKey(value string) ([]byte, error) {
@@ -222,13 +247,23 @@ func (a *Admin) StartRemoteHome() {
 	h := &a.remoteHome
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	h.loadBlocked = false
+	h.fault = ""
 	data, err := os.ReadFile(filepath.Join(a.store.paths.Data, homeStateFile))
 	if errors.Is(err, os.ErrNotExist) {
+		h.state = homeState{}
 		return
 	}
-	if err != nil || json.Unmarshal(data, &h.state) != nil || !validHomeState(h.state) {
+	var parsed homeState
+	if err != nil || json.Unmarshal(data, &parsed) != nil || !validHomeState(parsed) {
 		h.state = homeState{}
-		h.fault = "无法读取内置 WireGuard 配置，请检查数据目录"
+		h.loadBlocked = true
+		h.fault = "无法读取内置 WireGuard 配置，已阻止覆盖以保护原密钥与设备，请检查数据目录"
+		return
+	}
+	h.state = parsed
+	if overlapErr := checkHomeTunnelOverlap(h.state.Settings.Tunnel); overlapErr != nil {
+		h.fault = overlapErr.Error()
 		return
 	}
 	h.runtime, err = newHomeRuntime(a, h.state)
@@ -252,7 +287,7 @@ func validHomeState(state homeState) bool {
 		return false
 	}
 	s := state.Settings
-	normalized, err := normalizeHomeSettings(homeInput{Endpoint: s.Endpoint, Port: s.Port, LAN: s.LAN.String(), Tunnel: s.Tunnel.String()})
+	normalized, err := normalizeHomeSettingsStatic(homeInput{Endpoint: s.Endpoint, Port: s.Port, LAN: s.LAN.String(), Tunnel: s.Tunnel.String()})
 	if err != nil || normalized != *s {
 		return false
 	}
@@ -328,7 +363,7 @@ func (a *Admin) homeRoutes() []homeRoute {
 	for _, r := range cfg.Routes {
 		g, ok := cfg.Group(r.GroupID)
 		upstream, err := url.Parse(r.Upstream)
-		if !ok || !cfg.RouteActive(r) || r.ID == "" || err != nil || isAdminUpstream(upstream, a.adminPort, addrs) {
+		if !ok || !cfg.RouteActive(r) || r.ID == "" || err != nil || isAdminAccessBlockedTarget(upstream, a.adminPort, addrs) {
 			continue
 		}
 		p := g.HTTPPort
@@ -445,6 +480,9 @@ func (a *Admin) changeRemoteHome(op string, input homeInput) (map[string]string,
 	h := &a.remoteHome
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if h.loadBlocked {
+		return nil, errors.New("内置 WireGuard 配置文件读取失败，已阻止覆盖以保护原密钥与设备，请先排查数据目录")
+	}
 	next := h.state
 	next.Devices = slices.Clone(next.Devices)
 	var result map[string]string
@@ -453,6 +491,11 @@ func (a *Admin) changeRemoteHome(op string, input homeInput) (map[string]string,
 		settings, err := normalizeHomeSettings(input)
 		if err != nil {
 			return nil, err
+		}
+		for _, f := range a.store.Snapshot().Config.Forwards {
+			if f.Protocol != "tcp" && f.ListenPort == settings.Port {
+				return nil, errors.New("内置 WireGuard 端口不能与 UDP 端口转发相同")
+			}
 		}
 		if len(next.Devices) > 0 && (settings.LAN != next.Settings.LAN || settings.Tunnel != next.Settings.Tunnel) {
 			return nil, errors.New("已有设备时不能修改网段")
@@ -574,6 +617,12 @@ func (a *Admin) remoteHomeRoutes(mux *http.ServeMux) {
 		mux.HandleFunc("POST /api/remote-home/"+op, a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
 			var input homeInput
 			if !decodeBody(w, r, &input) {
+				return
+			}
+			a.updateMu.Lock()
+			defer a.updateMu.Unlock()
+			if a.maintenance != nil && a.maintenance.Busy() {
+				apiError(w, 409, "维护操作执行中，请稍后重试")
 				return
 			}
 			result, err := a.changeRemoteHome(op, input)

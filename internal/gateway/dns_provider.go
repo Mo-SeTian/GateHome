@@ -152,5 +152,23 @@ func validateCredentials(s State) error {
 			}
 		}
 	}
+	if s.Assistant.Base != "" || s.Assistant.Model != "" || s.Assistant.Name != "" || s.Assistant.Key != "" || len(s.Assistant.Models) > 0 {
+		if _, err := (assistantSettings{assistantEndpoint: s.Assistant}).endpoint(s.Assistant); err != nil {
+			return err
+		}
+	}
+	if len(s.AssistantProviders) > 19 {
+		return errors.New("模型接入点数量超出上限")
+	}
+	seenProviders := map[string]bool{}
+	for _, provider := range s.AssistantProviders {
+		if provider.ID == "" || provider.ID == "new" || provider.ID == "default" || seenProviders[provider.ID] {
+			return errors.New("模型接入点 ID 无效或重复")
+		}
+		seenProviders[provider.ID] = true
+		if _, err := (assistantSettings{assistantEndpoint: provider}).endpoint(provider); err != nil {
+			return err
+		}
+	}
 	return nil
 }

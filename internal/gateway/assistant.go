@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"cmp"
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/json"
@@ -10,11 +11,14 @@ import (
 	"maps"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf16"
+	"unicode/utf8"
 )
 
 type assistantEndpoint struct {
@@ -67,10 +71,85 @@ var assistantPages = map[string]string{
 	"/settings/exposure": "入口暴露总览",
 }
 
-var assistantHTTP = &http.Client{
-	Timeout:       40 * time.Second,
-	Transport:     &http.Transport{ForceAttemptHTTP2: true},
-	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+func (a *Admin) internalPorts() (adminPort int, bridgePort int, localAddrs map[netip.Addr]bool) {
+	adminPort = a.adminPort
+	if a.sunPanel != nil {
+		bridgePort = int(a.sunPanel.bridgePort.Load())
+	}
+	return adminPort, bridgePort, localAdminAddresses()
+}
+
+func isForbiddenAssistantTarget(u *url.URL, adminPort, bridgePort int, localAddrs map[netip.Addr]bool) bool {
+	if isAdminAccessBlockedTarget(u, adminPort, localAddrs) {
+		return true
+	}
+	if bridgePort < 1 || u == nil {
+		return false
+	}
+	port := urlEffectivePort(u)
+	if port != bridgePort {
+		return false
+	}
+	if strings.EqualFold(u.Hostname(), "localhost") {
+		return true
+	}
+	ip, err := netip.ParseAddr(u.Hostname())
+	if err != nil {
+		return false
+	}
+	ip = ip.Unmap()
+	return ip.IsLoopback() || ip.IsUnspecified() || localAddrs[ip]
+}
+
+func (a *Admin) validateAssistantEndpoint(e assistantEndpoint) error {
+	u, err := url.Parse(e.Base)
+	if err != nil {
+		return errors.New("模型接口地址无效")
+	}
+	adminPort, bridgePort, localAddrs := a.internalPorts()
+	if isForbiddenAssistantTarget(u, adminPort, bridgePort, localAddrs) {
+		return errors.New("模型接口地址不能指向 GateHome 管理或内部服务端口")
+	}
+	return nil
+}
+
+func (a *Admin) assistantHTTPClient(state State, streaming bool) *http.Client {
+	timeout := 40 * time.Second
+	if streaming {
+		timeout = 0
+	}
+	client := serviceEndpointClient(state, timeout)
+	transport := client.Transport.(*http.Transport)
+	transport.TLSHandshakeTimeout = 15 * time.Second
+	transport.MaxResponseHeaderBytes = 64 << 10
+	if streaming {
+		transport.ResponseHeaderTimeout = 45 * time.Second
+	}
+	baseDial := transport.DialContext
+	adminPort, bridgePort, localAddrs := a.internalPorts()
+	transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+		host, portStr, err := net.SplitHostPort(address)
+		if err == nil {
+			if port, portErr := strconv.Atoi(portStr); portErr == nil &&
+				((adminPort > 0 && port == adminPort) || (bridgePort > 0 && port == bridgePort)) {
+				if ip, ipErr := netip.ParseAddr(host); ipErr == nil {
+					ip = ip.Unmap()
+					if ip.IsLoopback() || ip.IsUnspecified() || localAddrs[ip] {
+						return nil, errors.New("模型接口地址不能指向 GateHome 管理或内部服务端口")
+					}
+				} else if ips, lookupErr := net.DefaultResolver.LookupNetIP(ctx, "ip", host); lookupErr == nil {
+					for _, resolved := range ips {
+						resolved = resolved.Unmap()
+						if resolved.IsLoopback() || resolved.IsUnspecified() || localAddrs[resolved] {
+							return nil, errors.New("模型接口地址不能指向 GateHome 管理或内部服务端口")
+						}
+					}
+				}
+			}
+		}
+		return baseDial(ctx, network, address)
+	}
+	return client
 }
 
 func (e assistantEndpoint) protocol() string {
@@ -239,13 +318,20 @@ func (a *Admin) assistantRoutes(mux *http.ServeMux) {
 		if !decodeBody(w, r, &input) {
 			return
 		}
-		previous, _ := assistantProvider(a.store.Snapshot(), input.ID)
+		state := a.store.Snapshot()
+		previous, _ := assistantProvider(state, input.ID)
 		e, err := input.endpoint(previous)
 		if err != nil {
 			apiError(w, 400, err.Error())
 			return
 		}
-		if _, err := e.complete(r.Context(), []assistantMessage{{Role: "user", Content: "Reply with OK."}}); err != nil {
+		if err := a.validateAssistantEndpoint(e); err != nil {
+			apiError(w, 400, err.Error())
+			return
+		}
+		client := a.assistantHTTPClient(state, false)
+		defer closeClient(client)
+		if _, err := e.complete(r.Context(), client, []assistantMessage{{Role: "user", Content: "Reply with OK."}}); err != nil {
 			apiError(w, 502, err.Error())
 			return
 		}
@@ -256,13 +342,20 @@ func (a *Admin) assistantRoutes(mux *http.ServeMux) {
 		if !decodeBody(w, r, &input) {
 			return
 		}
-		previous, _ := assistantProvider(a.store.Snapshot(), input.ID)
+		state := a.store.Snapshot()
+		previous, _ := assistantProvider(state, input.ID)
 		e, err := input.normalized(previous, false)
 		if err != nil {
 			apiError(w, 400, err.Error())
 			return
 		}
-		models, err := e.listModels(r.Context())
+		if err := a.validateAssistantEndpoint(e); err != nil {
+			apiError(w, 400, err.Error())
+			return
+		}
+		client := a.assistantHTTPClient(state, false)
+		defer closeClient(client)
+		models, err := e.listModels(r.Context(), client)
 		if err != nil {
 			apiError(w, 502, err.Error())
 			return
@@ -316,6 +409,416 @@ route_upstream: target 为准确的反代 ID，value 为完整的 HTTP(S) 上游
 health_interval: value 为 30–86400 秒的整数
 只有用户明确请求修改时才提出变更。目标或值不明确时先追问。修改需要用户确认，绝不要声称已写入。不要输出外部链接、命令或索要凭据。`
 
+type redactingEmitter struct {
+	key  string
+	buf  string
+	emit func(string) error
+}
+
+func (r *redactingEmitter) Write(chunk string) error {
+	if chunk == "" || r.emit == nil {
+		return nil
+	}
+	if r.key == "" {
+		return r.emit(chunk)
+	}
+	r.buf += chunk
+	r.buf = strings.ReplaceAll(r.buf, r.key, "<REDACTED>")
+	maxKeep := min(len(r.key)-1, len(r.buf))
+	keep := 0
+	for k := maxKeep; k >= 1; k-- {
+		if strings.HasPrefix(r.key, r.buf[len(r.buf)-k:]) && utf8.ValidString(r.buf[:len(r.buf)-k]) {
+			keep = k
+			break
+		}
+	}
+	if keep < len(r.buf) {
+		head := r.buf[:len(r.buf)-keep]
+		r.buf = r.buf[len(r.buf)-keep:]
+		return r.emit(head)
+	}
+	return nil
+}
+
+func (r *redactingEmitter) Finish() error {
+	if r.buf == "" || r.emit == nil {
+		return nil
+	}
+	rest := r.buf
+	r.buf = ""
+	if r.key != "" {
+		rest = strings.ReplaceAll(rest, r.key, "<REDACTED>")
+	}
+	return r.emit(rest)
+}
+
+type assistantStreamMode int
+
+const (
+	streamModeUnknown assistantStreamMode = iota
+	streamModePlain
+	streamModeJSON
+)
+
+type jsonParserStage int
+
+const (
+	jpExpectOpen jsonParserStage = iota
+	jpExpectKeyOrEnd
+	jpInKey
+	jpKeyEscape
+	jpExpectColon
+	jpExpectValue
+	jpInTextValue
+	jpTextEscape
+	jpTextUnicode
+	jpSkipString
+	jpSkipStringEscape
+	jpSkipScalar
+	jpDone
+)
+
+// assistantStreamExtractor streams decoded Markdown from either plain LLM text
+// or a streaming JSON envelope {"text":"...","action":...}.
+type assistantStreamExtractor struct {
+	mode        assistantStreamMode
+	probe       strings.Builder
+	stage       jsonParserStage
+	keyBuf      strings.Builder
+	currentKey  string
+	skipDepth   int
+	inSkipStr   bool
+	skipEscape  bool
+	hexBuf      [4]byte
+	hexLen      int
+	pendingHigh rune
+	hasHigh     bool
+	utf8Buf     strings.Builder
+	emittedText bool
+	emit        func(string) error
+}
+
+func (x *assistantStreamExtractor) Feed(chunk string) error {
+	if chunk == "" {
+		return nil
+	}
+	if x.mode == streamModePlain {
+		return x.emitText(chunk)
+	}
+	if x.mode == streamModeJSON {
+		return x.feedJSON(chunk)
+	}
+	x.probe.WriteString(chunk)
+	buf := x.probe.String()
+	trimmed := strings.TrimLeft(buf, " \t\r\n")
+	if trimmed == "" {
+		return nil
+	}
+	if trimmed[0] == '{' {
+		x.mode = streamModeJSON
+		x.stage = jpExpectOpen
+		x.probe.Reset()
+		return x.feedJSON(trimmed)
+	}
+	if strings.HasPrefix(trimmed, "`") {
+		if strings.HasPrefix(trimmed, "```") {
+			if newline := strings.IndexByte(trimmed, '\n'); newline >= 0 {
+				lang := strings.TrimSpace(trimmed[3:newline])
+				after := strings.TrimLeft(trimmed[newline+1:], " \t\r\n")
+				if lang == "" || strings.EqualFold(lang, "json") {
+					if after == "" {
+						return nil
+					}
+					if after[0] == '{' {
+						x.mode = streamModeJSON
+						x.stage = jpExpectOpen
+						x.probe.Reset()
+						return x.feedJSON(after)
+					}
+				}
+				x.mode = streamModePlain
+				x.probe.Reset()
+				return x.emitText(buf)
+			}
+			if len(trimmed) < 32 {
+				return nil
+			}
+		} else if len(trimmed) < 3 {
+			return nil
+		}
+	}
+	x.mode = streamModePlain
+	x.probe.Reset()
+	return x.emitText(buf)
+}
+
+func (x *assistantStreamExtractor) Finish() error {
+	if x.mode == streamModeUnknown && x.probe.Len() > 0 {
+		buf := x.probe.String()
+		x.probe.Reset()
+		x.mode = streamModePlain
+		return x.emitText(buf)
+	}
+	if x.mode == streamModeJSON {
+		if x.hasHigh {
+			x.utf8Buf.WriteRune(utf16.DecodeRune(x.pendingHigh, 0))
+			x.hasHigh = false
+		}
+		return x.flushUTF8()
+	}
+	return nil
+}
+
+func (x *assistantStreamExtractor) emitText(text string) error {
+	if text == "" || x.emit == nil {
+		return nil
+	}
+	x.emittedText = true
+	return x.emit(text)
+}
+
+func (x *assistantStreamExtractor) flushUTF8() error {
+	if x.utf8Buf.Len() == 0 {
+		return nil
+	}
+	text := x.utf8Buf.String()
+	x.utf8Buf.Reset()
+	return x.emitText(text)
+}
+
+func (x *assistantStreamExtractor) feedJSON(s string) error {
+	for i := 0; i < len(s); i++ {
+		b := s[i]
+		switch x.stage {
+		case jpExpectOpen:
+			if b == '{' {
+				x.stage = jpExpectKeyOrEnd
+			}
+		case jpExpectKeyOrEnd:
+			if b == ' ' || b == '\t' || b == '\r' || b == '\n' || b == ',' {
+				continue
+			}
+			if b == '"' {
+				x.keyBuf.Reset()
+				x.stage = jpInKey
+			} else {
+				x.stage = jpDone
+			}
+		case jpInKey:
+			if b == '\\' {
+				x.keyBuf.WriteByte(b)
+				x.stage = jpKeyEscape
+			} else if b == '"' {
+				key, err := strconv.Unquote(`"` + x.keyBuf.String() + `"`)
+				if err != nil {
+					key = x.keyBuf.String()
+				}
+				x.currentKey = key
+				x.stage = jpExpectColon
+			} else {
+				x.keyBuf.WriteByte(b)
+			}
+		case jpKeyEscape:
+			x.keyBuf.WriteByte(b)
+			x.stage = jpInKey
+		case jpExpectColon:
+			if b == ' ' || b == '\t' || b == '\r' || b == '\n' {
+				continue
+			}
+			if b == ':' {
+				x.stage = jpExpectValue
+			} else {
+				x.stage = jpDone
+			}
+		case jpExpectValue:
+			if b == ' ' || b == '\t' || b == '\r' || b == '\n' {
+				continue
+			}
+			if x.currentKey == "text" && b == '"' {
+				x.stage = jpInTextValue
+				continue
+			}
+			if b == '"' {
+				x.stage = jpSkipString
+				continue
+			}
+			if b == '{' || b == '[' {
+				x.skipDepth = 1
+				x.inSkipStr = false
+				x.skipEscape = false
+				x.stage = jpSkipScalar
+				continue
+			}
+			x.skipDepth = 0
+			x.stage = jpSkipScalar
+		case jpInTextValue:
+			if b == '\\' {
+				x.stage = jpTextEscape
+			} else if b == '"' {
+				if x.hasHigh {
+					x.utf8Buf.WriteRune(utf16.DecodeRune(x.pendingHigh, 0))
+					x.hasHigh = false
+				}
+				if err := x.flushUTF8(); err != nil {
+					return err
+				}
+				x.stage = jpExpectKeyOrEnd
+			} else {
+				if x.hasHigh {
+					x.utf8Buf.WriteRune(utf16.DecodeRune(x.pendingHigh, 0))
+					x.hasHigh = false
+				}
+				x.utf8Buf.WriteByte(b)
+			}
+		case jpTextEscape:
+			if b == 'u' {
+				x.hexLen = 0
+				x.stage = jpTextUnicode
+				continue
+			}
+			if x.hasHigh {
+				x.utf8Buf.WriteRune(utf16.DecodeRune(x.pendingHigh, 0))
+				x.hasHigh = false
+			}
+			switch b {
+			case '"', '\\', '/':
+				x.utf8Buf.WriteByte(b)
+			case 'b':
+				x.utf8Buf.WriteByte('\b')
+			case 'f':
+				x.utf8Buf.WriteByte('\f')
+			case 'n':
+				x.utf8Buf.WriteByte('\n')
+			case 'r':
+				x.utf8Buf.WriteByte('\r')
+			case 't':
+				x.utf8Buf.WriteByte('\t')
+			default:
+				x.utf8Buf.WriteByte(b)
+			}
+			x.stage = jpInTextValue
+		case jpTextUnicode:
+			x.hexBuf[x.hexLen] = b
+			x.hexLen++
+			if x.hexLen < 4 {
+				continue
+			}
+			val, err := strconv.ParseUint(string(x.hexBuf[:]), 16, 16)
+			if err == nil {
+				r := rune(val)
+				if x.hasHigh {
+					if r >= 0xDC00 && r <= 0xDFFF {
+						x.utf8Buf.WriteRune(utf16.DecodeRune(x.pendingHigh, r))
+						x.hasHigh = false
+					} else if r >= 0xD800 && r <= 0xDBFF {
+						x.utf8Buf.WriteRune(utf16.DecodeRune(x.pendingHigh, 0))
+						x.pendingHigh = r
+					} else {
+						x.utf8Buf.WriteRune(utf16.DecodeRune(x.pendingHigh, 0))
+						x.hasHigh = false
+						x.utf8Buf.WriteRune(r)
+					}
+				} else if r >= 0xD800 && r <= 0xDBFF {
+					x.pendingHigh = r
+					x.hasHigh = true
+				} else {
+					x.utf8Buf.WriteRune(r)
+				}
+			} else if x.hasHigh {
+				x.utf8Buf.WriteRune(utf16.DecodeRune(x.pendingHigh, 0))
+				x.hasHigh = false
+			}
+			x.stage = jpInTextValue
+		case jpSkipString:
+			if b == '\\' {
+				x.stage = jpSkipStringEscape
+			} else if b == '"' {
+				x.stage = jpExpectKeyOrEnd
+			}
+		case jpSkipStringEscape:
+			x.stage = jpSkipString
+		case jpSkipScalar:
+			if x.skipDepth == 0 {
+				if b == ',' {
+					x.stage = jpExpectKeyOrEnd
+				} else if b == '}' {
+					x.stage = jpDone
+				}
+				continue
+			}
+			if x.inSkipStr {
+				if x.skipEscape {
+					x.skipEscape = false
+				} else if b == '\\' {
+					x.skipEscape = true
+				} else if b == '"' {
+					x.inSkipStr = false
+				}
+				continue
+			}
+			switch b {
+			case '"':
+				x.inSkipStr = true
+			case '{', '[':
+				x.skipDepth++
+			case '}', ']':
+				x.skipDepth--
+				if x.skipDepth == 0 {
+					x.stage = jpExpectKeyOrEnd
+				}
+			}
+		case jpDone:
+			return nil
+		}
+	}
+	// Only flush when utf8Buf ends on a complete UTF-8 rune and no pending high surrogate is held.
+	if x.utf8Buf.Len() > 0 && utf8.ValidString(x.utf8Buf.String()) {
+		return x.flushUTF8()
+	}
+	return nil
+}
+
+func writeSSEEvent(w http.ResponseWriter, event string, payload any) error {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, data); err != nil {
+		return err
+	}
+	return http.NewResponseController(w).Flush()
+}
+
+func buildAssistantReply(state State, content string) map[string]any {
+	reply := assistantReply{}
+	if strings.HasPrefix(content, "```") && strings.HasSuffix(content, "```") {
+		if _, body, ok := strings.Cut(content, "\n"); ok {
+			content = strings.TrimSpace(strings.TrimSuffix(body, "```"))
+		}
+	}
+	if json.Unmarshal([]byte(content), &reply) != nil || strings.TrimSpace(reply.Text) == "" {
+		return map[string]any{"text": content}
+	}
+	result := map[string]any{"text": reply.Text}
+	if reply.Action == "navigate" && assistantPages[reply.Target] != "" {
+		result["link"] = map[string]string{"path": reply.Target, "label": assistantPages[reply.Target]}
+	} else if reply.Action == "health_settings" {
+		result["link"] = map[string]string{"path": "/routes", "health": ":settings", "label": "服务健康检查"}
+	} else if reply.Action == "health" {
+		for _, route := range state.Config.Routes {
+			if route.ID == reply.Target {
+				result["link"] = map[string]string{"path": "/routes", "health": route.ID, "label": "上游健康诊断"}
+				break
+			}
+		}
+	} else if change := assistantProposal(state, reply); change != nil {
+		result["change"] = change
+	} else if reply.Action == "route_port" || reply.Action == "route_upstream" || reply.Action == "health_interval" {
+		result["hint"] = "没有可应用的变更，请核对目标或配置值。"
+	}
+	return result
+}
+
 func (a *Admin) assistantChat(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		Messages []assistantMessage `json:"messages"`
@@ -324,6 +827,7 @@ func (a *Admin) assistantChat(w http.ResponseWriter, r *http.Request) {
 		Binding  string             `json:"binding"`
 		Model    string             `json:"model"`
 		Effort   *string            `json:"effort"`
+		Stream   bool               `json:"stream"`
 	}
 	if !decodeBody(w, r, &input) {
 		return
@@ -346,6 +850,10 @@ func (a *Admin) assistantChat(w http.ResponseWriter, r *http.Request) {
 	}
 	if endpoint.Base == "" {
 		apiError(w, 409, "请先配置模型接入点")
+		return
+	}
+	if err := a.validateAssistantEndpoint(endpoint); err != nil {
+		apiError(w, 400, err.Error())
 		return
 	}
 	if input.Model != "" {
@@ -387,39 +895,47 @@ func (a *Admin) assistantChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	messages := append([]assistantMessage{{Role: "system", Content: assistantInstruction + "\n网关快照：" + string(contextData)}}, input.Messages...)
-	content, err := endpoint.complete(r.Context(), messages)
-	if err != nil {
-		apiError(w, 502, err.Error())
+	if !input.Stream {
+		client := a.assistantHTTPClient(state, false)
+		defer closeClient(client)
+		content, err := endpoint.complete(r.Context(), client, messages)
+		if err != nil {
+			apiError(w, 502, err.Error())
+			return
+		}
+		jsonResponse(w, 200, buildAssistantReply(state, content))
 		return
 	}
-	reply := assistantReply{}
-	if strings.HasPrefix(content, "```") && strings.HasSuffix(content, "```") {
-		if _, body, ok := strings.Cut(content, "\n"); ok {
-			content = strings.TrimSpace(strings.TrimSuffix(body, "```"))
-		}
+
+	streamCtx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
+	defer cancel()
+	client := a.assistantHTTPClient(state, true)
+	defer closeClient(client)
+	headers := w.Header()
+	headers.Set("Content-Type", "text/event-stream; charset=utf-8")
+	headers.Set("Cache-Control", "no-cache, no-store")
+	headers.Set("X-Accel-Buffering", "no")
+	w.WriteHeader(200)
+	_ = http.NewResponseController(w).Flush()
+
+	redactor := &redactingEmitter{
+		key: endpoint.Key,
+		emit: func(delta string) error {
+			return writeSSEEvent(w, "delta", map[string]string{"text": delta})
+		},
 	}
-	if json.Unmarshal([]byte(content), &reply) != nil || strings.TrimSpace(reply.Text) == "" {
-		jsonResponse(w, 200, map[string]any{"text": content})
+	extractor := &assistantStreamExtractor{emit: redactor.Write}
+	content, streamErr := endpoint.completeStream(streamCtx, client, messages, extractor.Feed)
+	if streamErr != nil {
+		if r.Context().Err() == nil {
+			_ = writeSSEEvent(w, "error", map[string]string{"error": streamErr.Error()})
+		}
 		return
 	}
-	result := map[string]any{"text": reply.Text}
-	if reply.Action == "navigate" && assistantPages[reply.Target] != "" {
-		result["link"] = map[string]string{"path": reply.Target, "label": assistantPages[reply.Target]}
-	} else if reply.Action == "health_settings" {
-		result["link"] = map[string]string{"path": "/routes", "health": ":settings", "label": "服务健康检查"}
-	} else if reply.Action == "health" {
-		for _, route := range state.Config.Routes {
-			if route.ID == reply.Target {
-				result["link"] = map[string]string{"path": "/routes", "health": route.ID, "label": "上游健康诊断"}
-				break
-			}
-		}
-	} else if change := assistantProposal(state, reply); change != nil {
-		result["change"] = change
-	} else if reply.Action == "route_port" || reply.Action == "route_upstream" || reply.Action == "health_interval" {
-		result["hint"] = "没有可应用的变更，请核对目标或配置值。"
+	if err := extractor.Finish(); err != nil || redactor.Finish() != nil {
+		return
 	}
-	jsonResponse(w, 200, result)
+	_ = writeSSEEvent(w, "done", buildAssistantReply(state, content))
 }
 
 func assistantProposal(state State, reply assistantReply) *assistantChange {

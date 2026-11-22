@@ -35,16 +35,22 @@
         <Sparkles :size="24" class="assistant-mark" aria-hidden="true" />
         <h2>有什么需要查看或调整？</h2>
         <p v-if="loadError" class="assistant-error">{{ loadError }}</p>
-        <template v-else-if="settings && !settings.base_url">
+        <template v-else-if="settings && !providers.length">
           <p>配置模型接入点后，即可在这里查看网关状态、跳转设置或提出配置变更。</p>
           <RouterLink class="btn btn-primary" to="/assistant/settings">配置模型接入点</RouterLink>
         </template>
         <p v-else>可以查询反代健康、最近采样和运行状态，也可以提出反代及健康检查配置变更。</p>
       </div>
 
-      <article v-for="(message, index) in messages" :key="index" class="assistant-message" :class="[message.role, { fresh: message.fresh }]">
+      <article
+        v-for="(message, index) in messages"
+        :key="index"
+        v-show="message.role !== 'assistant' || !message.streaming || message.content"
+        class="assistant-message"
+        :class="[message.role, { fresh: message.fresh, streaming: message.streaming }]"
+      >
         <div v-if="message.role === 'assistant'" class="assistant-byline"><Sparkles :size="15" aria-hidden="true" /> <span>网关助手</span><small v-if="message.model">{{ message.model }}</small></div>
-        <div v-if="message.role === 'assistant'" class="assistant-markdown" v-html="markdown.render(message.content)" />
+        <div v-if="message.role === 'assistant'" class="assistant-markdown" v-html="renderMarkdown(message.content)" />
         <p v-else class="assistant-copy">{{ message.content }}</p>
         <p v-if="message.hint" class="assistant-note">{{ message.hint }}</p>
         <RouterLink v-if="message.link" class="assistant-link" :to="linkTo(message.link)" @click="followLink">
@@ -66,7 +72,7 @@
           </div>
         </div>
       </article>
-      <div v-if="sending" class="assistant-wait" role="status"><span aria-hidden="true"><i></i><i></i><i></i></span>正在等待模型回复</div>
+      <div v-if="sending && !streamingContentStarted" class="assistant-wait" role="status"><span aria-hidden="true"><i></i><i></i><i></i></span>正在等待模型回复</div>
       <p v-if="error" class="assistant-error" role="alert">{{ error }}</p>
     </div>
 
@@ -92,7 +98,8 @@
               <option value="low">低</option><option value="medium">中</option><option value="high">高</option>
             </select>
           </template>
-          <button class="btn btn-primary btn-sm" type="submit" aria-label="发送消息" :disabled="sending || applying || !draft.trim() || !provider"><ArrowUp :size="16" /></button>
+          <button v-if="sending" class="btn btn-secondary btn-sm" type="button" aria-label="停止生成" title="停止生成" @click="stopGeneration"><Square :size="14" /></button>
+          <button v-else class="btn btn-primary btn-sm" type="submit" aria-label="发送消息" :disabled="applying || !draft.trim() || !provider"><ArrowUp :size="16" /></button>
         </div>
       </form>
     </footer>
@@ -100,21 +107,35 @@
 </template>
 
 <script setup>
-import { nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import MarkdownIt from 'markdown-it'
-import { ArrowUp, Check, ExternalLink, History, Maximize2, Settings2, Sparkles, SquarePen, Trash2, X } from 'lucide-vue-next'
+import { ArrowUp, Check, ExternalLink, History, Maximize2, Settings2, Sparkles, Square, SquarePen, Trash2, X } from 'lucide-vue-next'
 import { useAssistant } from '@/composables/useAssistant'
 
 const props = defineProps({ full: Boolean })
 const route = useRoute()
 const { panelOpen, draft, messages, settings, providers, provider, model, effortChoice, conversations, conversation,
-  sending, applying, error, loadSettings, send, apply, cancelChange, clearConversation,
+  sending, applying, error, loadSettings, send, stopGeneration, apply, cancelChange, clearConversation,
   openConversation, removeConversation, selectModel } = useAssistant()
 const showHistory = ref(false)
 const effortLabels = { low: '低', medium: '中', high: '高' }
 const dateFormat = new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-const markdown = new MarkdownIt({ html: false, breaks: true }).disable('image')
+const markdown = new MarkdownIt({ html: false, breaks: true }).disable(['image', 'link'])
+const markdownCache = new Map()
+const streamingContentStarted = computed(() => {
+  const latest = messages.value.at(-1)
+  return Boolean(latest?.role === 'assistant' && latest.streaming && latest.content)
+})
+
+function renderMarkdown(text) {
+  const source = String(text || '')
+  if (markdownCache.has(source)) return markdownCache.get(source)
+  const html = markdown.render(source)
+  if (markdownCache.size >= 120) markdownCache.delete(markdownCache.keys().next().value)
+  markdownCache.set(source, html)
+  return html
+}
 
 function changeModel(event) {
   selectModel(...JSON.parse(event.target.value))
@@ -142,7 +163,7 @@ function changeValue(change, key) {
   return change[key] + (change.field === 'health_interval' ? ' 秒' : '')
 }
 function submit(content = draft.value) {
-  if (!content.trim() || sending.value || applying.value || !settings.value?.base_url) return
+  if (!content.trim() || sending.value || applying.value || !provider.value) return
   send(content, props.full ? '' : route.path)
 }
 function handleEnter(event) {
@@ -155,6 +176,13 @@ function scrollToLatest() {
   if (timeline.value) timeline.value.scrollTop = timeline.value.scrollHeight
 }
 watch([() => messages.value.length, sending], () => nextTick(scrollToLatest))
+watch(() => messages.value.at(-1)?.content, () => {
+  const el = timeline.value
+  if (!el) return
+  if (el.scrollHeight - el.scrollTop - el.clientHeight < 120) {
+    nextTick(scrollToLatest)
+  }
+})
 onMounted(() => {
   scrollToLatest()
   loadSettings().catch(err => { if (err.name !== 'AbortError') loadError.value = err.message })
@@ -204,7 +232,7 @@ onMounted(() => {
 .assistant-composer textarea { width: 100%; padding: 4px; border: 0; background: transparent; color: var(--ink); resize: vertical; min-height: 42px; max-height: 130px; font: inherit; }
 .composer-actions select { color: var(--ink-secondary); background: var(--strip-bg); border: 1px solid var(--line); border-radius: 7px; min-height: 34px; padding: 0 5px; font: inherit; font-size: 12px; }
 #assistant-model-select { flex: 1; min-width: 0; max-width: 245px; text-overflow: ellipsis; }
-#assistant-effort-select { flex: none; width: 86px !important; }
+#assistant-effort-select { flex: none; width: auto !important; min-width: 108px; max-width: 132px; padding: 0 26px 0 8px; text-overflow: ellipsis; }
 .composer-actions button { margin-left: auto; }
 .assistant-full { border: 1px solid var(--line); border-radius: var(--radius-card); overflow: hidden; min-height: 490px; height: calc(100dvh - var(--topbar-h) - 48px); }
 .assistant-full .assistant-timeline, .assistant-full .assistant-footer { width: min(100%, 820px); margin-inline: auto; }
@@ -232,9 +260,21 @@ onMounted(() => {
 .assistant-wait i:nth-child(2) { animation-delay: .16s; }
 .assistant-wait i:nth-child(3) { animation-delay: .32s; }
 .fresh { animation: reveal-reply .35s ease-out both; }
+.assistant-message.streaming .assistant-markdown::after {
+  content: '';
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 3px;
+  vertical-align: -0.15em;
+  background: var(--brand-light);
+  border-radius: 1px;
+  animation: stream-caret 0.8s steps(1) infinite;
+}
+@keyframes stream-caret { 50% { opacity: 0; } }
 @keyframes pulse-dot { from { opacity: .3; transform: translateY(2px); } to { opacity: 1; transform: translateY(-2px); } }
 @keyframes reveal-reply { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
-@media (prefers-reduced-motion: reduce) { .assistant-wait i, .fresh { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .assistant-wait i, .fresh, .assistant-message.streaming .assistant-markdown::after { animation: none; } }
 @media (max-width: 600px) {
   .assistant-header { padding: 10px 12px; }
   .assistant-heading { gap: 6px; }
@@ -250,6 +290,7 @@ onMounted(() => {
   .assistant-full { min-height: 0; height: calc(100dvh - var(--topbar-h) - 32px); }
 }
 @media (max-width: 400px) {
+  .assistant-suggestions { flex-wrap: wrap; overflow: visible; }
   .composer-actions { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }
   #assistant-model-select { grid-column: 1 / -1; width: 100%; max-width: none; }
   .composer-actions button { grid-column: 2; }

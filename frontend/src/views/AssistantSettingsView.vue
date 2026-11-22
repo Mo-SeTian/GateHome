@@ -13,7 +13,7 @@
         <button v-for="row in settings.providers.filter(row => row.base_url)" :key="row.id" type="button"
           class="btn btn-secondary" :aria-pressed="draft?.id === row.id" :disabled="!!busy" @click="setDraft(row)">{{ row.name }}</button>
       </div>
-      <p class="report-note">聊天内容、反代地址和运行摘要会发送到对话选中的模型接入点。</p>
+      <p class="report-note">聊天内容、反代地址、监听端口、WireGuard 设备摘要和运行状态会发送到对话选中的模型接入点（不含密钥与密码）。</p>
       <form v-if="draft" @submit.prevent="save">
         <fieldset class="endpoint-form" :disabled="!!busy">
           <label>接入点名称<input v-model.trim="draft.name" class="form-input" required maxlength="128" placeholder="家庭模型服务" /></label>

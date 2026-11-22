@@ -5,14 +5,36 @@ import (
 	"crypto/tls"
 	"encoding/binary"
 	"io"
+	"log"
 	"net"
 	"net/http"
+	"net/netip"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/miekg/dns"
 )
+
+var homeCGNATPrefix = netip.MustParsePrefix("100.64.0.0/10")
+
+func allowedRoutePeerDNSName(qName string) bool {
+	name := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(qName)), ".")
+	if name == "" || !strings.Contains(name, ".") {
+		return false
+	}
+	for _, suffix := range []string{".local", ".lan", ".internal", ".localhost", ".home.arpa", ".arpa"} {
+		if strings.HasSuffix(name, suffix) {
+			return false
+		}
+	}
+	return true
+}
+
+func allowedRoutePeerDNSIP(address netip.Addr) bool {
+	ip := address.Unmap()
+	return ip.IsGlobalUnicast() && !ip.IsPrivate() && !ip.IsLoopback() && !ip.IsLinkLocalUnicast() && !homeCGNATPrefix.Contains(ip)
+}
 
 type homeRouteContextKey struct{}
 
@@ -40,6 +62,9 @@ func (a *Admin) serveHomeProxy(ctx context.Context, peer homePeer, client net.Co
 		server := &http.Server{
 			Handler:           a.proxy.Handler(route.GroupID),
 			ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second,
+			MaxHeaderBytes: 64 << 10,
+			ErrorLog:       log.New(io.Discard, "", 0),
+			ConnContext:    ProxyConnContext,
 			BaseContext: func(net.Listener) context.Context {
 				return context.WithValue(ctx, homeRouteContextKey{}, peer.Route)
 			},
@@ -92,7 +117,11 @@ func (c *homeStreamConn) Close() error {
 func (a *Admin) homeDNS(ctx context.Context, peer homePeer, client net.Conn, stream bool) {
 	defer client.Close()
 	for {
-		client.SetDeadline(time.Now().Add(10 * time.Second))
+		deadline := 10 * time.Second
+		if !stream {
+			deadline = 3 * time.Second
+		}
+		client.SetDeadline(time.Now().Add(deadline))
 		var data []byte
 		if stream {
 			var length uint16
@@ -133,6 +162,9 @@ func (a *Admin) homeDNS(ctx context.Context, peer homePeer, client net.Conn, str
 		if _, err := client.Write(packet); err != nil {
 			return
 		}
+		if !stream {
+			return
+		}
 	}
 }
 
@@ -145,8 +177,12 @@ func (a *Admin) homeDNSReply(ctx context.Context, peer homePeer, query *dns.Msg)
 		}
 		return reply
 	}
-	// Resolve ordinary addresses for clients that use the VPN DNS globally.
+	// Resolve ordinary public addresses for clients that use the VPN DNS globally.
 	if q.Qclass != dns.ClassINET || (q.Qtype != dns.TypeA && q.Qtype != dns.TypeAAAA) {
+		return reply
+	}
+	if !allowedRoutePeerDNSName(q.Name) {
+		reply.Rcode = dns.RcodeNameError
 		return reply
 	}
 	network := "ip4"
@@ -164,12 +200,18 @@ func (a *Admin) homeDNSReply(ctx context.Context, peer homePeer, query *dns.Msg)
 		return reply
 	}
 	for _, address := range addresses {
+		if !allowedRoutePeerDNSIP(address) {
+			continue
+		}
 		h := dns.RR_Header{Name: q.Name, Rrtype: q.Qtype, Class: dns.ClassINET, Ttl: 30}
 		if address.Is4() {
 			reply.Answer = append(reply.Answer, &dns.A{Hdr: h, A: net.IP(address.AsSlice())})
 		} else {
 			reply.Answer = append(reply.Answer, &dns.AAAA{Hdr: h, AAAA: net.IP(address.AsSlice())})
 		}
+	}
+	if len(addresses) > 0 && len(reply.Answer) == 0 {
+		reply.Rcode = dns.RcodeNameError
 	}
 	return reply
 }

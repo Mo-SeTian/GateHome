@@ -28,7 +28,7 @@ onMounted(() => {
     overflowing.value = element.scrollWidth > element.clientWidth
   })
   observer.observe(element)
-  observer.observe(element.firstElementChild)
+  if (element?.firstElementChild) observer.observe(element.firstElementChild)
 })
 
 onBeforeUnmount(() => observer?.disconnect())

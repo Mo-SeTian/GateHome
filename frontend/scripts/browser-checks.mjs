@@ -34,7 +34,14 @@ const upstream = createServer((req, res) => {
       res.setHeader('Content-Type', 'application/json')
       if (req.url.endsWith('/responses')) {
         responseRequest = JSON.parse(body)
-        res.end(JSON.stringify({ output: [{ content: [{ type: 'output_text', text }] }] }))
+        if (responseRequest.stream) {
+          res.setHeader('Content-Type', 'text/event-stream; charset=utf-8')
+          res.write(`data: ${JSON.stringify({ type: 'response.output_text.delta', delta: text.slice(0, 12) })}\n\n`)
+          res.write(`data: ${JSON.stringify({ type: 'response.output_text.delta', delta: text.slice(12) })}\n\n`)
+          res.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [{ content: [{ type: 'output_text', text }] }] } })}\n\n`)
+        } else {
+          res.end(JSON.stringify({ output: [{ content: [{ type: 'output_text', text }] }] }))
+        }
       } else {
         claudeRequest = { payload: JSON.parse(body), version: req.headers['anthropic-version'] }
         res.end(JSON.stringify({ content: [{ type: 'text', text }] }))

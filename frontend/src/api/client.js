@@ -68,3 +68,101 @@ export async function request(path, { method = 'GET', body, signal, notifyUnauth
   if (data === null) throw new ApiError('管理接口返回了无效响应，请检查 API 转发配置', response.status)
   return data
 }
+
+export async function requestStream(path, { method = 'POST', body, signal, notifyUnauthorized = true, onEvent } = {}) {
+  const generation = sessionGeneration
+  const headers = { Accept: 'text/event-stream, application/json' }
+  if (body !== undefined) {
+    headers['Content-Type'] = 'application/json'
+    headers['X-Gatehouse-Request'] = '1'
+  }
+
+  let response
+  try {
+    response = await fetch(path, {
+      method, headers, signal, credentials: 'same-origin',
+      body: body === undefined ? undefined : JSON.stringify(body)
+    })
+  } catch (err) {
+    if (err.name === 'AbortError') throw err
+    throw new ApiError('无法连接 GateHome，请检查服务是否正在运行', 0)
+  }
+
+  synchronizeVersion(response.headers.get('X-GateHome-Version'))
+  const contentType = response.headers.get('Content-Type') || ''
+  if (!response.ok) {
+    const data = contentType.includes('application/json') ? await response.json().catch(() => null) : null
+    const message = data?.error || `管理接口请求失败（HTTP ${response.status}）`
+    if (response.status === 401 && notifyUnauthorized && generation === sessionGeneration) {
+      unauthorizedHandler?.(message)
+    }
+    throw new ApiError(message, response.status)
+  }
+
+  if (contentType.includes('application/json')) {
+    const data = await response.json().catch(() => null)
+    if (data === null) throw new ApiError('管理接口返回了无效响应，请检查 API 转发配置', response.status)
+    onEvent?.('done', data)
+    return data
+  }
+
+  if (!response.body) throw new ApiError('浏览器不支持流式读取响应', response.status)
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder('utf-8')
+  let buffer = ''
+  let donePayload = null
+
+  const dispatchBlock = block => {
+    const cleaned = block.trim()
+    if (!cleaned) return
+    let eventName = 'message'
+    const dataLines = []
+    for (const line of block.split('\n')) {
+      if (!line || line.startsWith(':')) continue
+      if (line.startsWith('event:')) {
+        eventName = line.slice(6).trim()
+      } else if (line.startsWith('data:')) {
+        const value = line.slice(5)
+        dataLines.push(value.startsWith(' ') ? value.slice(1) : value)
+      }
+    }
+    if (!dataLines.length) return
+    let payload
+    try {
+      payload = JSON.parse(dataLines.join('\n'))
+    } catch {
+      return
+    }
+    if (eventName === 'error') {
+      throw new ApiError(payload?.error || '模型流式回复失败', 502)
+    }
+    if (eventName === 'done') donePayload = payload
+    onEvent?.(eventName, payload)
+  }
+
+  try {
+    while (true) {
+      const { value, done } = await reader.read()
+      if (done) {
+        buffer += decoder.decode()
+        buffer = buffer.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+        const blocks = buffer.split('\n\n')
+        for (const block of blocks) dispatchBlock(block)
+        break
+      }
+      buffer += decoder.decode(value, { stream: true })
+      buffer = buffer.replace(/\r\n/g, '\n')
+      let sep
+      while ((sep = buffer.indexOf('\n\n')) !== -1) {
+        const block = buffer.slice(0, sep)
+        buffer = buffer.slice(sep + 2)
+        dispatchBlock(block)
+      }
+    }
+  } finally {
+    reader.releaseLock()
+  }
+
+  return donePayload
+}

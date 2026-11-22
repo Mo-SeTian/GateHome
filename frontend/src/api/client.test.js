@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { afterEach, test } from 'node:test'
-import { ApiError, markSessionChanged, request, setUnauthorizedHandler } from './client.js'
+import { ApiError, markSessionChanged, request, requestStream, setUnauthorizedHandler } from './client.js'
 
 const originalFetch = globalThis.fetch
 const originalWindow = globalThis.window
@@ -128,4 +128,54 @@ test('rolling back to an older server also reloads and supports legacy status re
   globalThis.fetch = async () => response(200, { version: '1.0.0-beta.18' })
   await assert.rejects(request('/api/status'), { status: 409 })
   assert.equal(reloads(), 1)
+})
+
+test('requestStream incrementally parses chunked SSE deltas and done events', async () => {
+  const encoder = new TextEncoder()
+  const chunks = [
+    'event: delta\ndata: {"text":"你好"}\n\nevent: del',
+    'ta\ndata: {"text":"，世界"}\n\nevent: done\ndata: {"text":"你好，世界","hint":"ok"}\n\n'
+  ]
+  globalThis.fetch = async () => new Response(new ReadableStream({
+    start(controller) {
+      for (const chunk of chunks) controller.enqueue(encoder.encode(chunk))
+      controller.close()
+    }
+  }), { status: 200, headers: { 'Content-Type': 'text/event-stream; charset=utf-8' } })
+
+  const events = []
+  const done = await requestStream('/api/assistant/chat', {
+    body: { stream: true },
+    onEvent(name, payload) { events.push([name, payload]) }
+  })
+
+  assert.deepEqual(events, [
+    ['delta', { text: '你好' }],
+    ['delta', { text: '，世界' }],
+    ['done', { text: '你好，世界', hint: 'ok' }]
+  ])
+  assert.deepEqual(done, { text: '你好，世界', hint: 'ok' })
+})
+
+test('requestStream throws ApiError on SSE error event and supports JSON fallback', async () => {
+  const encoder = new TextEncoder()
+  globalThis.fetch = async () => new Response(new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoder.encode('event: error\ndata: {"error":"上游超时"}\n\n'))
+      controller.close()
+    }
+  }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+
+  await assert.rejects(requestStream('/api/assistant/chat', { body: { stream: true } }), {
+    message: '上游超时', status: 502
+  })
+
+  globalThis.fetch = async () => response(200, { text: '非流式回退' })
+  const seen = []
+  const fallback = await requestStream('/api/assistant/chat', {
+    body: { stream: true },
+    onEvent(name, payload) { seen.push([name, payload]) }
+  })
+  assert.deepEqual(fallback, { text: '非流式回退' })
+  assert.deepEqual(seen, [['done', { text: '非流式回退' }]])
 })

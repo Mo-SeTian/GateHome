@@ -75,14 +75,29 @@ func (t *homeTunnel) Close() error {
 	return nil
 }
 
+const (
+	homeMaxTotalFlows    = 256
+	homeMaxPeerFlows     = 64
+	homeMaxTotalDNSFlows = 128
+	homeMaxPeerDNSFlows  = 32
+)
+
+var homeUDPBufPool = sync.Pool{
+	New: func() any {
+		buf := make([]byte, 65535)
+		return &buf
+	},
+}
+
 type homeRuntime struct {
-	device *device.Device
-	tunnel *homeTunnel
-	mu     sync.Mutex
-	policy homePolicy
-	active map[*homeFlow]struct{}
-	closed bool
-	admin  *Admin
+	device    *device.Device
+	tunnel    *homeTunnel
+	mu        sync.Mutex
+	policy    homePolicy
+	active    map[*homeFlow]struct{}
+	dnsActive map[*homeFlow]struct{}
+	closed    bool
+	admin     *Admin
 }
 
 type homePolicy struct {
@@ -97,6 +112,7 @@ type homeRelaySocket struct {
 
 type homeFlow struct {
 	peer   homePeer
+	isDNS  bool
 	cancel context.CancelFunc
 }
 
@@ -106,7 +122,10 @@ func newHomeRuntime(admin *Admin, config homeState) (*homeRuntime, error) {
 		TransportProtocols: []stack.TransportProtocolFactory{tcp.NewProtocol, udp.NewProtocol},
 	})
 	t := &homeTunnel{link: channel.New(256, homeMTU, ""), stack: s, events: make(chan tun.Event)}
-	r := &homeRuntime{admin: admin, tunnel: t, policy: config.policy(), active: make(map[*homeFlow]struct{})}
+	r := &homeRuntime{
+		admin: admin, tunnel: t, policy: config.policy(),
+		active: make(map[*homeFlow]struct{}), dnsActive: make(map[*homeFlow]struct{}),
+	}
 	if err := s.CreateNIC(1, t.link); err != nil {
 		s.Destroy()
 		return nil, errors.New("无法初始化内置 WireGuard 网络")
@@ -145,6 +164,9 @@ func (r *homeRuntime) close() {
 	for flow := range r.active {
 		flow.cancel()
 	}
+	for flow := range r.dnsActive {
+		flow.cancel()
+	}
 	r.mu.Unlock()
 	r.device.Close()
 	r.tunnel.stack.Destroy()
@@ -160,6 +182,28 @@ func (r *homeRuntime) setPolicy(policy homePolicy) {
 			flow.cancel()
 		}
 	}
+	for flow := range r.dnsActive {
+		next, exists := policy.peers[flow.peer.Address]
+		if !exists || next != flow.peer {
+			flow.cancel()
+		}
+	}
+}
+
+func hasAdminPortForward(c Config, listenPort, adminPort int) bool {
+	if adminPort < 1 || listenPort < 1 || len(c.Forwards) == 0 {
+		return false
+	}
+	local := localAdminAddresses()
+	for _, f := range c.Forwards {
+		if !f.Enabled || f.Protocol == "udp" || f.ListenPort != listenPort {
+			continue
+		}
+		if targetPort, isLocal := localForwardTarget(f.Upstream, local); isLocal && targetPort == adminPort {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *homeRuntime) allowed(id stack.TransportEndpointID, tcpFlow bool) (homePeer, bool) {
@@ -173,7 +217,7 @@ func (r *homeRuntime) allowed(id stack.TransportEndpointID, tcpFlow bool) (homeP
 		return peer, dest == homeServiceIP && (id.LocalPort == 53 || tcpFlow && int(id.LocalPort) == peer.Port)
 	}
 	if !r.policy.lan.Contains(dest) || !homeUsableHost(r.policy.lan, dest) ||
-		tcpFlow && int(id.LocalPort) == r.admin.adminPort && !peer.Admin {
+		(tcpFlow && !peer.Admin && (int(id.LocalPort) == r.admin.adminPort || hasAdminPortForward(r.admin.store.Snapshot().Config, int(id.LocalPort), r.admin.adminPort))) {
 		return peer, false
 	}
 	return peer, peer.Mode == "lan" || peer.Mode == "host" &&
@@ -184,19 +228,40 @@ func (r *homeRuntime) begin(id stack.TransportEndpointID, tcpFlow bool) (context
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	peer, allowed := r.allowed(id, tcpFlow)
-	if !allowed || len(r.active) >= 256 {
+	if !allowed {
 		return nil, nil
 	}
+	isDNS := peer.Mode == "route" && !tcpFlow && id.LocalPort == 53
+	pool, totalCap, peerCap := r.active, homeMaxTotalFlows, homeMaxPeerFlows
+	if isDNS {
+		pool, totalCap, peerCap = r.dnsActive, homeMaxTotalDNSFlows, homeMaxPeerDNSFlows
+	}
+	if len(pool) >= totalCap {
+		return nil, nil
+	}
+	peerCount := 0
+	for activeFlow := range pool {
+		if activeFlow.peer.ID == peer.ID {
+			peerCount++
+			if peerCount >= peerCap {
+				return nil, nil
+			}
+		}
+	}
 	ctx, cancel := context.WithCancel(context.Background())
-	f := &homeFlow{peer: peer, cancel: cancel}
-	r.active[f] = struct{}{}
+	f := &homeFlow{peer: peer, isDNS: isDNS, cancel: cancel}
+	pool[f] = struct{}{}
 	return ctx, f
 }
 
 func (r *homeRuntime) end(f *homeFlow) {
 	f.cancel()
 	r.mu.Lock()
-	delete(r.active, f)
+	if f.isDNS {
+		delete(r.dnsActive, f)
+	} else {
+		delete(r.active, f)
+	}
 	r.mu.Unlock()
 }
 
@@ -268,6 +333,15 @@ func (r *homeRuntime) relay(ctx context.Context, id stack.TransportEndpointID, n
 		socket := homeRelaySocket{wan.LocalAddr().String(), wan.RemoteAddr().String()}
 		r.admin.proxy.homeRelaySources.Store(socket, peer)
 		defer r.admin.proxy.homeRelaySources.Delete(socket)
+		if !peer.Admin {
+			if localAP, parseErr := netip.ParseAddrPort(wan.LocalAddr().String()); parseErr == nil {
+				localIP := localAP.Addr().Unmap()
+				if localIP.Is4() && !localIP.IsLoopback() && !r.policy.lan.Contains(localIP) {
+					r.admin.proxy.trackHomeBridgeRelay(localIP, id.LocalPort, 1)
+					defer r.admin.proxy.trackHomeBridgeRelay(localIP, id.LocalPort, -1)
+				}
+			}
+		}
 		done := make(chan struct{})
 		go func() {
 			defer close(done)
@@ -286,7 +360,9 @@ func (r *homeRuntime) relay(ctx context.Context, id stack.TransportEndpointID, n
 		wan.SetReadDeadline(deadline)
 	}
 	copyPackets := func(to, from net.Conn) {
-		buf := make([]byte, 65535)
+		bufPtr := homeUDPBufPool.Get().(*[]byte)
+		defer homeUDPBufPool.Put(bufPtr)
+		buf := *bufPtr
 		for {
 			n, err := from.Read(buf)
 			if err != nil {

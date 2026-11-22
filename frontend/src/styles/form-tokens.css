@@ -405,7 +405,7 @@ meter::-webkit-meter-optimum-value {
 }
 
 /* ================= 6. 全局 Dialog 统一高透毛玻璃规范 ================= */
-dialog,
+dialog:not(.cmdk-backdrop),
 .modal-dialog,
 .modal-box,
 .report-dialog,
@@ -432,7 +432,7 @@ dialog:not([open]) {
   display: none !important;
 }
 
-dialog::backdrop,
+dialog:not(.cmdk-backdrop)::backdrop,
 .modal-dialog::backdrop,
 .modal-box::backdrop,
 .report-dialog::backdrop,
@@ -442,7 +442,7 @@ dialog::backdrop,
   -webkit-backdrop-filter: blur(12px) !important;
 }
 
-dialog header,
+dialog:not(.cmdk-backdrop) header,
 .modal-header,
 .report-dialog header {
   padding: 18px 24px !important;
@@ -454,8 +454,8 @@ dialog header,
   background: rgba(255, 255, 255, 0.02) !important;
 }
 
-dialog header h2,
-dialog header h3,
+dialog:not(.cmdk-backdrop) header h2,
+dialog:not(.cmdk-backdrop) header h3,
 .modal-title,
 .report-dialog header h2 {
   font-size: 16.5px !important;
@@ -468,8 +468,8 @@ dialog header h3,
 .close-modal-btn,
 .dialog-close-btn,
 .modal-close-btn,
-dialog header button.close-btn,
-dialog header .btn-ghost {
+dialog:not(.cmdk-backdrop) header button.close-btn,
+dialog:not(.cmdk-backdrop) header .btn-ghost {
   display: inline-flex !important;
   align-items: center !important;
   justify-content: center !important;
@@ -487,16 +487,16 @@ dialog header .btn-ghost {
 .close-modal-btn:hover,
 .dialog-close-btn:hover,
 .modal-close-btn:hover,
-dialog header button.close-btn:hover,
-dialog header .btn-ghost:hover {
+dialog:not(.cmdk-backdrop) header button.close-btn:hover,
+dialog:not(.cmdk-backdrop) header .btn-ghost:hover {
   background: rgba(255, 255, 255, 0.08) !important;
   color: var(--ink, #f8fafc) !important;
 }
 
-dialog form,
+dialog:not(.cmdk-backdrop) > form,
 .modal-body,
-.report-dialog form,
-.firewall-dialog form {
+.report-dialog > form,
+.firewall-dialog > form {
   padding: 22px 24px !important;
   overflow-y: auto !important;
   flex: 1 1 auto !important;
@@ -506,7 +506,7 @@ dialog form,
   gap: 16px !important;
 }
 
-dialog footer,
+dialog:not(.cmdk-backdrop) footer,
 .modal-footer,
 .report-dialog footer {
   padding: 16px 24px !important;
@@ -765,7 +765,7 @@ details > *:not(summary) {
 }
 
 @media (max-width: 480px) {
-  dialog,
+  dialog:not(.cmdk-backdrop),
   .modal-dialog,
   .modal-box,
   .report-dialog,
@@ -774,19 +774,19 @@ details > *:not(summary) {
     max-height: calc(100dvh - 24px) !important;
     border-radius: 16px !important;
   }
-  dialog header,
+  dialog:not(.cmdk-backdrop) header,
   .modal-header,
   .report-dialog header {
     padding: 14px 16px !important;
   }
-  dialog form,
+  dialog:not(.cmdk-backdrop) > form,
   .modal-body,
-  .report-dialog form,
-  .firewall-dialog form {
+  .report-dialog > form,
+  .firewall-dialog > form {
     padding: 16px !important;
     gap: 12px !important;
   }
-  dialog footer,
+  dialog:not(.cmdk-backdrop) footer,
   .modal-footer,
   .report-dialog footer {
     padding: 12px 16px !important;

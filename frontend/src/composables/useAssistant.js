@@ -1,7 +1,8 @@
 import { computed, ref, shallowRef } from 'vue'
-import { request } from '@/api/client'
+import { request, requestStream } from '@/api/client'
 import { useGatewayStatus } from '@/composables/useGatewayStatus'
 
+const maxConversationMessages = 40
 const panelOpen = ref(false)
 const messages = ref([])
 const settings = shallowRef(null)
@@ -20,6 +21,7 @@ const effort = computed(() => effortChoice.value ?? provider.value?.effort ?? ''
 const historyKey = 'gatehome.assistant.history.v1'
 let historyLoaded = false
 let session = new AbortController()
+let turnController = null
 
 function readHistory() {
   try {
@@ -44,7 +46,10 @@ function updateHistory(entry, remove = false) {
 
 function persistConversation() {
   if (!conversation.value || !messages.value.length) return
-  const history = messages.value.slice(-40).map(({ changeError, fresh, ...message }) => ({
+  if (messages.value.length > maxConversationMessages) {
+    messages.value = messages.value.slice(-maxConversationMessages)
+  }
+  const history = messages.value.slice(-maxConversationMessages).map(({ changeError, fresh, streaming, ...message }) => ({
     ...message, ...(message.change && !message.outcome ? { outcome: '请重新发起修改' } : {})
   }))
   updateHistory({ ...conversation.value, model: model.value, updated: Date.now(), messages: history })
@@ -54,7 +59,7 @@ function openConversation(row) {
   if (sending.value || applying.value) return
   clearConversation()
   conversation.value = { id: row.id, binding: row.binding, provider: row.provider, title: row.title }
-  messages.value = row.messages.map(message => ({ ...message }))
+  messages.value = row.messages.slice(-maxConversationMessages).map(message => ({ ...message }))
   modelChoice.value = { provider: row.provider, model: row.model }
   effortChoice.value = null
 }
@@ -107,6 +112,10 @@ function listModels(body) {
   return request('/api/assistant/models', { method: 'POST', body, signal: session.signal })
 }
 
+function stopGeneration() {
+  turnController?.abort()
+}
+
 async function send(content, page) {
   content = content.trim()
   const selected = provider.value
@@ -115,44 +124,103 @@ async function send(content, page) {
     error.value = '原接入点已变化。请新建对话，或切换到其他接入点。'
     return
   }
-  if (!conversation.value) {
+  const startedNew = !conversation.value
+  if (startedNew) {
     conversation.value = {
       id: globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`,
       binding: selected.binding, provider: selected.id, title: content.replace(/\s+/g, ' ').slice(0, 48)
     }
   }
+  const encoder = new TextEncoder()
+  const priorHistory = messages.value.slice(-12).map(({ role, content: textBody, change, outcome }) => {
+    const details = change ? `\n配置建议：${change.name}，原值 ${change.before}，新值 ${change.after}` : ''
+    const text = textBody + details + (outcome ? `\n操作结果：${outcome}` : '')
+    return { role, content: encoder.encode(text).length <= 20000 ? text : textBody }
+  })
+  const history = [...priorHistory, { role: 'user', content }]
+  // Keep requests below the server's JSON body limit even with long earlier replies.
+  while (history.length > 1 && encoder.encode(JSON.stringify(history)).length > 112000) history.shift()
+
   draft.value = ''
   messages.value.push({ role: 'user', content })
-  persistConversation()
-  const { signal } = session
+  const placeholder = { role: 'assistant', content: '', model: model.value, streaming: true, fresh: false }
+  messages.value.push(placeholder)
+  if (messages.value.length > maxConversationMessages) {
+    messages.value = messages.value.slice(-maxConversationMessages)
+  }
+  const assistantMessage = messages.value[messages.value.length - 1]
+
+  const sessionSignal = session.signal
+  const currentTurn = new AbortController()
+  turnController = currentTurn
+  const abortTurn = () => currentTurn.abort()
+  sessionSignal.addEventListener('abort', abortTurn, { once: true })
+
   const modelID = model.value
   sending.value = true
   error.value = ''
   try {
-    const encoder = new TextEncoder()
-    const history = messages.value.slice(-13).map(({ role, content, change, outcome }) => {
-      const details = change ? `\n配置建议：${change.name}，原值 ${change.before}，新值 ${change.after}` : ''
-      const text = content + details + (outcome ? `\n操作结果：${outcome}` : '')
-      return { role, content: encoder.encode(text).length <= 20000 ? text : content }
+    let completed = false
+    await requestStream('/api/assistant/chat', {
+      method: 'POST',
+      body: {
+        messages: history, page, provider: selected.id, binding: selected.binding,
+        model: modelID, effort: effort.value, stream: true
+      },
+      signal: currentTurn.signal,
+      onEvent(eventName, payload) {
+        if (currentTurn.signal.aborted || sessionSignal.aborted) return
+        if (eventName === 'delta' && payload?.text) {
+          assistantMessage.content += payload.text
+        } else if (eventName === 'done' && payload) {
+          completed = true
+          if (payload.text) assistantMessage.content = payload.text
+          if (payload.link) assistantMessage.link = payload.link
+          if (payload.change) assistantMessage.change = payload.change
+          if (payload.hint) assistantMessage.hint = payload.hint
+          assistantMessage.streaming = false
+          assistantMessage.fresh = true
+        }
+      }
     })
-    // Keep requests below the server's JSON body limit even with long earlier replies.
-    while (new TextEncoder().encode(JSON.stringify(history)).length > 112000) history.shift()
-    const reply = await request('/api/assistant/chat', {
-      method: 'POST', body: {
-        messages: history, page, provider: selected.id, binding: selected.binding, model: modelID, effort: effort.value
-      }, signal
-    })
-    if (!signal.aborted) {
-      messages.value.push({ ...reply, role: 'assistant', content: reply.text, model: modelID, fresh: true })
+    if (!sessionSignal.aborted && !currentTurn.signal.aborted) {
+      if (!completed && !assistantMessage.content.trim()) {
+        throw new Error('模型回复为空，请重试')
+      }
+      assistantMessage.streaming = false
       persistConversation()
     }
   } catch (err) {
-    if (!signal.aborted) {
-      error.value = err.message
-      if (err.status === 409) await loadSettings().catch(() => {})
+    if (!sessionSignal.aborted) {
+      assistantMessage.streaming = false
+      const hasPartial = assistantMessage.content.trim().length > 0
+      const removeUnanswered = () => {
+        const idx = messages.value.indexOf(assistantMessage)
+        if (idx > 0 && messages.value[idx - 1]?.role === 'user') messages.value.splice(idx - 1, 2)
+        else if (idx >= 0) messages.value.splice(idx, 1)
+        if (startedNew && messages.value.length === 0) conversation.value = null
+        if (!draft.value) draft.value = content
+      }
+      if (err.name === 'AbortError') {
+        if (hasPartial) {
+          persistConversation()
+        } else {
+          removeUnanswered()
+        }
+      } else {
+        if (hasPartial) {
+          persistConversation()
+        } else {
+          removeUnanswered()
+        }
+        error.value = err.message
+        if (err.status === 409) await loadSettings().catch(() => {})
+      }
     }
   } finally {
-    if (!signal.aborted) sending.value = false
+    sessionSignal.removeEventListener('abort', abortTurn)
+    if (turnController === currentTurn) turnController = null
+    if (!sessionSignal.aborted) sending.value = false
   }
 }
 
@@ -199,6 +267,7 @@ function cancelChange(message) {
 }
 
 function clearConversation() {
+  turnController?.abort()
   messages.value = []
   conversation.value = null
   draft.value = ''
@@ -206,6 +275,7 @@ function clearConversation() {
 }
 
 function resetAssistant() {
+  turnController?.abort()
   session.abort()
   session = new AbortController()
   clearConversation()
@@ -221,6 +291,6 @@ function resetAssistant() {
 
 export function useAssistant() {
   return { panelOpen, draft, messages, conversations, conversation, settings, providers, provider, model, effort,
-    effortChoice, sending, applying, error, loadSettings, saveSettings, testSettings, listModels, send, apply,
+    effortChoice, sending, applying, error, loadSettings, saveSettings, testSettings, listModels, send, stopGeneration, apply,
     clearConversation, cancelChange, openConversation, removeConversation, selectModel, resetAssistant }
 }

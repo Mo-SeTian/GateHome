@@ -810,6 +810,8 @@ async function saveRoute() {
       replaceConfigItem(editSnapshot.value, 'routes', record, originalRouteId.value),
       credentials
     )
+    if (record.image) failedRouteImages.value.delete(record.image)
+    if (originalRoute.value?.image) failedRouteImages.value.delete(originalRoute.value.image)
     routeDialog.value.close()
     await saved('反代路由已保存')
   } catch (err) {

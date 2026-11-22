@@ -18,31 +18,85 @@ import (
 )
 
 type proxyRoute struct {
-	adminUpstream bool
-	route         Route
-	trafficID     string
-	handler       http.Handler
-	firewall      *compiledFirewall
-	groupName     string
-	auth          *routeGate
+	adminUpstream    bool
+	homeAdminBlocked bool
+	route            Route
+	trafficID        string
+	handler          http.Handler
+	firewall         *compiledFirewall
+	groupName        string
+	auth             *routeGate
+}
+
+type homeBridgeRelayKey struct {
+	prefix netip.Prefix
+	port   uint16
 }
 
 type Proxy struct {
-	homeRelaySources sync.Map // homeRelaySocket -> authenticated tunnel peer
-	routes           atomic.Value
-	firewalls        atomic.Value
-	trustedProxies   atomic.Value
-	Requests         atomic.Uint64
-	Blocked          atomic.Uint64
-	Failures         atomic.Uint64
-	subscriptions    *Subscriptions
-	logs             *Logs
-	traffic          *Traffic
-	liveTraffic      proxyLiveTraffic
-	defense          *IPDefense
-	wafSlots         chan struct{}
-	wafMemory        *semaphore.Weighted
-	adminPort        int
+	homeRelaySources   sync.Map // homeRelaySocket -> authenticated tunnel peer
+	homeBridgeMu       sync.Mutex
+	homeBridgeNonAdmin map[homeBridgeRelayKey]int
+	routes             atomic.Value
+	firewalls          atomic.Value
+	trustedProxies     atomic.Value
+	Requests           atomic.Uint64
+	Blocked            atomic.Uint64
+	Failures           atomic.Uint64
+	subscriptions      *Subscriptions
+	logs               *Logs
+	traffic            *Traffic
+	liveTraffic        proxyLiveTraffic
+	defense            *IPDefense
+	wafSlots           chan struct{}
+	wafMemory          *semaphore.Weighted
+	adminPort          int
+}
+
+func (p *Proxy) trackHomeBridgeRelay(localIP netip.Addr, port uint16, delta int) {
+	if !localIP.Is4() || port == 0 || delta == 0 {
+		return
+	}
+	key := homeBridgeRelayKey{prefix: netip.PrefixFrom(localIP, 16).Masked(), port: port}
+	p.homeBridgeMu.Lock()
+	defer p.homeBridgeMu.Unlock()
+	if delta > 0 {
+		if p.homeBridgeNonAdmin == nil {
+			p.homeBridgeNonAdmin = map[homeBridgeRelayKey]int{}
+		}
+		p.homeBridgeNonAdmin[key] += delta
+		return
+	}
+	if p.homeBridgeNonAdmin == nil {
+		return
+	}
+	p.homeBridgeNonAdmin[key] += delta
+	if p.homeBridgeNonAdmin[key] <= 0 {
+		delete(p.homeBridgeNonAdmin, key)
+	}
+}
+
+func (p *Proxy) isHomeBridgeNonAdmin(remoteAddr string, local net.Addr) bool {
+	if local == nil {
+		return false
+	}
+	remoteAP, err := netip.ParseAddrPort(remoteAddr)
+	if err != nil {
+		return false
+	}
+	remoteIP := remoteAP.Addr().Unmap()
+	if !remoteIP.Is4() {
+		return false
+	}
+	localAP, err := netip.ParseAddrPort(local.String())
+	if err != nil {
+		return false
+	}
+	key := homeBridgeRelayKey{prefix: netip.PrefixFrom(remoteIP, 16).Masked(), port: localAP.Port()}
+	p.homeBridgeMu.Lock()
+	count := p.homeBridgeNonAdmin[key]
+	p.homeBridgeMu.Unlock()
+	return count > 0
 }
 
 func NewProxy(c Config, subscriptions *Subscriptions) *Proxy {
@@ -90,6 +144,7 @@ func (p *Proxy) configurePrepared(c Config, hashes map[string]string, firewalls 
 		u, _ := url.Parse(r.Upstream)
 		upstream := u
 		adminUpstream := isAdminUpstream(upstream, p.adminPort, adminAddresses)
+		homeAdminBlocked := isAdminAccessBlockedTarget(upstream, p.adminPort, adminAddresses)
 		trafficID := proxyTrafficID(r)
 		h := &httputil.ReverseProxy{
 			Rewrite: func(pr *httputil.ProxyRequest) {
@@ -133,7 +188,7 @@ func (p *Proxy) configurePrepared(c Config, hashes map[string]string, firewalls 
 			},
 		}
 		group, _ := c.Group(r.GroupID)
-		entry := proxyRoute{adminUpstream: adminUpstream, route: r, trafficID: trafficID, handler: h, firewall: firewalls[r.FirewallID], groupName: group.Name}
+		entry := proxyRoute{adminUpstream: adminUpstream, homeAdminBlocked: homeAdminBlocked, route: r, trafficID: trafficID, handler: h, firewall: firewalls[r.FirewallID], groupName: group.Name}
 		if r.Auth.Enabled {
 			key := routeKey(r)
 			entry.auth = previous[key].auth
@@ -169,7 +224,8 @@ func (p *Proxy) serveGroup(groupID string, w http.ResponseWriter, r *http.Reques
 	if local != nil {
 		relay, fromHome = p.homeRelaySources.Load(homeRelaySocket{r.RemoteAddr, local.String()})
 	}
-	if !tunnelRequest && !fromHome {
+	bridgeNonAdmin := !fromHome && p.isHomeBridgeNonAdmin(r.RemoteAddr, local)
+	if !tunnelRequest && !fromHome && !bridgeNonAdmin {
 		trusted, _ := p.trustedProxies.Load().([]netip.Prefix)
 		r = proxySourceRequest(r, trusted)
 	}
@@ -204,8 +260,9 @@ func (p *Proxy) serveGroup(groupID string, w http.ResponseWriter, r *http.Reques
 		http.NotFound(w, r)
 		return
 	}
-	if (tunnelRequest && (homeRoute != route.route.ID || route.adminUpstream)) ||
-		(fromHome && route.adminUpstream && !relay.(homePeer).Admin) {
+	if (tunnelRequest && (homeRoute != route.route.ID || route.homeAdminBlocked)) ||
+		(fromHome && route.homeAdminBlocked && !relay.(homePeer).Admin) ||
+		(bridgeNonAdmin && route.homeAdminBlocked) {
 		http.Error(w, "此设备未授权访问该反代服务", http.StatusForbidden)
 		return
 	}

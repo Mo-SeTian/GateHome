@@ -509,7 +509,8 @@ onBeforeUnmount(() => {
 .kpi-card { padding: 16px; }
 .kpi-card :deep(.card-inner) { display: flex; flex-direction: column; justify-content: space-between; gap: 8px; }
 .kpi-card-bad { border-color: rgba(244, 63, 94, 0.38) !important; }
-.kpi-top { display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 12px; color: var(--muted); }
+.kpi-top { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 4px 8px; font-size: 12px; color: var(--muted); }
+.kpi-top > span:first-child { white-space: nowrap; }
 .kpi-val { font-size: 24px; font-weight: 700; line-height: 1.15; color: var(--ink); }
 .kpi-foot { font-size: 11.5px; color: var(--muted); min-height: 18px; margin: 0; }
 .error-text { color: var(--bad); }
