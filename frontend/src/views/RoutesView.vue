@@ -961,8 +961,9 @@ function changeRouteGroup() {
 }
 
 watch(
-  [() => currentRoute.query.q, () => currentRoute.query.group],
-  ([q, group]) => {
+  [() => currentRoute.name, () => currentRoute.query.q, () => currentRoute.query.group],
+  ([name, q, group]) => {
+    if (name !== 'Routes') return
     if (typeof q !== 'string' && typeof group !== 'string') return
     if (typeof q === 'string') {
       searchQuery.value = q

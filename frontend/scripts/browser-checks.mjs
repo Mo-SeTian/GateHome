@@ -658,10 +658,15 @@ try {
   await httpSection.locator('.route-group-toggle').click()
   for (const [width, height] of [[1440, 1000], [390, 844], [320, 667], [844, 390]]) {
     await page.setViewportSize({ width, height })
+    // Wait for the sidebar margin transition before checking the responsive layout.
+    await page.locator('.main-wrapper').evaluate(async el => {
+      await document.fonts.ready
+      await Promise.all(el.getAnimations().map(animation => animation.finished.catch(() => {})))
+    })
     for (const theme of ['light', 'dark']) {
       if (!await page.locator('body').evaluate((el, theme) => el.classList.contains('theme-' + theme), theme))
         await page.getByTitle(theme === 'dark' ? '切换为深色模式' : '切换为浅色模式').click()
-      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true)
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `route groups overflow at ${width}px/${theme}`)
       assert.ok((await httpsFold().boundingBox()).height >= 44)
       assert.equal(await httpsSection.locator('.domain-text').textContent(), createdURL)
       if (width <= 640) {
@@ -773,6 +778,7 @@ try {
   for (let n = 0; n < 10; n++) await input.press('ArrowDown')
   await input.fill('概览'); await input.press('Enter')
   await page.waitForFunction(() => location.hash === '#/overview' && !document.querySelector('dialog[open]'))
+  await page.getByRole('heading', { name: '系统概览', exact: true }).waitFor()
   await trigger.click()
   for (let n = 0; n < 8; n++) {
     await page.keyboard.press('Tab')
@@ -786,13 +792,16 @@ try {
   await input.fill(String(forwardPort))
   await input.press('Enter')
   await page.waitForFunction(() => location.hash.startsWith('#/forwards') && !document.querySelector('dialog[open]'))
-  assert.equal(await page.getByRole('searchbox', { name: '搜索端口转发' }).inputValue(), String(forwardPort))
+  await page.waitForFunction(
+    expected => document.querySelector('input[aria-label="搜索端口转发"]')?.value === expected,
+    String(forwardPort)
+  )
   await page.getByRole('searchbox', { name: '搜索端口转发' }).fill('')
   await trigger.click()
   await input.fill('scan.home.example.test')
   await input.press('Enter')
   await page.waitForFunction(() => location.hash.startsWith('#/routes') && !document.querySelector('dialog[open]'))
-  assert.equal(await page.getByRole('textbox', { name: '搜索反代服务' }).inputValue(), 'scan.home.example.test')
+  await page.waitForFunction(() => document.querySelector('input[aria-label="搜索反代服务"]')?.value === 'scan.home.example.test')
   await page.getByRole('textbox', { name: '搜索反代服务' }).fill('')
   await page.locator('.chip-btn', { hasText: '全部路由' }).click()
   console.log('PASS command palette: filtered Enter, entity deep-linking, native focus boundary and Escape focus restoration')

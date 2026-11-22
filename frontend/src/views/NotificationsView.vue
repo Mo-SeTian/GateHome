@@ -242,7 +242,7 @@ const filter = ref('all')
 const searchQuery = ref('')
 
 watch(
-  () => route.query.q,
+  () => route.name === 'Notifications' ? route.query.q : undefined,
   (q) => {
     if (typeof q === 'string') {
       searchQuery.value = q.trim()

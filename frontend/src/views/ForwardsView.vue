@@ -387,7 +387,7 @@ async function deleteForward(forward) {
   }
 }
 watch(
-  () => currentRoute.query.q,
+  () => currentRoute.name === 'Forwards' ? currentRoute.query.q : undefined,
   (q) => {
     if (typeof q !== 'string') return
     searchQuery.value = q
