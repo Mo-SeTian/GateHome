@@ -303,9 +303,47 @@ try {
     }, { endpoint, body })
     return response
   }
+  const routeMeta = {
+    overview: ['概览 · GateHome', ['系统概览']],
+    sunpanel: ['浏览器首页 · GateHome', ['SunPanel 浏览器首页']],
+    icons: ['图标库 · GateHome', ['图标库']],
+    routes: ['反向代理 · GateHome', ['反向代理']],
+    forwards: ['端口转发 · GateHome', ['端口转发']],
+    'remote-home': ['远程回家 · GateHome', ['远程回家', 'WireGuard']],
+    ddns: ['动态域名 · GateHome', ['动态域名（DDNS）']],
+    certificates: ['SSL 证书 · GateHome', ['SSL / TLS 证书']],
+    access: ['防火墙管理 · GateHome', ['防火墙与 WAF']],
+    firewall: ['防火墙管理 · GateHome', ['防火墙与 WAF']],
+    subscriptions: ['订阅管理 · GateHome', ['IP 规则订阅']],
+    'ip-blocks': ['IP 拦截名单 · GateHome', ['IP 拦截名单']],
+    'firewall-logs': ['防火墙拦截记录 · GateHome', ['防火墙拦截记录']],
+    runtime: ['运行状态 · GateHome', ['运行状态']],
+    notifications: ['通知中心 · GateHome', ['通知中心']],
+    logs: ['日志 · GateHome', ['日志']],
+    statistics: ['统计 · GateHome', ['访问统计']],
+    traffic: ['流量统计 · GateHome', ['流量统计']],
+    assistant: ['网关助手 · GateHome', ['网关助手']],
+    'assistant/settings': ['模型接入点 · GateHome', ['模型接入点']],
+    mcp: ['MCP 授权 · GateHome', ['MCP 授权']],
+    updates: ['更新 · GateHome', ['版本更新与回滚']],
+    backups: ['备份与恢复 · GateHome', ['备份与恢复']],
+    settings: ['设置 · GateHome', ['设置']],
+    'settings/exposure': ['入口暴露总览 · GateHome', ['入口暴露总览']],
+    'settings/security': ['账号安全 · GateHome', ['账号安全']]
+  }
   async function route(name) {
-    await page.goto(origin + '/console/#/' + name)
-    await page.locator('.page-viewport h1').waitFor()
+    const expectedHash = '#/' + name
+    const [expectedTitle, expectedHeadings] = routeMeta[name] ?? []
+    await page.goto(origin + '/console/' + expectedHash)
+    await page.waitForFunction(({ expectedHash, expectedTitle, expectedHeadings }) => {
+      if (window.location.hash !== expectedHash) return false
+      if (expectedTitle && document.title !== expectedTitle) return false
+      const viewport = document.querySelector('.page-viewport')
+      if (!viewport || viewport.querySelector('.page-fade-leave-active')) return false
+      const heading = viewport.querySelector('h1')?.textContent?.trim()
+      if (!heading) return false
+      return !expectedHeadings || expectedHeadings.includes(heading)
+    }, { expectedHash, expectedTitle, expectedHeadings })
   }
   async function closeEditor() {
     await dialog().getByRole('button', { name: /关闭/ }).first().click()
@@ -1703,7 +1741,9 @@ try {
         await page.screenshot({ path: path.join(process.env.GATEHOME_BROWSER_ARTIFACTS, `sidebar-${width}-${theme}.png`) })
       if (width < 1024) {
         await settings.click()
-        await page.waitForFunction(() => !document.querySelector('.app-sidebar').classList.contains('mobile-open'))
+        await page.waitForFunction(() =>
+          window.location.hash === '#/settings' &&
+          !document.querySelector('.app-sidebar').classList.contains('mobile-open'))
         await route('routes')
       }
     }
@@ -1988,6 +2028,7 @@ try {
   await composer.fill('检查 Markdown')
   await composer.press('Enter')
   await assistant.getByRole('heading', { name: '模型已连接' }).waitFor()
+  await assistant.getByRole('button', { name: '发送消息', exact: true }).waitFor()
   assert.equal(await assistant.locator('.assistant-markdown strong').textContent(), '加粗')
   assert.equal(responseRequest.reasoning.effort, 'high')
   assert.equal(responseRequest.input.length, 2, 'history from another provider reached Responses')

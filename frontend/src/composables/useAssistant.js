@@ -159,8 +159,8 @@ async function send(content, page) {
   const modelID = model.value
   sending.value = true
   error.value = ''
+  let completed = false
   try {
-    let completed = false
     await requestStream('/api/assistant/chat', {
       method: 'POST',
       body: {
@@ -180,18 +180,20 @@ async function send(content, page) {
           if (payload.hint) assistantMessage.hint = payload.hint
           assistantMessage.streaming = false
           assistantMessage.fresh = true
+          persistConversation()
+          if (turnController === currentTurn) sending.value = false
         }
       }
     })
-    if (!sessionSignal.aborted && !currentTurn.signal.aborted) {
-      if (!completed && !assistantMessage.content.trim()) {
+    if (!sessionSignal.aborted && !currentTurn.signal.aborted && !completed) {
+      if (!assistantMessage.content.trim()) {
         throw new Error('模型回复为空，请重试')
       }
       assistantMessage.streaming = false
       persistConversation()
     }
   } catch (err) {
-    if (!sessionSignal.aborted) {
+    if (!sessionSignal.aborted && !completed) {
       assistantMessage.streaming = false
       const hasPartial = assistantMessage.content.trim().length > 0
       const removeUnanswered = () => {
@@ -219,8 +221,10 @@ async function send(content, page) {
     }
   } finally {
     sessionSignal.removeEventListener('abort', abortTurn)
-    if (turnController === currentTurn) turnController = null
-    if (!sessionSignal.aborted) sending.value = false
+    if (turnController === currentTurn) {
+      turnController = null
+      if (!sessionSignal.aborted) sending.value = false
+    }
   }
 }
 
