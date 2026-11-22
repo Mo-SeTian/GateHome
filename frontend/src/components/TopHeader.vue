@@ -2,7 +2,8 @@
   <header class="top-header">
     <div class="header-left">
       <!-- Mobile Hamburger Menu Button -->
-      <button class="mobile-toggle-btn" @click="toggleSidebar" aria-label="打开侧边栏导航">
+      <button id="mobile-nav-toggle" class="mobile-toggle-btn" type="button" @click="toggleSidebar"
+        aria-label="打开侧边栏导航" aria-controls="app-sidebar" :aria-expanded="isSidebarOpen">
         <Menu :size="20" />
       </button>
 
@@ -155,7 +156,7 @@ import { useToast } from '@/composables/useToast'
 
 const route = useRoute()
 const { panelOpen } = useAssistant()
-const { toggleSidebar, openCmdk, theme, toggleTheme } = useAppStore()
+const { isSidebarOpen, toggleSidebar, openCmdk, theme, toggleTheme } = useAppStore()
 const { username, openAccountModal } = useSession()
 const { gatewayState } = useGatewayStatus()
 const { unreadCount } = useToast()

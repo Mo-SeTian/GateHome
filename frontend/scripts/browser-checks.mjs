@@ -1194,7 +1194,7 @@ try {
   await page.unroute('**/api/logs?*')
   console.log('PASS log explorer quick IP ban/unblock loop on access logs')
   await page.getByRole('button', { name: '关闭此通知' }).evaluateAll(buttons => buttons.forEach(button => button.click()))
-  await page.getByRole('link', { name: '图标库', exact: true }).click()
+  await route('icons')
   await page.locator('.icons-page h1').waitFor()
   const cards = page.locator('.icons-grid .icon-tile')
   const iconSearch = page.getByRole('searchbox', { name: '搜索图标' })
@@ -1560,6 +1560,40 @@ try {
 
   await route('routes')
   await page.getByRole('button', { name: '关闭此通知' }).evaluateAll(buttons => buttons.forEach(button => button.click()))
+  const sidebarNav = page.getByRole('navigation', { name: '主导航' })
+  const expandedSidebarGroups = () => sidebarNav.locator('.nav-section-title[aria-expanded="true"]').allTextContents()
+  const monitoringGroup = sidebarNav.getByRole('button', { name: '监控与日志', exact: true })
+  assert.deepEqual(await expandedSidebarGroups(), ['服务接入'])
+  await sidebarNav.getByRole('button', { name: '服务接入', exact: true }).click()
+  assert.deepEqual(await expandedSidebarGroups(), [])
+  await route('forwards')
+  assert.deepEqual(await expandedSidebarGroups(), ['服务接入'])
+  await monitoringGroup.click()
+  await route('settings/security')
+  assert.deepEqual(await expandedSidebarGroups(), ['监控与日志', '系统维护'])
+  assert.equal(await sidebarNav.getByRole('link', { name: '设置', exact: true }).getAttribute('aria-current'), 'location')
+  await page.reload()
+  await sidebarNav.getByRole('link', { name: '设置', exact: true }).waitFor()
+  assert.deepEqual(await expandedSidebarGroups(), ['监控与日志', '系统维护'])
+  await monitoringGroup.click()
+  await route('firewall')
+  assert.deepEqual(await expandedSidebarGroups(), ['访问安全'])
+  assert.equal(await sidebarNav.getByRole('link', { name: '防火墙管理', exact: true }).getAttribute('aria-current'), 'page')
+  await route('routes')
+  await page.setViewportSize({ width: 390, height: 900 })
+  const sidebarTrigger = button('打开侧边栏导航')
+  await sidebarTrigger.click()
+  await page.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === '关闭侧边栏导航')
+  await page.keyboard.press('Escape')
+  assert.equal(await sidebarTrigger.getAttribute('aria-expanded'), 'false')
+  assert.equal(await sidebarTrigger.evaluate(el => el === document.activeElement), true)
+  await sidebarTrigger.click()
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.waitForFunction(() => !document.querySelector('.app-sidebar').classList.contains('mobile-open'))
+  await page.setViewportSize({ width: 390, height: 900 })
+  assert.equal(await sidebarTrigger.getAttribute('aria-expanded'), 'false')
+  console.log('PASS sidebar expansion: active group, persisted manual groups, nested settings, aliases, Escape and resize')
+
   for (const width of [1440, 1024, 390, 320]) {
     await page.setViewportSize({ width, height: 900 })
     for (const theme of ['dark', 'light']) {
@@ -1609,6 +1643,18 @@ try {
   console.log('PASS sidebar: both themes, 23 links in six collapsible groups and 44px mobile targets from 320px to 1440px')
 
   await page.setViewportSize({ width: 1440, height: 1000 })
+  const wireGuardSocket = createSocket('udp4')
+  await new Promise((resolve, reject) => wireGuardSocket.once('error', reject).bind(0, '127.0.0.1', resolve))
+  const wireGuardPort = wireGuardSocket.address().port
+  await new Promise(resolve => wireGuardSocket.close(resolve))
+  assert.equal(await page.evaluate(async port => {
+    const response = await fetch('/api/remote-home/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Gatehouse-Request': '1' },
+      body: JSON.stringify({ endpoint: 'vpn.example.test', port, lan: '192.168.2.0/24', tunnel: '10.77.0.0/24' })
+    })
+    return response.status
+  }, wireGuardPort), 200)
   const baseRuntime = await api('runtime')
   let runtimeSampleTick = 0
   await page.route('**/api/runtime', async reqRoute => {
@@ -1639,6 +1685,20 @@ try {
     const row = ports.locator('.listener-row').filter({ hasText: '流量测试转发' }).filter({ hasText: protocol })
     assert.equal(await row.count(), 1)
   }
+  const wireGuardRow = ports.getByRole('listitem').filter({ hasText: 'WireGuard' })
+  await wireGuardRow.getByText(`:${wireGuardPort}`, { exact: true }).waitFor()
+  await wireGuardRow.getByText('UDP', { exact: true }).waitFor()
+  await wireGuardRow.getByText('绑定 所有网卡', { exact: true }).waitFor()
+  const listenerFilters = runtime.getByRole('group', { name: '监听分类筛选' })
+  const remoteHomeFilter = listenerFilters.getByRole('button', { name: '远程回家', exact: true })
+  await remoteHomeFilter.click()
+  assert.equal(await remoteHomeFilter.getAttribute('aria-pressed'), 'true')
+  assert.equal(await ports.getByRole('listitem').count(), 1)
+  const protocolFilter = runtime.getByRole('combobox', { name: '监听协议' })
+  await protocolFilter.selectOption('TCP')
+  await runtime.getByText('暂无符合条件的监听端口', { exact: true }).waitFor()
+  await protocolFilter.selectOption('UDP')
+  await wireGuardRow.waitFor()
   const openHistory = runtime.locator('.history-toggle').first()
   await openHistory.waitFor()
   await openHistory.click()
@@ -1657,6 +1717,7 @@ try {
     await page.locator('.main-wrapper').evaluate(el => Promise.all(el.getAnimations().map(animation => animation.finished.catch(() => {}))))
     assert.ok(await runtime.evaluate(el => el.scrollWidth <= el.clientWidth))
     assert.ok(await page.evaluate(() => document.querySelector('.page-viewport').scrollWidth <= innerWidth))
+    assert.ok((await remoteHomeFilter.boundingBox()).height >= 44)
   }
   await page.setViewportSize({ width: 1440, height: 1000 })
   await runtime.getByRole('link', { name: '故障推送', exact: true }).click()

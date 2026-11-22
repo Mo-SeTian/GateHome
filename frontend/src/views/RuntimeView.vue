@@ -228,7 +228,7 @@
               <span class="badge mono" :class="row.protocol === 'UDP' ? 'badge-brand' : 'badge-ok'">{{ row.protocol }}</span>
               <div class="listener-meta">
                 <div class="listener-purpose">{{ row.purpose }}</div>
-                <div class="listener-bind mono">绑定 {{ row.ip }}</div>
+                <div class="listener-bind mono">绑定 {{ row.ip === '*' ? '所有网卡' : row.ip }}</div>
               </div>
             </div>
             <div class="listener-services">
@@ -389,6 +389,7 @@ function listenerCategory(row) {
   const purpose = String(row.purpose || '')
   if (purpose.startsWith('管理台') || purpose.startsWith('独立入口') || purpose.startsWith('内部桥接')) return 'system'
   if (purpose === '端口转发') return 'forward'
+  if (purpose === '远程回家') return 'remote-home'
   return 'proxy'
 }
 
@@ -396,6 +397,7 @@ const listenerTabs = [
   { key: 'all', label: '全部' },
   { key: 'proxy', label: '反代组' },
   { key: 'forward', label: '端口转发' },
+  { key: 'remote-home', label: '远程回家' },
   { key: 'system', label: '管理' }
 ]
 
@@ -648,7 +650,9 @@ onBeforeUnmount(() => {
   .runtime-section-head.inline-head { flex-direction: row; align-items: center; justify-content: space-between; }
   .route-tools, .listener-tools { flex-direction: column; align-items: stretch; }
   .route-search { width: 100%; }
-  .proto-select { width: 100% !important; }
+  .listener-tools .chips-group { gap: 8px; }
+  .listener-tools .chip-btn { min-height: 44px; }
+  .proto-select { width: 100% !important; min-height: 44px !important; }
 
   .route-row-btn { grid-template-columns: minmax(0, 1fr); padding: 12px; gap: 8px; }
   .route-path-line { padding-left: 0; }

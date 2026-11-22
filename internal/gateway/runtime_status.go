@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"net"
 	"net/http"
-	"net/url"
 	"slices"
 	"strconv"
 	"time"
@@ -48,12 +47,10 @@ func (a *Admin) runtimeInventory(config Config) ([]runtimeListener, []runtimeRou
 	bind(a.adminAddress, "TCP", "管理台 · HTTP", adminServices...)
 	if a.ports.SunPanel.Enabled {
 		bind(a.httpAddresses[a.ports.SunPanel.Port], "TCP", "独立入口 · HTTP", "SunPanel")
-		if a.sunPanel != nil && a.sunPanel.mu.TryRLock() {
-			bridge, _ := url.Parse(a.sunPanel.bridgeURL)
-			if bridge != nil {
-				bind(bridge.Host, "TCP", "内部桥接 · HTTP", "SunPanel")
+		if a.sunPanel != nil {
+			if port := a.sunPanel.bridgePort.Load(); port != 0 {
+				bind(net.JoinHostPort("127.0.0.1", strconv.Itoa(int(port))), "TCP", "内部桥接 · HTTP", "SunPanel")
 			}
-			a.sunPanel.mu.RUnlock()
 		}
 	}
 	for _, group := range a.ports.Groups {
@@ -78,6 +75,9 @@ func (a *Admin) runtimeInventory(config Config) ([]runtimeListener, []runtimeRou
 				bind(active.udp.LocalAddr().String(), "UDP", "端口转发", active.rule.Name)
 			}
 		}
+	}
+	if port := a.remoteHome.listenPort(); port != 0 {
+		bind(net.JoinHostPort("*", strconv.Itoa(port)), "UDP", "远程回家", "WireGuard")
 	}
 	routes := make([]runtimeRoute, 0, len(config.Routes))
 	options := serviceHealthOptions(config)

@@ -6,10 +6,70 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestRuntimeInventoryTracksWireGuardListener(t *testing.T) {
+	a, handler := testAdmin(t)
+	t.Cleanup(a.CloseRemoteHome)
+	cookie := loginForTest(t, handler)
+	read := func() []runtimeListener {
+		t.Helper()
+		w := adminRequest(handler, "GET", "/api/runtime", nil, cookie, "")
+		var result struct{ Listeners []runtimeListener }
+		if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &result) != nil {
+			t.Fatalf("runtime inventory returned HTTP %d", w.Code)
+		}
+		var wireGuard []runtimeListener
+		for _, listener := range result.Listeners {
+			if listener.Purpose == "远程回家" {
+				wireGuard = append(wireGuard, listener)
+			}
+		}
+		return wireGuard
+	}
+	expectPort := func(port int) {
+		t.Helper()
+		want := []runtimeListener{{Port: port, IP: "*", Protocol: "UDP", Purpose: "远程回家", Services: []string{"WireGuard"}}}
+		if got := read(); !reflect.DeepEqual(got, want) {
+			t.Fatalf("WireGuard listeners: got %+v, want %+v", got, want)
+		}
+	}
+	if got := read(); len(got) != 0 {
+		t.Fatal("unconfigured WireGuard appeared in the inventory")
+	}
+	settings := homeInput{Endpoint: "vpn.example.test", Port: unusedHomePort(t), LAN: "192.168.2.0/24", Tunnel: "10.77.0.0/24"}
+	save := func(want int) {
+		t.Helper()
+		w := adminRequest(handler, "POST", "/api/remote-home/settings", settings, cookie, "")
+		if w.Code != want {
+			t.Fatalf("save WireGuard settings returned HTTP %d, want %d", w.Code, want)
+		}
+	}
+	save(http.StatusOK)
+	expectPort(settings.Port)
+	initialPort := settings.Port
+
+	occupied, err := net.ListenPacket("udp4", ":0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { occupied.Close() })
+	settings.Port = occupied.LocalAddr().(*net.UDPAddr).Port
+	save(http.StatusBadRequest)
+	expectPort(initialPort)
+	occupied.Close()
+	save(http.StatusOK)
+	expectPort(settings.Port)
+
+	a.CloseRemoteHome()
+	if got := read(); len(got) != 0 {
+		t.Fatal("closed WireGuard listener was still reported")
+	}
+}
 
 func TestRuntimeInventoryAndHistory(t *testing.T) {
 	a, handler := testAdmin(t)
@@ -46,7 +106,9 @@ func TestRuntimeInventoryAndHistory(t *testing.T) {
 	}
 	a.SetHTTPListeners([]net.Listener{admin, proxy, panel})
 	a.ports = config
-	a.SetSunPanel(&SunPanel{bridgeURL: "http://" + bridge.Addr().String()})
+	panelWorker := &SunPanel{}
+	panelWorker.bridgePort.Store(int32(bridge.Addr().(*net.TCPAddr).Port))
+	a.SetSunPanel(panelWorker)
 	a.SetPortForwarder(&PortForwarder{bindings: []*forwardBinding{
 		{rule: PortForward{Name: "双协议"}, tcp: forwardTCP},
 		{rule: PortForward{Name: "双协议"}, udp: forwardUDP},
@@ -65,7 +127,9 @@ func TestRuntimeInventoryAndHistory(t *testing.T) {
 	if code := adminRequest(handler, "GET", "/api/runtime", nil, nil, "").Code; code != 401 {
 		t.Fatal("runtime status requires login")
 	}
+	panelWorker.mu.Lock()
 	read := adminRequest(handler, "GET", "/api/runtime", nil, cookie, "")
+	panelWorker.mu.Unlock()
 	var runtime struct {
 		Listeners []runtimeListener
 		Routes    []runtimeRoute

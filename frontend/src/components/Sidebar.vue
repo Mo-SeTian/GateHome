@@ -5,14 +5,17 @@
       <div 
         v-if="isSidebarOpen" 
         class="mobile-backdrop"
-        @click="closeSidebar"
+        @click="dismissSidebar"
       />
     </transition>
 
     <!-- Sidebar Container -->
     <aside 
+      id="app-sidebar"
       class="app-sidebar"
       :class="{ 'mobile-open': isSidebarOpen }"
+      :inert="isMobile && !isSidebarOpen"
+      @keydown.esc="isSidebarOpen && dismissSidebar()"
     >
       <!-- Brand Logo Section -->
       <div class="sidebar-brand">
@@ -21,21 +24,23 @@
           <span class="brand-title">GateHome</span>
           <span class="brand-version">{{ gatewayVersion }}</span>
         </div>
-        <button class="mobile-close-btn" aria-label="关闭侧边栏导航" @click="closeSidebar">
+        <button ref="closeButton" class="mobile-close-btn" type="button" aria-label="关闭侧边栏导航" @click="dismissSidebar">
           <X :size="18" />
         </button>
       </div>
 
       <nav class="sidebar-nav" aria-label="主导航">
         <div v-for="(group, index) in groups" :key="group.label" class="nav-group">
-          <button type="button" class="nav-section-title" :class="{ 'section-active': group.items.some(item => item[0] === route.path) }"
-            :aria-expanded="openGroups.has(group.label)" :aria-controls="'nav-group-' + index" @click="toggleGroup(group.label)">
+          <button type="button" class="nav-section-title" :class="{ 'section-active': group === activeGroup }"
+            :aria-expanded="isGroupOpen(group.label)" :aria-controls="'nav-group-' + index" @click="toggleGroup(group.label)">
             <component :is="group.icon" :size="16" /><span>{{ group.label }}</span><ChevronDown :size="15" class="section-chevron" />
           </button>
-          <div v-show="openGroups.has(group.label)" :id="'nav-group-' + index">
-            <router-link v-for="[path, label, icon] in group.items" :key="path" :to="path" class="nav-link" exact-active-class="active"
+          <div v-show="isGroupOpen(group.label)" :id="'nav-group-' + index">
+            <router-link v-for="[path, label, icon] in group.items" :key="path" :to="path" class="nav-link"
+              :class="{ active: path === activeNav.path }"
+              :aria-current="path === activeNav.path ? (activeNav.exact ? 'page' : 'location') : undefined"
               :aria-label="path === '/certificates' && certificatesExpiring ? `SSL 证书，${certificatesExpiring} 张即将到期或已过期` : undefined"
-              @click="onNavClick">
+              @click="closeSidebar">
               <component :is="icon" :size="14" class="nav-icon" />
               <span class="nav-text">{{ label }}</span>
               <span v-if="path === '/certificates' && certificatesExpiring" class="nav-badge" title="30 天内到期或已过期">{{ certificatesExpiring }}</span>
@@ -70,7 +75,7 @@
 
 <script setup>
 import { useToast } from '@/composables/useToast'
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { 
   House, X, ChevronDown, Sparkles, Cable, LayoutDashboard, Network, ArrowLeftRight, Compass, Images,
@@ -105,18 +110,70 @@ const groups = [
     ['/updates', '更新', RefreshCw], ['/backups', '备份与恢复', HardDriveDownload], ['/settings', '设置', Settings]
   ] }
 ]
-const openGroups = ref(new Set(['工作台', '服务接入', 'AI 与集成']))
-function toggleGroup(label) {
-  if (openGroups.value.has(label)) openGroups.value.delete(label)
-  else openGroups.value.add(label)
+const groupPreferenceKey = 'gh_sidebar_expanded_groups'
+function readExpandedGroups() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(groupPreferenceKey) || '[]')
+    if (Array.isArray(saved)) return new Set(groups.map(group => group.label).filter(label => saved.includes(label)))
+  } catch {}
+  return new Set()
 }
-watch(() => route.path, path => {
-  const group = groups.find(({ items }) => items.some(([target]) => target === path))
-  if (group) openGroups.value.add(group.label)
-}, { immediate: true })
+const expandedGroups = ref(readExpandedGroups())
+const collapsedActiveGroup = ref('')
+const activeNav = computed(() => {
+  const current = route.matched.at(-1)?.aliasOf?.path ?? route.path
+  let path = ''
+  let group
+  for (const item of groups) {
+    for (const [target] of item.items) {
+      if ((current === target || current.startsWith(target + '/')) && target.length > path.length) {
+        path = target
+        group = item
+      }
+    }
+  }
+  return { group, path, exact: path === current }
+})
+const activeGroup = computed(() => activeNav.value.group)
+function isGroupOpen(label) {
+  return expandedGroups.value.has(label) ||
+    (activeGroup.value?.label === label && collapsedActiveGroup.value !== label)
+}
+function toggleGroup(label) {
+  if (isGroupOpen(label)) {
+    expandedGroups.value.delete(label)
+    if (activeGroup.value?.label === label) collapsedActiveGroup.value = label
+  } else {
+    expandedGroups.value.add(label)
+    if (collapsedActiveGroup.value === label) collapsedActiveGroup.value = ''
+  }
+  try { localStorage.setItem(groupPreferenceKey, JSON.stringify([...expandedGroups.value])) } catch {}
+}
 
 const { unreadCount } = useToast()
 const { isSidebarOpen, closeSidebar } = useAppStore()
+const closeButton = ref(null)
+const mobileLayout = window.matchMedia('(max-width: 1023px)')
+const isMobile = ref(mobileLayout.matches)
+const onLayoutChange = ({ matches }) => {
+  isMobile.value = matches
+  if (!matches) closeSidebar()
+}
+onMounted(() => mobileLayout.addEventListener('change', onLayoutChange))
+onUnmounted(() => mobileLayout.removeEventListener('change', onLayoutChange))
+watch(() => route.path, () => {
+  collapsedActiveGroup.value = ''
+  closeSidebar()
+})
+watch(isSidebarOpen, open => {
+  if (open) requestAnimationFrame(() => {
+    if (isSidebarOpen.value) closeButton.value?.focus({ preventScroll: true })
+  })
+}, { flush: 'post' })
+function dismissSidebar() {
+  closeSidebar()
+  document.getElementById('mobile-nav-toggle')?.focus()
+}
 const { gatewayStatus, gatewayVersion, gatewayState } = useGatewayStatus()
 const { isLoggingOut } = useSession()
 const logout = useLogout()
@@ -135,12 +192,6 @@ const uptime = computed(() => {
   return minutes ? `${minutes}分` : `${seconds}秒`
 })
 
-const onNavClick = () => {
-  if (window.innerWidth < 1024) {
-    closeSidebar()
-  }
-}
-
 const handleLogout = () => {
   closeSidebar()
   return logout()
@@ -149,6 +200,7 @@ const handleLogout = () => {
 
 <style scoped>
 .mobile-backdrop {
+  display: none;
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.65);
@@ -171,7 +223,7 @@ const handleLogout = () => {
   border-right: 1px solid var(--line);
   display: flex;
   flex-direction: column;
-  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), visibility 0.3s ease;
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .sidebar-brand {
@@ -402,14 +454,15 @@ const handleLogout = () => {
 
 /* ================= Mobile Breakpoints ================= */
 @media (max-width: 1023px) {
+  .mobile-backdrop {
+    display: block;
+  }
   .app-sidebar {
     transform: translateX(-105%);
-    visibility: hidden;
     box-shadow: none;
   }
   .app-sidebar.mobile-open {
     transform: translateX(0);
-    visibility: visible;
     box-shadow: 25px 0 60px rgba(0, 0, 0, 0.7);
   }
   .mobile-close-btn {

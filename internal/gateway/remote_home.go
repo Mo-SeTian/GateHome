@@ -94,6 +94,15 @@ type remoteHome struct {
 	fault   string
 }
 
+func (h *remoteHome) listenPort() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.runtime == nil {
+		return 0
+	}
+	return h.state.Settings.Port
+}
+
 func homePrefix(value string) (netip.Prefix, bool) {
 	p, err := netip.ParsePrefix(strings.TrimSpace(value))
 	if err != nil || p != p.Masked() || !p.Addr().Is4() || p.Bits() > 30 {

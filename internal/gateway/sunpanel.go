@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -75,14 +76,15 @@ func validateSunPanelListener(c SunPanelConfig, groups []ProxyGroup) error {
 
 // The worker shares the release binary, but isolates upstream globals and cwd.
 type SunPanel struct {
-	failure   chan error
-	mu        sync.RWMutex
-	dir       string
-	cmd       *exec.Cmd
-	done      chan error
-	proxy     *httputil.ReverseProxy
-	bridgeKey []byte
-	bridgeURL string
+	failure    chan error
+	mu         sync.RWMutex
+	dir        string
+	cmd        *exec.Cmd
+	done       chan error
+	proxy      *httputil.ReverseProxy
+	bridgeKey  []byte
+	bridgeURL  string
+	bridgePort atomic.Int32
 }
 
 func NewSunPanel(paths StoragePaths) *SunPanel {
@@ -147,6 +149,7 @@ func (s *SunPanel) start() error {
 		defer s.mu.Unlock()
 		if s.cmd == cmd {
 			s.bridgeURL = ""
+			s.bridgePort.Store(0)
 			select {
 			case s.failure <- errors.New("Sun-Panel 子进程意外退出"):
 			default:
@@ -172,6 +175,7 @@ func (s *SunPanel) start() error {
 			response.Body.Close()
 			if response.StatusCode == 204 {
 				s.bridgeKey, s.bridgeURL = bridgeKey, target.String()
+				s.bridgePort.Store(int32(listener.Addr().(*net.TCPAddr).Port))
 				s.proxy = httputil.NewSingleHostReverseProxy(target)
 				s.proxy.ErrorLog = nil
 				s.proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
@@ -192,6 +196,7 @@ func (s *SunPanel) stop() {
 		s.proxy = nil
 		clear(s.bridgeKey)
 		s.bridgeKey, s.bridgeURL = nil, ""
+		s.bridgePort.Store(0)
 	}
 }
 func (s *SunPanel) Stop() { s.mu.Lock(); defer s.mu.Unlock(); s.stop() }
