@@ -1,7 +1,11 @@
 <template>
   <SpotlightCard class="report-panel">
-    <div class="report-heading">
-      <h2>公网 IP 与网卡</h2>
+    <div class="report-heading monitor-heading">
+      <div class="monitor-title-wrap">
+        <h2>公网 IP 与网卡</h2>
+        <span v-if="resultInput.group_id" class="monitor-chip">{{ groupName(resultInput.group_id) }}</span>
+        <span v-if="network?.ip.running" class="monitor-chip">检测中…</span>
+      </div>
       <div class="report-actions">
         <button class="btn btn-secondary btn-sm" :disabled="loading" @click="read(true)">检测公网 IP</button
         ><button class="btn btn-secondary btn-sm" :disabled="!gatewayConfig || isSavingConfig" @click="edit">
@@ -10,18 +14,15 @@
       </div>
     </div>
     <p v-if="error" class="report-error" role="alert">{{ error }}</p>
-    <p class="report-note">
-      {{ resultInput.group_id ? '使用 DDNS 组 ' + groupName(resultInput.group_id) : '使用本机检测设置' }} ·
-      {{
-        network?.ip.running
-          ? '检测中，IPv4 / IPv6 分别更新'
-          : '页面每 5 秒刷新结果，每 30 秒检查；检测不写入 DNS'
-      }}
-    </p>
     <div class="ip-results">
       <div v-for="family in ['ipv4', 'ipv6']" :key="family">
-        <strong>{{ family === 'ipv4' ? 'IPv4' : 'IPv6' }}</strong>
-        <p class="mono-text">
+        <div class="ip-row-top">
+          <strong>{{ family === 'ipv4' ? 'IPv4' : 'IPv6' }}</strong>
+          <span class="ip-iface mono-text">
+            {{ network?.ip[family]?.interface || '—' }} · {{ network?.ip[family]?.local_address || '—' }}
+          </span>
+        </div>
+        <p class="ip-addr mono-text">
           {{
             network?.mode === (family === 'ipv4' ? 'ipv6' : 'ipv4')
               ? '未启用此类型'
@@ -31,18 +32,11 @@
         <p v-if="network?.ip[family]?.error" class="report-error">
           {{ network.ip[family].address ? '保留上次有效地址 · ' : '' }}{{ network.ip[family].error }}
         </p>
-        <small
-          >网卡 {{ network?.ip[family]?.interface || '—' }} · 本地源地址
-          {{ network?.ip[family]?.local_address || '—' }}</small
-        ><small
-          >检测 {{ reportDate(network?.ip[family]?.checked_at) }} · 成功
-          {{ reportDate(network?.ip[family]?.last_success) }}</small
-        ><small class="mono-text"
-          >{{ network?.ip[family]?.endpoint
-          }}{{
-            network?.ip[family]?.attempts ? ' · 尝试 ' + network.ip[family].attempts + ' 个接口' : ''
-          }}</small
-        >
+        <small class="ip-meta">
+          {{ reportDate(network?.ip[family]?.checked_at)
+          }}<template v-if="network?.ip[family]?.endpoint"> · {{ network.ip[family].endpoint }}</template
+          ><template v-if="network?.ip[family]?.attempts > 1"> · {{ network.ip[family].attempts }} 次</template>
+        </small>
       </div>
     </div>
     <dialog
@@ -193,28 +187,65 @@ onUnmounted(() => {
 })
 </script>
 <style scoped>
+.monitor-heading h2 {
+  margin-bottom: 0;
+}
+.monitor-title-wrap {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.monitor-chip {
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--strip-bg);
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
 .ip-results {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 16px;
-  margin-top: 16px;
+  gap: 12px;
+  margin-top: 14px;
 }
 .ip-results > div {
-  padding: 14px;
+  padding: 12px 14px;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   min-width: 0;
+  display: grid;
+  gap: 6px;
 }
-.ip-results p {
+.ip-row-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.ip-iface {
+  font-size: 12px;
+  color: var(--muted);
   overflow-wrap: anywhere;
-  margin: 6px 0;
 }
-small {
+.ip-addr {
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+  margin: 0;
+}
+.ip-results .report-error {
+  margin: 0;
+}
+.ip-meta {
   display: block;
   color: var(--muted);
   font-size: 12px;
+  font-variant-numeric: tabular-nums;
   overflow-wrap: anywhere;
-  margin-top: 5px;
 }
 @media (max-width: 600px) {
   .ip-results {

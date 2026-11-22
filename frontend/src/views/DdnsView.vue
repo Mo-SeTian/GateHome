@@ -29,10 +29,6 @@
     <p v-if="error" class="report-error" role="alert">{{ error }}</p>
     <p v-if="pollError || statusError" class="report-error" role="alert">{{ pollError || statusError }}</p>
     <PublicIPMonitor v-if="gatewayConfig" @network="network = $event" />
-    <p class="report-note">
-      公网 IP 查询保持直连。保存后立即生效；同一 A / AAAA 记录不可跨组重复。删除组或域名不会删除托管商已有的
-      DNS 记录。
-    </p>
     <div class="ddns-grid">
       <SpotlightCard
         v-for="group in groups"
@@ -51,98 +47,89 @@
           <span class="header-left-title">
             <ChevronDown :size="16" class="chevron-icon" aria-hidden="true" :class="{ 'rotate-minus-90': isCollapsed(group.id) }" />
             <strong>{{ group.name }}</strong>
-            <span class="mono-text zone-pill">{{ group.zone }}</span>
+            <span v-if="group.zone && group.zone !== group.name" class="mono-text zone-pill">{{ group.zone }}</span>
             <span class="count-badge">{{ group.hosts?.length || 0 }} 个域名</span>
+            <span class="header-meta">{{ providerLabel(group.provider) }} · {{ modeLabel(group.mode) }} · {{ group.interval.toLocaleString() }}s</span>
           </span>
           <span class="header-right-badges">
+            <span v-if="lastSuccess(group.id)" class="header-time">{{ lastSuccess(group.id) }}</span>
             <span class="badge" :class="state(group).tone">{{ state(group).label }}</span>
-            <span class="collapse-hint-text">{{ isCollapsed(group.id) ? '展开' : '收起' }}</span>
           </span>
         </button>
 
         <div :id="`ddns-details-${group.id}`" v-show="!isCollapsed(group.id)" class="ddns-card-body">
-          <p class="mono-text domain-title">{{ group.zone }} · {{ modeLabel(group.mode) }}</p>
-          <p class="report-note">
-            Cloudflare · 每 {{ group.interval.toLocaleString() }} 秒 ·
-            {{
-              gatewayConfigSnapshot.dns_credentials_configured?.[group.id]
-                ? '独立 Token 已配置'
-                : '尚未配置 Token'
-            }}
-          </p>
-          <p class="report-note">{{ job(group.id)?.message || '此组尚未运行' }}</p>
-          <p class="report-note">
-            检查 {{ reportDate(job(group.id)?.last_run) }} · 成功 {{ reportDate(job(group.id)?.last_success) }}
-          </p>
-          <div v-if="network?.groups[group.id]" class="group-ips">
-            <p v-for="family in families(group.mode)" :key="family" class="report-note">
-              {{ family === 'ipv4' ? 'IPv4' : 'IPv6' }} 检测：<span class="mono-text">{{
-                network.groups[group.id][family].address || '未获取'
-              }}</span
-              ><span v-if="network.groups[group.id][family].error" class="report-error">
-                · {{ network.groups[group.id][family].error }}</span
+          <div class="ddns-body-bar">
+            <div class="ddns-context">
+              <template v-if="network?.groups[group.id]">
+                <span v-for="family in families(group.mode)" :key="family" class="context-chip mono-text">
+                  <span>{{ network.groups[group.id][family].address || '未获取' }}</span>
+                  <span v-if="network.groups[group.id][family].error" class="report-error">
+                    · {{ network.groups[group.id][family].error }}
+                  </span>
+                </span>
+              </template>
+              <span v-if="!gatewayConfigSnapshot.dns_credentials_configured?.[group.id]" class="context-chip warn">
+                未配置 Token
+              </span>
+              <span v-for="name in references(group.id)" :key="name" class="context-chip">{{ name }}</span>
+              <span
+                v-if="job(group.id)?.message && state(group).tone !== 'badge-ok'"
+                :class="state(group).tone === 'badge-bad' ? 'report-error' : 'report-note'"
               >
-            </p>
+                {{ job(group.id).message }}
+              </span>
+            </div>
+            <div class="report-actions card-actions">
+              <button
+                class="btn btn-secondary btn-sm"
+                :disabled="!group.enabled || queuing || job(group.id)?.running"
+                @click="sync(group.id)"
+              >
+                单独同步</button
+              ><button class="btn btn-secondary btn-sm" :disabled="isSavingConfig" @click="edit(group, true)">
+                编辑域名</button
+              ><button class="btn btn-ghost btn-sm" :disabled="isSavingConfig" @click="edit(group)">编辑组</button
+              ><button class="btn btn-ghost btn-sm" :disabled="isSavingConfig" @click="toggle(group)">
+                {{ group.enabled ? '停用' : '启用' }}</button
+              ><button
+                class="btn btn-ghost btn-sm text-bad"
+                :disabled="
+                  isSavingConfig ||
+                  references(group.id).length > 0 ||
+                  gatewayConfig.ddns.ip_monitor.group_id === group.id
+                "
+                :title="'先解除反代组和公网检测引用，再删除'"
+                @click="remove(group)"
+              >
+                删除
+              </button>
+            </div>
           </div>
+
           <ReportTableScroll :label="`${group.name} DNS 记录`">
             <table class="report-table dns-records">
               <thead>
                 <tr>
                   <th>域名</th>
-                  <th>公网解析 A / AAAA</th>
-                  <th>最近查询</th>
+                  <th>A</th>
+                  <th>AAAA</th>
+                  <th class="col-time">查询时间</th>
                 </tr>
               </thead>
               <tbody>
                 <tr v-for="host in group.hosts" :key="host">
-                  <td class="mono-text">{{ host }}</td>
-                  <td>
-                    <div v-for="family in ['ipv4', 'ipv6']" :key="family">
-                      <span>{{ family === 'ipv4' ? 'A' : 'AAAA' }}: </span
-                      ><span :class="{ 'report-error': record(group.id, host)?.[family + '_error'] }">{{
-                        address(group.id, host, family)
-                      }}</span>
-                    </div>
+                  <td class="mono-text col-host">{{ host }}</td>
+                  <td class="mono-text" :class="{ 'report-error': record(group.id, host)?.ipv4_error }">
+                    {{ address(group.id, host, 'ipv4') }}
                   </td>
-                  <td>{{ reportDate(record(group.id, host)?.checked_at) }}</td>
+                  <td class="mono-text" :class="{ 'report-error': record(group.id, host)?.ipv6_error }">
+                    {{ address(group.id, host, 'ipv6') }}
+                  </td>
+                  <td class="col-time">{{ reportDate(record(group.id, host)?.checked_at) }}</td>
                 </tr>
               </tbody>
             </table>
           </ReportTableScroll>
-
-          <details v-if="references(group.id).length" class="ref-details">
-            <summary>
-              <span>关联 {{ references(group.id).length }} 个反代组</span>
-            </summary>
-            <div class="ref-pills-wrap">
-              <span v-for="name in references(group.id)" :key="name" class="ref-pill">{{ name }}</span>
-            </div>
-          </details>
-          <div class="report-actions card-actions">
-            <button
-              class="btn btn-secondary btn-sm"
-              :disabled="!group.enabled || queuing || job(group.id)?.running"
-              @click="sync(group.id)"
-            >
-              单独同步</button
-            ><button class="btn btn-secondary btn-sm" :disabled="isSavingConfig" @click="edit(group, true)">
-              编辑域名</button
-            ><button class="btn btn-ghost btn-sm" :disabled="isSavingConfig" @click="edit(group)">编辑组</button
-            ><button class="btn btn-ghost btn-sm" :disabled="isSavingConfig" @click="toggle(group)">
-              {{ group.enabled ? '停用' : '启用' }}</button
-            ><button
-              class="btn btn-ghost btn-sm text-bad"
-              :disabled="
-                isSavingConfig ||
-                references(group.id).length > 0 ||
-                gatewayConfig.ddns.ip_monitor.group_id === group.id
-              "
-              :title="'先解除反代组和公网检测引用，再删除'"
-              @click="remove(group)"
-            >
-              删除
-            </button>
-          </div>
         </div>
       </SpotlightCard>
     </div>
@@ -253,6 +240,13 @@ function state(group) {
 function modeLabel(mode) {
   return { ipv4: 'IPv4 · A', ipv6: 'IPv6 · AAAA', dual: 'IPv4 + IPv6' }[mode]
 }
+function providerLabel(provider) {
+  return { cloudflare: 'Cloudflare' }[provider] || provider || 'Cloudflare'
+}
+function lastSuccess(id) {
+  const ts = job(id)?.last_success
+  return ts && !ts.startsWith('0001') ? reportDate(ts) : ''
+}
 function families(mode) {
   return mode === 'dual' ? ['ipv4', 'ipv6'] : [mode]
 }
@@ -361,13 +355,12 @@ onUnmounted(() => {
 <style scoped>
 .ddns-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  align-items: start;
-  gap: 16px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
 }
 .ddns-card :deep(.card-inner) {
   display: grid;
-  gap: 14px;
+  gap: 12px;
 }
 .ddns-card {
   padding: 12px 16px;
@@ -409,14 +402,17 @@ onUnmounted(() => {
 .rotate-minus-90 {
   transform: rotate(-90deg);
 }
-.zone-pill {
+.zone-pill, .header-meta, .header-time {
   font-size: 12px;
   color: var(--muted);
 }
+.header-time {
+  font-variant-numeric: tabular-nums;
+}
 .count-badge {
   white-space: nowrap;
-  font-size: 11px;
-  padding: 1px 7px;
+  font-size: 12px;
+  padding: 1px 8px;
   border-radius: 10px;
   background: var(--strip-bg);
   border: 1px solid var(--line);
@@ -428,38 +424,80 @@ onUnmounted(() => {
   gap: 8px;
   flex-shrink: 0;
 }
-.collapse-hint-text {
-  font-size: 11px;
-  color: var(--muted);
-  opacity: 0.8;
-}
 .ddns-card-body {
   display: grid;
-  gap: 14px;
+  gap: 12px;
+  min-width: 0;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+.ddns-body-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
   min-width: 0;
 }
-.domain-title {
-  overflow-wrap: anywhere;
-  font-size: 14px;
+.ddns-context {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
 }
-.dns-records {
-  min-width: 520px;
+.context-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--strip-bg);
+  color: var(--ink-secondary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+  max-width: 100%;
+}
+.context-chip.warn {
+  color: var(--warn);
+  border-color: var(--warn);
 }
 .card-actions {
-  border-top: 1px solid var(--line);
-  padding-top: 14px;
+  margin-left: auto;
+}
+.dns-records {
+  min-width: 640px;
+}
+.dns-records td {
+  max-width: none;
+  padding: 10px 14px;
+  font-variant-numeric: tabular-nums;
+}
+.dns-records .col-host,
+.dns-records .col-time {
+  white-space: nowrap;
+}
+.dns-records .col-time {
+  text-align: right;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }
 .text-bad {
   color: var(--bad);
 }
-summary {
-  color: var(--muted);
-  font-size: 12px;
-  cursor: pointer;
+@media (max-width: 768px) {
+  .header-meta {
+    display: none;
+  }
+  .card-actions {
+    margin-left: 0;
+  }
 }
-@media (max-width: 1100px) {
-  .ddns-grid {
-    grid-template-columns: 1fr;
+@media (max-width: 640px) {
+  .header-time {
+    display: none;
   }
 }
 @media (prefers-reduced-motion: reduce) {

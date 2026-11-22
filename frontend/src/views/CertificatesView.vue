@@ -26,16 +26,12 @@
       <span class="badge" :class="jobState(acme.enabled, job).tone">{{
         jobState(acme.enabled, job).label
       }}</span>
-      <p>{{ job?.message || '尚未运行证书检查' }}</p>
-      <p class="report-note">
-        最近检查 {{ reportDate(job?.last_run) }} · 最近成功 {{ reportDate(job?.last_success) }} · 自动签发{{
-          acme.enabled ? '已启用' : '已停用'
-        }}
-      </p>
+      <span v-if="job?.message" class="job-msg">{{ job.message }}</span>
+      <span v-if="job?.last_success && !job.last_success.startsWith('0001')" class="job-time">{{
+        reportDate(job.last_success)
+      }}</span>
+      <span v-if="!acme.enabled" class="cert-chip">自动签发已停用</span>
     </div>
-    <p class="report-note">
-      全局检查只处理已启用且需要申请或续期的任务，每小时自动检查。停用任务只暂停申请与续期，已有有效证书继续加载；移除任务会停止加载该任务证书。
-    </p>
     <div class="certs-grid">
       <SpotlightCard
         v-for="request in acme?.requests"
@@ -43,64 +39,52 @@
         class="report-panel cert-card"
         :data-request-id="request.id"
       >
-        <div class="report-heading">
-          <Lock :size="18" /><span
-            class="badge"
-            :class="
-              certificate(request.id)?.ready ? 'badge-ok' : expired(request.id) ? 'badge-bad' : 'badge-warn'
-            "
-            >{{
-              certificate(request.id)?.ready
-                ? '证书有效'
-                : expired(request.id)
-                  ? '证书已过期'
-                  : '等待有效证书'
-            }}</span
-          >
+        <div class="cert-row-top">
+          <div class="cert-primary">
+            <Lock :size="16" class="cert-lock" aria-hidden="true" />
+            <div class="cert-domains">
+              <span v-for="domain in request.domains" :key="domain" class="mono-text domain-chip">{{
+                domain
+              }}</span>
+            </div>
+            <span
+              class="badge"
+              :class="
+                certificate(request.id)?.ready ? 'badge-ok' : expired(request.id) ? 'badge-bad' : 'badge-warn'
+              "
+              >{{
+                certificate(request.id)?.ready
+                  ? '证书有效'
+                  : expired(request.id)
+                    ? '证书已过期'
+                    : '等待有效证书'
+              }}</span
+            >
+            <span class="cert-chip">{{ remaining(request.id) }}</span>
+            <span v-if="certificate(request.id)?.staging ?? acme.staging" class="cert-chip warn">测试环境</span>
+            <span v-if="!request.enabled" class="cert-chip">已暂停</span>
+            <span
+              v-if="!gatewayConfigSnapshot.certificate_credentials_configured?.[request.id]"
+              class="cert-chip warn"
+            >
+              未配置 Token
+            </span>
+          </div>
+          <div class="report-actions cert-actions">
+            <button class="btn btn-secondary btn-sm" :disabled="isSavingConfig" @click="edit(request)">
+              编辑任务</button
+            ><button class="btn btn-ghost btn-sm" :disabled="isSavingConfig" @click="toggle(request)">
+              {{ request.enabled ? '暂停续期' : '启用续期' }}</button
+            ><button class="btn btn-ghost btn-sm text-bad" :disabled="isSavingConfig" @click="remove(request)">
+              移除任务
+            </button>
+          </div>
         </div>
-        <p class="domains mono-text">{{ request.domains.join('\n') }}</p>
-        <dl>
-          <div>
-            <dt>DNS 验证</dt>
-            <dd>Cloudflare · DNS-01</dd>
-          </div>
-          <div>
-            <dt>申请算法</dt>
-            <dd>ECDSA P-256</dd>
-          </div>
-          <div>
-            <dt>独立凭据</dt>
-            <dd>
-              {{
-                gatewayConfigSnapshot.certificate_credentials_configured?.[request.id] ? '已配置' : '尚未配置'
-              }}
-            </dd>
-          </div>
-          <div>
-            <dt>签发环境</dt>
-            <dd>{{ (certificate(request.id)?.staging ?? acme.staging) ? '测试环境' : '正式环境' }}</dd>
-          </div>
-          <div>
-            <dt>到期时间</dt>
-            <dd>{{ reportDate(certificate(request.id)?.not_after) }}</dd>
-          </div>
-          <div>
-            <dt>剩余时间</dt>
-            <dd>{{ remaining(request.id) }}</dd>
-          </div>
-          <div>
-            <dt>申请与续期</dt>
-            <dd>{{ request.enabled ? '任务已启用' : '任务已暂停' }}</dd>
-          </div>
-        </dl>
-        <div class="report-actions">
-          <button class="btn btn-secondary btn-sm" :disabled="isSavingConfig" @click="edit(request)">
-            编辑任务</button
-          ><button class="btn btn-ghost btn-sm" :disabled="isSavingConfig" @click="toggle(request)">
-            {{ request.enabled ? '暂停续期' : '启用续期' }}</button
-          ><button class="btn btn-ghost btn-sm text-bad" :disabled="isSavingConfig" @click="remove(request)">
-            移除任务
-          </button>
+        <div class="cert-meta">
+          <span>Cloudflare · DNS-01 · ECDSA P-256</span
+          ><span v-if="certificate(request.id)?.not_after && !certificate(request.id).not_after.startsWith('0001')">
+            · 到期 {{ reportDate(certificate(request.id).not_after) }}</span
+          >
         </div>
       </SpotlightCard>
     </div>
@@ -237,56 +221,105 @@ onMounted(reload)
 onUnmounted(() => controller.abort())
 </script>
 <style scoped>
+.job-summary {
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.job-msg {
+  color: var(--ink-secondary);
+  overflow-wrap: anywhere;
+}
+.job-time {
+  font-variant-numeric: tabular-nums;
+}
 .certs-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  align-items: start;
-  gap: 16px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+}
+.cert-card {
+  padding: 14px 16px;
 }
 .cert-card :deep(.card-inner) {
   display: grid;
-  gap: 14px;
-}
-.domains {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  font-size: 14px;
-}
-.cert-card dl {
-  display: grid;
   gap: 10px;
-  font-size: 12px;
 }
-.cert-card dl > div {
+.cert-row-top {
   display: flex;
+  align-items: center;
   justify-content: space-between;
-  gap: 14px;
   flex-wrap: wrap;
+  gap: 10px 16px;
+  min-width: 0;
 }
-dt,
-.job-summary {
+.cert-primary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+.cert-lock {
   color: var(--muted);
+  flex-shrink: 0;
 }
-dd {
-  margin: 0;
-  color: var(--ink-secondary);
+.cert-domains {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
 }
-.job-summary {
-  padding: 16px;
+.domain-chip {
+  font-size: 13px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 6px;
   border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  display: grid;
-  gap: 10px;
+  background: var(--strip-bg);
+  color: var(--ink);
+  overflow-wrap: anywhere;
+  max-width: 100%;
+}
+.cert-chip {
+  display: inline-flex;
+  align-items: center;
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--strip-bg);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.cert-chip.warn {
+  color: var(--warn);
+  border-color: var(--warn);
+}
+.cert-actions {
+  flex-shrink: 0;
+}
+.cert-meta {
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
 }
 .text-bad {
   color: var(--bad);
 }
-.job-summary > .badge {
-  justify-self: start;
-}
-@media (max-width: 900px) {
-  .certs-grid {
-    grid-template-columns: 1fr;
+@media (max-width: 768px) {
+  .cert-row-top {
+    flex-direction: column;
+    align-items: stretch;
   }
 }
 </style>
