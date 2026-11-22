@@ -20,6 +20,7 @@ import (
 var webFiles embed.FS
 
 type Admin struct {
+	remoteHome    remoteHome
 	webDAV        remoteBackupRuntime
 	sunPanel      *SunPanel
 	store         *Store
@@ -303,10 +304,6 @@ func (a *Admin) Handler() http.Handler {
 		http.NotFound(w, r)
 	})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !wireGuardAdminAllowed(r, r.RemoteAddr) {
-			http.Error(w, "此设备未授权访问管理后台", http.StatusForbidden)
-			return
-		}
 		var trusted []netip.Prefix
 		if a.proxy != nil {
 			trusted, _ = a.proxy.trustedProxies.Load().([]netip.Prefix)

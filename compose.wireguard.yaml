@@ -1,7 +1,0 @@
-# Optional overlay for a Linux host running gatehome-wireguard.service.
-services:
-  gatehouse:
-    group_add:
-      - "${GATEHOME_WG_GID:?Set GATEHOME_WG_GID to the host gatehouse group ID}"
-    volumes:
-      - /run/gatehome-wireguard:/run/gatehome-wireguard:ro

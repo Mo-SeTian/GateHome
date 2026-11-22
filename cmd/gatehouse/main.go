@@ -61,11 +61,14 @@ func run() error {
 		return errors.New("无法打开数据目录或配置文件，请检查权限和配置格式")
 	}
 	if flag.NArg() > 0 {
+		if flag.NArg() == 1 && flag.Arg(0) == "import-wireguard" {
+			return gateway.ImportRemoteHome(paths.Data, os.Stdin)
+		}
 		if flag.NArg() == 1 && flag.Arg(0) == "migrate" {
 			return nil
 		}
 		if flag.Arg(0) != "init" {
-			return errors.New("支持的命令：init（设置或重置管理员账号密码）、migrate（迁移旧目录）；参数须放在命令前")
+			return errors.New("支持的命令：init（设置或重置管理员账号密码）、migrate（迁移旧目录）、import-wireguard（从标准输入导入旧配置）；参数须放在命令前")
 		}
 		if !term.IsTerminal(int(os.Stdin.Fd())) {
 			return errors.New("请在交互终端运行 init，Docker 使用 docker compose run --rm gatehouse init")
@@ -218,6 +221,8 @@ func run() error {
 		return err
 	}
 	defer forwards.Close()
+	admin.StartRemoteHome()
+	defer admin.CloseRemoteHome()
 	admin.SetPortForwarder(forwards)
 	admin.SetHTTPListeners(listeners)
 	proxy.StartTrafficSampling(ctx)

@@ -110,12 +110,6 @@ install_gatehouse() {
   else
     printf '保留已有配置和管理员账户。\n'
   fi
-  # Keep the optional host-service kit available after a streamed installer cleans up its download.
-  if [[ -f "$SOURCE_DIR/deploy/wireguard_host.py" ]]; then
-    install -d -m 0755 -o root -g root "$INSTALL_DIR/wireguard/deploy" "$INSTALL_DIR/wireguard/docs"
-    install -m 0644 -o root -g root "$SOURCE_DIR/deploy/wireguard_host.py" "$SOURCE_DIR/deploy/gatehome-wireguard.service" "$INSTALL_DIR/wireguard/deploy/"
-    install -m 0644 -o root -g root "$SOURCE_DIR/docs/wireguard.md" "$INSTALL_DIR/wireguard/docs/"
-  fi
   install -m 0644 -o root -g root "$SOURCE_DIR/deploy/gatehouse.service" "$SERVICE_FILE"
   install -d -m 0755 -o root -g root "${SERVICE_FILE}.d"
   cat > "${SERVICE_FILE}.d/admin.conf" <<EOF

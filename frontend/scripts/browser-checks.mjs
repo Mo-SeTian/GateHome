@@ -194,23 +194,23 @@ try {
   await page.waitForSelector('body.theme-dark')
   await page.emulateMedia({ colorScheme: 'light' })
   await page.waitForSelector('body.theme-light')
-  let remoteHomeState = { available: false }
+  let remoteHomeState = {}
   await page.route('**/api/remote-home', r => r.fulfill({ json: remoteHomeState }))
   await page.locator('.nav-link[href$="/remote-home"]').click()
   await page.getByRole('button', { name: '配置 WireGuard' }).click()
   const wireGuardDialog = page.getByRole('dialog', { name: 'WireGuard 设置' })
   const saveWireGuard = wireGuardDialog.getByRole('button', { name: '保存并应用' })
   await wireGuardDialog.waitFor()
-  assert.equal(await saveWireGuard.isDisabled(), true)
+  assert.equal(await saveWireGuard.isEnabled(), true)
   const initialViewport = page.viewportSize()
   await page.setViewportSize({ width: 320, height: 620 })
   const beforeScroll = await saveWireGuard.boundingBox()
   const heights = await wireGuardDialog.locator('.settings-fields input').evaluateAll(inputs =>
     inputs.map(input => input.getBoundingClientRect().height))
   assert.deepEqual(heights, [44, 44, 44, 44])
-  const downloadGuide = wireGuardDialog.getByRole('link', { name: '下载部署说明' })
+  const downloadGuide = wireGuardDialog.getByRole('link', { name: '下载连接说明' })
   assert.equal(await downloadGuide.isVisible(), false)
-  await wireGuardDialog.getByText('部署步骤', { exact: true }).click()
+  await wireGuardDialog.getByText('公网入口与端口转发', { exact: true }).click()
   await downloadGuide.scrollIntoViewIfNeeded()
   const body = await wireGuardDialog.locator('.modal-body').boundingBox()
   const guide = await downloadGuide.boundingBox()
@@ -224,8 +224,8 @@ try {
   await wireGuardDialog.getByRole('button', { name: '关闭', exact: true }).click()
   await page.setViewportSize(initialViewport)
   remoteHomeState = {
-    available: true, running: true, forwarding: true, listen_port: 51820,
-    settings: { endpoint: 'vpn.example.test', port: 51820, lan: '192.168.2.0/24', tunnel: '10.77.0.0/24', snat: true },
+    running: true, listen_port: 51820,
+    settings: { endpoint: 'vpn.example.test', port: 51820, lan: '192.168.2.0/24', tunnel: '10.77.0.0/24' },
     devices: [{ id: 'phone', name: '测试手机', address: '10.77.0.2', mode: 'lan', rx: 1024, tx: 2048, handshake: Math.floor(Date.now() / 1000) }]
   }
   const refreshRemoteHome = () => page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
@@ -233,23 +233,22 @@ try {
   await page.getByRole('button', { name: '测试手机', exact: true }).waitFor()
   await page.getByText('已收到握手', { exact: true }).waitFor()
   const connectedState = remoteHomeState
-  remoteHomeState = { available: false }
+  remoteHomeState = { ...connectedState, running: false, fault: 'WireGuard 端口已占用' }
   await refreshRemoteHome()
-  await page.getByText('状态不可用', { exact: true }).first().waitFor()
+  await page.getByText('WireGuard 端口已占用', { exact: true }).waitFor()
   assert.equal(await page.getByRole('button', { name: '测试手机', exact: true }).count(), 1)
   assert.equal(await page.getByRole('button', { name: '添加设备', exact: true }).isDisabled(), true)
   remoteHomeState = connectedState
-  await page.getByRole('button', { name: '重试', exact: true }).click()
+  await refreshRemoteHome()
   await page.getByText('已收到握手', { exact: true }).waitFor()
   await page.getByRole('button', { name: '设置', exact: true }).click()
-  await wireGuardDialog.getByText('Linux 宿主机已就绪').waitFor()
+  await wireGuardDialog.getByText('内置 WireGuard', { exact: true }).waitFor()
   assert.equal(await wireGuardDialog.getByLabel('家庭局域网段').getAttribute('readonly'), '')
   await wireGuardDialog.getByLabel('公网域名或 IP').fill('vpn-edited.example.test')
-  await wireGuardDialog.getByRole('switch', { name: '地址转换（SNAT）' }).click()
   await page.route('**/api/remote-home/settings', r => {
     const input = r.request().postDataJSON()
     assert.equal(input.endpoint, 'vpn-edited.example.test')
-    assert.equal(input.snat, false)
+    assert.equal(input.lan, '192.168.2.0/24')
     remoteHomeState = { ...connectedState, settings: input }
     return r.fulfill({ json: {} })
   })
@@ -258,7 +257,7 @@ try {
   await page.getByText('vpn-edited.example.test:51820').waitFor()
   await page.unroute('**/api/remote-home/settings')
   await page.unroute('**/api/remote-home')
-  console.log('PASS WireGuard setup and host outage recovery, with operating system theme updates')
+  console.log('PASS built-in WireGuard setup and runtime recovery, with operating system theme updates')
   await page.locator('.nav-link[href$="/routes"]').click()
   await page.locator('.routes-page').waitFor()
   assert.equal(await page.evaluate(() => isSecureContext), false)

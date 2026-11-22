@@ -11,6 +11,8 @@ services:
     command: ["-admin", "0.0.0.0:16666"]
     ports:
       - "16666:16666"
+      # Match the UDP port selected under Remote Home in GateHome.
+      - "${GATEHOME_WG_PORT:-51820}:${GATEHOME_WG_PORT:-51820}/udp"
       - "18080:18080"
       - "18443:18443"
       # Match this container port to the port configured in GateHome.

@@ -17,8 +17,8 @@
         <button class="btn btn-primary" :disabled="!connectionOK || !status.running" @click="openPeer()"><Plus :size="16"/>添加设备</button>
       </div>
     </header>
-    <p v-if="loadError || (status?.settings && !status.available)" role="alert" class="report-error">
-      {{ loadError || status.error || '暂时无法连接 WireGuard 宿主机服务' }}
+    <p v-if="loadError" role="alert" class="report-error">
+      {{ loadError }}
       <button class="btn btn-secondary" @click="refresh">重试</button>
     </p>
     <p v-if="!status && !loadError" class="report-note">正在读取宿主机状态…</p>
@@ -33,7 +33,7 @@
         </button>
       </div>
       <div class="panel diag"><h2>接入前准备</h2>
-        <p><Monitor/>宿主机服务 <b>{{ status.available ? '已连接' : '待安装或连接' }}</b></p>
+        <p><Monitor/>运行方式 <b>GateHome 内置</b></p>
         <p><Globe/>公网入口 <b>可从外网访问的 IPv4 或 IPv6</b></p>
         <p><Network/>家庭网络 <b>选择网段或填写设备地址</b></p>
       </div>
@@ -60,12 +60,11 @@
         <p v-if="!filtered.length" class="report-empty">{{ search ? '没有匹配的设备' : '尚未授权设备，添加第一台手机或电脑即可开始连接。' }}</p>
       </div></section>
       <section class="panel diag"><h2>连接诊断</h2>
-        <p><Monitor/>宿主机服务 <b :class="{ good: connectionOK }"><CircleCheck v-if="connectionOK" :size="15"/>{{ connectionOK ? '已连接' : '状态不可用' }}</b></p>
+        <p><Monitor/>内置 WireGuard <b :class="{ good: connectionOK && status.running }">{{ !connectionOK ? '状态不可用' : status.running ? '运行中' : '未运行' }}</b></p>
         <p><Radio/>UDP 监听 <b>{{ connectionOK ? (status.listen_port || '未监听') : '—' }}</b></p>
-        <p v-if="connectionOK && status.dns_ready != null"><Network/>隧道 DNS <b>{{ status.dns_ready ? '正常' : '需要检查' }}</b></p>
         <p v-if="connectionOK && status.fault" class="report-error">{{ status.fault }}</p>
-        <p><Globe/>设备握手 <b :class="{good: hasHandshake}">{{ !connectionOK ? '—' : hasHandshake ? '已收到握手' : '等待设备握手' }}</b></p>
-        <p v-if="connectionOK && (!status.forwarding || !hasHandshake)" class="report-note">{{ !status.forwarding ? '请开启宿主机 IPv4 转发。' : '手机关闭 Wi-Fi，使用移动网络开启隧道并打开一个家庭服务，即可验证外网访问。' }}</p>
+        <p><Globe/>设备握手 <b :class="{good: hasHandshake}">{{ !connectionOK || !status.running ? '—' : hasHandshake ? '已收到握手' : '等待设备握手' }}</b></p>
+        <p v-if="connectionOK && status.running && !hasHandshake" class="report-note">手机关闭 Wi-Fi 后开启隧道，再打开一个家庭服务验证外网访问。</p>
       </section>
     </template>
     <dialog ref="dialog" class="modal-dialog" :class="{ 'settings-dialog': screen === 'settings' }"
@@ -79,33 +78,12 @@
       <form id="remote-home-form" class="modal-body" @submit.prevent="save">
         <p v-if="error" ref="formAlert" class="form-alert report-error" role="alert" tabindex="-1">{{ error }}</p>
         <template v-if="screen === 'settings'">
-          <section class="host-check" aria-label="宿主机检测">
-            <div class="host-check-heading">
-              <div>
-                <h3 aria-live="polite">
-                  <CircleCheck v-if="hostReady" :size="17" class="host-ready-icon" aria-hidden="true"/>
-                  <TriangleAlert v-else :size="17" class="host-warning-icon" aria-hidden="true"/>
-                  {{ hostReady ? 'Linux 宿主机已就绪' : '需要配置 Linux 宿主机' }}
-                </h3>
-                <p v-if="!hostReady" class="report-note">
-                  {{ loadError || status.error || (!connectionOK ? '请安装并启动 WireGuard 宿主机服务。'
-                    : status.missing?.length ? '缺少工具：' + status.missing.join('、') : '请开启宿主机 IPv4 转发。') }}
-                </p>
-              </div>
-              <button v-if="!hostReady || checkingHost" type="button" class="btn btn-secondary"
-                :disabled="checkingHost" @click="checkHost">
-                <RefreshCw :size="15" aria-hidden="true"/>{{ checkingHost ? '检测中…' : '重新检测' }}
-              </button>
+          <div class="gateway-note">
+            <Network :size="18" aria-hidden="true"/>
+            <div><strong>内置 WireGuard</strong>
+              <p class="report-note">保存后由 GateHome 监听 UDP 端口。请确保外网能访问该端口。</p>
             </div>
-            <details v-if="!hostReady" class="host-guide">
-              <summary>部署步骤</summary>
-              <div class="host-guide-body">
-                <p class="report-note">在 Linux 宿主机安装 Python 3、wireguard-tools、iproute2 和 nftables，启用 <code>gatehome-wireguard.service</code> 和 IPv4 转发。Docker 部署还需挂载套接字目录并添加对应用户组。</p>
-                <a :href="deploymentGuide" download="GateHome-WireGuard.md"><Download :size="15" aria-hidden="true"/>下载部署说明</a>
-              </div>
-            </details>
-          </section>
-
+          </div>
           <section class="settings-section" aria-labelledby="wireguard-network-title">
             <h3 id="wireguard-network-title">网络参数</h3>
             <div class="settings-fields">
@@ -114,7 +92,7 @@
                   placeholder="vpn.example.net" required maxlength="253" autocapitalize="off" spellcheck="false">
               </label>
               <label class="form-field">UDP 端口
-                <input v-model.number="form.port" class="form-input" type="number" inputmode="numeric" min="1" max="65535" required>
+                <input v-model.number="form.port" class="form-input" type="number" inputmode="numeric" min="1024" max="65535" required>
               </label>
               <label class="form-field">家庭局域网段
                 <input v-model.trim="form.lan" class="form-input" type="text" :readonly="devices.length > 0"
@@ -127,17 +105,17 @@
             </div>
             <datalist id="home-domains"><option v-for="host in status.ddns" :key="host" :value="host"/></datalist>
             <datalist id="home-lans"><option v-for="net in status.lans" :key="net" :value="net"/></datalist>
-            <p class="report-note">公网 IPv4 需要映射 UDP 端口，公网 IPv6 需要放行入站 UDP。家庭网段可点选或手动填写。</p>
+            <p class="report-note">家庭网段可点选或手动填写。内置转发支持 TCP 和 UDP。</p>
             <p v-if="devices.length" class="report-note">已有设备授权，网段已锁定。修改公网入口或端口后，请同步更新设备配置。</p>
           </section>
 
-          <label class="toggle-row snat-setting">
-            <span>
-              <strong>地址转换（SNAT）</strong>
-              <small>{{ form.snat ? '家中设备可直接回复网关，通常无需修改路由器。' : '请在家庭路由器添加返回隧道网段的静态路由。' }}</small>
-            </span>
-            <input v-model="form.snat" type="checkbox" role="switch" aria-label="地址转换（SNAT）">
-          </label>
+          <details class="endpoint-guide">
+            <summary>公网入口与端口转发</summary>
+            <div class="guide-content">
+              <p class="report-note">公网 IPv4 需要路由器映射 UDP 端口，公网 IPv6 需要放行入站 UDP。Docker bridge 模式还需发布同一个 UDP 端口。</p>
+              <a :href="deploymentGuide" download="GateHome-WireGuard.md">下载连接说明 <Download :size="15" aria-hidden="true"/></a>
+            </div>
+          </details>
         </template>
         <template v-else-if="screen === 'peer'">
           <label>设备名称<input v-model.trim="form.name" class="form-input" type="text" maxlength="80" required autofocus placeholder="例如，我的手机"></label>
@@ -145,7 +123,7 @@
           <p v-if="form.mode === 'lan'" class="report-note">此设备可访问 {{ status.settings.lan }} 内的主机。其他网络流量继续使用当前网络。</p>
           <template v-if="form.mode === 'host'"><label>家庭设备 IP<input v-model.trim="form.target" class="form-input" type="text" placeholder="192.168.2.60" required></label>
             <label>允许的端口（留空允许所有端口）<input v-model.number="form.port" type="number" min="1" max="65535" placeholder="7777"></label></template>
-          <template v-if="form.mode === 'route'"><label>反代服务<select v-model="form.route" required><option disabled value="">选择服务</option><option v-for="r in status.routes" :key="r.id" :value="r.id">{{ r.name }} · {{ r.host }}</option></select></label><p class="report-note">客户端使用隧道 DNS 解析所选域名。宿主机需安装 dnsmasq。</p></template>
+          <template v-if="form.mode === 'route'"><label>反代服务<select v-model="form.route" required><option disabled value="">选择服务</option><option v-for="r in status.routes" :key="r.id" :value="r.id">{{ r.name }} · {{ r.host }}</option></select></label><p class="report-note">客户端使用内置隧道 DNS 解析所选域名。</p></template>
           <label v-else class="check"><input v-model="form.admin" type="checkbox">允许范围内的 GateHome 管理端口</label>
           <label v-if="!form.id">已有客户端公钥（可选）<input v-model.trim="form.public_key" class="form-input" type="text" autocomplete="off" placeholder="留空生成一次性导入配置"></label>
           <p v-if="form.id" class="report-note">更改访问范围会立即更新宿主机规则。客户端请按设备详情同步 AllowedIPs 与 DNS。</p>
@@ -167,7 +145,7 @@
         <button type="button" class="btn btn-secondary" :disabled="busy" @click="dialog.close()">取消</button>
         <button type="submit" form="remote-home-form" class="btn"
           :class="screen === 'remove' ? 'btn-danger' : 'btn-primary'"
-          :disabled="busy || !connectionOK || (screen === 'settings' && !hostReady)">
+          :disabled="busy || !connectionOK">
           {{ busy ? '正在应用…' : screen === 'remove' ? '撤销授权' : '保存并应用' }}
         </button>
       </footer>
@@ -178,7 +156,7 @@
 <script setup>
 import { computed, nextTick, onMounted, onBeforeUnmount, ref } from 'vue'
 import deploymentGuide from '../../../docs/wireguard.md?url'
-import { CircleCheck, Download, Globe, Laptop, Layers, Monitor, Network, Pencil, Plus, Radio, RefreshCw, Search, Settings, Smartphone, Tablet, Trash2, TriangleAlert, Users, X } from 'lucide-vue-next'
+import { Download, Globe, Laptop, Layers, Monitor, Network, Pencil, Plus, Radio, Search, Settings, Smartphone, Tablet, Trash2, Users, X } from 'lucide-vue-next'
 import { request } from '@/api/client'
 import { startPolling } from '@/api/polling'
 import { formatBytes } from '@/api/reports'
@@ -187,15 +165,14 @@ import '@/styles/reports.css'
 const status = ref(null), loadError = ref(''), search = ref(''), chooser = ref(false)
 const dialog = ref(null), screen = ref(''), form = ref({}), selected = ref(null)
 const error = ref(''), busy = ref(false), profile = ref(''), qr = ref('')
-const checkingHost = ref(false), formAlert = ref(null)
+const formAlert = ref(null)
 const controller = new AbortController()
 let stop, version = 0
 const devices = computed(() => status.value?.devices || [])
 const managing = computed(() => status.value?.settings && !chooser.value)
 const filtered = computed(() => devices.value.filter(p => (p.name + ' ' + p.address).toLowerCase().includes(search.value.toLowerCase())))
-const connectionOK = computed(() => Boolean(status.value?.available && !loadError.value))
-const hostReady = computed(() => connectionOK.value && status.value.forwarding && !status.value.missing?.length)
-const hasHandshake = computed(() => connectionOK.value && devices.value.some(p => p.handshake > 0))
+const connectionOK = computed(() => Boolean(status.value && !loadError.value))
+const hasHandshake = computed(() => connectionOK.value && status.value.running && devices.value.some(p => p.handshake > 0))
 const endpoint = computed(() => {
   const s = status.value?.settings
   return s ? (s.endpoint.includes(':') ? '['+s.endpoint+']' : s.endpoint) + ':' + s.port : ''
@@ -209,7 +186,8 @@ const bytes = n => n == null ? '—' : formatBytes(n)
 const deviceIcon = name => /book|电脑|laptop|桌面/i.test(name) ? Laptop : /pad|平板/i.test(name) ? Tablet : Smartphone
 function handshake(p) {
   if (!connectionOK.value) return '—'
-  if (!p.handshake) return status.value?.running ? '尚未握手' : '—'
+  if (!status.value.running) return '—'
+  if (!p.handshake) return '尚未握手'
   const sec = Math.max(0, Math.floor(Date.now()/1000) - p.handshake)
   if (sec < 60) return sec + ' 秒前'
   if (sec < 3600) return Math.floor(sec/60) + ' 分钟前'
@@ -231,17 +209,8 @@ async function refresh() {
     const data = await request('/api/remote-home', {signal:controller.signal})
     if (seq !== version) return
     loadError.value = ''
-    if (!data.available && status.value?.settings) {
-      status.value = { ...status.value, available: false, error: data.error }
-      return
-    }
     status.value = data
   } catch (e) { if (e.name !== 'AbortError' && seq === version) loadError.value = e.message }
-}
-async function checkHost() {
-  checkingHost.value = true
-  try { await refresh() }
-  finally { checkingHost.value = false }
 }
 onMounted(() => { refresh(); stop = startPolling(refresh, 10000) })
 onBeforeUnmount(() => { stop?.(); controller.abort(); clearDialog() })
@@ -252,8 +221,7 @@ function show(view, peer=null) {
 function detail(peer) { show('detail',peer) }
 function openSettings() {
   const s = status.value
-  form.value = {...(s.settings || {endpoint:s.ddns?.[0] || '',port:51820,lan:s.lans?.find(n => n.startsWith('192.168.')) || s.lans?.[0] || '192.168.2.0/24',tunnel:'10.77.0.0/24',snat:true})}
-  delete form.value.admin_port
+  form.value = {...(s.settings || {endpoint:s.ddns?.[0] || '',port:51820,lan:s.lans?.find(n => n.startsWith('192.168.')) || s.lans?.[0] || '192.168.2.0/24',tunnel:'10.77.0.0/24'})}
   show('settings')
 }
 function openPeer(peer) {
@@ -264,7 +232,6 @@ function openPeer(peer) {
 function clearDialog() { profile.value = ''; qr.value = ''; screen.value = ''; selected.value = null; form.value = {}; error.value = '' }
 async function save() {
   if (busy.value || !connectionOK.value || !['settings','peer','remove'].includes(screen.value)) return
-  if (screen.value === 'settings' && !hostReady.value) return
   busy.value = true; error.value = ''
   try {
     const op = screen.value === 'peer' ? (form.value.id ? 'edit' : 'add') : screen.value
@@ -369,14 +336,12 @@ td.actions { display:table-cell; white-space:nowrap; }
 }
 .settings-dialog .modal-body > * { flex: 0 0 auto; }
 .form-alert { padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); }
-.settings-dialog .modal-footer .btn,
-.host-check .btn { min-height: 44px; }
+.settings-dialog .modal-footer .btn { min-height: 44px; }
 .settings-dialog .btn-primary:not(:disabled) {
   background: color-mix(in srgb, var(--brand) 79%, #222699);
   box-shadow: none;
 }
-.modal-footer .btn:disabled,
-.host-check .btn:disabled {
+.modal-footer .btn:disabled {
   color: var(--muted);
   background: var(--strip-bg);
   border-color: var(--line);
@@ -385,59 +350,32 @@ td.actions { display:table-cell; white-space:nowrap; }
   filter: none;
   cursor: not-allowed;
 }
-.host-check {
+.gateway-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
   background: var(--strip-bg);
+  font-size: 14px;
 }
-.host-check-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px;
-}
-.host-check h3,
-.settings-section h3 { font-size: 14px; font-weight: 650; }
-.host-check h3 { display: flex; align-items: center; gap: 8px; }
-.host-check h3 svg { flex: none; }
-.settings-dialog .report-note {
-  color: var(--muted) !important;
-  font-size: 12px !important;
-  margin-top: 0 !important;
-}
-.host-check-heading .report-note { margin-top: 4px !important; }
-.host-ready-icon { color: var(--ok); }
-.host-warning-icon { color: color-mix(in srgb, var(--warn) 67%, var(--ink)); }
-.host-guide {
-  margin: 0 !important;
-  border: 0 !important;
-  border-top: 1px solid var(--line) !important;
-  border-radius: 0 0 var(--radius-md) var(--radius-md) !important;
-  background: transparent !important;
-  box-shadow: none !important;
-}
-.host-guide summary {
-  min-height: 44px;
-  color: var(--ink-secondary) !important;
-}
-.host-guide summary:focus-visible { outline: 2px solid var(--brand) !important; outline-offset: -3px; }
-.host-guide > .host-guide-body {
-  border: 0 !important;
-  padding: 0 12px 12px !important;
-  animation: none !important;
-}
-.host-guide a {
+.gateway-note svg { flex: none; color: var(--muted); }
+.settings-dialog .report-note { color: var(--muted) !important; font-size: 12px !important; margin-top: 0 !important; }
+.gateway-note .report-note { margin-top: 4px !important; }
+.endpoint-guide summary { min-height: 44px; }
+.endpoint-guide summary:focus-visible { outline: 2px solid var(--brand) !important; outline-offset: -3px; }
+.endpoint-guide > .guide-content { animation: none !important; }
+.guide-content a {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  min-height: 44px;
+  min-height: 40px;
   color: var(--ink);
   font-size: 13px;
   text-decoration: underline;
   text-underline-offset: 3px;
 }
-.host-guide code { overflow-wrap: anywhere; }
 .settings-section { display: grid; gap: 10px; }
 .settings-fields { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(0, 1fr); gap: 12px; }
 .settings-fields .form-input {
@@ -446,19 +384,6 @@ td.actions { display:table-cell; white-space:nowrap; }
   font-size: 16px !important;
 }
 .settings-fields .form-input[readonly] { background: var(--strip-bg) !important; }
-.settings-dialog .modal-body .snat-setting {
-  gap: 14px !important;
-  padding: 12px !important;
-  margin: 0 !important;
-  background: transparent !important;
-  border-radius: var(--radius-md) !important;
-}
-.snat-setting small { display: block; margin-top: 4px; color: var(--muted); font-size: 12px; }
-.snat-setting input[type="checkbox"]:checked {
-  background: var(--brand) !important;
-  box-shadow: none !important;
-}
-.snat-setting input[type="checkbox"]:focus-visible { outline: 2px solid var(--brand) !important; }
 @media (max-width: 600px) {
   .settings-dialog {
     position: fixed;
@@ -479,7 +404,6 @@ td.actions { display:table-cell; white-space:nowrap; }
   }
   .settings-fields { grid-template-columns: minmax(0, 1fr) 86px; }
   .settings-fields > :nth-child(n+3) { grid-column: 1 / -1; }
-  .host-check-heading { flex-wrap: wrap; }
 }
 @media(max-width:760px) {
   .home { gap:16px; }

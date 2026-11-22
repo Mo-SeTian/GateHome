@@ -10,6 +10,7 @@ import (
 	"net/netip"
 	"net/url"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -27,20 +28,21 @@ type proxyRoute struct {
 }
 
 type Proxy struct {
-	routes         atomic.Value
-	firewalls      atomic.Value
-	trustedProxies atomic.Value
-	Requests       atomic.Uint64
-	Blocked        atomic.Uint64
-	Failures       atomic.Uint64
-	subscriptions  *Subscriptions
-	logs           *Logs
-	traffic        *Traffic
-	liveTraffic    proxyLiveTraffic
-	defense        *IPDefense
-	wafSlots       chan struct{}
-	wafMemory      *semaphore.Weighted
-	adminPort      int
+	homeRelaySources sync.Map // homeRelaySocket -> authenticated tunnel peer
+	routes           atomic.Value
+	firewalls        atomic.Value
+	trustedProxies   atomic.Value
+	Requests         atomic.Uint64
+	Blocked          atomic.Uint64
+	Failures         atomic.Uint64
+	subscriptions    *Subscriptions
+	logs             *Logs
+	traffic          *Traffic
+	liveTraffic      proxyLiveTraffic
+	defense          *IPDefense
+	wafSlots         chan struct{}
+	wafMemory        *semaphore.Weighted
+	adminPort        int
 }
 
 func NewProxy(c Config, subscriptions *Subscriptions) *Proxy {
@@ -160,9 +162,17 @@ func (p *Proxy) Handler(groupID string) http.Handler {
 }
 
 func (p *Proxy) serveGroup(groupID string, w http.ResponseWriter, r *http.Request) {
-	peerAddress := r.RemoteAddr
-	trusted, _ := p.trustedProxies.Load().([]netip.Prefix)
-	r = proxySourceRequest(r, trusted)
+	homeRoute, tunnelRequest := r.Context().Value(homeRouteContextKey{}).(string)
+	local, _ := r.Context().Value(http.LocalAddrContextKey).(net.Addr)
+	var relay any
+	var fromHome bool
+	if local != nil {
+		relay, fromHome = p.homeRelaySources.Load(homeRelaySocket{r.RemoteAddr, local.String()})
+	}
+	if !tunnelRequest && !fromHome {
+		trusted, _ := p.trustedProxies.Load().([]netip.Prefix)
+		r = proxySourceRequest(r, trusted)
+	}
 	started := time.Now()
 	logged := &loggedResponseWriter{ResponseWriter: w}
 	w = logged
@@ -194,7 +204,8 @@ func (p *Proxy) serveGroup(groupID string, w http.ResponseWriter, r *http.Reques
 		http.NotFound(w, r)
 		return
 	}
-	if !wireGuardRouteAllowed(r, peerAddress, route) {
+	if (tunnelRequest && (homeRoute != route.route.ID || route.adminUpstream)) ||
+		(fromHome && route.adminUpstream && !relay.(homePeer).Admin) {
 		http.Error(w, "此设备未授权访问该反代服务", http.StatusForbidden)
 		return
 	}

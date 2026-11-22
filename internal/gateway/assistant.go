@@ -370,9 +370,10 @@ func (a *Admin) assistantChat(w http.ResponseWriter, r *http.Request) {
 	}
 	now := time.Now().UTC()
 	traffic := a.proxy.liveTraffic.status()
+	wireguard, _ := a.remoteHomeStatus()
 	contextData, err := json.Marshal(map[string]any{
 		"page": assistantPages[input.Page], "pages": assistantPages, "routes": routes, "listeners": listeners,
-		"wireguard":  wireGuardAssistant(r.Context()),
+		"wireguard":  wireguard,
 		"sampled_at": now, "health_settings": serviceHealthOptions(state.Config),
 		"proxy_traffic": map[string]any{
 			"total": traffic.Total, "rates_sampled": traffic.Sampled, "routes": assistantProxyConnections(state.Config, traffic),
