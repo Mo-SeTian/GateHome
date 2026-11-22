@@ -595,13 +595,6 @@ func (s *Store) UpdateRouteCredentials(c Config, tokens, certificateTokens map[s
 	if err := Validate(c); err != nil {
 		return err
 	}
-	for _, route := range c.Routes {
-		if route.Image != "" {
-			if !routeImageExists(s.paths.Data, route.Image) {
-				return errors.New("反代图片不存在或已失效，请重新选择图片")
-			}
-		}
-	}
 	hashes, err := hashRoutePasswords(c, routePasswords)
 	if err != nil {
 		return err
@@ -628,6 +621,15 @@ func (s *Store) UpdateRouteCredentials(c Config, tokens, certificateTokens map[s
 	}
 	if err := Validate(c); err != nil {
 		return err
+	}
+	oldImages := make(map[string]string, len(s.state.Config.Routes))
+	for _, route := range s.state.Config.Routes {
+		oldImages[route.ID] = route.Image
+	}
+	for _, route := range c.Routes {
+		if route.Image != "" && route.Image != oldImages[route.ID] && !routeImageExists(s.paths.Data, route.Image) {
+			return errors.New("反代图片不存在或已失效，请重新选择图片")
+		}
 	}
 	next.Config = c
 	next.NoticeHistory.Active.pruneRemoved(c)

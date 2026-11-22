@@ -137,11 +137,13 @@
             <div class="card-head">
               <div class="app-icon-wrap" :class="routeCategoryClass(route)">
                 <img
-                  v-if="route.image"
+                  v-if="route.image && !failedRouteImages.has(route.image)"
+                  :key="route.image"
                   :src="routeImageUrl(route.image)"
                   width="32"
                   height="32"
                   alt=""
+                  @error="failedRouteImages.add(route.image)"
                 /><component :is="routeFallbackIcons[routeCategoryClass(route)] || Network" v-else :size="19" />
               </div>
               <div class="service-heading">
@@ -577,6 +579,7 @@ const toast = useToast()
 const currentRoute = useRoute()
 const router = useRouter()
 const routes = computed(() => gatewayConfig.value?.routes ?? [])
+const failedRouteImages = ref(new Set())
 const proxyGroups = computed(() => gatewayConfig.value?.groups ?? [])
 const liveTraffic = computed(() => statusError.value ? null : gatewayStatus.value?.proxy_traffic)
 const idleTraffic = { upload_bytes_per_second: 0, download_bytes_per_second: 0, active: 0 }
@@ -724,6 +727,7 @@ async function refreshHealth() {
 }
 async function reload() {
   if (loading.value || isSavingConfig.value) return
+  failedRouteImages.value.clear()
   loading.value = true
   loadError.value = ''
   try {

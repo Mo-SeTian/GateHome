@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -147,8 +148,9 @@ func TestBackupAllPersistentDataRoundTrip(t *testing.T) {
 }
 func TestBackupUnsafeFilesAndLegacyCompatibility(t *testing.T) {
 	_, p := fullBackupFixture(t)
-	for _, name := range []string{"../state.json", "/tmp/file", "logs/../state.json", "logs/calls.jsonl/other", "subscriptions/../local.json", "route-images/bad.img", "maintenance/operation.json"} {
+	for _, name := range []string{"../state.json", "/tmp/file", "logs/../state.json", "logs/calls.jsonl/other", "subscriptions/../local.json", "route-images/bad.img", "icons/uploads/../icon.svg", "maintenance/operation.json"} {
 		p.Files[name] = []byte("invalid")
+		omitUnavailableBackupImages(&p)
 		if validateBackupFiles(p) == nil {
 			t.Fatal("unsafe backup path accepted")
 		}
@@ -157,6 +159,9 @@ func TestBackupUnsafeFilesAndLegacyCompatibility(t *testing.T) {
 	for _, name := range []string{"logs/calls.jsonl", "subscriptions/local.json", "route-images/" + p.State.Config.Routes[0].Image + ".img"} {
 		old := p.Files[name]
 		p.Files[name] = []byte("invalid")
+		if !isBackupImage(name) {
+			omitUnavailableBackupImages(&p)
+		}
 		if validateBackupFiles(p) == nil {
 			t.Fatal("invalid persistent data accepted")
 		}
@@ -196,6 +201,92 @@ func TestBackupUnsafeFilesAndLegacyCompatibility(t *testing.T) {
 		t.Fatal("legacy backup erased data it never included")
 	}
 }
+func TestBackupRestoreWithUnavailableRouteIcons(t *testing.T) {
+	dir, payload := fullBackupFixture(t)
+	const corruptIcon = "icons/uploads/legacy.svg"
+	const missingIcon = "icons/uploads/missing.png"
+	c := &payload.State.Config
+	c.Routes = append(c.Routes,
+		Route{ID: "legacy", GroupID: "default", Host: "legacy.example.test", Upstream: "http://127.0.0.1:8081", Image: "/" + corruptIcon},
+		Route{ID: "missing", GroupID: "default", Host: "missing.example.test", Upstream: "http://127.0.0.1:8082", Image: "/" + missingIcon},
+	)
+	corruptPath := filepath.Join(dir, corruptIcon)
+	if err := os.MkdirAll(filepath.Dir(corruptPath), 0700); err != nil {
+		t.Fatal(err)
+	}
+	payload.Files[corruptIcon] = []byte("invalid icon")
+	if err := atomicWrite(corruptPath, payload.Files[corruptIcon]); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeJSON(filepath.Join(dir, "state.json"), payload.State); err != nil {
+		t.Fatal(err)
+	}
+	assertImagesRecovered := func(p backupPayload) {
+		t.Helper()
+		if p.SkippedImages != 2 || p.State.Config.Routes[0].Image != c.Routes[0].Image ||
+			p.State.Config.Routes[1].Image != "" || p.State.Config.Routes[2].Image != "" {
+			t.Fatal("snapshot should preserve valid image and drop both unavailable references")
+		}
+		if images, _, caches := backupFileCounts(p); images != 1 || caches != 1 {
+			t.Fatal("valid persistent files must survive icon recovery")
+		}
+	}
+	current, err := snapshotBackup(dir, payload.State)
+	if err != nil {
+		t.Fatal("unavailable icons blocked backup:", err)
+	}
+	assertImagesRecovered(current)
+	if c.Routes[1].Image != "/"+corruptIcon || c.Routes[2].Image != "/"+missingIcon {
+		t.Fatal("backup modified live config")
+	}
+	capacity, err := inspectBackupCapacity(legacyStorage(dir), payload.State)
+	if err != nil || !capacity.CanProceed {
+		t.Fatal("unavailable icons blocked capacity check:", err)
+	}
+	appDir := t.TempDir()
+	if err := atomicWrite(filepath.Join(appDir, "gatehouse"), []byte("TEST_ONLY_PROGRAM")); err != nil {
+		t.Fatal(err)
+	}
+	m, err := NewMaintenance(dir, appDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const password = "TEST_ONLY_BACKUP_PASSWORD"
+	for _, p := range []backupPayload{payload, current} {
+		archive, err := encodeBackup(p, password)
+		if err != nil {
+			t.Fatal(err)
+		}
+		report, err := m.inspectBackup(archive, password, 16666)
+		if err != nil {
+			t.Fatal("unavailable icons blocked restore preflight:", err)
+		}
+		if !strings.Contains(report["message"].(string), "已跳过 2 张") {
+			t.Fatal("restore preview did not report the skipped icons")
+		}
+		var staged backupPayload
+		data, err := os.ReadFile(filepath.Join(m.dir, "restore-staged.json"))
+		if err != nil || json.Unmarshal(data, &staged) != nil {
+			t.Fatal("restore preflight did not stage the sanitized backup")
+		}
+		assertImagesRecovered(staged)
+	}
+	if err := writeJSON(filepath.Join(m.dir, "operation.json"), maintenanceOperation{Kind: "restore", Version: Version}); err != nil {
+		t.Fatal(err)
+	}
+	if active, err := m.beginTransition(); !active || err != nil {
+		t.Fatal("unavailable icons blocked maintenance snapshot or restoration:", err)
+	}
+	store, err := OpenStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	routes := store.Snapshot().Config.Routes
+	if routes[0].Image != c.Routes[0].Image || routes[1].Image != "" || routes[2].Image != "" {
+		t.Fatal("applied restore did not use the recovered icon references")
+	}
+}
+
 func TestBackupRestoreAtomicFailureAndSupervisorRollback(t *testing.T) {
 	source, p := fullBackupFixture(t)
 	dest := t.TempDir()

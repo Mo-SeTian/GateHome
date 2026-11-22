@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"image"
+	"slices"
 	"strings"
 
 	"sun-panel/lib/imageasset"
@@ -56,23 +57,63 @@ func validRouteImage(id string, data []byte) bool {
 	return imageasset.Validate("image.svg", data)
 }
 
+func validateBackupImage(name string, data []byte) error {
+	if id, ok := strings.CutPrefix(name, "route-images/"); ok {
+		if !validRouteImage(strings.TrimSuffix(id, ".img"), data) {
+			return errors.New("备份中的反代图片损坏或无效")
+		}
+		return nil
+	}
+	if len(data) == 0 || len(data) > maxImageUpload {
+		return errors.New("备份中的图标大小无效")
+	}
+	if _, _, err := iconDimensions(bytes.NewReader(data), iconFormat(name)); err != nil {
+		return errors.New("备份中的图标损坏或无效")
+	}
+	return nil
+}
+
+// Drop unusable optional assets before validating a complete backup. Invalid
+// paths and non-image data are still checked by validateBackupFiles.
+func omitUnavailableBackupImages(payload *backupPayload) {
+	if payload.Files == nil {
+		return
+	}
+	skipped := map[string]struct{}{}
+	for name, data := range payload.Files {
+		if isBackupImage(name) && safeBackupFile(name) && validateBackupImage(name, data) != nil {
+			delete(payload.Files, name)
+			skipped[name] = struct{}{}
+		}
+	}
+	copied := false
+	for i, route := range payload.State.Config.Routes {
+		if route.Image == "" {
+			continue
+		}
+		name := routeImageBackupPath(route.Image)
+		if !safeBackupFile(name) || payload.Files[name] != nil {
+			continue
+		}
+		if !copied {
+			payload.State.Config.Routes = slices.Clone(payload.State.Config.Routes)
+			copied = true
+		}
+		payload.State.Config.Routes[i].Image = ""
+		skipped[name] = struct{}{}
+	}
+	payload.SkippedImages += len(skipped)
+}
+
 func validateBackupFiles(payload backupPayload) error {
 	for name, data := range payload.Files {
 		if !safeBackupFile(name) {
 			return errors.New("备份含不支持的数据路径")
 		}
 		switch {
-		case strings.HasPrefix(name, "route-images/"):
-			id := strings.TrimSuffix(strings.TrimPrefix(name, "route-images/"), ".img")
-			if !validRouteImage(id, data) {
-				return errors.New("备份中的反代图片损坏或无效")
-			}
-		case strings.HasPrefix(name, "icons/"):
-			if len(data) == 0 || len(data) > maxImageUpload {
-				return errors.New("备份中的图标大小无效")
-			}
-			if _, _, err := iconDimensions(bytes.NewReader(data), iconFormat(name)); err != nil {
-				return errors.New("备份中的图标损坏或无效")
+		case isBackupImage(name):
+			if err := validateBackupImage(name, data); err != nil {
+				return err
 			}
 		case strings.HasPrefix(name, "logs/"):
 			if len(data) > maxLogBytes {

@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"os"
+	"path/filepath"
 	"reflect"
 	"runtime"
 	"strconv"
@@ -493,6 +495,53 @@ func TestPortForwardConfigAPIPersistence(t *testing.T) {
 	next.Config.Forwards[0].ListenPort = 16666
 	if code := request(next.Config, next.Revision); code != 400 {
 		t.Fatal("admin port conflict saved", code)
+	}
+}
+
+func TestPortForwardSaveWithUnavailableRouteIcon(t *testing.T) {
+	a, handler := testAdmin(t)
+	cookie := loginForTest(t, handler)
+	state := a.store.Snapshot()
+	const imageRef = "/icons/uploads/legacy.svg"
+	iconPath := filepath.Join(a.store.paths.Data, strings.TrimPrefix(imageRef, "/"))
+	if err := os.MkdirAll(filepath.Dir(iconPath), 0700); err != nil {
+		t.Fatal(err)
+	}
+	icon, err := builtinIcons.ReadFile("icon_builtin/gateway.svg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := atomicWrite(iconPath, icon); err != nil {
+		t.Fatal(err)
+	}
+	c := state.Config
+	c.Routes = []Route{{GroupID: c.Groups[0].ID, Host: "nas.example.test", Upstream: "http://127.0.0.1:5000", Enabled: true, Image: imageRef}}
+	save := func(config Config, revision int) *httptest.ResponseRecorder {
+		return adminRequest(handler, "PUT", "/api/config", map[string]any{"config": config, "revision": revision}, cookie, "")
+	}
+	if got := save(c, state.Revision); got.Code != 200 {
+		t.Fatal("initial rule save failed:", got.Code)
+	}
+	if err := atomicWrite(iconPath, []byte("invalid icon")); err != nil {
+		t.Fatal(err)
+	}
+	if routeImageExists(a.store.paths.Data, imageRef) {
+		t.Fatal("fixture icon must be unavailable")
+	}
+	state = a.store.Snapshot()
+	c = state.Config
+	c.Forwards = []PortForward{testForward("tcp", 22022, "127.0.0.1:22")}
+	if got := save(c, state.Revision); got.Code != 200 {
+		t.Fatal("unavailable icon blocked forward save:", got.Code)
+	}
+	state = a.store.Snapshot()
+	if len(state.Config.Forwards) != 1 || state.Config.Forwards[0] != c.Forwards[0] || state.Config.Routes[0].Image != imageRef {
+		t.Fatal("forward save did not preserve the route and its icon reference")
+	}
+	c.Routes = append([]Route(nil), c.Routes...)
+	c.Routes[0].Image = "/icons/uploads/another-missing.svg"
+	if got := save(c, state.Revision); got.Code != 400 || !strings.Contains(got.Body.String(), "反代图片不存在或已失效") {
+		t.Fatal("changed image reference should still be checked:", got.Code)
 	}
 }
 

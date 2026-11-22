@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -164,6 +165,9 @@ func (m *Maintenance) inspectBackup(data []byte, password string, adminPort int)
 	}
 	if compatible != nil && m.Available() {
 		message = compatible.Error()
+	}
+	if payload.SkippedImages > 0 {
+		message += fmt.Sprintf(" 已跳过 %d 张缺失或无效的图标，相关反代将使用默认图标。", payload.SkippedImages)
 	}
 	return map[string]any{"id": id, "version": manifest.Version, "created_at": manifest.CreatedAt, "can_apply": canApply, "routes": len(c.Routes), "forwards": len(c.Forwards), "groups": len(c.Groups), "sunpanel_files": sunPanelFileCount(payload.Files), "sunpanel_images": sunPanelBackupImageCount(payload.Files), "ddns_groups": len(c.DDNS.Groups), "firewalls": len(c.Firewalls), "subscriptions": len(c.Subscriptions), "certificates": len(payload.Certificates), "images": images, "log_entries": logs, "subscription_caches": caches, "includes_files": payload.Files != nil, "token_configured": payload.State.HasDNSToken(), "message": message}, nil
 }

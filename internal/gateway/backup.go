@@ -23,9 +23,10 @@ import (
 )
 
 type backupPayload struct {
-	State        State             `json:"state"`
-	Certificates map[string][]byte `json:"certificates"`
-	Files        map[string][]byte `json:"files"`
+	State         State             `json:"state"`
+	Certificates  map[string][]byte `json:"certificates"`
+	Files         map[string][]byte `json:"files"`
+	SkippedImages int               `json:"skipped_images,omitempty"`
 }
 type diskBackup struct {
 	State        json.RawMessage   `json:"state"`
@@ -99,18 +100,31 @@ func snapshotBackupPaths(paths StoragePaths, state State) (backupPayload, error)
 	names = append(names, panelNames...)
 	for _, name := range names {
 		var f *os.File
+		image := isBackupImage(name)
+		if image && !safeBackupFile(name) {
+			return b, errors.New("备份含不支持的数据路径")
+		}
 		if rel, ok := strings.CutPrefix(name, "icons/"); ok {
 			f, _, err = openIconFile(paths.Data, rel)
+			if errors.Is(err, os.ErrNotExist) || errors.Is(err, errIconFileSize) {
+				continue
+			}
 		} else {
 			path := paths.file(name)
 			info, statErr := os.Lstat(path)
-			if errors.Is(statErr, os.ErrNotExist) && !isBackupImage(name) {
+			if errors.Is(statErr, os.ErrNotExist) {
 				continue
 			}
 			if statErr != nil || !info.Mode().IsRegular() {
-				return b, errors.New("备份数据文件缺失或不是普通文件")
+				return b, errors.New("备份数据文件无法读取或不是普通文件")
+			}
+			if image && (info.Size() == 0 || info.Size() > maxRouteImage) {
+				continue
 			}
 			f, err = os.Open(path)
+			if image && errors.Is(err, os.ErrNotExist) {
+				continue
+			}
 		}
 		if err != nil {
 			return b, errors.New("数据文件读取失败")
@@ -123,6 +137,7 @@ func snapshotBackupPaths(paths StoragePaths, state State) (backupPayload, error)
 		total += len(data)
 		b.Files[name] = data
 	}
+	omitUnavailableBackupImages(&b)
 	if err := validateBackupFiles(b); err != nil {
 		return b, err
 	}
@@ -219,6 +234,9 @@ func decodeBackup(data []byte, password string) (backupPayload, backupManifest, 
 	if (m.Format == "gatehouse-backup-v2") != (payload.Files != nil) {
 		return payload, m, errors.New("备份格式与数据范围不一致")
 	}
+	if payload.SkippedImages < 0 || payload.SkippedImages > maxBackupBytes {
+		return payload, m, errors.New("备份图标数量无效")
+	}
 	migrateState(&payload.State)
 	if err := ValidateAdminUsername(payload.State.AdminUsername); err != nil {
 		return payload, m, errors.New("备份的管理员账号数据无效")
@@ -240,6 +258,7 @@ func decodeBackup(data []byte, password string) (backupPayload, backupManifest, 
 			return payload, m, errors.New("备份证书数据无效")
 		}
 	}
+	omitUnavailableBackupImages(&payload)
 	if err := validateBackupFiles(payload); err != nil {
 		return payload, m, err
 	}

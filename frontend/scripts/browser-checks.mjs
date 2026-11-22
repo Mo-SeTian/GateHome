@@ -1364,6 +1364,17 @@ try {
   assert.ok((await api('config')).config.routes.some(row => row.image?.startsWith('/icons/uploads/')))
   await page.locator(`.routes-grid img[src="${previewURL}"]`).waitFor()
 
+  const iconRequestURL = new URL(previewURL, page.url()).href
+  const firstCardIcon = page.locator('.route-card').first().locator('.app-icon-wrap')
+  await page.route(iconRequestURL, request => request.fulfill({ contentType: 'image/svg+xml', body: 'invalid icon' }))
+  await page.reload()
+  await firstCardIcon.locator('svg').waitFor()
+  assert.equal(await firstCardIcon.locator('img').count(), 0)
+  await page.unroute(iconRequestURL)
+  await button('刷新').click()
+  await firstCardIcon.locator('img').evaluate(img => img.decode())
+  console.log('PASS unavailable route icon: default icon displays and refresh retries the custom asset')
+
   await button('编辑').first().click()
   await routeDialog.getByRole('textbox', { name: '图片地址', exact: true }).fill(linkedURL)
   await routeDialog.getByRole('button', { name: '导入', exact: true }).click()

@@ -85,6 +85,10 @@ func inspectBackupCapacity(paths StoragePaths, state State) (backupCapacity, err
 	var encodedBytes int64
 	for _, name := range names {
 		var info os.FileInfo
+		image := isBackupImage(name)
+		if image && !safeBackupFile(name) {
+			return c, errors.New("容量检查发现不支持的数据路径")
+		}
 		if rel, ok := strings.CutPrefix(name, "icons/"); ok {
 			var file *os.File
 			file, info, err = openIconFile(paths.Data, rel)
@@ -94,19 +98,22 @@ func inspectBackupCapacity(paths StoragePaths, state State) (backupCapacity, err
 		} else {
 			info, err = os.Lstat(paths.file(name))
 		}
-		if errors.Is(err, os.ErrNotExist) && !isBackupImage(name) {
+		if errors.Is(err, os.ErrNotExist) || (image && errors.Is(err, errIconFileSize)) {
 			continue
 		}
 		if err != nil || !info.Mode().IsRegular() {
 			return c, errors.New("容量检查发现缺失或非普通数据文件")
 		}
 		size := info.Size()
+		if strings.HasPrefix(name, "route-images/") && (size == 0 || size > maxRouteImage) {
+			continue
+		}
 		c.RawBytes += size
 		encodedBytes += 4 * ((size + 2) / 3)
 		switch {
 		case strings.HasPrefix(name, "sunpanel/"):
 			c.SunPanelBytes += size
-		case isBackupImage(name):
+		case image:
 			c.ImageBytes += size
 		default:
 			c.OtherBytes += size

@@ -31,6 +31,8 @@ var iconSources = []string{"builtin", "imported", "uploads"}
 const iconRefPrefix = "/icons/"
 const iconFilePrefix = "/api/icons/file/"
 
+var errIconFileSize = errors.New("图标大小无效")
+
 type libraryIcon struct {
 	ID       string   `json:"id"`
 	Name     string   `json:"name"`
@@ -141,9 +143,13 @@ func openIconFile(data, rel string) (*os.File, fs.FileInfo, error) {
 		return nil, nil, err
 	}
 	info, err := file.Stat()
-	if err != nil || !info.Mode().IsRegular() || info.Size() == 0 || info.Size() > maxImageUpload {
+	if err != nil || !info.Mode().IsRegular() {
 		file.Close()
 		return nil, nil, fs.ErrInvalid
+	}
+	if info.Size() == 0 || info.Size() > maxImageUpload {
+		file.Close()
+		return nil, nil, errIconFileSize
 	}
 	return file, info, nil
 }
