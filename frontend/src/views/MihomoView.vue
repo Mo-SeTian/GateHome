@@ -1944,10 +1944,15 @@ onBeforeUnmount(() => {
 <style scoped>
 .mihomo-page {
   gap: 16px;
+  grid-template-columns: minmax(0, 1fr);
+  width: 100%;
+  max-width: 100%;
 }
 
 .header-controls {
   gap: 8px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .mode-segment {
@@ -2026,6 +2031,7 @@ onBeforeUnmount(() => {
 .mihomo-tabs-wrap {
   overflow-x: auto;
   padding-bottom: 2px;
+  width: 100%;
   min-width: 0;
   max-width: 100%;
 }
@@ -2063,8 +2069,11 @@ onBeforeUnmount(() => {
 
 .tab-section {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 14px;
+  width: 100%;
   min-width: 0;
+  max-width: 100%;
 }
 
 .section-toolbar {
@@ -2089,11 +2098,15 @@ onBeforeUnmount(() => {
 
 .groups-stack {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
+  min-width: 0;
 }
 
 .group-card {
   padding: 14px 16px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .group-head {
@@ -2132,6 +2145,7 @@ onBeforeUnmount(() => {
 .group-head-actions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
 }
 
@@ -2210,7 +2224,9 @@ onBeforeUnmount(() => {
 
 .rules-list {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 8px;
+  min-width: 0;
 }
 
 .rule-row {
@@ -2223,6 +2239,8 @@ onBeforeUnmount(() => {
   border-radius: var(--radius-sm);
   background: var(--strip-bg);
   border: 1px solid var(--line);
+  min-width: 0;
+  max-width: 100%;
 }
 
 .rule-row.disabled {
@@ -2256,6 +2274,7 @@ onBeforeUnmount(() => {
 .rule-actions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 4px;
 }
 
@@ -2278,7 +2297,9 @@ onBeforeUnmount(() => {
 
 .settings-form {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
+  min-width: 0;
 }
 
 .ports-grid {
@@ -2289,7 +2310,9 @@ onBeforeUnmount(() => {
 
 .auth-section {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 10px;
+  min-width: 0;
 }
 
 .auth-fields-grid {
@@ -2336,11 +2359,15 @@ onBeforeUnmount(() => {
   font-size: 12.5px;
   color: var(--ink-secondary);
   cursor: pointer;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .subs-list {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 10px;
+  min-width: 0;
 }
 
 .sub-card {
@@ -2353,6 +2380,8 @@ onBeforeUnmount(() => {
   border-radius: var(--radius-sm);
   background: var(--strip-bg);
   border: 1px solid var(--line);
+  min-width: 0;
+  max-width: 100%;
 }
 
 .sub-card.active {
@@ -2386,6 +2415,7 @@ onBeforeUnmount(() => {
 .sub-actions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
 }
 
@@ -2435,7 +2465,9 @@ onBeforeUnmount(() => {
 
 .core-meta {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 10px;
+  min-width: 0;
 }
 
 .core-meta > div {
@@ -2675,6 +2707,15 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 640px) {
+  .report-panel {
+    padding: 12px;
+  }
+
+  .mode-btn {
+    padding: 4px 8px;
+    white-space: normal;
+  }
+
   .yaml-panel {
     padding: 10px;
   }

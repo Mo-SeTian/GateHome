@@ -2181,7 +2181,8 @@ try {
     await page.setViewportSize({ width, height: 844 })
     for (const tabName of ['策略组与节点', '自定义分流', '订阅管理', '端口与核心', '配置文件']) {
       await mihomoPage.getByRole('tab', { name: tabName }).click()
-      assert.ok(await mihomoPage.evaluate(el => el.scrollWidth <= el.clientWidth))
+      const dims = await mihomoPage.evaluate(el => ({ scrollWidth: el.scrollWidth, clientWidth: el.clientWidth }))
+      assert.ok(dims.scrollWidth <= dims.clientWidth, `mihomo overflow at width=${width} tab=${tabName}: scrollWidth=${dims.scrollWidth} clientWidth=${dims.clientWidth}`)
     }
     assert.ok((await sourceViewer.boundingBox()).height >= 350)
   }
