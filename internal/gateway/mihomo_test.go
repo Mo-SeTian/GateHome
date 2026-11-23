@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -1554,5 +1555,93 @@ func TestMihomoZashboardInstallServeAndControllerProxy(t *testing.T) {
 	h.ServeHTTP(crossRec, crossReq)
 	if crossRec.Code != 403 {
 		t.Fatalf("expected 403 for cross-site request to controller proxy, got %d", crossRec.Code)
+	}
+}
+
+func TestMihomoLogsAPIAndClear(t *testing.T) {
+	a, h := testAdmin(t)
+	cookie := loginForTest(t, h)
+
+	a.mihomo.logs.add(`time="2026-11-23T22:50:00+08:00" level=info msg="Mihomo started"`)
+	a.mihomo.logs.add(`time="2026-11-23T22:50:01+08:00" level=warning msg="sample warning"`)
+
+	rec := adminRequest(h, "GET", "/api/mihomo/logs", nil, cookie, "")
+	if rec.Code != 200 {
+		t.Fatalf("GET /api/mihomo/logs failed: %d %s", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		Lines   []string `json:"lines"`
+		Running bool     `json:"running"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &payload)
+	if len(payload.Lines) != 2 || !strings.Contains(payload.Lines[0], "Mihomo started") {
+		t.Fatalf("unexpected logs payload: %+v", payload)
+	}
+
+	// Clear logs
+	rec = adminRequest(h, "DELETE", "/api/mihomo/logs", map[string]any{}, cookie, "")
+	if rec.Code != 200 {
+		t.Fatalf("DELETE /api/mihomo/logs failed: %d %s", rec.Code, rec.Body.String())
+	}
+	rec = adminRequest(h, "GET", "/api/mihomo/logs", nil, cookie, "")
+	_ = json.Unmarshal(rec.Body.Bytes(), &payload)
+	if len(payload.Lines) != 0 {
+		t.Fatalf("expected logs cleared, got %+v", payload.Lines)
+	}
+}
+
+func TestMihomoMMDBUploadValidationAndStatus(t *testing.T) {
+	a, h := testAdmin(t)
+	cookie := loginForTest(t, h)
+
+	upload := func(data []byte) *httptest.ResponseRecorder {
+		var body bytes.Buffer
+		mw := multipart.NewWriter(&body)
+		fw, _ := mw.CreateFormFile("file", "country.mmdb")
+		_, _ = fw.Write(data)
+		_ = mw.Close()
+
+		req := httptest.NewRequest("POST", "http://localhost:16666/api/mihomo/geodata/upload", &body)
+		req.Header.Set("Content-Type", mw.FormDataContentType())
+		req.Header.Set("X-Gatehouse-Request", "1")
+		req.AddCookie(cookie)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+
+	// Reject corrupt/invalid bytes
+	badRec := upload([]byte("not an mmdb file"))
+	if badRec.Code != 400 {
+		t.Fatalf("expected 400 for invalid mmdb upload, got %d %s", badRec.Code, badRec.Body.String())
+	}
+
+	// Accept valid MMDB with MaxMind metadata marker in trailing bytes
+	validMMDB := make([]byte, 2048)
+	copy(validMMDB[len(validMMDB)-len(mmdbMetadataMarker)-4:], mmdbMetadataMarker)
+	okRec := upload(validMMDB)
+	if okRec.Code != 200 {
+		t.Fatalf("expected 200 for valid mmdb upload, got %d %s", okRec.Code, okRec.Body.String())
+	}
+
+	var res struct {
+		OK     bool                 `json:"ok"`
+		Size   int64                `json:"size"`
+		Status mihomoStatusResponse `json:"status"`
+	}
+	_ = json.Unmarshal(okRec.Body.Bytes(), &res)
+	if !res.OK || res.Size != 2048 || !res.Status.MMDBInstalled || res.Status.MMDBSize != 2048 {
+		t.Fatalf("unexpected upload status: %+v", res)
+	}
+
+	// Check GET /api/mihomo/status reflects mmdb_installed
+	stRec := adminRequest(h, "GET", "/api/mihomo/status", nil, cookie, "")
+	var st mihomoStatusResponse
+	_ = json.Unmarshal(stRec.Body.Bytes(), &st)
+	if !st.MMDBInstalled || st.MMDBSize != 2048 {
+		t.Fatalf("expected status mmdb_installed=true size=2048, got %+v", st)
+	}
+	if _, err := os.Stat(a.mihomo.mmdbPath()); err != nil {
+		t.Fatalf("country.mmdb missing on disk: %v", err)
 	}
 }

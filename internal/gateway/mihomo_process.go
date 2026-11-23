@@ -35,7 +35,10 @@ const (
 	maxZashboardZipBytes      = 32 << 20
 	maxZashboardExtractBytes  = 96 << 20
 	maxZashboardExtractFiles  = 2000
+	maxMihomoMMDBBytes        = 32 << 20
 )
+
+var mmdbMetadataMarker = []byte{0xab, 0xcd, 0xef, 'M', 'a', 'x', 'M', 'i', 'n', 'd', '.', 'c', 'o', 'm'}
 
 type mihomoLogRing struct {
 	mu    sync.Mutex
@@ -54,9 +57,15 @@ func (r *mihomoLogRing) add(line string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.lines = append(r.lines, line)
-	if len(r.lines) > 50 {
-		r.lines = r.lines[len(r.lines)-50:]
+	if len(r.lines) > 500 {
+		r.lines = r.lines[len(r.lines)-500:]
 	}
+}
+
+func (r *mihomoLogRing) clear() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.lines = nil
 }
 
 func (r *mihomoLogRing) snapshot() []string {
@@ -82,8 +91,9 @@ type mihomoManager struct {
 	lastError string
 	logs      mihomoLogRing
 
-	ctrlBaseURL string // optional override for tests
-	ctrlSecret  string // optional override for tests
+	ctrlBaseURL  string        // optional override for tests
+	ctrlSecret   string        // optional override for tests
+	startTimeout time.Duration // optional override for tests
 }
 
 func newMihomoManager(paths StoragePaths, store *Store, adminPort int) *mihomoManager {
@@ -224,6 +234,32 @@ func (m *mihomoManager) Start() error {
 		m.mu.Unlock()
 		return err
 	}
+	if m.store != nil {
+		if ok, _, _ := m.mmdbStatus(); !ok {
+			_ = os.Remove(m.mmdbPath())
+			stateSnap := m.store.Snapshot()
+			m.mu.Unlock()
+			m.logs.add("country.mmdb 缺失或已损坏，正在尝试从镜像源自动下载…")
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			size, host, dlErr := m.DownloadMMDB(ctx, stateSnap)
+			cancel()
+			if dlErr != nil {
+				m.logs.add("country.mmdb 镜像预下载失败: " + dlErr.Error() + "（将继续尝试启动，若长时间卡住请在「端口与核心」手动上传 country.mmdb）")
+			} else {
+				m.logs.add(fmt.Sprintf("country.mmdb 已从 %s 下载就绪 (%d bytes)", host, size))
+			}
+			m.mu.Lock()
+			if m.running && m.cmd != nil {
+				m.mu.Unlock()
+				return nil
+			}
+			bin = m.resolveBinaryLocked()
+			if bin == "" {
+				m.mu.Unlock()
+				return errors.New("未检测到 mihomo 内核程序，请先在「端口与核心」下载或上传内核")
+			}
+		}
+	}
 	absDir, err := filepath.Abs(m.dir)
 	if err != nil {
 		m.mu.Unlock()
@@ -250,6 +286,10 @@ func (m *mihomoManager) Start() error {
 	waitDone := make(chan error, 1)
 	m.waitDone = waitDone
 	ctrlURL, secret := m.controllerURLAndSecretLocked()
+	startWait := m.startTimeout
+	if startWait <= 0 {
+		startWait = 60 * time.Second
+	}
 	m.mu.Unlock()
 
 	pipeReader := func(r io.ReadCloser) {
@@ -280,8 +320,8 @@ func (m *mihomoManager) Start() error {
 		}
 	}()
 
-	// Poll controller /version up to 5s until ready or process exits early.
-	deadline := time.Now().Add(5 * time.Second)
+	// Poll controller /version until ready or process exits early (allows initial MMDB/Geodata download).
+	deadline := time.Now().Add(startWait)
 	client := mihomoLocalClient(500 * time.Millisecond)
 	var readyErr error
 	for time.Now().Before(deadline) {
@@ -315,11 +355,15 @@ func (m *mihomoManager) Start() error {
 			return nil
 		}
 		readyErr = err
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(150 * time.Millisecond)
 	}
 
 	_ = m.Stop()
-	msg := fmt.Sprintf("mihomo 控制接口未就绪: %v", readyErr)
+	tail := ""
+	if lines := m.logs.snapshot(); len(lines) > 0 {
+		tail = "（最近日志: " + lines[len(lines)-1] + "）"
+	}
+	msg := fmt.Sprintf("mihomo 控制接口未就绪: %v%s", readyErr, tail)
 	m.mu.Lock()
 	m.lastError = msg
 	m.mu.Unlock()
@@ -1293,6 +1337,150 @@ func (m *mihomoManager) DownloadZashboard(ctx context.Context, state State) (str
 		return "", fmt.Errorf("下载 Zashboard 压缩包失败: %v", err)
 	}
 	return m.installZashboardZip(raw, release.TagName)
+}
+
+func (m *mihomoManager) mmdbPath() string {
+	return filepath.Join(m.dir, "country.mmdb")
+}
+
+func isValidMMDBData(raw []byte) bool {
+	if len(raw) < 1024 || len(raw) > maxMihomoMMDBBytes {
+		return false
+	}
+	tailStart := 0
+	if len(raw) > 128<<10 {
+		tailStart = len(raw) - (128 << 10)
+	}
+	return bytes.Contains(raw[tailStart:], mmdbMetadataMarker)
+}
+
+func isValidMMDBFile(path string) (bool, int64, time.Time) {
+	info, err := os.Stat(path)
+	if err != nil || info.IsDir() {
+		return false, 0, time.Time{}
+	}
+	size := info.Size()
+	if size < 1024 || size > maxMihomoMMDBBytes {
+		return false, 0, time.Time{}
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return false, 0, time.Time{}
+	}
+	defer f.Close()
+	readSize := size
+	var offset int64
+	if readSize > 128<<10 {
+		offset = size - (128 << 10)
+		readSize = 128 << 10
+	}
+	buf := make([]byte, readSize)
+	if _, err := f.ReadAt(buf, offset); err != nil && !errors.Is(err, io.EOF) {
+		return false, 0, time.Time{}
+	}
+	if !bytes.Contains(buf, mmdbMetadataMarker) {
+		return false, 0, time.Time{}
+	}
+	return true, size, info.ModTime()
+}
+
+func (m *mihomoManager) mmdbStatus() (bool, int64, time.Time) {
+	return isValidMMDBFile(m.mmdbPath())
+}
+
+func (m *mihomoManager) installMMDBData(raw []byte) (int64, error) {
+	if !isValidMMDBData(raw) {
+		return 0, errors.New("无效的 country.mmdb 文件（缺少 MaxMind 数据库标识或大小异常）")
+	}
+	if err := os.MkdirAll(m.dir, 0700); err != nil {
+		return 0, err
+	}
+	_ = os.Chmod(m.dir, 0700)
+	if err := atomicWrite(m.mmdbPath(), raw); err != nil {
+		return 0, err
+	}
+	return int64(len(raw)), nil
+}
+
+func allowedMMDBHost(u *url.URL) bool {
+	if u == nil || u.Scheme != "https" || u.User != nil || (u.Port() != "" && u.Port() != "443") {
+		return false
+	}
+	switch strings.ToLower(u.Hostname()) {
+	case "fastly.jsdelivr.net", "testingcf.jsdelivr.net", "cdn.jsdelivr.net",
+		"github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com", "github-releases.githubusercontent.com":
+		return true
+	}
+	return false
+}
+
+func (m *mihomoManager) DownloadMMDB(ctx context.Context, state State) (int64, string, error) {
+	client := outboundClient(state, 30*time.Second)
+	defer closeClient(client)
+	client.CheckRedirect = func(r *http.Request, via []*http.Request) error {
+		if len(via) >= 5 || !allowedMMDBHost(r.URL) {
+			return errors.New("GeoIP 下载重定向地址不受信任")
+		}
+		r.Header.Del("Authorization")
+		r.Header.Del("Cookie")
+		return nil
+	}
+
+	mirrors := []string{
+		"https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/country.mmdb",
+		"https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/country.mmdb",
+		"https://cdn.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/country.mmdb",
+		"https://github.com/MetaCubeX/meta-rules-dat/releases/latest/download/country.mmdb",
+	}
+
+	var lastErr error
+	for _, mirrorURL := range mirrors {
+		u, err := url.Parse(mirrorURL)
+		if err != nil || !allowedMMDBHost(u) {
+			continue
+		}
+		attemptCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+		req, err := http.NewRequestWithContext(attemptCtx, http.MethodGet, mirrorURL, nil)
+		if err != nil {
+			cancel()
+			lastErr = err
+			continue
+		}
+		req.Header.Set("User-Agent", "GateHome/"+Version)
+		resp, err := client.Do(req)
+		if err != nil {
+			cancel()
+			lastErr = err
+			continue
+		}
+		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close()
+			cancel()
+			lastErr = fmt.Errorf("%s 返回 HTTP %d", u.Hostname(), resp.StatusCode)
+			continue
+		}
+		raw, readErr := io.ReadAll(io.LimitReader(resp.Body, maxMihomoMMDBBytes+1))
+		resp.Body.Close()
+		cancel()
+		if readErr != nil {
+			lastErr = readErr
+			continue
+		}
+		if int64(len(raw)) > maxMihomoMMDBBytes {
+			lastErr = errors.New("country.mmdb 文件超过 32 MiB 限制")
+			continue
+		}
+		size, installErr := m.installMMDBData(raw)
+		if installErr != nil {
+			lastErr = installErr
+			continue
+		}
+		return size, u.Hostname(), nil
+	}
+	if lastErr == nil {
+		lastErr = errors.New("无可用下载镜像")
+	}
+	return 0, "", fmt.Errorf("country.mmdb 下载失败 (%v)，请在「端口与核心」手动上传 country.mmdb", lastErr)
 }
 
 func (m *mihomoManager) fetchSubscriptionYAML(ctx context.Context, subURL string) ([]byte, int64, int64, int64, int64, error) {

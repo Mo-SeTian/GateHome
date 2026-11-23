@@ -674,6 +674,42 @@
           </div>
         </dl>
       </SpotlightCard>
+
+      <!-- GeoIP (country.mmdb) Card -->
+      <SpotlightCard v-if="status" class="report-panel">
+        <div class="panel-header-row">
+          <h2>GeoIP 数据库 (country.mmdb)</h2>
+          <div class="report-actions">
+            <button type="button" class="btn btn-secondary btn-sm" :disabled="mmdbBusy" @click="triggerMMDBUpload">
+              <Upload :size="14" /> 上传 country.mmdb
+            </button>
+            <button type="button" class="btn btn-primary btn-sm" :disabled="mmdbBusy" @click="downloadMMDB">
+              <Download :size="14" /> {{ mmdbBusy ? '下载中…' : '镜像在线下载' }}
+            </button>
+            <input
+              ref="mmdbFileInput"
+              type="file"
+              accept=".mmdb,application/octet-stream"
+              class="sr-only"
+              @change="handleMMDBUpload"
+            />
+          </div>
+        </div>
+        <dl class="core-meta">
+          <div>
+            <dt>安装状态</dt>
+            <dd>{{ status.mmdb_installed ? '已就绪' : '未安装（首次启动将自动从镜像下载）' }}</dd>
+          </div>
+          <div>
+            <dt>文件大小</dt>
+            <dd class="mono-text">{{ status.mmdb_size ? formatBytes(status.mmdb_size) : '—' }}</dd>
+          </div>
+          <div>
+            <dt>更新时间</dt>
+            <dd class="mono-text">{{ status.mmdb_updated_at ? formatTime(status.mmdb_updated_at) : '—' }}</dd>
+          </div>
+        </dl>
+      </SpotlightCard>
     </section>
 
     <!-- Tab 5: Config YAML Dual View -->
@@ -820,6 +856,53 @@
             @input="onYamlInput"
             @keydown.tab.prevent="insertYamlTab"
           />
+        </div>
+      </SpotlightCard>
+    </section>
+
+    <!-- Tab 6: Mihomo Runtime Logs -->
+    <section v-show="activeTab === 'logs'" class="tab-section" role="tabpanel" aria-label="运行日志">
+      <div class="section-toolbar">
+        <div class="toolbar-meta">
+          <span class="badge" :class="logsRunning ? 'badge-ok' : 'badge-neutral'">
+            {{ logsRunning ? '运行中' : '已停止' }}
+          </span>
+          <span class="meta-pill">{{ filteredLogLines.length }} 条日志</span>
+          <input
+            v-model.trim="logSearch"
+            type="search"
+            class="form-input toolbar-input"
+            aria-label="筛选运行日志"
+            placeholder="筛选日志关键字…"
+          />
+        </div>
+        <div class="report-actions">
+          <label class="log-live-toggle">
+            <span>实时刷新</span>
+            <span class="switch">
+              <input v-model="logsLive" type="checkbox" aria-label="实时刷新运行日志" @change="syncLogPolling" />
+              <span class="switch-slider" />
+            </span>
+          </label>
+          <button type="button" class="btn btn-secondary btn-sm" :disabled="logsLoading" @click="loadLogs(false)">
+            <RefreshCw :size="13" /> 刷新
+          </button>
+          <button type="button" class="btn btn-secondary btn-sm text-bad" :disabled="logsLoading" @click="clearLogs">
+            <Trash2 :size="13" /> 清理
+          </button>
+        </div>
+      </div>
+
+      <SpotlightCard class="report-panel log-panel">
+        <p v-if="logsError" class="report-warning" role="status">{{ logsError }}</p>
+        <div ref="logViewerEl" class="log-viewer mono-text" role="log" aria-live="off">
+          <template v-if="filteredLogLines.length">
+            <div v-for="entry in filteredLogLines" :key="entry.num" class="log-line" :class="entry.levelClass">
+              <span class="log-num">{{ entry.num }}</span>
+              <span class="log-text">{{ entry.text }}</span>
+            </div>
+          </template>
+          <p v-else class="report-empty">{{ logLines.length ? '无匹配日志' : '暂无 Mihomo 运行日志' }}</p>
         </div>
       </SpotlightCard>
     </section>
@@ -1039,7 +1122,7 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import {
   ArrowDown,
   ArrowRight,
@@ -1061,6 +1144,7 @@ import {
   RefreshCw,
   RotateCw,
   Save,
+  ScrollText,
   Sliders,
   Square,
   Trash2,
@@ -1089,7 +1173,8 @@ const tabs = [
   { id: 'rules', label: '自定义分流', icon: GitBranch },
   { id: 'subscriptions', label: '订阅管理', icon: Download },
   { id: 'settings', label: '端口与核心', icon: Sliders },
-  { id: 'yaml', label: '配置文件', icon: FileCode2 }
+  { id: 'yaml', label: '配置文件', icon: FileCode2 },
+  { id: 'logs', label: '运行日志', icon: ScrollText }
 ]
 
 const status = ref(null)
@@ -1102,6 +1187,7 @@ const savingDNSPolicies = ref(false)
 const showInheritedDNS = ref(false)
 const busySub = ref('')
 const coreBusy = ref(false)
+const mmdbBusy = ref(false)
 const zashboardBusy = ref(false)
 const testingGroup = ref('')
 const testingNode = ref('')
@@ -1129,11 +1215,21 @@ const yamlWrap = ref(false)
 const yamlFullscreen = ref(false)
 const yamlPreviewMode = ref(false)
 
+const logLines = ref([])
+const logsRunning = ref(false)
+const logsError = ref('')
+const logsLoading = ref(false)
+const logsLive = ref(true)
+const logSearch = ref('')
+const logViewerEl = ref(null)
+let logPollTimer = null
+
 const groupDialog = ref(null)
 const ruleDialog = ref(null)
 const subDialog = ref(null)
 const dnsDialog = ref(null)
 const coreFileInput = ref(null)
+const mmdbFileInput = ref(null)
 const modalError = ref('')
 const modalBusy = ref(false)
 
@@ -1293,6 +1389,12 @@ async function switchTab(tabId) {
   activeTab.value = tabId
   if (tabId === 'groups') await loadGroups()
   if (tabId === 'yaml') await loadYaml(yamlKind.value)
+  if (tabId === 'logs') {
+    await loadLogs(false)
+    syncLogPolling()
+  } else {
+    stopLogPolling()
+  }
 }
 
 async function runCoreAction(fn, okMsg) {
@@ -1767,6 +1869,46 @@ async function handleFileUpload(event) {
   }
 }
 
+async function downloadMMDB() {
+  mmdbBusy.value = true
+  try {
+    const res = await adminApi.downloadMihomoMMDB()
+    if (res.status) applyStatus(res.status)
+    toast.success(`country.mmdb 已从 ${res.source || '镜像源'} 下载就绪`)
+  } catch (err) {
+    toast.error(err.message)
+  } finally {
+    mmdbBusy.value = false
+  }
+}
+
+function triggerMMDBUpload() {
+  mmdbFileInput.value?.click()
+}
+
+async function handleMMDBUpload(event) {
+  const file = event.target.files?.[0]
+  event.target.value = ''
+  if (!file) return
+  mmdbBusy.value = true
+  try {
+    const res = await adminApi.uploadMihomoMMDB(file)
+    if (res.status) applyStatus(res.status)
+    toast.success(`country.mmdb 已上传 (${formatBytes(res.size || file.size)})`)
+  } catch (err) {
+    toast.error(err.message)
+  } finally {
+    mmdbBusy.value = false
+  }
+}
+
+function formatBytes(n) {
+  if (!n || n <= 0) return '0 B'
+  if (n >= 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(2)} MiB`
+  if (n >= 1024) return `${(n / 1024).toFixed(1)} KiB`
+  return `${n} B`
+}
+
 function onYamlInput() {
   yamlDirty.value = true
   yamlValidated.value = false
@@ -1966,12 +2108,87 @@ async function copyText(text, msg) {
   }
 }
 
+function classifyLogLevel(line) {
+  const lower = line.toLowerCase()
+  if (lower.includes('level=error') || lower.includes('level=fatal')) return 'log-err'
+  if (lower.includes('level=warning') || lower.includes('level=warn')) return 'log-warn'
+  if (lower.includes('level=debug')) return 'log-debug'
+  return 'log-info'
+}
+
+const filteredLogLines = computed(() => {
+  const q = logSearch.value.toLowerCase()
+  const out = []
+  for (let i = 0; i < logLines.value.length; i++) {
+    const text = logLines.value[i]
+    if (q && !text.toLowerCase().includes(q)) continue
+    out.push({ num: i + 1, text, levelClass: classifyLogLevel(text) })
+  }
+  return out
+})
+
+async function loadLogs(silent = false) {
+  if (!silent) logsLoading.value = true
+  try {
+    const el = logViewerEl.value
+    const wasNearBottom = !el || (el.scrollHeight - el.scrollTop - el.clientHeight < 60)
+    const res = await adminApi.mihomoLogs(controller.signal)
+    if (controller.signal.aborted) return
+    logLines.value = res.lines || []
+    logsRunning.value = !!res.running
+    logsError.value = res.last_error || ''
+    if (wasNearBottom) {
+      await nextTick()
+      if (logViewerEl.value) {
+        logViewerEl.value.scrollTop = logViewerEl.value.scrollHeight
+      }
+    }
+  } catch (err) {
+    if (!controller.signal.aborted && !silent) toast.error(err.message)
+  } finally {
+    if (!silent) logsLoading.value = false
+  }
+}
+
+async function clearLogs() {
+  logsLoading.value = true
+  try {
+    await adminApi.clearMihomoLogs()
+    logLines.value = []
+    logsError.value = ''
+    toast.success('运行日志已清理')
+  } catch (err) {
+    toast.error(err.message)
+  } finally {
+    logsLoading.value = false
+  }
+}
+
+function stopLogPolling() {
+  if (logPollTimer) {
+    clearInterval(logPollTimer)
+    logPollTimer = null
+  }
+}
+
+function syncLogPolling() {
+  stopLogPolling()
+  if (activeTab.value === 'logs' && logsLive.value) {
+    logPollTimer = setInterval(() => {
+      if (activeTab.value === 'logs' && logsLive.value && !document.hidden) {
+        loadLogs(true)
+      }
+    }, 2000)
+  }
+}
+
 onMounted(async () => {
   await loadStatus()
   await loadGroups()
 })
 
 onBeforeUnmount(() => {
+  stopLogPolling()
   controller.abort()
 })
 </script>
@@ -2710,6 +2927,61 @@ onBeforeUnmount(() => {
 .tok-bool { color: var(--brand-cyan); font-weight: 600; }
 .tok-val { color: var(--ink); }
 .tok-comment { color: var(--faint); font-style: italic; }
+
+.log-live-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--ink-secondary);
+  cursor: pointer;
+}
+
+.log-panel {
+  padding: 12px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.log-viewer {
+  width: 100%;
+  height: clamp(380px, 58dvh, 720px);
+  min-height: 320px;
+  overflow: auto;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--input-bg);
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.55;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.log-line {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 8px;
+  padding: 2px 0;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.08);
+  overflow-wrap: anywhere;
+}
+
+.log-num {
+  color: var(--faint);
+  text-align: right;
+  user-select: none;
+}
+
+.log-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.log-info .log-text { color: var(--ink-secondary); }
+.log-warn .log-text { color: var(--warn); }
+.log-err .log-text { color: var(--bad); }
+.log-debug .log-text { color: var(--faint); }
 
 .mihomo-modal-form {
   display: grid;

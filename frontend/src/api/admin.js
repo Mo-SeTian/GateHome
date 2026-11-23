@@ -97,6 +97,14 @@ export const adminApi = {
   resyncMihomoYaml: () => request('/api/mihomo/config/resync', { method: 'POST', body: {} }),
   downloadMihomoCore: () => request('/api/mihomo/core/download', { method: 'POST', body: {} }),
   downloadMihomoZashboard: () => request('/api/mihomo/zashboard/download', { method: 'POST', body: {} }),
+  downloadMihomoMMDB: () => request('/api/mihomo/geodata/download', { method: 'POST', body: {} }),
+  uploadMihomoMMDB: (file) => {
+    const body = new FormData()
+    body.append('file', file)
+    return request('/api/mihomo/geodata/upload', { method: 'POST', body })
+  },
+  mihomoLogs: (signal) => request('/api/mihomo/logs', { signal }),
+  clearMihomoLogs: () => request('/api/mihomo/logs', { method: 'DELETE', body: {} }),
   uploadMihomoCore: (file) => {
     const body = new FormData()
     body.append('file', file)

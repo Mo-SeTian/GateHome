@@ -44,6 +44,9 @@ type mihomoStatusResponse struct {
 	CoreInstalled          bool                       `json:"core_installed"`
 	CoreVersion            string                     `json:"core_version,omitempty"`
 	BinaryPath             string                     `json:"binary_path,omitempty"`
+	MMDBInstalled          bool                       `json:"mmdb_installed"`
+	MMDBSize               int64                      `json:"mmdb_size,omitempty"`
+	MMDBUpdatedAt          time.Time                  `json:"mmdb_updated_at,omitempty"`
 	ZashboardInstalled     bool                       `json:"zashboard_installed"`
 	ZashboardVersion       string                     `json:"zashboard_version,omitempty"`
 	LANIP                  string                     `json:"lan_ip"`
@@ -76,6 +79,7 @@ func (m *mihomoManager) statusSnapshot() mihomoStatusResponse {
 		m.version = ver
 	}
 	zashInstalled, zashVersion := m.zashboardStatus()
+	mmdbInstalled, mmdbSize, mmdbUpdatedAt := m.mmdbStatus()
 	outboundURL := ""
 	takeoverActive := false
 	if m.running && m.cfg.TakeoverOutbound {
@@ -93,6 +97,9 @@ func (m *mihomoManager) statusSnapshot() mihomoStatusResponse {
 		CoreInstalled:          bin != "",
 		CoreVersion:            ver,
 		BinaryPath:             bin,
+		MMDBInstalled:          mmdbInstalled,
+		MMDBSize:               mmdbSize,
+		MMDBUpdatedAt:          mmdbUpdatedAt,
 		ZashboardInstalled:     zashInstalled,
 		ZashboardVersion:       zashVersion,
 		LANIP:                  detectLANIP(),
@@ -154,7 +161,11 @@ func (a *Admin) mihomoRoutes(mux *http.ServeMux) {
 
 	mux.HandleFunc("POST /api/mihomo/core/download", a.requireAuth(a.handleMihomoDownloadCore))
 	mux.HandleFunc("POST /api/mihomo/core/upload", a.requireAuth(a.handleMihomoUploadCore))
+	mux.HandleFunc("POST /api/mihomo/geodata/download", a.requireAuth(a.handleMihomoDownloadMMDB))
+	mux.HandleFunc("POST /api/mihomo/geodata/upload", a.requireAuth(a.handleMihomoUploadMMDB))
 	mux.HandleFunc("POST /api/mihomo/zashboard/download", a.requireAuth(a.handleMihomoDownloadZashboard))
+	mux.HandleFunc("GET /api/mihomo/logs", a.requireAuth(a.handleMihomoLogs))
+	mux.HandleFunc("DELETE /api/mihomo/logs", a.requireAuth(a.handleMihomoClearLogs))
 }
 
 func (a *Admin) handleMihomoStatus(w http.ResponseWriter, r *http.Request) {
@@ -1415,4 +1426,74 @@ func (a *Admin) handleMihomoControllerProxy(w http.ResponseWriter, r *http.Reque
 		},
 	}
 	proxy.ServeHTTP(w, r)
+}
+
+func (a *Admin) handleMihomoLogs(w http.ResponseWriter, r *http.Request) {
+	m := a.mihomo
+	m.mu.Lock()
+	running := m.running
+	lastErr := m.lastError
+	m.mu.Unlock()
+	jsonResponse(w, 200, map[string]any{
+		"lines":      m.logs.snapshot(),
+		"running":    running,
+		"last_error": lastErr,
+	})
+}
+
+func (a *Admin) handleMihomoClearLogs(w http.ResponseWriter, r *http.Request) {
+	a.mihomo.logs.clear()
+	jsonResponse(w, 200, map[string]any{
+		"ok":    true,
+		"lines": []string{},
+	})
+}
+
+func (a *Admin) handleMihomoDownloadMMDB(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
+	defer cancel()
+	size, source, err := a.mihomo.DownloadMMDB(ctx, a.store.Snapshot())
+	if err != nil {
+		apiError(w, 400, err.Error())
+		return
+	}
+	jsonResponse(w, 200, map[string]any{
+		"ok":     true,
+		"size":   size,
+		"source": source,
+		"status": a.mihomo.statusSnapshot(),
+	})
+}
+
+func (a *Admin) handleMihomoUploadMMDB(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxMihomoMMDBBytes+64<<10)
+	if err := r.ParseMultipartForm(8 << 20); err != nil {
+		apiError(w, 400, "上传请求无效或文件过大（上限 32 MiB）")
+		return
+	}
+	file, _, err := r.FormFile("file")
+	if err != nil {
+		apiError(w, 400, "请选择要上传的 country.mmdb 文件")
+		return
+	}
+	defer file.Close()
+	raw, err := io.ReadAll(io.LimitReader(file, maxMihomoMMDBBytes+1))
+	if err != nil {
+		apiError(w, 400, "读取上传文件失败")
+		return
+	}
+	if int64(len(raw)) > maxMihomoMMDBBytes {
+		apiError(w, 400, "country.mmdb 文件不能超过 32 MiB")
+		return
+	}
+	size, err := a.mihomo.installMMDBData(raw)
+	if err != nil {
+		apiError(w, 400, err.Error())
+		return
+	}
+	jsonResponse(w, 200, map[string]any{
+		"ok":     true,
+		"size":   size,
+		"status": a.mihomo.statusSnapshot(),
+	})
 }

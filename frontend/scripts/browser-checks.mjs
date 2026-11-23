@@ -2094,6 +2094,9 @@ try {
   // Configure 4 custom ports + outbound takeover + LAN proxy auth on 端口与核心 tab
   await mihomoPage.getByRole('tab', { name: '端口与核心' }).click()
   await mihomoPage.getByRole('heading', { name: 'Zashboard 面板' }).waitFor()
+  await mihomoPage.getByRole('heading', { name: 'GeoIP 数据库 (country.mmdb)' }).waitFor()
+  await mihomoPage.getByRole('button', { name: /上传 country\.mmdb/ }).waitFor()
+  await mihomoPage.getByRole('button', { name: /镜像在线下载/ }).waitFor()
   await mihomoPage.locator('input[name="mixed_port"]').fill('17890')
   await mihomoPage.locator('input[name="http_port"]').fill('17891')
   await mihomoPage.locator('input[name="socks_port"]').fill('17892')
@@ -2179,12 +2182,21 @@ try {
 
   for (const width of [390, 320]) {
     await page.setViewportSize({ width, height: 844 })
-    for (const tabName of ['策略组与节点', '自定义分流', '订阅管理', '端口与核心', '配置文件']) {
+    for (const tabName of ['策略组与节点', '自定义分流', '订阅管理', '端口与核心', '配置文件', '运行日志']) {
       await mihomoPage.getByRole('tab', { name: tabName }).click()
       const dims = await mihomoPage.evaluate(el => ({ scrollWidth: el.scrollWidth, clientWidth: el.clientWidth }))
       assert.ok(dims.scrollWidth <= dims.clientWidth, `mihomo overflow at width=${width} tab=${tabName}: scrollWidth=${dims.scrollWidth} clientWidth=${dims.clientWidth}`)
+      if (tabName === '配置文件') {
+        assert.ok((await sourceViewer.boundingBox()).height >= 350)
+      }
+      if (tabName === '运行日志') {
+        await mihomoPage.getByRole('button', { name: '刷新' }).waitFor()
+        await mihomoPage.getByRole('button', { name: '清理' }).waitFor()
+        await mihomoPage.locator('.log-live-toggle').waitFor()
+        await mihomoPage.locator('.log-viewer').waitFor()
+        assert.equal(await mihomoPage.getByRole('checkbox', { name: '实时刷新运行日志' }).isChecked(), true)
+      }
     }
-    assert.ok((await sourceViewer.boundingBox()).height >= 350)
   }
   await page.setViewportSize({ width: 1440, height: 1000 })
   console.log('PASS mihomo: 3 custom ports, custom group, custom rule, dual YAML view and responsive 320px/390px layout')
