@@ -122,6 +122,23 @@ onMounted(load)
   max-width: 100%;
 }
 
+.panel-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.panel-header-row .report-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: auto;
+}
+
 .custom-yaml-title {
   display: flex;
   align-items: center;
@@ -159,6 +176,7 @@ textarea.form-input.custom-yaml-editor {
   padding: 12px 14px;
   font-size: 12.5px;
   line-height: 1.6;
+  font-variant-emoji: emoji;
   resize: vertical;
   tab-size: 2;
   white-space: pre;

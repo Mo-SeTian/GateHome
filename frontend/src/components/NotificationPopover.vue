@@ -9,9 +9,14 @@
         <button type="button" class="btn btn-ghost btn-sm" :disabled="!unreadCount" @click="markAllAsRead">
           全部已读
         </button>
-        <router-link to="/notifications?tab=push" class="btn btn-ghost btn-sm" @click="emit('close')">
-          故障推送
-        </router-link>
+        <button
+          type="button"
+          class="btn btn-ghost btn-sm clear-all-btn"
+          :disabled="!notifications.length"
+          @click="clearAllNotifications"
+        >
+          一键清除
+        </button>
       </div>
     </div>
 
@@ -81,7 +86,7 @@ import { ArrowUpRight, ChevronRight, Inbox, X } from 'lucide-vue-next'
 import { useToast } from '@/composables/useToast'
 
 const emit = defineEmits(['close'])
-const { notifications, unreadCount, markAllAsRead, markAsRead, removeNotification } = useToast()
+const { notifications, unreadCount, markAllAsRead, markAsRead, removeNotification, clearAllNotifications } = useToast()
 
 const categories = {
   upstream: '反向代理',
@@ -172,6 +177,9 @@ body.theme-light .notification-popover {
   align-items: center;
   gap: 4px;
   flex-shrink: 0;
+}
+.clear-all-btn:not(:disabled) {
+  color: var(--bad);
 }
 
 .popover-list {

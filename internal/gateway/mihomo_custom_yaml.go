@@ -86,7 +86,26 @@ func customGroupsToYAML(groups []MihomoCustomGroup) string {
 			URL: g.URL, Interval: g.Interval, Tolerance: g.Tolerance,
 		})
 	}
-	header := "# GateHome 自定义策略组：与页面「策略组」同源，保存后合并进机场配置（同名则覆盖机场策略组）\n"
+	header := strings.Join([]string{
+		"# GateHome 自定义策略组：与页面「策略组」同源，保存后合并进机场配置（同名则覆盖机场策略组）",
+		"# 支持类型：select（手动选择）、url-test（自动测速）、fallback（故障转移）、load-balance（负载均衡）",
+		"# 示例写法（去掉行首 # 即可生效）：",
+		"# proxy-groups:",
+		"#   - name: 节点选择",
+		"#     type: select",
+		"#     proxies: [自动测速, 香港节点, 日本节点, DIRECT]",
+		"#   - name: 自动测速",
+		"#     type: url-test",
+		"#     filter: 香港|狮城|日本",
+		"#     url: https://www.gstatic.com/generate_204",
+		"#     interval: 300",
+		"#     tolerance: 50",
+		"#   - name: OpenAI",
+		"#     type: fallback",
+		"#     filter: 美国|日本|IEPL",
+		"#     url: https://www.gstatic.com/generate_204",
+		"#     interval: 300",
+	}, "\n") + "\n"
 	if len(list) == 0 {
 		return header + "proxy-groups: []\n"
 	}
@@ -147,7 +166,19 @@ func parseCustomGroupsYAML(raw []byte, existing []MihomoCustomGroup) ([]MihomoCu
 }
 
 func customRulesToYAML(rules []MihomoCustomRule) string {
-	header := "# GateHome 自定义分流规则：与页面「自定义分流」同源，自上而下优先级递减，且高于机场订阅自带规则\n# 条目可写成字符串，或用 {rule, enabled, comment} 映射表示停用/备注\n"
+	header := strings.Join([]string{
+		"# GateHome 自定义分流规则：与页面「自定义分流」同源，自上而下优先级递减，且高于机场订阅自带规则",
+		"# 条目可写成字符串，或用 {rule, enabled, comment} 映射表示停用/备注",
+		"# 示例写法（去掉行首 # 即可生效）：",
+		"# rules:",
+		"#   - DOMAIN-SUFFIX,openai.com,OpenAI",
+		"#   - DOMAIN-KEYWORD,anthropic,节点选择",
+		"#   - IP-CIDR,192.168.0.0/16,DIRECT,no-resolve",
+		"#   - DST-PORT,22,DIRECT",
+		"#   - rule: DOMAIN-SUFFIX,example.com,DIRECT",
+		"#     enabled: false",
+		"#     comment: 临时停用规则备注",
+	}, "\n") + "\n"
 	if len(rules) == 0 {
 		return header + "rules: []\n"
 	}

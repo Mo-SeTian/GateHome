@@ -1645,7 +1645,11 @@ try {
   }
   await rows.filter({ hasText: '网关证书' }).getByRole('button', { name: '删除此通知' }).click()
   await rows.filter({ hasText: '网关证书' }).waitFor({ state: 'detached' })
-  await center.getByRole('button', { name: '清空', exact: true }).click()
+  await notificationTrigger.click()
+  await popover.getByRole('button', { name: '一键清除', exact: true }).click()
+  await popover.getByText('暂无通知记录').waitFor()
+  await page.keyboard.press('Escape')
+  await popover.waitFor({ state: 'hidden' })
   await center.getByText('暂无通知记录').waitFor()
   await page.reload()
   await center.getByText('暂无通知记录').waitFor()

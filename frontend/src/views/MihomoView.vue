@@ -2882,6 +2882,7 @@ onBeforeUnmount(() => {
   padding: 12px 14px;
   font-size: 12.5px;
   line-height: 1.6;
+  font-variant-emoji: emoji;
   resize: vertical;
   tab-size: 2;
   white-space: pre;
@@ -2903,6 +2904,7 @@ onBeforeUnmount(() => {
   background: var(--input-bg);
   font-size: 12.5px;
   line-height: 1.6;
+  font-variant-emoji: emoji;
 }
 
 .yaml-panel.fullscreen .yaml-editor-shell,
@@ -2984,6 +2986,7 @@ onBeforeUnmount(() => {
   padding: 10px 12px;
   font-size: 12px;
   line-height: 1.55;
+  font-variant-emoji: emoji;
   min-width: 0;
   max-width: 100%;
 }
