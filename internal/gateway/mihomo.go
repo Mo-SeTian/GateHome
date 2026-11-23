@@ -31,36 +31,45 @@ type MihomoCoreSettings struct {
 	UnifiedDelay    bool   `json:"unified_delay"`
 	TCPConcurrent   bool   `json:"tcp_concurrent"`
 	DNSEnhancedMode string `json:"dns_enhanced_mode"`
+	AuthEnabled     bool   `json:"auth_enabled"`
+	AuthUsername    string `json:"auth_username,omitempty"`
+	AuthPassword    string `json:"auth_password,omitempty"`
 }
 
 // MihomoSubscription represents a managed proxy subscription source.
 type MihomoSubscription struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	URL       string    `json:"url,omitempty"`
-	UpdatedAt time.Time `json:"updated_at,omitempty"`
-	NodeCount int       `json:"node_count"`
-	LastError string    `json:"last_error,omitempty"`
-	Upload    int64     `json:"upload,omitempty"`
-	Download  int64     `json:"download,omitempty"`
-	Total     int64     `json:"total,omitempty"`
-	Expire    int64     `json:"expire,omitempty"`
+	ID            string    `json:"id"`
+	Name          string    `json:"name"`
+	URL           string    `json:"url,omitempty"`
+	IncludeFilter string    `json:"include_filter,omitempty"`
+	ExcludeFilter string    `json:"exclude_filter,omitempty"`
+	NodeSuffix    string    `json:"node_suffix,omitempty"`
+	UpdatedAt     time.Time `json:"updated_at,omitempty"`
+	NodeCount     int       `json:"node_count"`
+	LastError     string    `json:"last_error,omitempty"`
+	Upload        int64     `json:"upload,omitempty"`
+	Download      int64     `json:"download,omitempty"`
+	Total         int64     `json:"total,omitempty"`
+	Expire        int64     `json:"expire,omitempty"`
 }
 
 // MihomoSubscriptionView exposes subscription metadata without leaking credentials or query tokens.
 type MihomoSubscriptionView struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	URLHost   string    `json:"url_host,omitempty"`
-	URLMasked string    `json:"url_masked,omitempty"`
-	HasURL    bool      `json:"has_url"`
-	UpdatedAt time.Time `json:"updated_at,omitempty"`
-	NodeCount int       `json:"node_count"`
-	LastError string    `json:"last_error,omitempty"`
-	Upload    int64     `json:"upload,omitempty"`
-	Download  int64     `json:"download,omitempty"`
-	Total     int64     `json:"total,omitempty"`
-	Expire    int64     `json:"expire,omitempty"`
+	ID            string    `json:"id"`
+	Name          string    `json:"name"`
+	URLHost       string    `json:"url_host,omitempty"`
+	URLMasked     string    `json:"url_masked,omitempty"`
+	HasURL        bool      `json:"has_url"`
+	IncludeFilter string    `json:"include_filter,omitempty"`
+	ExcludeFilter string    `json:"exclude_filter,omitempty"`
+	NodeSuffix    string    `json:"node_suffix,omitempty"`
+	UpdatedAt     time.Time `json:"updated_at,omitempty"`
+	NodeCount     int       `json:"node_count"`
+	LastError     string    `json:"last_error,omitempty"`
+	Upload        int64     `json:"upload,omitempty"`
+	Download      int64     `json:"download,omitempty"`
+	Total         int64     `json:"total,omitempty"`
+	Expire        int64     `json:"expire,omitempty"`
 }
 
 // MihomoCustomGroup represents a user-defined proxy group layered into runtime.yaml.
@@ -328,6 +337,16 @@ func validateMihomoSettings(cfg MihomoConfig, gwConfig Config, adminPort int) er
 	if !validMihomoDNSModes[cfg.Settings.DNSEnhancedMode] {
 		return errors.New("DNS 增强模式须为 fake-ip、redir-host 或 keep")
 	}
+	if cfg.Settings.AuthEnabled {
+		user := strings.TrimSpace(cfg.Settings.AuthUsername)
+		if user == "" || len(user) > 64 || strings.ContainsAny(user, ":\r\n \t") {
+			return errors.New("局域网代理账号不能为空，不能包含冒号、空白或换行，且不超过 64 字符")
+		}
+		pass := cfg.Settings.AuthPassword
+		if pass == "" || len(pass) > 128 || strings.ContainsAny(pass, "\r\n") {
+			return errors.New("局域网代理密码不能为空，不能包含换行，且不超过 128 字符")
+		}
+	}
 	return nil
 }
 
@@ -444,6 +463,31 @@ func validateMihomoSubscriptionURL(raw string) error {
 	return nil
 }
 
+func validateMihomoSubscriptionFilters(includeFilter, excludeFilter, nodeSuffix string) error {
+	if inc := strings.TrimSpace(includeFilter); inc != "" {
+		if len(inc) > 512 {
+			return errors.New("保留节点正则不能超过 512 字符")
+		}
+		if _, err := regexp.Compile(inc); err != nil {
+			return fmt.Errorf("保留节点正则无效: %v", err)
+		}
+	}
+	if exc := strings.TrimSpace(excludeFilter); exc != "" {
+		if len(exc) > 512 {
+			return errors.New("排除节点正则不能超过 512 字符")
+		}
+		if _, err := regexp.Compile(exc); err != nil {
+			return fmt.Errorf("排除节点正则无效: %v", err)
+		}
+	}
+	if nodeSuffix != "" {
+		if len(nodeSuffix) > 64 || strings.ContainsAny(nodeSuffix, ",\r\n") {
+			return errors.New("节点统一后缀不能包含逗号或换行，且不超过 64 字符")
+		}
+	}
+	return nil
+}
+
 func activeOutboundURL(s MihomoCoreSettings) string {
 	if s.MixedPort > 0 {
 		return "http://127.0.0.1:" + strconv.Itoa(s.MixedPort)
@@ -476,18 +520,21 @@ func toSubscriptionViews(subs []MihomoSubscription) []MihomoSubscriptionView {
 	for _, s := range subs {
 		host, masked, hasURL := maskSubscriptionURL(s.URL)
 		out = append(out, MihomoSubscriptionView{
-			ID:        s.ID,
-			Name:      s.Name,
-			URLHost:   host,
-			URLMasked: masked,
-			HasURL:    hasURL,
-			UpdatedAt: s.UpdatedAt,
-			NodeCount: s.NodeCount,
-			LastError: s.LastError,
-			Upload:    s.Upload,
-			Download:  s.Download,
-			Total:     s.Total,
-			Expire:    s.Expire,
+			ID:            s.ID,
+			Name:          s.Name,
+			URLHost:       host,
+			URLMasked:     masked,
+			HasURL:        hasURL,
+			IncludeFilter: s.IncludeFilter,
+			ExcludeFilter: s.ExcludeFilter,
+			NodeSuffix:    s.NodeSuffix,
+			UpdatedAt:     s.UpdatedAt,
+			NodeCount:     s.NodeCount,
+			LastError:     s.LastError,
+			Upload:        s.Upload,
+			Download:      s.Download,
+			Total:         s.Total,
+			Expire:        s.Expire,
 		})
 	}
 	return out

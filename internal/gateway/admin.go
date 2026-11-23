@@ -351,7 +351,7 @@ func (a *Admin) Handler() http.Handler {
 			mcpHandler.ServeHTTP(w, r)
 			return
 		}
-		if strings.HasPrefix(r.URL.Path, "/api/") && r.URL.Path != "/api/status" && r.URL.Path != "/api/dashboard" && r.URL.Path != "/api/service-health" && !(r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/api/backups/")) && r.URL.Path != "/api/logs" && r.URL.Path != "/api/statistics" && r.URL.Path != "/api/ddns/records" && r.URL.Path != "/api/maintenance/online-update-status" && !(r.Method == "GET" && (r.URL.Path == "/api/ip-blocks" || r.URL.Path == "/api/runtime" || r.URL.Path == "/api/remote-home" || r.URL.Path == "/api/account/sessions" || strings.HasPrefix(r.URL.Path, "/api/service-health/") || strings.HasPrefix(r.URL.Path, "/api/service-discovery/") || strings.HasPrefix(r.URL.Path, "/api/route-images/") || r.URL.Path == "/api/icons" || strings.HasPrefix(r.URL.Path, "/api/icons/"))) {
+		if strings.HasPrefix(r.URL.Path, "/api/") && r.URL.Path != "/api/status" && r.URL.Path != "/api/dashboard" && r.URL.Path != "/api/service-health" && !(r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/api/backups/")) && r.URL.Path != "/api/logs" && r.URL.Path != "/api/statistics" && r.URL.Path != "/api/ddns/records" && r.URL.Path != "/api/maintenance/online-update-status" && !(r.Method == "GET" && (r.URL.Path == "/api/ip-blocks" || r.URL.Path == "/api/runtime" || r.URL.Path == "/api/remote-home" || r.URL.Path == "/api/account/sessions" || strings.HasPrefix(r.URL.Path, "/api/service-health/") || strings.HasPrefix(r.URL.Path, "/api/service-discovery/") || strings.HasPrefix(r.URL.Path, "/api/route-images/") || r.URL.Path == "/api/icons" || strings.HasPrefix(r.URL.Path, "/api/icons/"))) && r.URL.Path != "/api/mihomo/ctrl" && !strings.HasPrefix(r.URL.Path, "/api/mihomo/ctrl/") {
 			started := time.Now()
 			logged := &loggedResponseWriter{ResponseWriter: w}
 			w = logged
@@ -366,6 +366,20 @@ func (a *Admin) Handler() http.Handler {
 				}
 				a.logs.Add(LogEntry{Category: "admin", Action: "管理 API", Method: r.Method, Path: r.URL.Path, Remote: remoteIP(r.RemoteAddr), Status: status, OK: status < 400, DurationMS: time.Since(started).Milliseconds(), Message: message})
 			}()
+		}
+		if r.URL.Path == "/zashboard" && a.mihomo != nil {
+			a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
+				http.Redirect(w, r, "/zashboard/", http.StatusFound)
+			})(w, r)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/zashboard/") && a.mihomo != nil {
+			a.requireAuth(a.handleZashboardUI)(w, r)
+			return
+		}
+		if (r.URL.Path == "/api/mihomo/ctrl" || strings.HasPrefix(r.URL.Path, "/api/mihomo/ctrl/")) && a.mihomo != nil {
+			a.requireAuth(a.handleMihomoControllerProxy)(w, r)
+			return
 		}
 		if strings.HasPrefix(r.URL.Path, "/sunpanel/") && a.sunPanel != nil {
 			a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
@@ -389,7 +403,7 @@ func (a *Admin) Handler() http.Handler {
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
 		if r.Method != "GET" && r.Method != "HEAD" {
-			isUpload := r.URL.Path == "/api/maintenance/inspect-update" || r.URL.Path == "/api/maintenance/inspect-backup" || r.URL.Path == "/api/route-images/upload" || r.URL.Path == "/api/icons/upload"
+			isUpload := r.URL.Path == "/api/maintenance/inspect-update" || r.URL.Path == "/api/maintenance/inspect-backup" || r.URL.Path == "/api/route-images/upload" || r.URL.Path == "/api/icons/upload" || r.URL.Path == "/api/mihomo/core/upload"
 			contentOK := strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") || (isUpload && strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data;"))
 			if r.Header.Get("X-Gatehouse-Request") != "1" || !contentOK {
 				apiError(w, 403, "请求来源验证失败")

@@ -2049,7 +2049,8 @@ try {
   await route('mihomo')
   const mihomoPage = page.locator('.mihomo-page')
   await mihomoPage.getByRole('tab', { name: '策略组与节点' }).waitFor()
-  await mihomoPage.getByRole('tab', { name: '订阅与配置' }).click()
+  await mihomoPage.getByRole('button', { name: /Zashboard 面板/ }).waitFor()
+  await mihomoPage.getByRole('tab', { name: '订阅管理' }).click()
   await mihomoPage.getByRole('button', { name: /添加订阅/ }).click()
   const mihomoDialog = dialog()
   await mihomoDialog.locator('input[name="sub_name"]').fill('浏览器测试机场')
@@ -2060,12 +2061,13 @@ try {
     '  nameserver-policy:',
     '    "cdn-hk.example.com": ["dn-hk.example.com:1066"]',
     'proxies:',
+    '  - { name: "剩余流量 10GB", type: ss, server: 1.2.3.1, port: 443 }',
     '  - { name: "HK-01", type: ss, server: 1.2.3.4, port: 443 }',
     '  - { name: "US-01", type: ss, server: 1.2.3.5, port: 443 }',
     'proxy-groups:',
     '  - name: "机场选择"',
     '    type: select',
-    '    proxies: ["HK-01", "US-01"]',
+    '    proxies: ["剩余流量 10GB", "HK-01", "US-01"]',
     'rules:',
     '  - "MATCH,机场选择"'
   ].join('\n'))
@@ -2074,26 +2076,40 @@ try {
   await mihomoPage.getByRole('button', { name: /已继承订阅 1 条/ }).click()
   await mihomoPage.getByText('cdn-hk.example.com', { exact: true }).waitFor()
 
-  // Configure 4 custom ports (including DNS listen port) + outbound takeover and save
-  await mihomoPage.locator('input[name="mixed_port"]').fill('17890')
-  await mihomoPage.locator('input[name="http_port"]').fill('17891')
-  await mihomoPage.locator('input[name="socks_port"]').fill('17892')
-  await mihomoPage.locator('input[name="dns_listen_port"]').fill('17853')
-  await mihomoPage.locator('input[name="takeover_outbound"]').check()
-  await mihomoPage.getByRole('button', { name: '保存并生效' }).click()
-  await mihomoPage.getByText(/^Mixed .*:17890$/).waitFor()
-  await mihomoPage.getByText(/^HTTP .*:17891$/).waitFor()
-  await mihomoPage.getByText(/^SOCKS5 .*:17892$/).waitFor()
-  await mihomoPage.getByText(/^DNS .*:17853$/).waitFor()
+  // Edit subscription to exclude noise nodes and add uniform node suffix
+  await mihomoPage.getByRole('button', { name: '编辑订阅 浏览器测试机场' }).click()
+  await mihomoDialog.locator('input[name="sub_exclude_filter"]').fill('剩余流量')
+  await mihomoDialog.locator('input[name="sub_node_suffix"]').fill(' [专线]')
+  await mihomoDialog.getByRole('button', { name: '保存修改' }).click()
+  await mihomoPage.getByText('排除: 剩余流量', { exact: true }).waitFor()
+  await mihomoPage.getByText(/后缀:\s*\[专线\]/).waitFor()
 
-  // Add incremental custom DNS policy
+  // Add incremental custom DNS policy on 订阅管理 tab
   await mihomoPage.getByRole('button', { name: /添加 DNS 策略/ }).click()
   await mihomoDialog.locator('input[name="dns_domain"]').fill('+.corp.internal')
   await mihomoDialog.locator('textarea[name="dns_servers"]').fill('10.0.0.53')
   await mihomoDialog.getByRole('button', { name: '保存 DNS 策略' }).click()
   await mihomoPage.locator('.rule-row').filter({ hasText: '+.corp.internal' }).waitFor()
 
-  // Create custom proxy group on Groups tab
+  // Configure 4 custom ports + outbound takeover + LAN proxy auth on 端口与核心 tab
+  await mihomoPage.getByRole('tab', { name: '端口与核心' }).click()
+  await mihomoPage.getByRole('heading', { name: 'Zashboard 面板' }).waitFor()
+  await mihomoPage.locator('input[name="mixed_port"]').fill('17890')
+  await mihomoPage.locator('input[name="http_port"]').fill('17891')
+  await mihomoPage.locator('input[name="socks_port"]').fill('17892')
+  await mihomoPage.locator('input[name="dns_listen_port"]').fill('17853')
+  await mihomoPage.locator('input[name="auth_enabled"]').check()
+  await mihomoPage.locator('input[name="auth_username"]').fill('lanuser')
+  await mihomoPage.locator('input[name="auth_password"]').fill('lanpass123')
+  await mihomoPage.locator('input[name="takeover_outbound"]').check()
+  await mihomoPage.getByRole('button', { name: '保存并生效' }).click()
+  await mihomoPage.getByText(/^Mixed .*:17890$/).waitFor()
+  await mihomoPage.getByText(/^HTTP .*:17891$/).waitFor()
+  await mihomoPage.getByText(/^SOCKS5 .*:17892$/).waitFor()
+  await mihomoPage.getByText(/^DNS .*:17853$/).waitFor()
+  await mihomoPage.getByText('代理认证 lanuser', { exact: true }).waitFor()
+
+  // Create & edit custom proxy group on Groups tab
   await mihomoPage.getByRole('tab', { name: '策略组与节点' }).click()
   await mihomoPage.getByRole('button', { name: /新建策略组/ }).click()
   await mihomoDialog.locator('input[name="group_name"]').fill('HK 专线')
@@ -2101,6 +2117,12 @@ try {
   await mihomoDialog.locator('input[name="group_filter"]').fill('HK')
   await mihomoDialog.getByRole('button', { name: '保存策略组' }).click()
   await mihomoPage.locator('.group-card').filter({ hasText: 'HK 专线' }).waitFor()
+
+  // Edit existing custom group via 编辑 button
+  await mihomoPage.getByRole('button', { name: '编辑策略组 HK 专线' }).click()
+  await mihomoDialog.locator('input[name="group_filter"]').fill('HK|US')
+  await mihomoDialog.getByRole('button', { name: '保存策略组' }).click()
+  await mihomoPage.locator('.group-card').filter({ hasText: 'HK 专线' }).getByText('US-01 [专线]').waitFor()
 
   // Add custom routing rule on Rules tab
   await mihomoPage.getByRole('tab', { name: '自定义分流' }).click()
@@ -2116,24 +2138,52 @@ try {
     const val = document.querySelector('.mihomo-page .yaml-editor')?.value || ''
     return val.includes('17890') && val.includes('17891') && val.includes('17892') &&
       val.includes('17853') && val.includes('cdn-hk.example.com') && val.includes('+.corp.internal') &&
-      val.includes('anthropic.com')
+      val.includes('HK-01 [专线]') && val.includes('anthropic.com')
   })
   const runtimeYamlText = await mihomoPage.locator('.yaml-editor').inputValue()
   assert.ok(runtimeYamlText.includes('mixed-port: 17890') && runtimeYamlText.includes('port: 17891') && runtimeYamlText.includes('socks-port: 17892'))
   assert.ok(runtimeYamlText.includes('listen: 0.0.0.0:17853') && runtimeYamlText.includes('cdn-hk.example.com') && runtimeYamlText.includes('+.corp.internal'))
+  assert.ok(runtimeYamlText.includes('lanuser:__GATEHOME_MANAGED_AUTH__') && !runtimeYamlText.includes('lanpass123') && runtimeYamlText.includes('skip-auth-prefixes:'))
+  assert.ok(!runtimeYamlText.includes('剩余流量 10GB') && runtimeYamlText.includes('HK-01 [专线]'))
   assert.ok(runtimeYamlText.includes('DOMAIN-SUFFIX,anthropic.com,HK 专线'))
+
+  // Modify runtime.yaml and verify validate-before-save gate
+  const saveYamlBtn = mihomoPage.getByRole('button', { name: '保存并热重载' })
+  await mihomoPage.locator('.yaml-editor').fill('proxies:\n  - [broken')
+  assert.equal(await saveYamlBtn.isDisabled(), true)
+  await mihomoPage.getByRole('button', { name: '校验配置' }).click()
+  await mihomoPage.locator('.yaml-validation-banner.invalid').waitFor()
+  assert.equal(await saveYamlBtn.isDisabled(), true)
+
+  // Restore valid YAML, validate, save, then resync
+  await mihomoPage.locator('.yaml-editor').fill(runtimeYamlText + '\n# edited comment')
+  await mihomoPage.getByRole('button', { name: '校验配置' }).click()
+  await mihomoPage.locator('.yaml-validation-banner.valid').waitFor()
+  assert.equal(await saveYamlBtn.isDisabled(), false)
+  await saveYamlBtn.click()
+  await mihomoPage.getByText(/已手动编辑/).waitFor()
+  await mihomoPage.getByRole('button', { name: '重新合成' }).click()
+  await mihomoPage.getByText('流水线自动合成', { exact: true }).waitFor()
+
+  // Switch to syntax-highlighted read-only source.yaml viewer
   await mihomoPage.getByRole('button', { name: /订阅原件/ }).click()
   await mihomoPage.getByText('只读原件', { exact: true }).waitFor()
-  const sourceYamlText = await mihomoPage.locator('.yaml-editor').inputValue()
-  assert.ok(sourceYamlText.includes('机场选择'))
-  assert.equal(await mihomoPage.locator('.yaml-editor').evaluate(el => el.readOnly), true)
+  const sourceViewer = mihomoPage.locator('.yaml-viewer')
+  await sourceViewer.waitFor()
+  await page.waitForFunction(() => {
+    const text = document.querySelector('.mihomo-page .yaml-viewer')?.textContent || ''
+    return text.includes('机场选择') && text.includes('剩余流量 10GB')
+  })
+  assert.equal(await sourceViewer.getAttribute('aria-readonly'), 'true')
+  assert.ok((await sourceViewer.locator('.tok-key').count()) > 0)
 
   for (const width of [390, 320]) {
     await page.setViewportSize({ width, height: 844 })
-    for (const tabName of ['策略组与节点', '自定义分流', '订阅与配置', '配置文件']) {
+    for (const tabName of ['策略组与节点', '自定义分流', '订阅管理', '端口与核心', '配置文件']) {
       await mihomoPage.getByRole('tab', { name: tabName }).click()
       assert.ok(await mihomoPage.evaluate(el => el.scrollWidth <= el.clientWidth))
     }
+    assert.ok((await sourceViewer.boundingBox()).height >= 350)
   }
   await page.setViewportSize({ width: 1440, height: 1000 })
   console.log('PASS mihomo: 3 custom ports, custom group, custom rule, dual YAML view and responsive 320px/390px layout')

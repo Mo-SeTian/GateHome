@@ -19,6 +19,14 @@
         <button
           type="button"
           class="btn btn-secondary"
+          :disabled="zashboardBusy || loading"
+          @click="openZashboard"
+        >
+          <ExternalLink :size="14" /> {{ zashboardBusy ? '下载面板中…' : 'Zashboard 面板' }}
+        </button>
+        <button
+          type="button"
+          class="btn btn-secondary"
           :disabled="busyAction || !status?.running"
           @click="reloadCore"
         >
@@ -86,12 +94,16 @@
         <span class="strip-chip" :class="{ 'chip-brand': status.outbound_takeover_active }">
           出站联动 {{ status.outbound_takeover_active ? '接管中' : status.takeover_outbound ? '待内核启动' : '未启用' }}
         </span>
+
+        <span v-if="status.settings?.auth_enabled" class="strip-chip chip-brand">
+          代理认证 {{ status.settings.auth_username }}
+        </span>
       </div>
     </SpotlightCard>
 
     <p v-if="status?.last_error" class="report-warning" role="status">{{ status.last_error }}</p>
 
-    <!-- Main 4-Tab Bar -->
+    <!-- Main 5-Tab Bar -->
     <div class="mihomo-tabs-wrap">
       <div class="mihomo-tabs" role="tablist" aria-label="代理分流功能标签">
         <button
@@ -150,6 +162,15 @@
                 @click="testGroupDelay(group.name)"
               >
                 <Zap :size="13" /> {{ testingGroup === group.name ? '测速中…' : '测速' }}
+              </button>
+              <button
+                v-if="group.custom && group.group_id"
+                type="button"
+                class="btn btn-secondary btn-sm"
+                :aria-label="`编辑策略组 ${group.name}`"
+                @click="openGroupModal(group)"
+              >
+                <Pencil :size="13" />
               </button>
               <button
                 v-if="group.custom && group.group_id"
@@ -264,131 +285,8 @@
       </SpotlightCard>
     </section>
 
-    <!-- Tab 3: Subscriptions, Ports & Core Settings -->
-    <section v-show="activeTab === 'settings'" class="tab-section settings-tab-grid" role="tabpanel" aria-label="订阅与配置">
-      <!-- Core Override & Ports Card -->
-      <SpotlightCard v-if="settingsDraft" class="report-panel">
-        <div class="panel-header-row">
-          <h2>代理端口与内核覆盖配置</h2>
-          <button type="button" class="btn btn-primary btn-sm" :disabled="savingSettings" @click="saveCoreSettings">
-            {{ savingSettings ? '应用中…' : '保存并生效' }}
-          </button>
-        </div>
-
-        <form class="settings-form" @submit.prevent="saveCoreSettings">
-          <div class="ports-grid">
-            <label class="form-field">
-              <span>混合端口 (Mixed HTTP+SOCKS5)</span>
-              <input
-                v-model.number="settingsDraft.settings.mixed_port"
-                name="mixed_port"
-                type="number"
-                min="0"
-                max="65535"
-                class="form-input mono-text"
-                placeholder="0 表示停用"
-              />
-            </label>
-            <label class="form-field">
-              <span>HTTP / HTTPS 端口</span>
-              <input
-                v-model.number="settingsDraft.settings.http_port"
-                name="http_port"
-                type="number"
-                min="0"
-                max="65535"
-                class="form-input mono-text"
-                placeholder="0 表示停用"
-              />
-            </label>
-            <label class="form-field">
-              <span>SOCKS5 端口</span>
-              <input
-                v-model.number="settingsDraft.settings.socks_port"
-                name="socks_port"
-                type="number"
-                min="0"
-                max="65535"
-                class="form-input mono-text"
-                placeholder="0 表示停用"
-              />
-            </label>
-            <label class="form-field">
-              <span>DNS 监听端口</span>
-              <input
-                v-model.number="settingsDraft.settings.dns_listen_port"
-                name="dns_listen_port"
-                type="number"
-                min="0"
-                max="65535"
-                class="form-input mono-text"
-                placeholder="0 表示停用"
-              />
-            </label>
-            <label class="form-field">
-              <span>内部控制端口 (仅 127.0.0.1)</span>
-              <input
-                v-model.number="settingsDraft.controller_port"
-                name="controller_port"
-                type="number"
-                min="1"
-                max="65535"
-                class="form-input mono-text"
-                required
-              />
-            </label>
-          </div>
-
-          <div class="selects-grid">
-            <label class="form-field">
-              <span>DNS 增强模式</span>
-              <select v-model="settingsDraft.settings.dns_enhanced_mode" name="dns_enhanced_mode" class="form-input">
-                <option value="keep">沿用订阅原配置 (keep)</option>
-                <option value="fake-ip">fake-ip</option>
-                <option value="redir-host">redir-host</option>
-              </select>
-            </label>
-            <label class="form-field">
-              <span>日志级别</span>
-              <select v-model="settingsDraft.settings.log_level" name="log_level" class="form-input">
-                <option value="info">info</option>
-                <option value="warning">warning</option>
-                <option value="error">error</option>
-                <option value="debug">debug</option>
-                <option value="silent">silent</option>
-              </select>
-            </label>
-          </div>
-
-          <div class="toggles-grid">
-            <label class="toggle-card">
-              <span>允许局域网接入 (allow-lan)</span>
-              <input v-model="settingsDraft.settings.allow_lan" name="allow_lan" type="checkbox" />
-            </label>
-            <label class="toggle-card">
-              <span>启用 IPv6（含 DNS IPv6）</span>
-              <input v-model="settingsDraft.settings.ipv6" name="ipv6" type="checkbox" />
-            </label>
-            <label class="toggle-card">
-              <span>GateHome 出站自动使用此代理</span>
-              <input v-model="settingsDraft.takeover_outbound" name="takeover_outbound" type="checkbox" />
-            </label>
-            <label class="toggle-card">
-              <span>随 GateHome 启动自动运行</span>
-              <input v-model="settingsDraft.enabled" name="enabled" type="checkbox" />
-            </label>
-            <label class="toggle-card">
-              <span>统一延迟 (unified-delay)</span>
-              <input v-model="settingsDraft.settings.unified_delay" name="unified_delay" type="checkbox" />
-            </label>
-            <label class="toggle-card">
-              <span>TCP 并发 (tcp-concurrent)</span>
-              <input v-model="settingsDraft.settings.tcp_concurrent" name="tcp_concurrent" type="checkbox" />
-            </label>
-          </div>
-        </form>
-      </SpotlightCard>
-
+    <!-- Tab 3: Subscriptions & Special-Line DNS -->
+    <section v-show="activeTab === 'subscriptions'" class="tab-section settings-tab-grid" role="tabpanel" aria-label="订阅管理">
       <!-- Subscriptions Card -->
       <SpotlightCard class="report-panel">
         <div class="panel-header-row">
@@ -410,6 +308,9 @@
                 <strong>{{ sub.name }}</strong>
                 <span v-if="status.active_subscription_id === sub.id" class="badge badge-ok">当前启用</span>
                 <span class="badge badge-neutral">{{ sub.node_count }} 节点</span>
+                <span v-if="sub.include_filter" class="badge badge-brand">仅保留: {{ sub.include_filter }}</span>
+                <span v-if="sub.exclude_filter" class="badge badge-warn">排除: {{ sub.exclude_filter }}</span>
+                <span v-if="sub.node_suffix" class="badge badge-neutral">后缀: {{ sub.node_suffix }}</span>
               </div>
               <div class="sub-meta mono-text">
                 <span>{{ sub.url_masked || '本地 YAML 导入' }}</span>
@@ -427,6 +328,15 @@
                 @click="activateSub(sub.id)"
               >
                 启用
+              </button>
+              <button
+                type="button"
+                class="btn btn-secondary btn-sm"
+                :disabled="busySub === sub.id"
+                :aria-label="`编辑订阅 ${sub.name}`"
+                @click="openSubModal(sub)"
+              >
+                <Pencil :size="13" /> 编辑
               </button>
               <button
                 v-if="sub.has_url"
@@ -519,6 +429,206 @@
         </div>
         <p v-else-if="!status.inherited_dns_policies?.length" class="report-empty">暂无自定义 DNS 策略</p>
       </SpotlightCard>
+    </section>
+
+    <!-- Tab 4: Ports, Core Overrides, LAN Auth, Zashboard & Core Binary -->
+    <section v-show="activeTab === 'settings'" class="tab-section settings-tab-grid" role="tabpanel" aria-label="端口与核心">
+      <!-- Core Override & Ports Card -->
+      <SpotlightCard v-if="settingsDraft" class="report-panel">
+        <div class="panel-header-row">
+          <h2>代理端口与内核覆盖配置</h2>
+          <button type="button" class="btn btn-primary btn-sm" :disabled="savingSettings" @click="saveCoreSettings">
+            {{ savingSettings ? '应用中…' : '保存并生效' }}
+          </button>
+        </div>
+
+        <form class="settings-form" @submit.prevent="saveCoreSettings">
+          <div class="ports-grid">
+            <label class="form-field">
+              <span>混合端口 (Mixed HTTP+SOCKS5)</span>
+              <input
+                v-model.number="settingsDraft.settings.mixed_port"
+                name="mixed_port"
+                type="number"
+                min="0"
+                max="65535"
+                class="form-input mono-text"
+                placeholder="0 表示停用"
+              />
+            </label>
+            <label class="form-field">
+              <span>HTTP / HTTPS 端口</span>
+              <input
+                v-model.number="settingsDraft.settings.http_port"
+                name="http_port"
+                type="number"
+                min="0"
+                max="65535"
+                class="form-input mono-text"
+                placeholder="0 表示停用"
+              />
+            </label>
+            <label class="form-field">
+              <span>SOCKS5 端口</span>
+              <input
+                v-model.number="settingsDraft.settings.socks_port"
+                name="socks_port"
+                type="number"
+                min="0"
+                max="65535"
+                class="form-input mono-text"
+                placeholder="0 表示停用"
+              />
+            </label>
+            <label class="form-field">
+              <span>DNS 监听端口</span>
+              <input
+                v-model.number="settingsDraft.settings.dns_listen_port"
+                name="dns_listen_port"
+                type="number"
+                min="0"
+                max="65535"
+                class="form-input mono-text"
+                placeholder="0 表示停用"
+              />
+            </label>
+            <label class="form-field">
+              <span>内部控制端口 (仅 127.0.0.1)</span>
+              <input
+                v-model.number="settingsDraft.controller_port"
+                name="controller_port"
+                type="number"
+                min="1"
+                max="65535"
+                class="form-input mono-text"
+                required
+              />
+            </label>
+          </div>
+
+          <div class="auth-section">
+            <label class="toggle-card">
+              <span>启用局域网代理认证 (authentication)</span>
+              <input v-model="settingsDraft.settings.auth_enabled" name="auth_enabled" type="checkbox" />
+            </label>
+            <div v-if="settingsDraft.settings.auth_enabled" class="auth-fields-grid">
+              <label class="form-field">
+                <span>代理账号</span>
+                <input
+                  v-model.trim="settingsDraft.settings.auth_username"
+                  name="auth_username"
+                  type="text"
+                  autocomplete="off"
+                  class="form-input mono-text"
+                  placeholder="例如 proxyuser"
+                  required
+                />
+              </label>
+              <label class="form-field">
+                <span>代理密码</span>
+                <input
+                  v-model="settingsDraft.settings.auth_password"
+                  name="auth_password"
+                  type="password"
+                  autocomplete="new-password"
+                  class="form-input mono-text"
+                  :placeholder="status?.auth_password_configured ? '已配置，留空保持不变' : '请输入密码'"
+                />
+              </label>
+            </div>
+            <p v-if="settingsDraft.settings.auth_enabled" class="auth-hint">
+              仅校验局域网接入；本机 127.0.0.1 出站联动自动免密
+            </p>
+          </div>
+
+          <div class="selects-grid">
+            <label class="form-field">
+              <span>DNS 增强模式</span>
+              <select v-model="settingsDraft.settings.dns_enhanced_mode" name="dns_enhanced_mode" class="form-input">
+                <option value="keep">沿用订阅原配置 (keep)</option>
+                <option value="fake-ip">fake-ip</option>
+                <option value="redir-host">redir-host</option>
+              </select>
+            </label>
+            <label class="form-field">
+              <span>日志级别</span>
+              <select v-model="settingsDraft.settings.log_level" name="log_level" class="form-input">
+                <option value="info">info</option>
+                <option value="warning">warning</option>
+                <option value="error">error</option>
+                <option value="debug">debug</option>
+                <option value="silent">silent</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="toggles-grid">
+            <label class="toggle-card">
+              <span>允许局域网接入 (allow-lan)</span>
+              <input v-model="settingsDraft.settings.allow_lan" name="allow_lan" type="checkbox" />
+            </label>
+            <label class="toggle-card">
+              <span>启用 IPv6（含 DNS IPv6）</span>
+              <input v-model="settingsDraft.settings.ipv6" name="ipv6" type="checkbox" />
+            </label>
+            <label class="toggle-card">
+              <span>GateHome 出站自动使用此代理</span>
+              <input v-model="settingsDraft.takeover_outbound" name="takeover_outbound" type="checkbox" />
+            </label>
+            <label class="toggle-card">
+              <span>随 GateHome 启动自动运行</span>
+              <input v-model="settingsDraft.enabled" name="enabled" type="checkbox" />
+            </label>
+            <label class="toggle-card">
+              <span>统一延迟 (unified-delay)</span>
+              <input v-model="settingsDraft.settings.unified_delay" name="unified_delay" type="checkbox" />
+            </label>
+            <label class="toggle-card">
+              <span>TCP 并发 (tcp-concurrent)</span>
+              <input v-model="settingsDraft.settings.tcp_concurrent" name="tcp_concurrent" type="checkbox" />
+            </label>
+          </div>
+        </form>
+      </SpotlightCard>
+
+      <!-- Zashboard Dashboard Card -->
+      <SpotlightCard v-if="status" class="report-panel">
+        <div class="panel-header-row">
+          <h2>Zashboard 面板</h2>
+          <div class="report-actions">
+            <button
+              type="button"
+              class="btn btn-secondary btn-sm"
+              :disabled="zashboardBusy"
+              @click="downloadZashboard(false)"
+            >
+              <Download :size="14" /> {{ zashboardBusy ? '下载中…' : (status.zashboard_installed ? '更新面板' : '在线下载面板') }}
+            </button>
+            <button
+              type="button"
+              class="btn btn-primary btn-sm"
+              :disabled="zashboardBusy"
+              @click="openZashboard"
+            >
+              <ExternalLink :size="14" /> 一键打开面板
+            </button>
+          </div>
+        </div>
+        <dl class="core-meta">
+          <div>
+            <dt>面板状态</dt>
+            <dd>{{ status.zashboard_installed ? '已就绪' : '未安装' }}</dd>
+          </div>
+          <div>
+            <dt>当前版本</dt>
+            <dd class="mono-text">{{ status.zashboard_version || '—' }}</dd>
+          </div>
+          <div>
+            <dt>受保护入口</dt>
+            <dd class="mono-text">/zashboard/ · /api/mihomo/ctrl</dd>
+          </div>
+        </dl>
+      </SpotlightCard>
 
       <!-- Core Binary Management Card -->
       <SpotlightCard v-if="status" class="report-panel">
@@ -551,9 +661,13 @@
       </SpotlightCard>
     </section>
 
-    <!-- Tab 4: Config YAML Dual View -->
+    <!-- Tab 5: Config YAML Dual View -->
     <section v-show="activeTab === 'yaml'" class="tab-section" role="tabpanel" aria-label="配置文件">
-      <SpotlightCard class="report-panel yaml-panel">
+      <SpotlightCard
+        class="report-panel yaml-panel"
+        :class="{ fullscreen: yamlFullscreen }"
+        @keydown.esc="yamlFullscreen && (yamlFullscreen = false)"
+      >
         <div class="panel-header-row yaml-toolbar">
           <div class="yaml-left">
             <div class="mode-segment" role="group" aria-label="YAML 视图切换">
@@ -574,36 +688,131 @@
                 订阅原件 (source.yaml)
               </button>
             </div>
-            <span v-if="yamlKind === 'runtime'" class="badge" :class="yamlManualOverride ? 'badge-warn' : 'badge-ok'">
-              {{ yamlManualOverride ? '已手动编辑' : '流水线自动合成' }}
+            <span
+              v-if="yamlKind === 'runtime'"
+              class="badge"
+              :class="yamlManualOverride ? 'badge-warn' : 'badge-ok'"
+              :title="yamlManualOverride ? '当前为手动修改版本；后续刷新订阅或修改设置会按流水线重新合成并覆盖手改内容' : ''"
+            >
+              {{ yamlManualOverride ? '已手动编辑 · 刷新订阅将重合成' : '流水线自动合成' }}
             </span>
             <span v-else class="badge badge-neutral">只读原件</span>
           </div>
 
-          <div v-if="yamlKind === 'runtime'" class="report-actions">
-            <button type="button" class="btn btn-secondary btn-sm" :disabled="yamlBusy" @click="resyncYaml">
-              <RotateCw :size="13" /> 重新合成
+          <div class="report-actions yaml-actions">
+            <button
+              type="button"
+              class="btn btn-ghost btn-sm"
+              :aria-pressed="yamlWrap"
+              @click="yamlWrap = !yamlWrap"
+            >
+              <WrapText :size="13" /> {{ yamlWrap ? '不换行' : '自动换行' }}
             </button>
-            <button type="button" class="btn btn-primary btn-sm" :disabled="yamlBusy" @click="saveYaml">
-              <Save :size="13" /> {{ yamlBusy ? '保存中…' : '保存并热重载' }}
+            <button
+              v-if="yamlKind === 'runtime'"
+              type="button"
+              class="btn btn-ghost btn-sm"
+              :aria-pressed="yamlPreviewMode"
+              @click="yamlPreviewMode = !yamlPreviewMode"
+            >
+              <Eye :size="13" /> {{ yamlPreviewMode ? '编辑代码' : '高亮预览' }}
             </button>
+            <button
+              type="button"
+              class="btn btn-ghost btn-sm"
+              :aria-pressed="yamlFullscreen"
+              @click="yamlFullscreen = !yamlFullscreen"
+            >
+              <component :is="yamlFullscreen ? Minimize2 : Maximize2" :size="13" />
+              {{ yamlFullscreen ? '退出全屏' : '全屏' }}
+            </button>
+            <template v-if="yamlKind === 'runtime'">
+              <button
+                type="button"
+                class="btn btn-secondary btn-sm"
+                :disabled="yamlBusy"
+                @click="formatYaml"
+              >
+                <WandSparkles :size="13" /> 格式化
+              </button>
+              <button
+                type="button"
+                class="btn btn-secondary btn-sm"
+                :disabled="yamlBusy"
+                @click="validateYaml"
+              >
+                <CheckCircle2 :size="13" /> 校验配置
+              </button>
+              <button type="button" class="btn btn-secondary btn-sm" :disabled="yamlBusy" @click="resyncYaml">
+                <RotateCw :size="13" /> 重新合成
+              </button>
+              <button
+                type="button"
+                class="btn btn-primary btn-sm"
+                :disabled="yamlBusy || (yamlDirty && !yamlValidated)"
+                :title="yamlDirty && !yamlValidated ? '请先点击「校验配置」通过后再保存' : ''"
+                @click="saveYaml"
+              >
+                <Save :size="13" /> {{ yamlBusy ? '保存中…' : '保存并热重载' }}
+              </button>
+            </template>
           </div>
         </div>
 
-        <textarea
-          v-model="yamlContent"
-          class="form-input yaml-editor mono-text"
-          :readonly="yamlKind === 'source'"
-          aria-label="Mihomo YAML 配置内容"
-          spellcheck="false"
-        />
+        <div
+          v-if="yamlKind === 'runtime' && yamlValidation"
+          class="yaml-validation-banner"
+          :class="yamlValidation.valid ? 'valid' : 'invalid'"
+          role="status"
+        >
+          <template v-if="yamlValidation.valid">
+            <span>
+              校验通过{{ yamlValidation.core_tested ? '（已通过 mihomo -t 内核校验）' : '' }} ·
+              {{ yamlValidation.summary?.proxies || 0 }} 节点 /
+              {{ yamlValidation.summary?.groups || 0 }} 策略组 /
+              {{ yamlValidation.summary?.rules || 0 }} 规则
+            </span>
+            <span v-if="yamlValidation.warnings?.length" class="yaml-warnings">
+              · {{ yamlValidation.warnings.join('；') }}
+            </span>
+          </template>
+          <span v-else>{{ yamlValidation.error }}</span>
+        </div>
+        <div v-else-if="yamlKind === 'runtime' && yamlDirty" class="yaml-validation-banner pending">
+          配置已修改，请先点击「校验配置」通过后再保存
+        </div>
+
+        <div v-if="yamlKind === 'source' || yamlPreviewMode" class="yaml-viewer mono-text" :class="{ wrap: yamlWrap }" aria-readonly="true">
+          <div class="yaml-code-table">
+            <div v-for="row in highlightedYamlRows" :key="row.num" class="yaml-code-line">
+              <span class="yaml-line-num">{{ row.num }}</span>
+              <span class="yaml-line-code">
+                <template v-for="(tok, idx) in row.tokens" :key="idx"><span :class="tok.cls">{{ tok.text }}</span></template>
+                <template v-if="row.tokens.length === 0">&nbsp;</template>
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div v-else class="yaml-editor-shell">
+          <textarea
+            v-model="yamlContent"
+            class="form-input yaml-editor mono-text"
+            :class="{ wrap: yamlWrap }"
+            :wrap="yamlWrap ? 'soft' : 'off'"
+            aria-label="Mihomo YAML 配置内容"
+            spellcheck="false"
+            @input="onYamlInput"
+            @keydown.tab.prevent="insertYamlTab"
+          />
+        </div>
       </SpotlightCard>
     </section>
 
-    <!-- Dialog: Create Custom Proxy Group -->
+    <!-- Dialog: Create or Edit Custom Proxy Group -->
     <dialog ref="groupDialog" class="modal-dialog" aria-labelledby="mihomo-group-dialog-title">
       <div class="modal-header">
-        <h2 id="mihomo-group-dialog-title" class="modal-title">新建自定义策略组</h2>
+        <h2 id="mihomo-group-dialog-title" class="modal-title">{{ groupForm.id ? '编辑自定义策略组' : '新建自定义策略组' }}</h2>
         <button type="button" class="close-modal-btn" aria-label="关闭" @click="groupDialog?.close()">
           <X :size="18" />
         </button>
@@ -707,10 +916,10 @@
       </div>
     </dialog>
 
-    <!-- Dialog: Add Subscription -->
+    <!-- Dialog: Add or Edit Subscription -->
     <dialog ref="subDialog" class="modal-dialog" aria-labelledby="mihomo-sub-dialog-title">
       <div class="modal-header">
-        <h2 id="mihomo-sub-dialog-title" class="modal-title">添加代理订阅</h2>
+        <h2 id="mihomo-sub-dialog-title" class="modal-title">{{ subForm.id ? '编辑订阅与节点筛选' : '添加代理订阅' }}</h2>
         <button type="button" class="close-modal-btn" aria-label="关闭" @click="subDialog?.close()">
           <X :size="18" />
         </button>
@@ -723,16 +932,54 @@
         </label>
         <label class="form-field">
           <span>订阅链接 (URL)</span>
-          <input v-model.trim="subForm.url" name="sub_url" type="url" class="form-input mono-text" placeholder="https://example.com/sub?..." />
+          <input
+            v-model.trim="subForm.url"
+            name="sub_url"
+            type="url"
+            class="form-input mono-text"
+            :placeholder="subForm.id ? '留空保留当前链接' : 'https://example.com/sub?...'"
+          />
         </label>
-        <label class="form-field">
+        <label v-if="!subForm.id" class="form-field">
           <span>或直接粘贴 Clash YAML 配置</span>
-          <textarea v-model="subForm.yaml_content" name="sub_yaml" class="form-input mono-text" rows="5" placeholder="留空则从上方 URL 下载" />
+          <textarea v-model="subForm.yaml_content" name="sub_yaml" class="form-input mono-text" rows="4" placeholder="留空则从上方 URL 下载" />
+        </label>
+        <div class="ports-grid">
+          <label class="form-field">
+            <span>保留节点正则 (仅保留匹配，可选)</span>
+            <input
+              v-model.trim="subForm.include_filter"
+              name="sub_include_filter"
+              class="form-input mono-text"
+              placeholder="例如：HK|JP|SG|专线"
+            />
+          </label>
+          <label class="form-field">
+            <span>排除节点正则 (排除匹配，可选)</span>
+            <input
+              v-model.trim="subForm.exclude_filter"
+              name="sub_exclude_filter"
+              class="form-input mono-text"
+              placeholder="例如：剩余流量|套餐|到期|官网"
+            />
+          </label>
+        </div>
+        <label class="form-field">
+          <span>节点名称统一后缀 (可选)</span>
+          <input
+            v-model="subForm.node_suffix"
+            name="sub_node_suffix"
+            class="form-input mono-text"
+            maxlength="64"
+            placeholder="例如： [主力]（注意可保留前导空格）"
+          />
         </label>
       </form>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" @click="subDialog?.close()">取消</button>
-        <button type="submit" form="mihomo-sub-form" class="btn btn-primary" :disabled="modalBusy">{{ modalBusy ? '导入中…' : '保存订阅' }}</button>
+        <button type="submit" form="mihomo-sub-form" class="btn btn-primary" :disabled="modalBusy">
+          {{ modalBusy ? '处理中…' : subForm.id ? '保存修改' : '保存订阅' }}
+        </button>
       </div>
     </dialog>
 
@@ -782,12 +1029,18 @@ import {
   ArrowDown,
   ArrowRight,
   ArrowUp,
+  CheckCircle2,
   ChevronDown,
   Copy,
   Download,
+  ExternalLink,
+  Eye,
   FileCode2,
   GitBranch,
   Layers,
+  Maximize2,
+  Minimize2,
+  Pencil,
   Play,
   Plus,
   RefreshCw,
@@ -797,6 +1050,8 @@ import {
   Square,
   Trash2,
   Upload,
+  WandSparkles,
+  WrapText,
   X,
   Zap
 } from 'lucide-vue-next'
@@ -817,7 +1072,8 @@ const modes = [
 const tabs = [
   { id: 'groups', label: '策略组与节点', icon: Layers },
   { id: 'rules', label: '自定义分流', icon: GitBranch },
-  { id: 'settings', label: '订阅与配置', icon: Sliders },
+  { id: 'subscriptions', label: '订阅管理', icon: Download },
+  { id: 'settings', label: '端口与核心', icon: Sliders },
   { id: 'yaml', label: '配置文件', icon: FileCode2 }
 ]
 
@@ -831,6 +1087,7 @@ const savingDNSPolicies = ref(false)
 const showInheritedDNS = ref(false)
 const busySub = ref('')
 const coreBusy = ref(false)
+const zashboardBusy = ref(false)
 const testingGroup = ref('')
 const error = ref('')
 
@@ -848,6 +1105,12 @@ const yamlKind = ref('runtime')
 const yamlContent = ref('')
 const yamlManualOverride = ref(false)
 const yamlBusy = ref(false)
+const yamlDirty = ref(false)
+const yamlValidated = ref(false)
+const yamlValidation = ref(null)
+const yamlWrap = ref(false)
+const yamlFullscreen = ref(false)
+const yamlPreviewMode = ref(false)
 
 const groupDialog = ref(null)
 const ruleDialog = ref(null)
@@ -858,6 +1121,7 @@ const modalError = ref('')
 const modalBusy = ref(false)
 
 const groupForm = reactive({
+  id: '',
   name: '',
   type: 'select',
   filter: '',
@@ -875,9 +1139,13 @@ const ruleForm = reactive({
 })
 
 const subForm = reactive({
+  id: '',
   name: '',
   url: '',
-  yaml_content: ''
+  yaml_content: '',
+  include_filter: '',
+  exclude_filter: '',
+  node_suffix: ''
 })
 
 const dnsForm = reactive({
@@ -943,7 +1211,10 @@ function applyStatus(data) {
     enabled: !!data.enabled,
     takeover_outbound: !!data.takeover_outbound,
     controller_port: data.controller_port || 19090,
-    settings: { ...data.settings }
+    settings: {
+      ...data.settings,
+      auth_password: ''
+    }
   }
   yamlManualOverride.value = !!data.manual_override
 }
@@ -978,7 +1249,16 @@ async function loadGroups() {
 }
 
 async function loadYaml(kind = yamlKind.value) {
+  if (kind !== yamlKind.value) {
+    yamlContent.value = ''
+  }
   yamlKind.value = kind
+  yamlDirty.value = false
+  yamlValidated.value = false
+  yamlValidation.value = null
+  if (kind === 'source') {
+    yamlPreviewMode.value = false
+  }
   yamlBusy.value = true
   try {
     const res = await adminApi.mihomoYaml(kind, controller.signal)
@@ -1041,9 +1321,21 @@ async function selectNode(group, node) {
 
 async function testGroupDelay(groupName) {
   testingGroup.value = groupName
+  expandedGroups[groupName] = true
   try {
     const res = await adminApi.testMihomoGroupDelay(groupName)
-    delays.value = { ...delays.value, ...(res.delays || {}) }
+    const nextDelays = res.delays || {}
+    delays.value = { ...delays.value, ...nextDelays }
+    const entries = Object.values(nextDelays)
+    const okCount = entries.filter((v) => v > 0).length
+    const timeoutCount = entries.filter((v) => v === 0).length
+    if (entries.length === 0) {
+      toast.info(`「${groupName}」无可测速节点`)
+    } else if (okCount === 0) {
+      toast.warn(`测速完成：${timeoutCount} 个节点均超时`)
+    } else {
+      toast.success(`测速完成：${okCount} 个可用${timeoutCount ? `，${timeoutCount} 个超时` : ''}`)
+    }
   } catch (err) {
     toast.error(err.message)
   } finally {
@@ -1051,14 +1343,18 @@ async function testGroupDelay(groupName) {
   }
 }
 
-function openGroupModal() {
+function openGroupModal(group = null) {
   modalError.value = ''
-  groupForm.name = ''
-  groupForm.type = 'select'
-  groupForm.filter = ''
-  groupForm.url = 'https://www.gstatic.com/generate_204'
-  groupForm.interval = 300
-  groupForm.proxies = []
+  const custom = group?.group_id
+    ? (status.value?.custom_groups || []).find((item) => item.id === group.group_id)
+    : null
+  groupForm.id = custom?.id || ''
+  groupForm.name = custom?.name || ''
+  groupForm.type = custom?.type || 'select'
+  groupForm.filter = custom?.filter || ''
+  groupForm.url = custom?.url || 'https://www.gstatic.com/generate_204'
+  groupForm.interval = custom?.interval || 300
+  groupForm.proxies = custom?.proxies ? [...custom.proxies] : []
   groupDialog.value?.showModal()
 }
 
@@ -1067,6 +1363,7 @@ async function submitCustomGroup() {
   modalBusy.value = true
   try {
     const data = await adminApi.saveMihomoGroup({
+      id: groupForm.id || undefined,
       name: groupForm.name,
       type: groupForm.type,
       filter: groupForm.filter,
@@ -1078,7 +1375,7 @@ async function submitCustomGroup() {
     groupDialog.value?.close()
     await loadGroups()
     expandedGroups[groupForm.name] = true
-    toast.success('自定义策略组已保存')
+    toast.success(groupForm.id ? '自定义策略组已更新' : '自定义策略组已保存')
   } catch (err) {
     modalError.value = err.message
   } finally {
@@ -1193,13 +1490,16 @@ async function saveCoreSettings() {
         mixed_port: Number(settingsDraft.value.settings.mixed_port) || 0,
         http_port: Number(settingsDraft.value.settings.http_port) || 0,
         socks_port: Number(settingsDraft.value.settings.socks_port) || 0,
-        dns_listen_port: Number(settingsDraft.value.settings.dns_listen_port) || 0
+        dns_listen_port: Number(settingsDraft.value.settings.dns_listen_port) || 0,
+        auth_enabled: !!settingsDraft.value.settings.auth_enabled,
+        auth_username: (settingsDraft.value.settings.auth_username || '').trim(),
+        auth_password: settingsDraft.value.settings.auth_password || ''
       }
     }
     const data = await adminApi.saveMihomoSettings(payload)
     applyStatus(data)
     await loadGroups()
-    toast.success('端口与核心设置已保存并合成 runtime.yaml')
+    toast.success('代理端口与核心设置已保存并合成 runtime.yaml')
   } catch (err) {
     error.value = err.message
     toast.error(err.message)
@@ -1208,11 +1508,60 @@ async function saveCoreSettings() {
   }
 }
 
-function openSubModal() {
+function buildZashboardURL() {
+  const isHttps = window.location.protocol === 'https:'
+  const protocol = isHttps ? 'https' : 'http'
+  const hostname = window.location.hostname
+  const port = window.location.port || (isHttps ? '443' : '80')
+  const params = new URLSearchParams({
+    protocol,
+    hostname,
+    port,
+    secondaryPath: '/api/mihomo/ctrl',
+    secret: '',
+    label: 'GateHome',
+    disableUpgradeCore: '1',
+    disableTunMode: '1'
+  })
+  return `/zashboard/#/setup?${params.toString()}`
+}
+
+async function downloadZashboard(openAfter = false) {
+  zashboardBusy.value = true
+  try {
+    const res = await adminApi.downloadMihomoZashboard()
+    if (res.status) applyStatus(res.status)
+    toast.success(`Zashboard 面板已就绪${res.version ? `: ${res.version}` : ''}`)
+    if (openAfter) {
+      const win = window.open(buildZashboardURL(), '_blank', 'noopener,noreferrer')
+      if (!win) {
+        toast.info('Zashboard 已就绪，请再次点击「Zashboard 面板」打开')
+      }
+    }
+  } catch (err) {
+    toast.error(err.message)
+  } finally {
+    zashboardBusy.value = false
+  }
+}
+
+async function openZashboard() {
+  if (status.value?.zashboard_installed) {
+    window.open(buildZashboardURL(), '_blank', 'noopener,noreferrer')
+    return
+  }
+  await downloadZashboard(true)
+}
+
+function openSubModal(sub = null) {
   modalError.value = ''
-  subForm.name = ''
+  subForm.id = sub?.id || ''
+  subForm.name = sub?.name || ''
   subForm.url = ''
   subForm.yaml_content = ''
+  subForm.include_filter = sub?.include_filter || ''
+  subForm.exclude_filter = sub?.exclude_filter || ''
+  subForm.node_suffix = sub?.node_suffix || ''
   subDialog.value?.showModal()
 }
 
@@ -1220,11 +1569,27 @@ async function submitSubscription() {
   modalError.value = ''
   modalBusy.value = true
   try {
-    const data = await adminApi.addMihomoSubscription({ ...subForm })
+    const isEdit = !!subForm.id
+    const data = isEdit
+      ? await adminApi.updateMihomoSubscription(subForm.id, {
+          name: subForm.name,
+          url: subForm.url,
+          include_filter: subForm.include_filter,
+          exclude_filter: subForm.exclude_filter,
+          node_suffix: subForm.node_suffix
+        })
+      : await adminApi.addMihomoSubscription({
+          name: subForm.name,
+          url: subForm.url,
+          yaml_content: subForm.yaml_content,
+          include_filter: subForm.include_filter,
+          exclude_filter: subForm.exclude_filter,
+          node_suffix: subForm.node_suffix
+        })
     applyStatus(data)
     subDialog.value?.close()
     await loadGroups()
-    toast.success('订阅已添加')
+    toast.success(isEdit ? '订阅设置已更新' : '订阅已添加')
   } catch (err) {
     modalError.value = err.message
   } finally {
@@ -1367,12 +1732,137 @@ async function handleFileUpload(event) {
   }
 }
 
+function onYamlInput() {
+  yamlDirty.value = true
+  yamlValidated.value = false
+  yamlValidation.value = null
+}
+
+function insertYamlTab(event) {
+  const el = event.target
+  const start = el.selectionStart
+  const end = el.selectionEnd
+  yamlContent.value = yamlContent.value.slice(0, start) + '  ' + yamlContent.value.slice(end)
+  onYamlInput()
+  requestAnimationFrame(() => {
+    el.selectionStart = el.selectionEnd = start + 2
+  })
+}
+
+function classifyYamlScalar(val) {
+  const trimmed = val.trim()
+  if (/^(true|false|null|~)$/i.test(trimmed)) return 'tok-bool'
+  if (/^-?\d+(\.\d+)?$/.test(trimmed)) return 'tok-num'
+  if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) return 'tok-str'
+  return 'tok-val'
+}
+
+function tokenizeYamlLine(line) {
+  if (!line) return []
+  const commentIdx = (() => {
+    let quote = ''
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i]
+      if (quote) {
+        if (ch === quote && line[i - 1] !== '\\') quote = ''
+      } else if (ch === '"' || ch === "'") {
+        quote = ch
+      } else if (ch === '#' && (i === 0 || /\s/.test(line[i - 1]))) {
+        return i
+      }
+    }
+    return -1
+  })()
+
+  const code = commentIdx >= 0 ? line.slice(0, commentIdx) : line
+  const comment = commentIdx >= 0 ? line.slice(commentIdx) : ''
+  const tokens = []
+
+  if (code) {
+    const listMatch = code.match(/^(\s*-\s+)(.*)$/)
+    let rest = code
+    if (listMatch) {
+      tokens.push({ cls: 'tok-punct', text: listMatch[1] })
+      rest = listMatch[2]
+    }
+    const kvMatch = rest.match(/^(\s*[^:\s][^:]*?)(:\s*)(.*)$/)
+    if (kvMatch) {
+      tokens.push({ cls: 'tok-key', text: kvMatch[1] })
+      tokens.push({ cls: 'tok-punct', text: kvMatch[2] })
+      if (kvMatch[3]) {
+        tokens.push({ cls: classifyYamlScalar(kvMatch[3]), text: kvMatch[3] })
+      }
+    } else if (rest) {
+      tokens.push({ cls: classifyYamlScalar(rest), text: rest })
+    }
+  }
+  if (comment) {
+    tokens.push({ cls: 'tok-comment', text: comment })
+  }
+  return tokens
+}
+
+const highlightedYamlRows = computed(() =>
+  (yamlContent.value || '').split('\n').map((line, index) => ({
+    num: index + 1,
+    tokens: tokenizeYamlLine(line)
+  }))
+)
+
+async function validateYaml() {
+  yamlBusy.value = true
+  try {
+    const res = await adminApi.validateMihomoYaml(yamlContent.value)
+    yamlValidation.value = res
+    yamlValidated.value = !!res.valid
+    if (res.valid) {
+      toast.success(res.core_tested ? 'YAML 与内核校验均通过' : 'YAML 语法与引用校验通过')
+    } else {
+      toast.error(res.error || '配置校验未通过')
+    }
+  } catch (err) {
+    yamlValidated.value = false
+    yamlValidation.value = { valid: false, error: err.message }
+    toast.error(err.message)
+  } finally {
+    yamlBusy.value = false
+  }
+}
+
+async function formatYaml() {
+  yamlBusy.value = true
+  try {
+    const res = await adminApi.validateMihomoYaml(yamlContent.value)
+    yamlValidation.value = res
+    if (res.valid && res.formatted_yaml) {
+      yamlContent.value = res.formatted_yaml
+      yamlDirty.value = true
+      yamlValidated.value = true
+      toast.success('已完成 YAML 格式化并校验通过')
+    } else {
+      yamlValidated.value = false
+      toast.error(res.error || 'YAML 无法格式化，请先修复语法错误')
+    }
+  } catch (err) {
+    yamlValidated.value = false
+    yamlValidation.value = { valid: false, error: err.message }
+    toast.error(err.message)
+  } finally {
+    yamlBusy.value = false
+  }
+}
+
 async function saveYaml() {
+  if (yamlDirty.value && !yamlValidated.value) {
+    await validateYaml()
+    if (!yamlValidated.value) return
+  }
   yamlBusy.value = true
   try {
     const res = await adminApi.saveMihomoYaml(yamlContent.value)
     yamlContent.value = res.content || yamlContent.value
     yamlManualOverride.value = !!res.manual_override
+    yamlDirty.value = false
     await loadStatus()
     await loadGroups()
     toast.success('运行配置已保存并应用')
@@ -1389,6 +1879,9 @@ async function resyncYaml() {
     const res = await adminApi.resyncMihomoYaml()
     yamlContent.value = res.content || ''
     yamlManualOverride.value = !!res.manual_override
+    yamlDirty.value = false
+    yamlValidated.value = false
+    yamlValidation.value = null
     await loadStatus()
     await loadGroups()
     toast.success('已按流水线重新合成 runtime.yaml')
@@ -1794,6 +2287,23 @@ onBeforeUnmount(() => {
   gap: 12px;
 }
 
+.auth-section {
+  display: grid;
+  gap: 10px;
+}
+
+.auth-fields-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+
+.auth-hint {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
 .selects-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -1860,6 +2370,11 @@ onBeforeUnmount(() => {
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.sub-title-line .badge {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .sub-meta {
@@ -1941,10 +2456,38 @@ onBeforeUnmount(() => {
 
 .yaml-panel {
   padding: 16px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.yaml-panel :deep(.card-inner) {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.yaml-panel.fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  border-radius: 0;
+  padding: 16px;
+  background: var(--canvas);
+  overflow: auto;
+}
+
+.yaml-panel.fullscreen :deep(.card-inner) {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: 10px;
 }
 
 .yaml-toolbar {
   margin-bottom: 12px;
+}
+
+.yaml-panel.fullscreen .yaml-toolbar {
+  margin-bottom: 0;
 }
 
 .yaml-left {
@@ -1954,15 +2497,128 @@ onBeforeUnmount(() => {
   gap: 8px;
 }
 
+.yaml-actions {
+  gap: 6px;
+}
+
+.yaml-validation-banner {
+  padding: 8px 12px;
+  margin-bottom: 10px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  line-height: 1.5;
+  border: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+
+.yaml-validation-banner.valid {
+  background: rgba(16, 185, 129, 0.1);
+  border-color: rgba(16, 185, 129, 0.35);
+  color: var(--ok);
+}
+
+.yaml-validation-banner.invalid {
+  background: rgba(244, 63, 94, 0.1);
+  border-color: rgba(244, 63, 94, 0.35);
+  color: var(--bad);
+}
+
+.yaml-validation-banner.pending {
+  background: rgba(245, 158, 11, 0.1);
+  border-color: rgba(245, 158, 11, 0.35);
+  color: var(--warn);
+}
+
+.yaml-warnings {
+  color: var(--warn);
+}
+
+.yaml-editor-shell {
+  width: 100%;
+  min-width: 0;
+}
+
 .yaml-editor {
   width: 100%;
-  min-height: 460px;
+  height: clamp(480px, 64dvh, 780px);
+  min-height: 440px;
   padding: 12px 14px;
-  font-size: 12px;
-  line-height: 1.55;
+  font-size: 12.5px;
+  line-height: 1.6;
   resize: vertical;
   tab-size: 2;
+  white-space: pre;
+  overflow-x: auto;
 }
+
+.yaml-editor.wrap {
+  white-space: pre-wrap;
+  overflow-x: hidden;
+}
+
+.yaml-viewer {
+  width: 100%;
+  height: clamp(480px, 64dvh, 780px);
+  min-height: 440px;
+  overflow: auto;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--input-bg);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.yaml-panel.fullscreen .yaml-editor-shell,
+.yaml-panel.fullscreen .yaml-editor,
+.yaml-panel.fullscreen .yaml-viewer {
+  flex: 1 1 auto;
+  height: 100%;
+  min-height: 0;
+}
+
+.yaml-code-table {
+  display: table;
+  min-width: 100%;
+  padding: 10px 0;
+}
+
+.yaml-code-line {
+  display: table-row;
+}
+
+.yaml-code-line:hover {
+  background: rgba(99, 102, 241, 0.06);
+}
+
+.yaml-line-num {
+  display: table-cell;
+  width: 1%;
+  min-width: 40px;
+  padding: 0 10px 0 8px;
+  text-align: right;
+  color: var(--faint);
+  user-select: none;
+  border-right: 1px solid var(--line);
+}
+
+.yaml-line-code {
+  display: table-cell;
+  padding: 0 14px;
+  white-space: pre;
+}
+
+.yaml-viewer.wrap .yaml-line-code {
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.tok-key { color: var(--brand); font-weight: 600; }
+.tok-punct { color: var(--muted); }
+.tok-str { color: var(--ok); }
+.tok-num { color: var(--warn); }
+.tok-bool { color: var(--brand-cyan); font-weight: 600; }
+.tok-val { color: var(--ink); }
+.tok-comment { color: var(--faint); font-style: italic; }
 
 .mihomo-modal-form {
   display: grid;
@@ -2019,6 +2675,17 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 640px) {
+  .yaml-panel {
+    padding: 10px;
+  }
+
+  .yaml-editor,
+  .yaml-viewer {
+    height: clamp(400px, 60dvh, 640px);
+    min-height: 360px;
+    font-size: 12px;
+  }
+
   .toolbar-input,
   .toolbar-select {
     max-width: none;
@@ -2026,6 +2693,7 @@ onBeforeUnmount(() => {
   }
 
   .ports-grid,
+  .auth-fields-grid,
   .selects-grid,
   .toggles-grid,
   .nodes-grid {

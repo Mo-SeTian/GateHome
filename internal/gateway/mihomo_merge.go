@@ -91,6 +91,23 @@ func synthesizeMihomoYAML(sourceYAML []byte, cfg MihomoConfig) ([]byte, error) {
 	yamlMapSet(root, "tcp-concurrent", yamlBoolNode(cfg.Settings.TCPConcurrent))
 	yamlMapSet(root, "external-controller", yamlStrNode(fmt.Sprintf("127.0.0.1:%d", cfg.ControllerPort)))
 	yamlMapSet(root, "secret", yamlStrNode(cfg.ControllerSecret))
+	if cfg.Settings.AuthEnabled && cfg.Settings.AuthUsername != "" && cfg.Settings.AuthPassword != "" {
+		authSeq := &yaml.Node{
+			Kind:    yaml.SequenceNode,
+			Tag:     "!!seq",
+			Content: []*yaml.Node{yamlStrNode(cfg.Settings.AuthUsername + ":" + cfg.Settings.AuthPassword)},
+		}
+		skipSeq := &yaml.Node{
+			Kind:    yaml.SequenceNode,
+			Tag:     "!!seq",
+			Content: []*yaml.Node{yamlStrNode("127.0.0.1/32"), yamlStrNode("::1/128")},
+		}
+		yamlMapSet(root, "authentication", authSeq)
+		yamlMapSet(root, "skip-auth-prefixes", skipSeq)
+	} else {
+		yamlMapDelete(root, "authentication")
+		yamlMapDelete(root, "skip-auth-prefixes")
+	}
 
 	dnsNode := yamlMapEnsureMapping(root, "dns")
 	yamlMapSet(dnsNode, "ipv6", yamlBoolNode(cfg.Settings.IPv6))
@@ -144,6 +161,11 @@ func synthesizeMihomoYAML(sourceYAML []byte, cfg MihomoConfig) ([]byte, error) {
 			}
 			yamlMapSet(policyNode, domain, seq)
 		}
+	}
+
+	// Apply active subscription node filters (include/exclude regex) and suffix renaming before collecting proxies.
+	if activeSub, ok := activeSubscription(cfg); ok {
+		applySubscriptionNodeTransform(root, activeSub)
 	}
 
 	// Collect available proxy node names from proxies:
@@ -213,6 +235,117 @@ func synthesizeMihomoYAML(sourceYAML []byte, cfg MihomoConfig) ([]byte, error) {
 		return nil, err
 	}
 	return out.Bytes(), nil
+}
+
+func activeSubscription(cfg MihomoConfig) (MihomoSubscription, bool) {
+	if cfg.ActiveSubscriptionID == "" {
+		return MihomoSubscription{}, false
+	}
+	for _, s := range cfg.Subscriptions {
+		if s.ID == cfg.ActiveSubscriptionID {
+			return s, true
+		}
+	}
+	return MihomoSubscription{}, false
+}
+
+func applySubscriptionNodeTransform(root *yaml.Node, sub MihomoSubscription) {
+	incPat := strings.TrimSpace(sub.IncludeFilter)
+	excPat := strings.TrimSpace(sub.ExcludeFilter)
+	suffix := sub.NodeSuffix
+	if incPat == "" && excPat == "" && suffix == "" {
+		return
+	}
+	var incRe, excRe *regexp.Regexp
+	if incPat != "" {
+		var err error
+		if incRe, err = regexp.Compile(incPat); err != nil {
+			return
+		}
+	}
+	if excPat != "" {
+		var err error
+		if excRe, err = regexp.Compile(excPat); err != nil {
+			return
+		}
+	}
+
+	proxiesNode, _ := yamlMapFind(root, "proxies")
+	if proxiesNode == nil || proxiesNode.Kind != yaml.SequenceNode {
+		return
+	}
+
+	removed := map[string]bool{}
+	renamed := map[string]string{}
+	kept := make([]*yaml.Node, 0, len(proxiesNode.Content))
+
+	for _, item := range proxiesNode.Content {
+		if item.Kind != yaml.MappingNode {
+			kept = append(kept, item)
+			continue
+		}
+		nameNode, _ := yamlMapFind(item, "name")
+		if nameNode == nil {
+			kept = append(kept, item)
+			continue
+		}
+		origName := nameNode.Value
+		keep := true
+		if incRe != nil && !incRe.MatchString(origName) {
+			keep = false
+		}
+		if keep && excRe != nil && excRe.MatchString(origName) {
+			keep = false
+		}
+		if !keep {
+			if origName != "" {
+				removed[origName] = true
+			}
+			continue
+		}
+		if suffix != "" && origName != "" {
+			newName := origName + suffix
+			nameNode.Value = newName
+			renamed[origName] = newName
+		}
+		kept = append(kept, item)
+	}
+	proxiesNode.Content = kept
+
+	if len(removed) == 0 && len(renamed) == 0 {
+		return
+	}
+	groupsNode, _ := yamlMapFind(root, "proxy-groups")
+	if groupsNode == nil || groupsNode.Kind != yaml.SequenceNode {
+		return
+	}
+	for _, groupItem := range groupsNode.Content {
+		if groupItem.Kind != yaml.MappingNode {
+			continue
+		}
+		membersSeq, _ := yamlMapFind(groupItem, "proxies")
+		if membersSeq == nil || membersSeq.Kind != yaml.SequenceNode {
+			continue
+		}
+		nextMembers := make([]*yaml.Node, 0, len(membersSeq.Content))
+		for _, m := range membersSeq.Content {
+			val := m.Value
+			if removed[val] {
+				continue
+			}
+			if newName, ok := renamed[val]; ok {
+				m.Value = newName
+			}
+			nextMembers = append(nextMembers, m)
+		}
+		if len(nextMembers) == 0 {
+			useNode, _ := yamlMapFind(groupItem, "use")
+			if useNode == nil || (useNode.Kind == yaml.SequenceNode && len(useNode.Content) == 0) {
+				nextMembers = append(nextMembers, yamlStrNode("DIRECT"))
+			}
+		}
+		membersSeq.Content = nextMembers
+	}
 }
 
 func formatCustomRule(r MihomoCustomRule) string {

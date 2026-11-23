@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"archive/zip"
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
@@ -483,6 +484,9 @@ func TestMihomoHelperProcess(t *testing.T) {
 	for _, arg := range os.Args {
 		if arg == "-v" {
 			fmt.Println("Mihomo Meta v1.19.0 test")
+			os.Exit(0)
+		}
+		if arg == "-t" {
 			os.Exit(0)
 		}
 	}
@@ -968,5 +972,557 @@ rules:
 	}
 	if adminRequest(h, "DELETE", "/api/mihomo/dns-policies/missing", nil, cookie, "").Code != 404 {
 		t.Fatal("expected 404 on deleting missing dns policy")
+	}
+}
+
+func TestMihomoSubscriptionFilterAndSuffixMerge(t *testing.T) {
+	sourceYAML := []byte(`
+proxies:
+  - { name: "剩余流量 10GB", type: ss, server: 1.1.1.1, port: 443 }
+  - { name: "HK IEPL 01", type: ss, server: 1.1.1.2, port: 443 }
+  - { name: "HK BGP 02", type: ss, server: 1.1.1.3, port: 443 }
+  - { name: "JP IEPL 01", type: ss, server: 1.1.1.4, port: 443 }
+  - { name: "US 普通 01", type: ss, server: 1.1.1.5, port: 443 }
+proxy-groups:
+  - name: "节点选择"
+    type: select
+    proxies: ["自动选择", "剩余流量 10GB", "HK IEPL 01", "JP IEPL 01", "US 普通 01", "DIRECT"]
+  - name: "自动选择"
+    type: url-test
+    proxies: ["HK IEPL 01", "HK BGP 02"]
+  - name: "全被排除组"
+    type: select
+    proxies: ["剩余流量 10GB", "US 普通 01"]
+  - name: "Provider组"
+    type: select
+    use: ["main-provider"]
+rules:
+  - "MATCH,节点选择"
+`)
+
+	cfg := defaultMihomoConfig()
+	cfg.ActiveSubscriptionID = "sub-1"
+	cfg.Subscriptions = []MihomoSubscription{{
+		ID:            "sub-1",
+		Name:          "测试机场",
+		IncludeFilter: "HK|JP",
+		ExcludeFilter: "BGP|剩余流量",
+		NodeSuffix:    " [专线]",
+	}}
+	cfg.CustomGroups = []MihomoCustomGroup{{
+		ID:     "grp-hk",
+		Name:   "香港节点",
+		Type:   "select",
+		Filter: `HK .*\[专线\]`,
+	}}
+
+	out, err := synthesizeMihomoYAML(sourceYAML, cfg)
+	if err != nil {
+		t.Fatalf("synthesize with subscription filter failed: %v", err)
+	}
+	groups, nodes := extractYAMLGroupsAndNodes(out, cfg.CustomGroups)
+	if len(nodes) != 2 || nodes[0] != "HK IEPL 01 [专线]" || nodes[1] != "JP IEPL 01 [专线]" {
+		t.Fatalf("expected only filtered+suffixed HK IEPL 01 & JP IEPL 01, got %v", nodes)
+	}
+
+	groupMap := map[string]MihomoGroupInfo{}
+	for _, g := range groups {
+		groupMap[g.Name] = g
+	}
+	if got := groupMap["节点选择"].All; len(got) != 4 || got[0] != "自动选择" || got[1] != "HK IEPL 01 [专线]" || got[2] != "JP IEPL 01 [专线]" || got[3] != "DIRECT" {
+		t.Fatalf("expected 节点选择 synced without excluded nodes and preserving group ref, got %v", got)
+	}
+	if got := groupMap["自动选择"].All; len(got) != 1 || got[0] != "HK IEPL 01 [专线]" {
+		t.Fatalf("expected 自动选择 synced, got %v", got)
+	}
+	if got := groupMap["全被排除组"].All; len(got) != 1 || got[0] != "DIRECT" {
+		t.Fatalf("expected emptied group fallback to DIRECT, got %v", got)
+	}
+	if got := groupMap["Provider组"].All; len(got) != 0 {
+		t.Fatalf("expected use-provider group left empty instead of DIRECT, got %v", got)
+	}
+	if got := groupMap["香港节点"].All; len(got) != 1 || got[0] != "HK IEPL 01 [专线]" {
+		t.Fatalf("expected custom group filter to match transformed nodes, got %v", got)
+	}
+}
+
+func TestMihomoSubscriptionFilterValidationAndAPI(t *testing.T) {
+	if validateMihomoSubscriptionFilters("[unclosed", "", "") == nil {
+		t.Fatal("expected invalid include_filter regex error")
+	}
+	if validateMihomoSubscriptionFilters("", "[unclosed", "") == nil {
+		t.Fatal("expected invalid exclude_filter regex error")
+	}
+	if validateMihomoSubscriptionFilters("", "", "bad,suffix") == nil {
+		t.Fatal("expected comma in node_suffix rejected")
+	}
+
+	_, h := testAdmin(t)
+	cookie := loginForTest(t, h)
+
+	subYAML := `
+proxies:
+  - { name: "公告: 到期提醒", type: ss, server: 1.2.3.4, port: 443 }
+  - { name: "SG-01", type: ss, server: 1.2.3.5, port: 443 }
+  - { name: "US-01", type: ss, server: 1.2.3.6, port: 443 }
+proxy-groups:
+  - name: "节点选择"
+    type: select
+    proxies: ["公告: 到期提醒", "SG-01", "US-01"]
+rules:
+  - "MATCH,节点选择"
+`
+	rec := adminRequest(h, "POST", "/api/mihomo/subscriptions", map[string]any{
+		"name":           "机场A",
+		"yaml_content":   subYAML,
+		"include_filter": "",
+		"exclude_filter": "公告",
+		"node_suffix":    " [A]",
+	}, cookie, "")
+	if rec.Code != 200 {
+		t.Fatalf("POST subscription with filters failed: %d %s", rec.Code, rec.Body.String())
+	}
+	var st mihomoStatusResponse
+	_ = json.Unmarshal(rec.Body.Bytes(), &st)
+	if len(st.Subscriptions) != 1 || st.Subscriptions[0].ExcludeFilter != "公告" || st.Subscriptions[0].NodeSuffix != " [A]" {
+		t.Fatalf("unexpected subscription view: %+v", st.Subscriptions)
+	}
+	subID := st.Subscriptions[0].ID
+
+	// Check runtime.yaml filtered & suffixed while source.yaml untouched
+	rtRes := adminRequest(h, "GET", "/api/mihomo/config/yaml?kind=runtime", nil, cookie, "")
+	if rtRes.Code != 200 || strings.Contains(rtRes.Body.String(), "到期提醒") || !strings.Contains(rtRes.Body.String(), "SG-01 [A]") {
+		t.Fatalf("runtime.yaml filter/suffix mismatch: %s", rtRes.Body.String())
+	}
+	srcRes := adminRequest(h, "GET", "/api/mihomo/config/yaml?kind=source", nil, cookie, "")
+	if srcRes.Code != 200 || !strings.Contains(srcRes.Body.String(), "到期提醒") {
+		t.Fatalf("source.yaml should remain untouched: %s", srcRes.Body.String())
+	}
+
+	// Update subscription filters via PUT (also test include_filter narrowing)
+	rec = adminRequest(h, "PUT", "/api/mihomo/subscriptions/"+subID, map[string]any{
+		"name":           "机场A-精选",
+		"include_filter": "SG",
+		"exclude_filter": "公告",
+		"node_suffix":    " [新]",
+	}, cookie, "")
+	if rec.Code != 200 {
+		t.Fatalf("PUT subscription failed: %d %s", rec.Code, rec.Body.String())
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &st)
+	if st.Subscriptions[0].Name != "机场A-精选" || st.Subscriptions[0].IncludeFilter != "SG" || st.Subscriptions[0].NodeSuffix != " [新]" {
+		t.Fatalf("unexpected updated subscription: %+v", st.Subscriptions[0])
+	}
+	rtRes2 := adminRequest(h, "GET", "/api/mihomo/config/yaml?kind=runtime", nil, cookie, "")
+	if strings.Contains(rtRes2.Body.String(), "US-01") || !strings.Contains(rtRes2.Body.String(), "SG-01 [新]") {
+		t.Fatalf("runtime.yaml after subscription update mismatch: %s", rtRes2.Body.String())
+	}
+
+	if adminRequest(h, "PUT", "/api/mihomo/subscriptions/missing", map[string]any{"name": "x"}, cookie, "").Code != 404 {
+		t.Fatal("expected 404 for missing subscription")
+	}
+}
+
+func TestMihomoDelaySpecialGroupFallbackAndEditGroup(t *testing.T) {
+	const groupName = "🇭🇰 香港 / 专线"
+	mux := http.NewServeMux()
+	var selected string
+	mux.HandleFunc("GET /proxies", func(w http.ResponseWriter, r *http.Request) {
+		jsonResponse(w, 200, map[string]any{
+			"proxies": map[string]any{
+				groupName: map[string]any{
+					"name": groupName,
+					"type": "Selector",
+					"now":  "HK-01",
+					"all":  []string{"HK-01", "HK-TIMEOUT", "DIRECT"},
+				},
+				"HK-01":      map[string]any{"name": "HK-01", "type": "Shadowsocks"},
+				"HK-TIMEOUT": map[string]any{"name": "HK-TIMEOUT", "type": "Shadowsocks"},
+			},
+		})
+	})
+	// Simulate /group/.../delay failing so fallback per-node /proxies/.../delay runs
+	mux.HandleFunc("GET /proxies/{name}/delay", func(w http.ResponseWriter, r *http.Request) {
+		node := r.PathValue("name")
+		if node == "HK-01" {
+			jsonResponse(w, 200, map[string]int{"delay": 52})
+			return
+		}
+		http.Error(w, `{"message":"timeout"}`, 504)
+	})
+	mux.HandleFunc("PUT /proxies/", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Name string `json:"name"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		selected = body.Name
+		w.WriteHeader(204)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	a, h := testAdmin(t)
+	a.mihomo.ctrlBaseURL = srv.URL
+	cookie := loginForTest(t, h)
+
+	// Test body-based POST /api/mihomo/delay with slash+emoji group name
+	rec := adminRequest(h, "POST", "/api/mihomo/delay", map[string]any{"group": groupName}, cookie, "")
+	if rec.Code != 200 {
+		t.Fatalf("POST /api/mihomo/delay failed: %d %s", rec.Code, rec.Body.String())
+	}
+	var delayRes struct {
+		Delays map[string]int `json:"delays"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &delayRes)
+	if delayRes.Delays["HK-01"] != 52 {
+		t.Fatalf("expected HK-01 delay 52, got %+v", delayRes.Delays)
+	}
+	if val, ok := delayRes.Delays["HK-TIMEOUT"]; !ok || val != 0 {
+		t.Fatalf("expected timed-out HK-TIMEOUT explicitly marked as 0, got %+v", delayRes.Delays)
+	}
+	if _, hasDirect := delayRes.Delays["DIRECT"]; hasDirect {
+		t.Fatal("DIRECT builtin should not be in tested delays")
+	}
+
+	// Test body-based PUT /api/mihomo/select with slash+emoji group name
+	rec = adminRequest(h, "PUT", "/api/mihomo/select", map[string]any{"group": groupName, "node": "HK-TIMEOUT"}, cookie, "")
+	if rec.Code != 200 || selected != "HK-TIMEOUT" {
+		t.Fatalf("PUT /api/mihomo/select failed: code=%d selected=%q", rec.Code, selected)
+	}
+
+	// Test creating and editing an existing custom proxy group via id
+	rec = adminRequest(h, "POST", "/api/mihomo/groups", map[string]any{
+		"name":   "香港自定义",
+		"type":   "select",
+		"filter": "HK",
+	}, cookie, "")
+	if rec.Code != 200 {
+		t.Fatalf("create group failed: %d %s", rec.Code, rec.Body.String())
+	}
+	var st mihomoStatusResponse
+	_ = json.Unmarshal(rec.Body.Bytes(), &st)
+	grpID := st.CustomGroups[0].ID
+
+	rec = adminRequest(h, "POST", "/api/mihomo/groups", map[string]any{
+		"id":       grpID,
+		"name":     "香港测速",
+		"type":     "url-test",
+		"filter":   "HK|SG",
+		"interval": 150,
+	}, cookie, "")
+	if rec.Code != 200 {
+		t.Fatalf("edit existing group failed: %d %s", rec.Code, rec.Body.String())
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &st)
+	if len(st.CustomGroups) != 1 || st.CustomGroups[0].ID != grpID || st.CustomGroups[0].Name != "香港测速" || st.CustomGroups[0].Interval != 150 {
+		t.Fatalf("expected updated custom group preserving id, got %+v", st.CustomGroups)
+	}
+}
+
+func TestMihomoYAMLValidateAndSaveGate(t *testing.T) {
+	_, h := testAdmin(t)
+	cookie := loginForTest(t, h)
+
+	validYAML := `
+mixed-port: 7890
+secret: "should-be-masked"
+proxies:
+  - { name: "N1", type: ss, server: 1.2.3.4, port: 443 }
+proxy-groups:
+  - name: "节点选择"
+    type: select
+    proxies: ["N1", "DIRECT"]
+rules:
+  - "MATCH,节点选择"
+`
+	rec := adminRequest(h, "POST", "/api/mihomo/config/validate", map[string]any{"content": validYAML}, cookie, "")
+	if rec.Code != 200 {
+		t.Fatalf("POST /api/mihomo/config/validate failed: %d", rec.Code)
+	}
+	var valRes mihomoYAMLValidationResult
+	_ = json.Unmarshal(rec.Body.Bytes(), &valRes)
+	if !valRes.Valid || valRes.Summary.Proxies != 1 || valRes.Summary.Groups != 1 || valRes.Summary.Rules != 1 || !strings.Contains(valRes.FormattedYAML, managedSecretPlaceholder) {
+		t.Fatalf("unexpected valid YAML result: %+v", valRes)
+	}
+
+	// Broken syntax rejected
+	rec = adminRequest(h, "POST", "/api/mihomo/config/validate", map[string]any{"content": "proxies:\n  - [broken"}, cookie, "")
+	_ = json.Unmarshal(rec.Body.Bytes(), &valRes)
+	if valRes.Valid || valRes.Error == "" {
+		t.Fatalf("expected syntax error flagged invalid: %+v", valRes)
+	}
+
+	// Missing member reference in proxy-groups rejected on validate & PUT save
+	missingRefYAML := `
+mixed-port: 7890
+proxies:
+  - { name: "N1", type: ss, server: 1.2.3.4, port: 443 }
+proxy-groups:
+  - name: "节点选择"
+    type: select
+    proxies: ["MISSING-NODE"]
+rules:
+  - "MATCH,节点选择"
+`
+	rec = adminRequest(h, "POST", "/api/mihomo/config/validate", map[string]any{"content": missingRefYAML}, cookie, "")
+	_ = json.Unmarshal(rec.Body.Bytes(), &valRes)
+	if valRes.Valid || !strings.Contains(valRes.Error, "MISSING-NODE") {
+		t.Fatalf("expected missing member reference error, got %+v", valRes)
+	}
+	if adminRequest(h, "PUT", "/api/mihomo/config/yaml", map[string]any{"content": missingRefYAML}, cookie, "").Code != 400 {
+		t.Fatal("expected PUT /api/mihomo/config/yaml to reject invalid member reference")
+	}
+
+	// Duplicate proxy names flagged in warnings
+	dupYAML := `
+proxies:
+  - { name: "DUP", type: ss, server: 1.2.3.4, port: 443 }
+  - { name: "DUP", type: ss, server: 1.2.3.5, port: 443 }
+proxy-groups:
+  - name: "节点选择"
+    type: select
+    proxies: ["DUP"]
+rules:
+  - "MATCH,节点选择"
+`
+	rec = adminRequest(h, "POST", "/api/mihomo/config/validate", map[string]any{"content": dupYAML}, cookie, "")
+	_ = json.Unmarshal(rec.Body.Bytes(), &valRes)
+	if !valRes.Valid || len(valRes.Warnings) != 1 || !strings.Contains(valRes.Warnings[0], "DUP") {
+		t.Fatalf("expected duplicate proxy warning, got %+v", valRes)
+	}
+}
+
+func TestMihomoLANAuthYAMLMaskingAndSettingsAPI(t *testing.T) {
+	a, h := testAdmin(t)
+	cookie := loginForTest(t, h)
+
+	// Invalid username with colon rejected
+	rec := adminRequest(h, "PUT", "/api/mihomo/settings", map[string]any{
+		"enabled":           true,
+		"takeover_outbound": false,
+		"controller_port":   19090,
+		"settings": map[string]any{
+			"mixed_port":        7890,
+			"allow_lan":         true,
+			"mode":              "rule",
+			"log_level":         "info",
+			"dns_enhanced_mode": "keep",
+			"auth_enabled":      true,
+			"auth_username":     "bad:user",
+			"auth_password":     "s3cret!",
+		},
+	}, cookie, "")
+	if rec.Code != 400 {
+		t.Fatalf("expected 400 on colon in auth_username, got %d %s", rec.Code, rec.Body.String())
+	}
+
+	// Save valid LAN proxy auth
+	rec = adminRequest(h, "PUT", "/api/mihomo/settings", map[string]any{
+		"enabled":           true,
+		"takeover_outbound": true,
+		"controller_port":   19090,
+		"settings": map[string]any{
+			"mixed_port":        17890,
+			"allow_lan":         true,
+			"mode":              "rule",
+			"log_level":         "info",
+			"dns_enhanced_mode": "keep",
+			"auth_enabled":      true,
+			"auth_username":     "lanuser",
+			"auth_password":     "s3cret!",
+		},
+	}, cookie, "")
+	if rec.Code != 200 {
+		t.Fatalf("PUT /api/mihomo/settings with LAN auth failed: %d %s", rec.Code, rec.Body.String())
+	}
+
+	var st mihomoStatusResponse
+	_ = json.Unmarshal(rec.Body.Bytes(), &st)
+	if !st.Settings.AuthEnabled || st.Settings.AuthUsername != "lanuser" || !st.AuthPasswordConfigured || st.Settings.AuthPassword != "" {
+		t.Fatalf("unexpected auth status snapshot (must not leak password): %+v auth_pwd_configured=%v", st.Settings, st.AuthPasswordConfigured)
+	}
+
+	// Runtime YAML on disk contains real credentials + loopback bypass
+	rtDisk, err := os.ReadFile(a.mihomo.runtimePath())
+	if err != nil {
+		t.Fatalf("read runtime.yaml failed: %v", err)
+	}
+	if !strings.Contains(string(rtDisk), "lanuser:s3cret!") || !strings.Contains(string(rtDisk), "127.0.0.1/32") {
+		t.Fatalf("expected real authentication and skip-auth-prefixes in runtime.yaml, got:\n%s", string(rtDisk))
+	}
+
+	// GET /api/mihomo/config/yaml masks auth password
+	yamlRes := adminRequest(h, "GET", "/api/mihomo/config/yaml?kind=runtime", nil, cookie, "")
+	if yamlRes.Code != 200 {
+		t.Fatalf("GET yaml failed: %d", yamlRes.Code)
+	}
+	var yamlPayload struct {
+		Content string `json:"content"`
+	}
+	_ = json.Unmarshal(yamlRes.Body.Bytes(), &yamlPayload)
+	if strings.Contains(yamlPayload.Content, "s3cret!") || !strings.Contains(yamlPayload.Content, "lanuser:"+managedAuthPlaceholder) {
+		t.Fatalf("expected masked authentication in YAML response, got:\n%s", yamlPayload.Content)
+	}
+
+	// Saving masked YAML re-injects real credentials on disk while keeping API response masked
+	putYamlRes := adminRequest(h, "PUT", "/api/mihomo/config/yaml", map[string]any{"content": yamlPayload.Content + "\n# keep"}, cookie, "")
+	if putYamlRes.Code != 200 {
+		t.Fatalf("PUT masked yaml failed: %d %s", putYamlRes.Code, putYamlRes.Body.String())
+	}
+	if strings.Contains(putYamlRes.Body.String(), "s3cret!") {
+		t.Fatalf("PUT yaml response leaked plaintext proxy password: %s", putYamlRes.Body.String())
+	}
+	rtAfterPut, _ := os.ReadFile(a.mihomo.runtimePath())
+	if !strings.Contains(string(rtAfterPut), "lanuser:s3cret!") {
+		t.Fatalf("expected real credentials re-injected on disk, got:\n%s", string(rtAfterPut))
+	}
+
+	// Updating settings with blank auth_password preserves existing password
+	rec = adminRequest(h, "PUT", "/api/mihomo/settings", map[string]any{
+		"enabled":           true,
+		"takeover_outbound": true,
+		"controller_port":   19090,
+		"settings": map[string]any{
+			"mixed_port":        17890,
+			"allow_lan":         true,
+			"mode":              "rule",
+			"log_level":         "info",
+			"dns_enhanced_mode": "keep",
+			"auth_enabled":      true,
+			"auth_username":     "lanuser2",
+			"auth_password":     "",
+		},
+	}, cookie, "")
+	if rec.Code != 200 {
+		t.Fatalf("update username preserving password failed: %d %s", rec.Code, rec.Body.String())
+	}
+	rtUpdated, _ := os.ReadFile(a.mihomo.runtimePath())
+	if !strings.Contains(string(rtUpdated), "lanuser2:s3cret!") {
+		t.Fatalf("expected preserved password with updated username, got:\n%s", string(rtUpdated))
+	}
+
+	// Disabling auth removes authentication & skip-auth-prefixes
+	rec = adminRequest(h, "PUT", "/api/mihomo/settings", map[string]any{
+		"enabled":           true,
+		"takeover_outbound": true,
+		"controller_port":   19090,
+		"settings": map[string]any{
+			"mixed_port":        17890,
+			"allow_lan":         true,
+			"mode":              "rule",
+			"log_level":         "info",
+			"dns_enhanced_mode": "keep",
+			"auth_enabled":      false,
+		},
+	}, cookie, "")
+	if rec.Code != 200 {
+		t.Fatalf("disable auth failed: %d %s", rec.Code, rec.Body.String())
+	}
+	rtDisabled, _ := os.ReadFile(a.mihomo.runtimePath())
+	if strings.Contains(string(rtDisabled), "authentication:") || strings.Contains(string(rtDisabled), "skip-auth-prefixes:") {
+		t.Fatalf("expected authentication keys removed when disabled, got:\n%s", string(rtDisabled))
+	}
+}
+
+func TestMihomoZashboardInstallServeAndControllerProxy(t *testing.T) {
+	a, h := testAdmin(t)
+	cookie := loginForTest(t, h)
+
+	// ZipSlip attempt must fail
+	var badZipBuf bytes.Buffer
+	zw := zip.NewWriter(&badZipBuf)
+	fw, _ := zw.Create("../evil.txt")
+	_, _ = fw.Write([]byte("pwned"))
+	_ = zw.Close()
+	if _, err := a.mihomo.installZashboardZip(badZipBuf.Bytes(), "bad"); err == nil {
+		t.Fatal("expected ZipSlip archive rejected")
+	}
+
+	// Valid dist/ archive strips top prefix cleanly
+	var goodZipBuf bytes.Buffer
+	zw = zip.NewWriter(&goodZipBuf)
+	idxW, _ := zw.Create("dist/index.html")
+	_, _ = idxW.Write([]byte("<html><head><title>Zashboard</title></head><body>ok</body></html>"))
+	jsW, _ := zw.Create("dist/assets/app.js")
+	_, _ = jsW.Write([]byte("console.log('zashboard');"))
+	_ = zw.Close()
+
+	ver, err := a.mihomo.installZashboardZip(goodZipBuf.Bytes(), "v1.2.3")
+	if err != nil || ver != "v1.2.3" {
+		t.Fatalf("install valid zashboard zip failed: ver=%q err=%v", ver, err)
+	}
+	installed, gotVer := a.mihomo.zashboardStatus()
+	if !installed || gotVer != "v1.2.3" {
+		t.Fatalf("expected zashboard installed v1.2.3, got installed=%v ver=%q", installed, gotVer)
+	}
+
+	// Unauthenticated /zashboard/ and /api/mihomo/ctrl/ rejected with 401
+	unauthUI := httptest.NewRequest("GET", "http://localhost:16666/zashboard/", nil)
+	unauthRec := httptest.NewRecorder()
+	h.ServeHTTP(unauthRec, unauthUI)
+	if unauthRec.Code != 401 {
+		t.Fatalf("expected 401 for unauthenticated /zashboard/, got %d", unauthRec.Code)
+	}
+
+	unauthCtrl := httptest.NewRequest("GET", "http://localhost:16666/api/mihomo/ctrl/version", nil)
+	unauthCtrlRec := httptest.NewRecorder()
+	h.ServeHTTP(unauthCtrlRec, unauthCtrl)
+	if unauthCtrlRec.Code != 401 {
+		t.Fatalf("expected 401 for unauthenticated /api/mihomo/ctrl/, got %d", unauthCtrlRec.Code)
+	}
+
+	// Authenticated /zashboard/ serves index.html with Zashboard CSP
+	authUI := httptest.NewRequest("GET", "http://localhost:16666/zashboard/", nil)
+	authUI.AddCookie(cookie)
+	authRec := httptest.NewRecorder()
+	h.ServeHTTP(authRec, authUI)
+	if authRec.Code != 200 || !strings.Contains(authRec.Body.String(), "<title>Zashboard</title>") {
+		t.Fatalf("expected /zashboard/ 200 with index.html, got %d %s", authRec.Code, authRec.Body.String())
+	}
+	if !strings.Contains(authRec.Header().Get("Content-Security-Policy"), "connect-src 'self' ws: wss:") {
+		t.Fatalf("expected Zashboard CSP header, got %q", authRec.Header().Get("Content-Security-Policy"))
+	}
+
+	// Mock Mihomo External Controller behind GateHome reverse proxy
+	var seenAuth, seenCookie, seenPath string
+	ctrlSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenAuth = r.Header.Get("Authorization")
+		seenCookie = r.Header.Get("Cookie")
+		seenPath = r.URL.RequestURI()
+		jsonResponse(w, 200, map[string]any{"ok": true, "path": seenPath})
+	}))
+	defer ctrlSrv.Close()
+
+	a.mihomo.ctrlBaseURL = ctrlSrv.URL
+	a.mihomo.ctrlSecret = "top-secret-token"
+
+	// Simulate real Zashboard PUT request (with session cookie & same Origin, WITHOUT X-Gatehouse-Request)
+	proxyReq := httptest.NewRequest("PUT", "http://localhost:16666/api/mihomo/ctrl/proxies/HK%20Node", strings.NewReader(`{"name":"HK-01"}`))
+	proxyReq.Header.Set("Content-Type", "application/json")
+	proxyReq.Header.Set("Origin", "http://localhost:16666")
+	proxyReq.AddCookie(cookie)
+	proxyRec := httptest.NewRecorder()
+	h.ServeHTTP(proxyRec, proxyReq)
+	if proxyRec.Code != 200 {
+		t.Fatalf("expected 200 from controller proxy without X-Gatehouse-Request, got %d %s", proxyRec.Code, proxyRec.Body.String())
+	}
+	if seenAuth != "Bearer top-secret-token" {
+		t.Fatalf("expected injected Bearer token, got %q", seenAuth)
+	}
+	if seenCookie != "" {
+		t.Fatalf("expected GateHome session cookie stripped before upstream controller, got %q", seenCookie)
+	}
+	if seenPath != "/proxies/HK%20Node" {
+		t.Fatalf("expected preserved escaped controller path, got %q", seenPath)
+	}
+
+	// Cross-site request to controller proxy blocked even with cookie
+	crossReq := httptest.NewRequest("GET", "http://localhost:16666/api/mihomo/ctrl/version", nil)
+	crossReq.Header.Set("Sec-Fetch-Site", "cross-site")
+	crossReq.AddCookie(cookie)
+	crossRec := httptest.NewRecorder()
+	h.ServeHTTP(crossRec, crossReq)
+	if crossRec.Code != 403 {
+		t.Fatalf("expected 403 for cross-site request to controller proxy, got %d", crossRec.Code)
 	}
 }

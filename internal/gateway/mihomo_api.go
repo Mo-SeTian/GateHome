@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -31,7 +33,10 @@ func decodeBodyLarge(w http.ResponseWriter, r *http.Request, v any, limit int64)
 	return true
 }
 
-const managedSecretPlaceholder = "__GATEHOME_MANAGED_SECRET__"
+const (
+	managedSecretPlaceholder = "__GATEHOME_MANAGED_SECRET__"
+	managedAuthPlaceholder   = "__GATEHOME_MANAGED_AUTH__"
+)
 
 type mihomoStatusResponse struct {
 	Running                bool                       `json:"running"`
@@ -39,6 +44,8 @@ type mihomoStatusResponse struct {
 	CoreInstalled          bool                       `json:"core_installed"`
 	CoreVersion            string                     `json:"core_version,omitempty"`
 	BinaryPath             string                     `json:"binary_path,omitempty"`
+	ZashboardInstalled     bool                       `json:"zashboard_installed"`
+	ZashboardVersion       string                     `json:"zashboard_version,omitempty"`
 	LANIP                  string                     `json:"lan_ip"`
 	OutboundTakeoverActive bool                       `json:"outbound_takeover_active"`
 	OutboundProxyURL       string                     `json:"outbound_proxy_url,omitempty"`
@@ -49,6 +56,7 @@ type mihomoStatusResponse struct {
 	TakeoverOutbound       bool                       `json:"takeover_outbound"`
 	ControllerPort         int                        `json:"controller_port"`
 	Settings               MihomoCoreSettings         `json:"settings"`
+	AuthPasswordConfigured bool                       `json:"auth_password_configured"`
 	ActiveSubscriptionID   string                     `json:"active_subscription_id,omitempty"`
 	Subscriptions          []MihomoSubscriptionView   `json:"subscriptions"`
 	CustomGroups           []MihomoCustomGroup        `json:"custom_groups"`
@@ -67,6 +75,7 @@ func (m *mihomoManager) statusSnapshot() mihomoStatusResponse {
 		ver = m.probeBinaryVersion(bin)
 		m.version = ver
 	}
+	zashInstalled, zashVersion := m.zashboardStatus()
 	outboundURL := ""
 	takeoverActive := false
 	if m.running && m.cfg.TakeoverOutbound {
@@ -75,12 +84,17 @@ func (m *mihomoManager) statusSnapshot() mihomoStatusResponse {
 	}
 	sourceRaw, _ := m.readSourceYAML(m.cfg)
 	inheritedDNS := extractInheritedDNSPolicies(sourceRaw)
+	sanitizedSettings := m.cfg.Settings
+	authPwdConfigured := sanitizedSettings.AuthPassword != ""
+	sanitizedSettings.AuthPassword = ""
 	return mihomoStatusResponse{
 		Running:                m.running,
 		PID:                    m.pid,
 		CoreInstalled:          bin != "",
 		CoreVersion:            ver,
 		BinaryPath:             bin,
+		ZashboardInstalled:     zashInstalled,
+		ZashboardVersion:       zashVersion,
 		LANIP:                  detectLANIP(),
 		OutboundTakeoverActive: takeoverActive,
 		OutboundProxyURL:       outboundURL,
@@ -90,7 +104,8 @@ func (m *mihomoManager) statusSnapshot() mihomoStatusResponse {
 		Enabled:                m.cfg.Enabled,
 		TakeoverOutbound:       m.cfg.TakeoverOutbound,
 		ControllerPort:         m.cfg.ControllerPort,
-		Settings:               m.cfg.Settings,
+		Settings:               sanitizedSettings,
+		AuthPasswordConfigured: authPwdConfigured,
 		ActiveSubscriptionID:   m.cfg.ActiveSubscriptionID,
 		Subscriptions:          toSubscriptionViews(m.cfg.Subscriptions),
 		CustomGroups:           slices.Clone(m.cfg.CustomGroups),
@@ -112,7 +127,9 @@ func (a *Admin) mihomoRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/mihomo/groups", a.requireAuth(a.handleMihomoGroups))
 	mux.HandleFunc("POST /api/mihomo/groups", a.requireAuth(a.handleMihomoSaveGroup))
 	mux.HandleFunc("DELETE /api/mihomo/groups/{id}", a.requireAuth(a.handleMihomoDeleteGroup))
+	mux.HandleFunc("PUT /api/mihomo/select", a.requireAuth(a.handleMihomoSelectProxyBody))
 	mux.HandleFunc("PUT /api/mihomo/groups/{name}/select", a.requireAuth(a.handleMihomoSelectProxy))
+	mux.HandleFunc("POST /api/mihomo/delay", a.requireAuth(a.handleMihomoGroupDelayBody))
 	mux.HandleFunc("POST /api/mihomo/groups/{name}/delay", a.requireAuth(a.handleMihomoGroupDelay))
 
 	mux.HandleFunc("POST /api/mihomo/rules", a.requireAuth(a.handleMihomoAddRule))
@@ -124,16 +141,19 @@ func (a *Admin) mihomoRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/mihomo/dns-policies/{id}", a.requireAuth(a.handleMihomoDeleteDNSPolicy))
 
 	mux.HandleFunc("POST /api/mihomo/subscriptions", a.requireAuth(a.handleMihomoAddSubscription))
+	mux.HandleFunc("PUT /api/mihomo/subscriptions/{id}", a.requireAuth(a.handleMihomoUpdateSubscription))
 	mux.HandleFunc("PUT /api/mihomo/subscriptions/{id}/activate", a.requireAuth(a.handleMihomoActivateSubscription))
 	mux.HandleFunc("POST /api/mihomo/subscriptions/{id}/refresh", a.requireAuth(a.handleMihomoRefreshSubscription))
 	mux.HandleFunc("DELETE /api/mihomo/subscriptions/{id}", a.requireAuth(a.handleMihomoDeleteSubscription))
 
 	mux.HandleFunc("GET /api/mihomo/config/yaml", a.requireAuth(a.handleMihomoGetYAML))
 	mux.HandleFunc("PUT /api/mihomo/config/yaml", a.requireAuth(a.handleMihomoPutYAML))
+	mux.HandleFunc("POST /api/mihomo/config/validate", a.requireAuth(a.handleMihomoValidateYAML))
 	mux.HandleFunc("POST /api/mihomo/config/resync", a.requireAuth(a.handleMihomoResyncYAML))
 
 	mux.HandleFunc("POST /api/mihomo/core/download", a.requireAuth(a.handleMihomoDownloadCore))
 	mux.HandleFunc("POST /api/mihomo/core/upload", a.requireAuth(a.handleMihomoUploadCore))
+	mux.HandleFunc("POST /api/mihomo/zashboard/download", a.requireAuth(a.handleMihomoDownloadZashboard))
 }
 
 func (a *Admin) handleMihomoStatus(w http.ResponseWriter, r *http.Request) {
@@ -166,6 +186,10 @@ func (a *Admin) handleMihomoSettings(w http.ResponseWriter, r *http.Request) {
 	if input.ControllerPort > 0 {
 		next.ControllerPort = input.ControllerPort
 	}
+	input.Settings.AuthUsername = strings.TrimSpace(input.Settings.AuthUsername)
+	if input.Settings.AuthPassword == "" {
+		input.Settings.AuthPassword = m.cfg.Settings.AuthPassword
+	}
 	next.Settings = input.Settings
 	if next.Settings.Mode == "" {
 		next.Settings.Mode = "rule"
@@ -188,7 +212,10 @@ func (a *Admin) handleMihomoSettings(w http.ResponseWriter, r *http.Request) {
 		next.Settings.HTTPPort != m.cfg.Settings.HTTPPort ||
 		next.Settings.SocksPort != m.cfg.Settings.SocksPort ||
 		next.Settings.DNSListenPort != m.cfg.Settings.DNSListenPort ||
-		next.Settings.AllowLAN != m.cfg.Settings.AllowLAN
+		next.Settings.AllowLAN != m.cfg.Settings.AllowLAN ||
+		next.Settings.AuthEnabled != m.cfg.Settings.AuthEnabled ||
+		next.Settings.AuthUsername != m.cfg.Settings.AuthUsername ||
+		next.Settings.AuthPassword != m.cfg.Settings.AuthPassword
 
 	next.ManualOverride = false
 	prev := m.cfg
@@ -383,31 +410,65 @@ func (a *Admin) handleMihomoDeleteGroup(w http.ResponseWriter, r *http.Request) 
 	jsonResponse(w, 200, m.statusSnapshot())
 }
 
-func (a *Admin) handleMihomoSelectProxy(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
-	var input struct {
-		Node string `json:"node"`
-	}
-	if !decodeBody(w, r, &input) {
-		return
-	}
-	if name == "" || input.Node == "" {
+func (a *Admin) applySelectProxy(w http.ResponseWriter, group, node string) {
+	if group == "" || node == "" {
 		apiError(w, 400, "策略组名称和节点名称不能为空")
 		return
 	}
-	if err := a.mihomo.SelectProxy(name, input.Node); err != nil {
+	if err := a.mihomo.SelectProxy(group, node); err != nil {
 		apiError(w, 400, err.Error())
 		return
 	}
 	jsonResponse(w, 200, map[string]any{"ok": true})
 }
 
-func (a *Admin) handleMihomoGroupDelay(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
-	if name == "" {
+func (a *Admin) handleMihomoSelectProxyBody(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Group string `json:"group"`
+		Node  string `json:"node"`
+	}
+	if !decodeBody(w, r, &input) {
+		return
+	}
+	a.applySelectProxy(w, input.Group, input.Node)
+}
+
+func (a *Admin) handleMihomoSelectProxy(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Node string `json:"node"`
+	}
+	if !decodeBody(w, r, &input) {
+		return
+	}
+	a.applySelectProxy(w, r.PathValue("name"), input.Node)
+}
+
+func (a *Admin) applyGroupDelay(w http.ResponseWriter, group, testURL string, timeout int) {
+	if group == "" {
 		apiError(w, 400, "策略组名称不能为空")
 		return
 	}
+	delays, err := a.mihomo.TestGroupDelay(group, testURL, timeout)
+	if err != nil {
+		apiError(w, 400, err.Error())
+		return
+	}
+	jsonResponse(w, 200, map[string]any{"delays": delays})
+}
+
+func (a *Admin) handleMihomoGroupDelayBody(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Group   string `json:"group"`
+		URL     string `json:"url"`
+		Timeout int    `json:"timeout"`
+	}
+	if !decodeBody(w, r, &input) {
+		return
+	}
+	a.applyGroupDelay(w, input.Group, input.URL, input.Timeout)
+}
+
+func (a *Admin) handleMihomoGroupDelay(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		URL     string `json:"url"`
 		Timeout int    `json:"timeout"`
@@ -417,12 +478,7 @@ func (a *Admin) handleMihomoGroupDelay(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	delays, err := a.mihomo.TestGroupDelay(name, input.URL, input.Timeout)
-	if err != nil {
-		apiError(w, 400, err.Error())
-		return
-	}
-	jsonResponse(w, 200, map[string]any{"delays": delays})
+	a.applyGroupDelay(w, r.PathValue("name"), input.URL, input.Timeout)
 }
 
 func (a *Admin) handleMihomoAddRule(w http.ResponseWriter, r *http.Request) {
@@ -641,9 +697,12 @@ func (a *Admin) handleMihomoDeleteDNSPolicy(w http.ResponseWriter, r *http.Reque
 }
 func (a *Admin) handleMihomoAddSubscription(w http.ResponseWriter, r *http.Request) {
 	var input struct {
-		Name        string `json:"name"`
-		URL         string `json:"url"`
-		YAMLContent string `json:"yaml_content"`
+		Name          string `json:"name"`
+		URL           string `json:"url"`
+		YAMLContent   string `json:"yaml_content"`
+		IncludeFilter string `json:"include_filter"`
+		ExcludeFilter string `json:"exclude_filter"`
+		NodeSuffix    string `json:"node_suffix"`
 	}
 	if !decodeBody(w, r, &input) {
 		return
@@ -651,8 +710,15 @@ func (a *Admin) handleMihomoAddSubscription(w http.ResponseWriter, r *http.Reque
 	name := strings.TrimSpace(input.Name)
 	subURL := strings.TrimSpace(input.URL)
 	rawYAML := strings.TrimSpace(input.YAMLContent)
+	incFilter := strings.TrimSpace(input.IncludeFilter)
+	excFilter := strings.TrimSpace(input.ExcludeFilter)
+	nodeSuffix := input.NodeSuffix
 	if name == "" || len(name) > 100 {
 		apiError(w, 400, "订阅名称不能为空且不超过 100 字符")
+		return
+	}
+	if err := validateMihomoSubscriptionFilters(incFilter, excFilter, nodeSuffix); err != nil {
+		apiError(w, 400, err.Error())
 		return
 	}
 	if subURL == "" && rawYAML == "" {
@@ -669,9 +735,12 @@ func (a *Admin) handleMihomoAddSubscription(w http.ResponseWriter, r *http.Reque
 	m := a.mihomo
 	id := randomMihomoID("sub")
 	sub := MihomoSubscription{
-		ID:   id,
-		Name: name,
-		URL:  subURL,
+		ID:            id,
+		Name:          name,
+		URL:           subURL,
+		IncludeFilter: incFilter,
+		ExcludeFilter: excFilter,
+		NodeSuffix:    nodeSuffix,
 	}
 
 	var data []byte
@@ -725,6 +794,85 @@ func (a *Admin) handleMihomoAddSubscription(w http.ResponseWriter, r *http.Reque
 
 	if running {
 		_ = m.Reload()
+	}
+	jsonResponse(w, 200, m.statusSnapshot())
+}
+
+func (a *Admin) handleMihomoUpdateSubscription(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var input struct {
+		Name          string `json:"name"`
+		URL           string `json:"url"`
+		IncludeFilter string `json:"include_filter"`
+		ExcludeFilter string `json:"exclude_filter"`
+		NodeSuffix    string `json:"node_suffix"`
+	}
+	if !decodeBody(w, r, &input) {
+		return
+	}
+	name := strings.TrimSpace(input.Name)
+	subURL := strings.TrimSpace(input.URL)
+	incFilter := strings.TrimSpace(input.IncludeFilter)
+	excFilter := strings.TrimSpace(input.ExcludeFilter)
+	nodeSuffix := input.NodeSuffix
+	if name == "" || len(name) > 100 {
+		apiError(w, 400, "订阅名称不能为空且不超过 100 字符")
+		return
+	}
+	if subURL != "" {
+		if err := validateMihomoSubscriptionURL(subURL); err != nil {
+			apiError(w, 400, err.Error())
+			return
+		}
+	}
+	if err := validateMihomoSubscriptionFilters(incFilter, excFilter, nodeSuffix); err != nil {
+		apiError(w, 400, err.Error())
+		return
+	}
+
+	m := a.mihomo
+	m.mu.Lock()
+	idx := slices.IndexFunc(m.cfg.Subscriptions, func(s MihomoSubscription) bool { return s.ID == id })
+	if idx < 0 {
+		m.mu.Unlock()
+		apiError(w, 404, "未找到该订阅")
+		return
+	}
+	next := m.cfg
+	next.Subscriptions = slices.Clone(m.cfg.Subscriptions)
+	next.Subscriptions[idx].Name = name
+	if subURL != "" {
+		next.Subscriptions[idx].URL = subURL
+	}
+	next.Subscriptions[idx].IncludeFilter = incFilter
+	next.Subscriptions[idx].ExcludeFilter = excFilter
+	next.Subscriptions[idx].NodeSuffix = nodeSuffix
+
+	isActive := next.ActiveSubscriptionID == id
+	if isActive {
+		next.ManualOverride = false
+	}
+	if err := saveMihomoConfig(m.dir, next); err != nil {
+		m.mu.Unlock()
+		apiError(w, 500, err.Error())
+		return
+	}
+	m.cfg = next
+	if isActive {
+		if err := m.synthesizeAndWriteLocked(); err != nil {
+			m.mu.Unlock()
+			apiError(w, 500, err.Error())
+			return
+		}
+	}
+	running := m.running && isActive
+	m.mu.Unlock()
+
+	if running {
+		if err := m.Reload(); err != nil {
+			apiError(w, 500, "订阅配置已更新，但热重载失败: "+err.Error())
+			return
+		}
 	}
 	jsonResponse(w, 200, m.statusSnapshot())
 }
@@ -861,8 +1009,26 @@ func maskYAMLSecret(raw []byte) string {
 	var doc yaml.Node
 	if err := yaml.Unmarshal(raw, &doc); err == nil && doc.Kind == yaml.DocumentNode && len(doc.Content) > 0 && doc.Content[0].Kind == yaml.MappingNode {
 		root := doc.Content[0]
+		changed := false
 		if _, idx := yamlMapFind(root, "secret"); idx >= 0 {
 			root.Content[idx+1] = yamlStrNode(managedSecretPlaceholder)
+			changed = true
+		}
+		if authNode, idx := yamlMapFind(root, "authentication"); idx >= 0 && authNode.Kind == yaml.SequenceNode {
+			for _, item := range authNode.Content {
+				if item.Kind != yaml.ScalarNode {
+					continue
+				}
+				if user, _, ok := strings.Cut(item.Value, ":"); ok {
+					item.Value = user + ":" + managedAuthPlaceholder
+				} else {
+					item.Value = managedAuthPlaceholder
+				}
+				item.Tag = "!!str"
+				changed = true
+			}
+		}
+		if changed {
 			var out bytes.Buffer
 			enc := yaml.NewEncoder(&out)
 			enc.SetIndent(2)
@@ -875,7 +1041,7 @@ func maskYAMLSecret(raw []byte) string {
 	return string(raw)
 }
 
-func injectManagedControllerKeys(raw []byte, controllerPort int, secret string) ([]byte, error) {
+func injectManagedKeys(raw []byte, cfg MihomoConfig) ([]byte, error) {
 	var doc yaml.Node
 	if err := yaml.Unmarshal(raw, &doc); err != nil {
 		return nil, fmt.Errorf("YAML 语法错误: %v", err)
@@ -884,8 +1050,24 @@ func injectManagedControllerKeys(raw []byte, controllerPort int, secret string) 
 		return nil, errors.New("YAML 根节点必须为映射对象")
 	}
 	root := doc.Content[0]
-	yamlMapSet(root, "external-controller", yamlStrNode(fmt.Sprintf("127.0.0.1:%d", controllerPort)))
-	yamlMapSet(root, "secret", yamlStrNode(secret))
+	yamlMapSet(root, "external-controller", yamlStrNode(fmt.Sprintf("127.0.0.1:%d", cfg.ControllerPort)))
+	yamlMapSet(root, "secret", yamlStrNode(cfg.ControllerSecret))
+	if authNode, idx := yamlMapFind(root, "authentication"); idx >= 0 && authNode.Kind == yaml.SequenceNode {
+		hasPlaceholder := false
+		for _, item := range authNode.Content {
+			if item.Kind == yaml.ScalarNode && (item.Value == managedAuthPlaceholder || strings.HasSuffix(item.Value, ":"+managedAuthPlaceholder)) {
+				hasPlaceholder = true
+				break
+			}
+		}
+		if hasPlaceholder {
+			if cfg.Settings.AuthEnabled && cfg.Settings.AuthUsername != "" && cfg.Settings.AuthPassword != "" {
+				authNode.Content = []*yaml.Node{yamlStrNode(cfg.Settings.AuthUsername + ":" + cfg.Settings.AuthPassword)}
+			} else {
+				yamlMapDelete(root, "authentication")
+			}
+		}
+	}
 
 	var out bytes.Buffer
 	enc := yaml.NewEncoder(&out)
@@ -958,6 +1140,18 @@ func (a *Admin) handleMihomoGetYAML(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (a *Admin) handleMihomoValidateYAML(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Content string `json:"content"`
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 4<<20)
+	if !decodeBodyLarge(w, r, &input, 4<<20) {
+		return
+	}
+	res := a.mihomo.ValidateYAML([]byte(input.Content))
+	jsonResponse(w, 200, res)
+}
+
 func (a *Admin) handleMihomoPutYAML(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		Content string `json:"content"`
@@ -968,14 +1162,15 @@ func (a *Admin) handleMihomoPutYAML(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	raw := []byte(input.Content)
-	if err := validateMihomoYAML(raw); err != nil {
-		apiError(w, 400, err.Error())
+	valRes := a.mihomo.ValidateYAML(raw)
+	if !valRes.Valid {
+		apiError(w, 400, valRes.Error)
 		return
 	}
 
 	m := a.mihomo
 	m.mu.Lock()
-	finalYAML, err := injectManagedControllerKeys(raw, m.cfg.ControllerPort, m.cfg.ControllerSecret)
+	finalYAML, err := injectManagedKeys(raw, m.cfg)
 	if err != nil {
 		m.mu.Unlock()
 		apiError(w, 400, err.Error())
@@ -1086,4 +1281,101 @@ func (a *Admin) handleMihomoUploadCore(w http.ResponseWriter, r *http.Request) {
 		"version": ver,
 		"status":  a.mihomo.statusSnapshot(),
 	})
+}
+
+func (a *Admin) handleMihomoDownloadZashboard(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Minute)
+	defer cancel()
+	ver, err := a.mihomo.DownloadZashboard(ctx, a.store.Snapshot())
+	if err != nil {
+		apiError(w, 400, err.Error())
+		return
+	}
+	jsonResponse(w, 200, map[string]any{
+		"ok":      true,
+		"version": ver,
+		"status":  a.mihomo.statusSnapshot(),
+	})
+}
+
+func (a *Admin) handleZashboardUI(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if strings.Contains(r.URL.Path, "..") {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' ws: wss:; worker-src 'self' blob:; frame-ancestors 'self'; base-uri 'self'")
+
+	installed, _ := a.mihomo.zashboardStatus()
+	if !installed {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = io.WriteString(w, "<!doctype html><meta charset=\"utf-8\"><title>Zashboard 未安装</title><body style=\"font-family:system-ui,sans-serif;padding:2rem\"><h2>Zashboard 面板尚未下载</h2><p>请返回 GateHome「代理分流 → 端口与核心」下载面板后再打开。</p></body>")
+		return
+	}
+	http.StripPrefix("/zashboard/", http.FileServer(http.Dir(a.mihomo.zashboardDir()))).ServeHTTP(w, r)
+}
+
+func (a *Admin) handleMihomoControllerProxy(w http.ResponseWriter, r *http.Request) {
+	m := a.mihomo
+	m.mu.Lock()
+	running := m.running || m.ctrlBaseURL != ""
+	ctrlURL, secret := m.controllerURLAndSecretLocked()
+	m.mu.Unlock()
+	if !running {
+		apiError(w, 503, "mihomo 内核未运行")
+		return
+	}
+	targetURL, err := url.Parse(ctrlURL)
+	if err != nil {
+		apiError(w, 500, "内部控制地址无效")
+		return
+	}
+
+	trimmedPath := strings.TrimPrefix(r.URL.Path, "/api/mihomo/ctrl")
+	if trimmedPath == "" {
+		trimmedPath = "/"
+	}
+	rawEscaped := strings.TrimPrefix(r.URL.EscapedPath(), "/api/mihomo/ctrl")
+	if rawEscaped == "" {
+		rawEscaped = "/"
+	}
+	isWS := strings.EqualFold(r.Header.Get("Upgrade"), "websocket")
+
+	proxy := &httputil.ReverseProxy{
+		FlushInterval: -1,
+		Rewrite: func(pr *httputil.ProxyRequest) {
+			pr.SetURL(targetURL)
+			pr.Out.URL.Path = trimmedPath
+			pr.Out.URL.RawPath = rawEscaped
+			pr.Out.Header.Del("Cookie")
+			pr.Out.Header.Del("Authorization")
+			pr.Out.Header.Del("X-Gatehouse-Request")
+			if secret != "" {
+				pr.Out.Header.Set("Authorization", "Bearer "+secret)
+				if isWS {
+					q := pr.Out.URL.Query()
+					q.Set("token", secret)
+					pr.Out.URL.RawQuery = q.Encode()
+				}
+			}
+		},
+		ModifyResponse: func(resp *http.Response) error {
+			if resp.StatusCode != http.StatusSwitchingProtocols {
+				resp.Header.Set("Cache-Control", "no-store")
+				resp.Header.Set("X-Content-Type-Options", "nosniff")
+			}
+			return nil
+		},
+		ErrorHandler: func(rw http.ResponseWriter, req *http.Request, proxyErr error) {
+			apiError(rw, 502, "无法连接 Mihomo 控制接口: "+proxyErr.Error())
+		},
+	}
+	proxy.ServeHTTP(w, r)
 }

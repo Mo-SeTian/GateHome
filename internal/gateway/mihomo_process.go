@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"archive/zip"
 	"bufio"
 	"bytes"
 	"compress/gzip"
@@ -22,12 +23,18 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 const (
-	mihomoReleaseLatestAPI = "https://api.github.com/repos/MetaCubeX/mihomo/releases/latest"
-	maxMihomoBinaryBytes   = 128 << 20
-	maxMihomoUnzipBytes    = 200 << 20
+	mihomoReleaseLatestAPI    = "https://api.github.com/repos/MetaCubeX/mihomo/releases/latest"
+	zashboardReleaseLatestAPI = "https://api.github.com/repos/Zephyruso/zashboard/releases/latest"
+	maxMihomoBinaryBytes      = 128 << 20
+	maxMihomoUnzipBytes       = 200 << 20
+	maxZashboardZipBytes      = 32 << 20
+	maxZashboardExtractBytes  = 96 << 20
+	maxZashboardExtractFiles  = 2000
 )
 
 type mihomoLogRing struct {
@@ -401,6 +408,10 @@ func (m *mihomoManager) PatchMode(mode string) error {
 }
 
 func (m *mihomoManager) doControllerJSON(method, targetURL, secret string, body any, out any) error {
+	return m.doControllerJSONWithTimeout(method, targetURL, secret, body, out, 10*time.Second)
+}
+
+func (m *mihomoManager) doControllerJSONWithTimeout(method, targetURL, secret string, body any, out any, timeout time.Duration) error {
 	var reader io.Reader
 	if body != nil {
 		raw, err := json.Marshal(body)
@@ -419,7 +430,10 @@ func (m *mihomoManager) doControllerJSON(method, targetURL, secret string, body 
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	client := mihomoLocalClient(10 * time.Second)
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
+	client := mihomoLocalClient(timeout)
 	resp, err := client.Do(req)
 	if err != nil {
 		return err
@@ -582,15 +596,235 @@ func (m *mihomoManager) TestGroupDelay(group, testURL string, timeoutMS int) (ma
 	if timeoutMS <= 0 || timeoutMS > 15000 {
 		timeoutMS = 5000
 	}
+
+	// Query group membership once so we can mark timed-out nodes as 0 and fall back per-node if needed.
+	var proxiesPayload struct {
+		Proxies map[string]mihomoProxyRecord `json:"proxies"`
+	}
+	_ = m.doControllerJSONWithTimeout(http.MethodGet, ctrlURL+"/proxies", secret, nil, &proxiesPayload, 8*time.Second)
+
 	q := url.Values{}
 	q.Set("url", testURL)
 	q.Set("timeout", strconv.Itoa(timeoutMS))
-	endpoint := ctrlURL + "/group/" + url.PathEscape(group) + "/delay?" + q.Encode()
+	encodedQ := q.Encode()
+
+	endpoint := ctrlURL + "/group/" + url.PathEscape(group) + "/delay?" + encodedQ
 	delays := map[string]int{}
-	if err := m.doControllerJSON(http.MethodGet, endpoint, secret, nil, &delays); err != nil {
-		return nil, err
+	groupErr := m.doControllerJSONWithTimeout(http.MethodGet, endpoint, secret, nil, &delays, 20*time.Second)
+
+	var testableMembers []string
+	if rec, ok := proxiesPayload.Proxies[group]; ok {
+		for _, member := range rec.All {
+			switch member {
+			case "", "DIRECT", "REJECT", "PASS", "COMPATIBLE":
+				continue
+			}
+			if mRec, exists := proxiesPayload.Proxies[member]; exists && len(mRec.All) > 0 {
+				// Nested group reference rather than a leaf node.
+				continue
+			}
+			testableMembers = append(testableMembers, member)
+		}
+	}
+
+	if (groupErr != nil || len(delays) == 0) && len(testableMembers) > 0 {
+		var mu sync.Mutex
+		var wg sync.WaitGroup
+		sem := make(chan struct{}, 8)
+		for _, member := range testableMembers {
+			wg.Add(1)
+			go func(nodeName string) {
+				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
+
+				var singleRes struct {
+					Delay int `json:"delay"`
+				}
+				nodeURL := ctrlURL + "/proxies/" + url.PathEscape(nodeName) + "/delay?" + encodedQ
+				err := m.doControllerJSONWithTimeout(http.MethodGet, nodeURL, secret, nil, &singleRes, 12*time.Second)
+				mu.Lock()
+				if err == nil && singleRes.Delay > 0 {
+					delays[nodeName] = singleRes.Delay
+				} else if _, exists := delays[nodeName]; !exists {
+					delays[nodeName] = 0
+				}
+				mu.Unlock()
+			}(member)
+		}
+		wg.Wait()
+	} else if groupErr != nil && len(delays) == 0 {
+		return nil, groupErr
+	}
+
+	for _, member := range testableMembers {
+		if _, exists := delays[member]; !exists {
+			delays[member] = 0
+		}
 	}
 	return delays, nil
+}
+
+type mihomoYAMLValidationSummary struct {
+	Proxies int `json:"proxies"`
+	Groups  int `json:"groups"`
+	Rules   int `json:"rules"`
+}
+
+type mihomoYAMLValidationResult struct {
+	Valid         bool                        `json:"valid"`
+	Error         string                      `json:"error,omitempty"`
+	Warnings      []string                    `json:"warnings,omitempty"`
+	CoreTested    bool                        `json:"core_tested"`
+	FormattedYAML string                      `json:"formatted_yaml,omitempty"`
+	Summary       mihomoYAMLValidationSummary `json:"summary"`
+}
+
+func (m *mihomoManager) ValidateYAML(raw []byte) mihomoYAMLValidationResult {
+	res := mihomoYAMLValidationResult{Warnings: []string{}}
+	if len(bytes.TrimSpace(raw)) == 0 {
+		res.Error = "YAML 内容不能为空"
+		return res
+	}
+	if len(raw) > 10<<20 {
+		res.Error = "YAML 配置大小不能超过 10 MiB"
+		return res
+	}
+	var doc yaml.Node
+	if err := yaml.Unmarshal(raw, &doc); err != nil {
+		res.Error = fmt.Sprintf("YAML 语法错误: %v", err)
+		return res
+	}
+	if doc.Kind != yaml.DocumentNode || len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
+		res.Error = "YAML 根节点必须为映射对象"
+		return res
+	}
+	root := doc.Content[0]
+
+	// Check common port fields if present.
+	for _, portKey := range []string{"mixed-port", "port", "socks-port"} {
+		if vNode, _ := yamlMapFind(root, portKey); vNode != nil {
+			if vNode.Kind != yaml.ScalarNode {
+				res.Error = fmt.Sprintf("%s 须为 0–65535 的整数", portKey)
+				return res
+			}
+			p, err := strconv.Atoi(strings.TrimSpace(vNode.Value))
+			if err != nil || p < 0 || p > 65535 {
+				res.Error = fmt.Sprintf("%s 端口值无效 (%s)，须为 0–65535", portKey, vNode.Value)
+				return res
+			}
+		}
+	}
+
+	proxySet := map[string]bool{}
+	dupSeen := map[string]bool{}
+	if proxiesNode, _ := yamlMapFind(root, "proxies"); proxiesNode != nil && proxiesNode.Kind == yaml.SequenceNode {
+		for _, item := range proxiesNode.Content {
+			if item.Kind != yaml.MappingNode {
+				continue
+			}
+			res.Summary.Proxies++
+			if nameNode, _ := yamlMapFind(item, "name"); nameNode != nil {
+				name := strings.TrimSpace(nameNode.Value)
+				if name == "" {
+					res.Error = "proxies 中存在缺少 name 的节点条目"
+					return res
+				}
+				if proxySet[name] && !dupSeen[name] {
+					dupSeen[name] = true
+					res.Warnings = append(res.Warnings, fmt.Sprintf("存在重复节点名称: %s", name))
+				}
+				proxySet[name] = true
+			}
+		}
+	}
+
+	groupSet := map[string]bool{}
+	if groupsNode, _ := yamlMapFind(root, "proxy-groups"); groupsNode != nil && groupsNode.Kind == yaml.SequenceNode {
+		for _, item := range groupsNode.Content {
+			if item.Kind != yaml.MappingNode {
+				continue
+			}
+			res.Summary.Groups++
+			if nameNode, _ := yamlMapFind(item, "name"); nameNode != nil && strings.TrimSpace(nameNode.Value) != "" {
+				groupSet[nameNode.Value] = true
+			}
+		}
+		builtins := map[string]bool{"DIRECT": true, "REJECT": true, "PASS": true, "COMPATIBLE": true}
+		for _, item := range groupsNode.Content {
+			if item.Kind != yaml.MappingNode {
+				continue
+			}
+			groupName := "(未命名策略组)"
+			if nameNode, _ := yamlMapFind(item, "name"); nameNode != nil && strings.TrimSpace(nameNode.Value) != "" {
+				groupName = nameNode.Value
+			}
+			membersNode, _ := yamlMapFind(item, "proxies")
+			if membersNode == nil || membersNode.Kind != yaml.SequenceNode {
+				continue
+			}
+			for _, member := range membersNode.Content {
+				val := strings.TrimSpace(member.Value)
+				if val == "" {
+					continue
+				}
+				if !builtins[val] && !proxySet[val] && !groupSet[val] {
+					res.Error = fmt.Sprintf("策略组「%s」引用了不存在的节点或策略组「%s」", groupName, val)
+					return res
+				}
+			}
+		}
+	}
+
+	if rulesNode, _ := yamlMapFind(root, "rules"); rulesNode != nil && rulesNode.Kind == yaml.SequenceNode {
+		res.Summary.Rules = len(rulesNode.Content)
+	}
+
+	var formattedBuf bytes.Buffer
+	enc := yaml.NewEncoder(&formattedBuf)
+	enc.SetIndent(2)
+	if err := enc.Encode(&doc); err != nil {
+		res.Error = fmt.Sprintf("YAML 格式化失败: %v", err)
+		return res
+	}
+	_ = enc.Close()
+
+	m.mu.Lock()
+	bin := m.resolveBinaryLocked()
+	dir := m.dir
+	cfgCopy := m.cfg
+	m.mu.Unlock()
+
+	if bin != "" && dir != "" {
+		if absDir, err := filepath.Abs(dir); err == nil {
+			_ = os.MkdirAll(absDir, 0700)
+			if tmp, err := os.CreateTemp(absDir, ".validate-*.yaml"); err == nil {
+				tmpPath := tmp.Name()
+				_ = tmp.Close()
+				defer os.Remove(tmpPath)
+				if testBytes, err := injectManagedKeys(formattedBuf.Bytes(), cfgCopy); err == nil {
+					if os.WriteFile(tmpPath, testBytes, 0600) == nil {
+						ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+						out, err := exec.CommandContext(ctx, bin, "-t", "-d", absDir, "-f", tmpPath).CombinedOutput()
+						cancel()
+						res.CoreTested = true
+						if err != nil {
+							msg := strings.TrimSpace(string(out))
+							if msg == "" {
+								msg = err.Error()
+							}
+							res.Error = "Mihomo 内核校验失败: " + msg
+							return res
+						}
+					}
+				}
+			}
+		}
+	}
+
+	res.Valid = true
+	res.FormattedYAML = maskYAMLSecret(formattedBuf.Bytes())
+	return res
 }
 
 func (m *mihomoManager) OutboundProxyURL() string {
@@ -821,6 +1055,219 @@ func (m *mihomoManager) DownloadCore(ctx context.Context, state State) (string, 
 		return "", err
 	}
 	return ver, nil
+}
+
+func (m *mihomoManager) zashboardDir() string {
+	return filepath.Join(m.dir, "ui", "zashboard")
+}
+
+func (m *mihomoManager) zashboardStatus() (bool, string) {
+	dir := m.zashboardDir()
+	info, err := os.Stat(filepath.Join(dir, "index.html"))
+	if err != nil || info.IsDir() {
+		return false, ""
+	}
+	verBytes, err := os.ReadFile(filepath.Join(dir, ".version"))
+	if err != nil {
+		return true, ""
+	}
+	return true, strings.TrimSpace(string(verBytes))
+}
+
+func selectZashboardAsset(assets []githubReleaseAsset) (githubReleaseAsset, bool) {
+	var cdnFallback *githubReleaseAsset
+	for i := range assets {
+		name := strings.ToLower(strings.TrimSpace(assets[i].Name))
+		if name == "dist.zip" {
+			return assets[i], true
+		}
+		if name == "dist-cdn-fonts.zip" && cdnFallback == nil {
+			cdnFallback = &assets[i]
+		}
+	}
+	if cdnFallback != nil {
+		return *cdnFallback, true
+	}
+	return githubReleaseAsset{}, false
+}
+
+func detectZashboardStripPrefix(files []*zip.File) string {
+	hasRootIndex := false
+	topDirs := map[string]bool{}
+	for _, f := range files {
+		clean := strings.TrimPrefix(filepath.ToSlash(f.Name), "./")
+		clean = strings.TrimLeft(clean, "/")
+		if clean == "" || strings.HasSuffix(clean, "/") {
+			continue
+		}
+		if clean == "index.html" {
+			hasRootIndex = true
+			break
+		}
+		if idx := strings.IndexByte(clean, '/'); idx > 0 {
+			topDirs[clean[:idx]] = true
+		} else {
+			topDirs[""] = true
+		}
+	}
+	if hasRootIndex || len(topDirs) != 1 {
+		return ""
+	}
+	for dir := range topDirs {
+		if dir != "" && dir != "." && dir != ".." {
+			return dir + "/"
+		}
+	}
+	return ""
+}
+
+func (m *mihomoManager) installZashboardZip(raw []byte, version string) (string, error) {
+	if len(raw) == 0 {
+		return "", errors.New("Zashboard 压缩包为空")
+	}
+	zr, err := zip.NewReader(bytes.NewReader(raw), int64(len(raw)))
+	if err != nil {
+		return "", fmt.Errorf("解析 Zashboard 压缩包失败: %v", err)
+	}
+	if len(zr.File) > maxZashboardExtractFiles {
+		return "", fmt.Errorf("压缩包文件数量过多 (%d)", len(zr.File))
+	}
+
+	uiParent := filepath.Join(m.dir, "ui")
+	if err := os.MkdirAll(uiParent, 0700); err != nil {
+		return "", err
+	}
+	tmpDir, err := os.MkdirTemp(uiParent, ".zashboard-tmp-*")
+	if err != nil {
+		return "", err
+	}
+	defer os.RemoveAll(tmpDir)
+
+	stripPrefix := detectZashboardStripPrefix(zr.File)
+	var totalWritten int64
+
+	for _, f := range zr.File {
+		if f.FileInfo().Mode()&os.ModeSymlink != 0 {
+			return "", errors.New("压缩包包含不允许的符号链接")
+		}
+		slashName := strings.TrimPrefix(filepath.ToSlash(f.Name), "./")
+		if stripPrefix != "" {
+			slashName = strings.TrimPrefix(slashName, stripPrefix)
+		}
+		slashName = strings.TrimPrefix(slashName, "/")
+		if slashName == "" {
+			continue
+		}
+		if strings.Contains(slashName, "\\") || filepath.IsAbs(slashName) {
+			return "", fmt.Errorf("压缩包包含非法路径: %s", f.Name)
+		}
+		parts := strings.Split(slashName, "/")
+		for _, p := range parts {
+			if p == ".." {
+				return "", fmt.Errorf("压缩包路径越界: %s", f.Name)
+			}
+		}
+
+		destPath := filepath.Join(tmpDir, filepath.FromSlash(slashName))
+		rel, err := filepath.Rel(tmpDir, destPath)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return "", fmt.Errorf("压缩包路径越界: %s", f.Name)
+		}
+
+		if f.FileInfo().IsDir() || strings.HasSuffix(slashName, "/") {
+			if err := os.MkdirAll(destPath, 0700); err != nil {
+				return "", err
+			}
+			continue
+		}
+
+		if err := os.MkdirAll(filepath.Dir(destPath), 0700); err != nil {
+			return "", err
+		}
+		rc, err := f.Open()
+		if err != nil {
+			return "", err
+		}
+		out, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+		if err != nil {
+			rc.Close()
+			return "", err
+		}
+		remaining := maxZashboardExtractBytes - totalWritten + 1
+		n, copyErr := io.Copy(out, io.LimitReader(rc, remaining))
+		closeErr := out.Close()
+		rc.Close()
+		if copyErr != nil {
+			return "", copyErr
+		}
+		if closeErr != nil {
+			return "", closeErr
+		}
+		totalWritten += n
+		if totalWritten > maxZashboardExtractBytes {
+			return "", errors.New("Zashboard 解压内容超过大小限制")
+		}
+	}
+
+	idxInfo, err := os.Stat(filepath.Join(tmpDir, "index.html"))
+	if err != nil || idxInfo.IsDir() || idxInfo.Size() == 0 {
+		return "", errors.New("压缩包缺少有效的 index.html")
+	}
+	cleanVer := strings.TrimSpace(version)
+	if cleanVer != "" {
+		if err := os.WriteFile(filepath.Join(tmpDir, ".version"), []byte(cleanVer+"\n"), 0600); err != nil {
+			return "", err
+		}
+	}
+
+	target := m.zashboardDir()
+	backup := target + ".old"
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	_ = os.RemoveAll(backup)
+	hasExisting := false
+	if _, err := os.Stat(target); err == nil {
+		if err := os.Rename(target, backup); err != nil {
+			return "", err
+		}
+		hasExisting = true
+	}
+	if err := os.Rename(tmpDir, target); err != nil {
+		if hasExisting {
+			_ = os.Rename(backup, target)
+		}
+		return "", err
+	}
+	if hasExisting {
+		_ = os.RemoveAll(backup)
+	}
+	return cleanVer, nil
+}
+
+func (m *mihomoManager) DownloadZashboard(ctx context.Context, state State) (string, error) {
+	client := onlineUpdateClient(state)
+	defer closeClient(client)
+
+	metaBytes, err := fetchOnlineUpdate(ctx, client, zashboardReleaseLatestAPI, 2<<20, state.GitHubToken)
+	if err != nil {
+		return "", fmt.Errorf("获取 Zashboard 发布信息失败: %v", err)
+	}
+	var release struct {
+		TagName string               `json:"tag_name"`
+		Assets  []githubReleaseAsset `json:"assets"`
+	}
+	if err := json.Unmarshal(metaBytes, &release); err != nil {
+		return "", errors.New("解析 Zashboard 版本信息失败")
+	}
+	asset, ok := selectZashboardAsset(release.Assets)
+	if !ok || asset.URL == "" {
+		return "", fmt.Errorf("未找到 Zashboard 发行包 (%s)", release.TagName)
+	}
+	raw, err := fetchOnlineUpdate(ctx, client, asset.URL, maxZashboardZipBytes, "")
+	if err != nil {
+		return "", fmt.Errorf("下载 Zashboard 压缩包失败: %v", err)
+	}
+	return m.installZashboardZip(raw, release.TagName)
 }
 
 func (m *mihomoManager) fetchSubscriptionYAML(ctx context.Context, subURL string) ([]byte, int64, int64, int64, int64, error) {

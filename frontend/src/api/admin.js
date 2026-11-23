@@ -77,8 +77,8 @@ export const adminApi = {
   mihomoGroups: (signal) => request('/api/mihomo/groups', { signal }),
   saveMihomoGroup: (body) => request('/api/mihomo/groups', { method: 'POST', body }),
   deleteMihomoGroup: (id) => request(`/api/mihomo/groups/${encodeURIComponent(id)}`, { method: 'DELETE', body: {} }),
-  selectMihomoProxy: (group, node) => request(`/api/mihomo/groups/${encodeURIComponent(group)}/select`, { method: 'PUT', body: { node } }),
-  testMihomoGroupDelay: (group, body = {}) => request(`/api/mihomo/groups/${encodeURIComponent(group)}/delay`, { method: 'POST', body }),
+  selectMihomoProxy: (group, node) => request('/api/mihomo/select', { method: 'PUT', body: { group, node } }),
+  testMihomoGroupDelay: (group, body = {}) => request('/api/mihomo/delay', { method: 'POST', body: { group, ...body } }),
   addMihomoRule: (body) => request('/api/mihomo/rules', { method: 'POST', body }),
   saveMihomoRules: (rules) => request('/api/mihomo/rules', { method: 'PUT', body: { rules } }),
   deleteMihomoRule: (id) => request(`/api/mihomo/rules/${encodeURIComponent(id)}`, { method: 'DELETE', body: {} }),
@@ -86,13 +86,16 @@ export const adminApi = {
   saveMihomoDNSPolicies: (policies) => request('/api/mihomo/dns-policies', { method: 'PUT', body: { policies } }),
   deleteMihomoDNSPolicy: (id) => request(`/api/mihomo/dns-policies/${encodeURIComponent(id)}`, { method: 'DELETE', body: {} }),
   addMihomoSubscription: (body) => request('/api/mihomo/subscriptions', { method: 'POST', body }),
+  updateMihomoSubscription: (id, body) => request(`/api/mihomo/subscriptions/${encodeURIComponent(id)}`, { method: 'PUT', body }),
   activateMihomoSubscription: (id) => request(`/api/mihomo/subscriptions/${encodeURIComponent(id)}/activate`, { method: 'PUT', body: {} }),
   refreshMihomoSubscription: (id) => request(`/api/mihomo/subscriptions/${encodeURIComponent(id)}/refresh`, { method: 'POST', body: {} }),
   deleteMihomoSubscription: (id) => request(`/api/mihomo/subscriptions/${encodeURIComponent(id)}`, { method: 'DELETE', body: {} }),
   mihomoYaml: (kind = 'runtime', signal) => request(queryPath('/api/mihomo/config/yaml', { kind }), { signal }),
+  validateMihomoYaml: (content) => request('/api/mihomo/config/validate', { method: 'POST', body: { content } }),
   saveMihomoYaml: (content) => request('/api/mihomo/config/yaml', { method: 'PUT', body: { content } }),
   resyncMihomoYaml: () => request('/api/mihomo/config/resync', { method: 'POST', body: {} }),
   downloadMihomoCore: () => request('/api/mihomo/core/download', { method: 'POST', body: {} }),
+  downloadMihomoZashboard: () => request('/api/mihomo/zashboard/download', { method: 'POST', body: {} }),
   uploadMihomoCore: (file) => {
     const body = new FormData()
     body.append('file', file)
