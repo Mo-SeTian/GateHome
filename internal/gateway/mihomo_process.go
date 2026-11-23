@@ -210,7 +210,7 @@ func (m *mihomoManager) Start() error {
 	bin := m.resolveBinaryLocked()
 	if bin == "" {
 		m.mu.Unlock()
-		return errors.New("未检测到 mihomo 内核程序，请先在「订阅与配置」下载或上传内核")
+		return errors.New("未检测到 mihomo 内核程序，请先在「端口与核心」下载或上传内核")
 	}
 	gwCfg := Config{}
 	if m.store != nil {
@@ -582,6 +582,38 @@ func (m *mihomoManager) SelectProxy(group, node string) error {
 	return m.doControllerJSON(http.MethodPut, endpoint, secret, map[string]string{"name": node}, nil)
 }
 
+func normalizeDelayQuery(testURL string, timeoutMS int) string {
+	if strings.TrimSpace(testURL) == "" {
+		testURL = "https://www.gstatic.com/generate_204"
+	}
+	if timeoutMS <= 0 || timeoutMS > 15000 {
+		timeoutMS = 5000
+	}
+	q := url.Values{}
+	q.Set("url", testURL)
+	q.Set("timeout", strconv.Itoa(timeoutMS))
+	return q.Encode()
+}
+
+func (m *mihomoManager) TestNodeDelay(node, testURL string, timeoutMS int) (int, error) {
+	m.mu.Lock()
+	running := m.running || m.ctrlBaseURL != ""
+	ctrlURL, secret := m.controllerURLAndSecretLocked()
+	m.mu.Unlock()
+	if !running {
+		return 0, errors.New("mihomo 内核未运行")
+	}
+	encodedQ := normalizeDelayQuery(testURL, timeoutMS)
+	var res struct {
+		Delay int `json:"delay"`
+	}
+	endpoint := ctrlURL + "/proxies/" + url.PathEscape(node) + "/delay?" + encodedQ
+	if err := m.doControllerJSONWithTimeout(http.MethodGet, endpoint, secret, nil, &res, 12*time.Second); err != nil || res.Delay <= 0 {
+		return 0, nil
+	}
+	return res.Delay, nil
+}
+
 func (m *mihomoManager) TestGroupDelay(group, testURL string, timeoutMS int) (map[string]int, error) {
 	m.mu.Lock()
 	running := m.running || m.ctrlBaseURL != ""
@@ -590,12 +622,7 @@ func (m *mihomoManager) TestGroupDelay(group, testURL string, timeoutMS int) (ma
 	if !running {
 		return nil, errors.New("mihomo 内核未运行")
 	}
-	if strings.TrimSpace(testURL) == "" {
-		testURL = "https://www.gstatic.com/generate_204"
-	}
-	if timeoutMS <= 0 || timeoutMS > 15000 {
-		timeoutMS = 5000
-	}
+	encodedQ := normalizeDelayQuery(testURL, timeoutMS)
 
 	// Query group membership once so we can mark timed-out nodes as 0 and fall back per-node if needed.
 	var proxiesPayload struct {
@@ -603,35 +630,33 @@ func (m *mihomoManager) TestGroupDelay(group, testURL string, timeoutMS int) (ma
 	}
 	_ = m.doControllerJSONWithTimeout(http.MethodGet, ctrlURL+"/proxies", secret, nil, &proxiesPayload, 8*time.Second)
 
-	q := url.Values{}
-	q.Set("url", testURL)
-	q.Set("timeout", strconv.Itoa(timeoutMS))
-	encodedQ := q.Encode()
-
 	endpoint := ctrlURL + "/group/" + url.PathEscape(group) + "/delay?" + encodedQ
 	delays := map[string]int{}
 	groupErr := m.doControllerJSONWithTimeout(http.MethodGet, endpoint, secret, nil, &delays, 20*time.Second)
 
 	var testableMembers []string
+	var fallbackTargets []string
+	needFullFallback := groupErr != nil || len(delays) == 0
+
 	if rec, ok := proxiesPayload.Proxies[group]; ok {
 		for _, member := range rec.All {
 			switch member {
 			case "", "DIRECT", "REJECT", "PASS", "COMPATIBLE":
 				continue
 			}
-			if mRec, exists := proxiesPayload.Proxies[member]; exists && len(mRec.All) > 0 {
-				// Nested group reference rather than a leaf node.
-				continue
-			}
 			testableMembers = append(testableMembers, member)
+			_, alreadyTested := delays[member]
+			if needFullFallback || (!alreadyTested && len(proxiesPayload.Proxies[member].All) > 0) {
+				fallbackTargets = append(fallbackTargets, member)
+			}
 		}
 	}
 
-	if (groupErr != nil || len(delays) == 0) && len(testableMembers) > 0 {
+	if len(fallbackTargets) > 0 {
 		var mu sync.Mutex
 		var wg sync.WaitGroup
 		sem := make(chan struct{}, 8)
-		for _, member := range testableMembers {
+		for _, member := range fallbackTargets {
 			wg.Add(1)
 			go func(nodeName string) {
 				defer wg.Done()

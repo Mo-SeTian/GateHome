@@ -129,7 +129,7 @@
           <span class="meta-pill">{{ groups.length }} 个策略组</span>
           <span class="meta-pill">{{ allNodes.length }} 个节点</span>
           <span v-if="groupsLive" class="badge badge-ok">实时控制</span>
-          <span v-else class="badge badge-neutral">离线预览</span>
+          <span v-else class="badge badge-warn">离线预览（请先启动内核）</span>
         </div>
         <div class="report-actions">
           <button type="button" class="btn btn-secondary btn-sm" @click="loadGroups()">刷新节点</button>
@@ -159,6 +159,7 @@
                 type="button"
                 class="btn btn-secondary btn-sm"
                 :disabled="!status?.running || testingGroup === group.name"
+                :title="status?.running ? '测试该策略组所有节点延迟' : '请先点击右上角「启动」运行 Mihomo 内核'"
                 @click="testGroupDelay(group.name)"
               >
                 <Zap :size="13" /> {{ testingGroup === group.name ? '测速中…' : '测速' }}
@@ -185,20 +186,34 @@
           </div>
 
           <div v-show="expandedGroups[group.name]" class="nodes-grid">
-            <button
+            <div
               v-for="node in group.all"
               :key="node"
-              type="button"
               class="node-tile"
               :class="{ selected: group.now === node }"
-              :disabled="!status?.running || (group.type !== 'Selector' && group.type !== 'select')"
-              @click="selectNode(group.name, node)"
             >
-              <span class="node-name" :title="node">{{ node }}</span>
-              <span class="node-delay mono-text" :class="delayClass(delays[node])">
-                {{ formatDelay(delays[node]) }}
-              </span>
-            </button>
+              <button
+                type="button"
+                class="node-select-btn"
+                :disabled="!status?.running || (group.type !== 'Selector' && group.type !== 'select')"
+                @click="selectNode(group.name, node)"
+              >
+                <span class="node-name" :title="node">{{ node }}</span>
+              </button>
+              <button
+                v-if="!builtinNodeNames.has(node)"
+                type="button"
+                class="node-delay node-delay-btn mono-text"
+                :class="delayClass(delays[node])"
+                :disabled="!status?.running || testingNode === node"
+                :title="status?.running ? `单独测速 ${node}` : '请先启动 Mihomo 内核'"
+                :aria-label="`单独测速 ${node}`"
+                @click.stop="testSingleNodeDelay(node)"
+              >
+                {{ testingNode === node ? '…' : formatDelay(delays[node]) }}
+              </button>
+              <span v-else class="node-delay mono-text muted">—</span>
+            </div>
           </div>
         </SpotlightCard>
       </div>
@@ -1089,7 +1104,9 @@ const busySub = ref('')
 const coreBusy = ref(false)
 const zashboardBusy = ref(false)
 const testingGroup = ref('')
+const testingNode = ref('')
 const error = ref('')
+const builtinNodeNames = new Set(['DIRECT', 'REJECT', 'PASS', 'COMPATIBLE'])
 
 const activeTab = ref('groups')
 const groups = ref([])
@@ -1340,6 +1357,24 @@ async function testGroupDelay(groupName) {
     toast.error(err.message)
   } finally {
     testingGroup.value = ''
+  }
+}
+
+async function testSingleNodeDelay(nodeName) {
+  testingNode.value = nodeName
+  try {
+    const res = await adminApi.testMihomoNodeDelay(nodeName)
+    const delay = Number(res.delay) || 0
+    delays.value = { ...delays.value, [nodeName]: delay }
+    if (delay > 0) {
+      toast.success(`${nodeName}: ${delay} ms`)
+    } else {
+      toast.warn(`${nodeName}: 测速超时`)
+    }
+  } catch (err) {
+    toast.error(err.message)
+  } finally {
+    testingNode.value = ''
   }
 }
 
@@ -2162,17 +2197,16 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  padding: 9px 11px;
+  gap: 6px;
+  padding: 4px 6px 4px 10px;
   border-radius: var(--radius-sm);
   background: var(--strip-bg);
   border: 1px solid var(--line);
-  text-align: left;
   transition: var(--transition-smooth);
   min-width: 0;
 }
 
-.node-tile:not(:disabled):hover {
+.node-tile:hover {
   border-color: var(--card-border-hover);
   background: var(--card-hover-bg);
 }
@@ -2180,6 +2214,19 @@ onBeforeUnmount(() => {
 .node-tile.selected {
   border-color: var(--brand);
   background: rgba(99, 102, 241, 0.1);
+}
+
+.node-select-btn {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  padding: 5px 4px 5px 0;
+  text-align: left;
+}
+
+.node-select-btn:disabled {
+  cursor: default;
 }
 
 .node-name {
@@ -2193,6 +2240,18 @@ onBeforeUnmount(() => {
 .node-delay {
   font-size: 11px;
   flex-shrink: 0;
+}
+
+.node-delay-btn {
+  padding: 4px 7px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  transition: var(--transition-smooth);
+}
+
+.node-delay-btn:not(:disabled):hover {
+  border-color: var(--line);
+  background: var(--card-bg);
 }
 
 .node-delay.ok { color: var(--ok); }

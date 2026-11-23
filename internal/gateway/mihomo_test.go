@@ -1134,8 +1134,9 @@ func TestMihomoDelaySpecialGroupFallbackAndEditGroup(t *testing.T) {
 					"name": groupName,
 					"type": "Selector",
 					"now":  "HK-01",
-					"all":  []string{"HK-01", "HK-TIMEOUT", "DIRECT"},
+					"all":  []string{"NestedAuto", "HK-01", "HK-TIMEOUT", "DIRECT"},
 				},
+				"NestedAuto": map[string]any{"name": "NestedAuto", "type": "URLTest", "all": []string{"HK-01"}},
 				"HK-01":      map[string]any{"name": "HK-01", "type": "Shadowsocks"},
 				"HK-TIMEOUT": map[string]any{"name": "HK-TIMEOUT", "type": "Shadowsocks"},
 			},
@@ -1144,8 +1145,12 @@ func TestMihomoDelaySpecialGroupFallbackAndEditGroup(t *testing.T) {
 	// Simulate /group/.../delay failing so fallback per-node /proxies/.../delay runs
 	mux.HandleFunc("GET /proxies/{name}/delay", func(w http.ResponseWriter, r *http.Request) {
 		node := r.PathValue("name")
-		if node == "HK-01" {
+		switch node {
+		case "HK-01":
 			jsonResponse(w, 200, map[string]int{"delay": 52})
+			return
+		case "NestedAuto":
+			jsonResponse(w, 200, map[string]int{"delay": 64})
 			return
 		}
 		http.Error(w, `{"message":"timeout"}`, 504)
@@ -1174,14 +1179,39 @@ func TestMihomoDelaySpecialGroupFallbackAndEditGroup(t *testing.T) {
 		Delays map[string]int `json:"delays"`
 	}
 	_ = json.Unmarshal(rec.Body.Bytes(), &delayRes)
-	if delayRes.Delays["HK-01"] != 52 {
-		t.Fatalf("expected HK-01 delay 52, got %+v", delayRes.Delays)
+	if delayRes.Delays["HK-01"] != 52 || delayRes.Delays["NestedAuto"] != 64 {
+		t.Fatalf("expected HK-01=52 and NestedAuto=64, got %+v", delayRes.Delays)
 	}
 	if val, ok := delayRes.Delays["HK-TIMEOUT"]; !ok || val != 0 {
 		t.Fatalf("expected timed-out HK-TIMEOUT explicitly marked as 0, got %+v", delayRes.Delays)
 	}
 	if _, hasDirect := delayRes.Delays["DIRECT"]; hasDirect {
 		t.Fatal("DIRECT builtin should not be in tested delays")
+	}
+
+	// Test single-node delay POST /api/mihomo/node-delay (reachable, timeout, invalid)
+	rec = adminRequest(h, "POST", "/api/mihomo/node-delay", map[string]any{"node": "HK-01"}, cookie, "")
+	if rec.Code != 200 {
+		t.Fatalf("POST /api/mihomo/node-delay reachable failed: %d %s", rec.Code, rec.Body.String())
+	}
+	var nodeRes struct {
+		Node  string `json:"node"`
+		Delay int    `json:"delay"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &nodeRes)
+	if nodeRes.Node != "HK-01" || nodeRes.Delay != 52 {
+		t.Fatalf("expected HK-01 delay 52, got %+v", nodeRes)
+	}
+	rec = adminRequest(h, "POST", "/api/mihomo/node-delay", map[string]any{"node": "HK-TIMEOUT"}, cookie, "")
+	if rec.Code != 200 {
+		t.Fatalf("POST /api/mihomo/node-delay timeout failed: %d %s", rec.Code, rec.Body.String())
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &nodeRes)
+	if nodeRes.Node != "HK-TIMEOUT" || nodeRes.Delay != 0 {
+		t.Fatalf("expected HK-TIMEOUT delay 0, got %+v", nodeRes)
+	}
+	if adminRequest(h, "POST", "/api/mihomo/node-delay", map[string]any{"node": ""}, cookie, "").Code != 400 {
+		t.Fatal("expected 400 on empty node in node-delay")
 	}
 
 	// Test body-based PUT /api/mihomo/select with slash+emoji group name

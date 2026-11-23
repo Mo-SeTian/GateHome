@@ -130,6 +130,7 @@ func (a *Admin) mihomoRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/mihomo/select", a.requireAuth(a.handleMihomoSelectProxyBody))
 	mux.HandleFunc("PUT /api/mihomo/groups/{name}/select", a.requireAuth(a.handleMihomoSelectProxy))
 	mux.HandleFunc("POST /api/mihomo/delay", a.requireAuth(a.handleMihomoGroupDelayBody))
+	mux.HandleFunc("POST /api/mihomo/node-delay", a.requireAuth(a.handleMihomoNodeDelayBody))
 	mux.HandleFunc("POST /api/mihomo/groups/{name}/delay", a.requireAuth(a.handleMihomoGroupDelay))
 
 	mux.HandleFunc("POST /api/mihomo/rules", a.requireAuth(a.handleMihomoAddRule))
@@ -254,6 +255,12 @@ func (a *Admin) handleMihomoStart(w http.ResponseWriter, r *http.Request) {
 		apiError(w, 400, err.Error())
 		return
 	}
+	a.mihomo.mu.Lock()
+	if !a.mihomo.cfg.Enabled {
+		a.mihomo.cfg.Enabled = true
+		_ = saveMihomoConfig(a.mihomo.dir, a.mihomo.cfg)
+	}
+	a.mihomo.mu.Unlock()
 	jsonResponse(w, 200, a.mihomo.statusSnapshot())
 }
 
@@ -262,6 +269,12 @@ func (a *Admin) handleMihomoStop(w http.ResponseWriter, r *http.Request) {
 		apiError(w, 500, err.Error())
 		return
 	}
+	a.mihomo.mu.Lock()
+	if a.mihomo.cfg.Enabled {
+		a.mihomo.cfg.Enabled = false
+		_ = saveMihomoConfig(a.mihomo.dir, a.mihomo.cfg)
+	}
+	a.mihomo.mu.Unlock()
 	jsonResponse(w, 200, a.mihomo.statusSnapshot())
 }
 
@@ -479,6 +492,30 @@ func (a *Admin) handleMihomoGroupDelay(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	a.applyGroupDelay(w, r.PathValue("name"), input.URL, input.Timeout)
+}
+
+func (a *Admin) handleMihomoNodeDelayBody(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Node    string `json:"node"`
+		URL     string `json:"url"`
+		Timeout int    `json:"timeout"`
+	}
+	if !decodeBody(w, r, &input) {
+		return
+	}
+	if input.Node == "" {
+		apiError(w, 400, "节点名称不能为空")
+		return
+	}
+	delay, err := a.mihomo.TestNodeDelay(input.Node, input.URL, input.Timeout)
+	if err != nil {
+		apiError(w, 400, err.Error())
+		return
+	}
+	jsonResponse(w, 200, map[string]any{
+		"node":  input.Node,
+		"delay": delay,
+	})
 }
 
 func (a *Admin) handleMihomoAddRule(w http.ResponseWriter, r *http.Request) {

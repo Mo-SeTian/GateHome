@@ -79,6 +79,7 @@ export const adminApi = {
   deleteMihomoGroup: (id) => request(`/api/mihomo/groups/${encodeURIComponent(id)}`, { method: 'DELETE', body: {} }),
   selectMihomoProxy: (group, node) => request('/api/mihomo/select', { method: 'PUT', body: { group, node } }),
   testMihomoGroupDelay: (group, body = {}) => request('/api/mihomo/delay', { method: 'POST', body: { group, ...body } }),
+  testMihomoNodeDelay: (node, body = {}) => request('/api/mihomo/node-delay', { method: 'POST', body: { node, ...body } }),
   addMihomoRule: (body) => request('/api/mihomo/rules', { method: 'POST', body }),
   saveMihomoRules: (rules) => request('/api/mihomo/rules', { method: 'PUT', body: { rules } }),
   deleteMihomoRule: (id) => request(`/api/mihomo/rules/${encodeURIComponent(id)}`, { method: 'DELETE', body: {} }),
