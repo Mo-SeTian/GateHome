@@ -1645,3 +1645,54 @@ func TestMihomoMMDBUploadValidationAndStatus(t *testing.T) {
 		t.Fatalf("country.mmdb missing on disk: %v", err)
 	}
 }
+
+func TestMihomoCustomGroupsRulesYAMLRoundTrip(t *testing.T) {
+	a, h := testAdmin(t)
+	cookie := loginForTest(t, h)
+
+	// Create group + rule via the form APIs, then read them back as YAML (single source of truth).
+	if rec := adminRequest(h, "POST", "/api/mihomo/groups", map[string]any{"name": "AI", "type": "select", "proxies": []string{"DIRECT"}}, cookie, ""); rec.Code != 200 {
+		t.Fatalf("create group: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := adminRequest(h, "POST", "/api/mihomo/rules", map[string]any{"type": "DOMAIN-SUFFIX", "value": "openai.com", "target": "AI", "enabled": true}, cookie, ""); rec.Code != 200 {
+		t.Fatalf("create rule: %d %s", rec.Code, rec.Body.String())
+	}
+	rec := adminRequest(h, "GET", "/api/mihomo/custom/groups/yaml", nil, cookie, "")
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "name: AI") {
+		t.Fatalf("groups yaml missing form-created group: %d %s", rec.Code, rec.Body.String())
+	}
+	rec = adminRequest(h, "GET", "/api/mihomo/custom/rules/yaml", nil, cookie, "")
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "DOMAIN-SUFFIX,openai.com,AI") {
+		t.Fatalf("rules yaml missing form-created rule: %d %s", rec.Code, rec.Body.String())
+	}
+
+	// Edit via YAML: invalid content is rejected without touching state.
+	if rec := adminRequest(h, "PUT", "/api/mihomo/custom/rules/yaml", map[string]any{"content": "rules:\n  - BAD,x\n"}, cookie, ""); rec.Code != 400 {
+		t.Fatalf("expected 400 for bad rule yaml, got %d", rec.Code)
+	}
+	if rec := adminRequest(h, "PUT", "/api/mihomo/custom/groups/yaml", map[string]any{"content": "proxy-groups:\n  - name: X\n    type: bogus\n"}, cookie, ""); rec.Code != 400 {
+		t.Fatalf("expected 400 for bad group yaml, got %d", rec.Code)
+	}
+
+	// Valid YAML edits replace the list and appear in the UI status + runtime.yaml (custom rules above airport ones).
+	groupsYAML := "proxy-groups:\n  - name: AI\n    type: fallback\n    proxies: [DIRECT]\n    interval: 120\n  - name: 流媒体\n    type: select\n    proxies: [DIRECT]\n"
+	if rec := adminRequest(h, "PUT", "/api/mihomo/custom/groups/yaml", map[string]any{"content": groupsYAML}, cookie, ""); rec.Code != 200 {
+		t.Fatalf("put groups yaml: %d %s", rec.Code, rec.Body.String())
+	}
+	rulesYAML := "rules:\n  - DOMAIN-SUFFIX,openai.com,AI\n  - rule: DOMAIN-SUFFIX,netflix.com,流媒体\n    enabled: false\n    comment: 暂停\n"
+	rec = adminRequest(h, "PUT", "/api/mihomo/custom/rules/yaml", map[string]any{"content": rulesYAML}, cookie, "")
+	if rec.Code != 200 {
+		t.Fatalf("put rules yaml: %d %s", rec.Code, rec.Body.String())
+	}
+	var st struct {
+		Status mihomoStatusResponse `json:"status"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &st)
+	if len(st.Status.CustomGroups) != 2 || st.Status.CustomGroups[0].Type != "fallback" || len(st.Status.CustomRules) != 2 || st.Status.CustomRules[1].Enabled {
+		t.Fatalf("UI status not reflecting YAML edits: %+v %+v", st.Status.CustomGroups, st.Status.CustomRules)
+	}
+	rt, _ := os.ReadFile(a.mihomo.runtimePath())
+	if !strings.Contains(string(rt), "DOMAIN-SUFFIX,openai.com,AI") || strings.Contains(string(rt), "netflix.com") || !strings.Contains(string(rt), "流媒体") {
+		t.Fatalf("runtime.yaml not merged from YAML edits:\n%s", rt)
+	}
+}

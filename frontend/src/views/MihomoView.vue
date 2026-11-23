@@ -132,14 +132,22 @@
           <span v-else class="badge badge-warn">离线预览（请先启动内核）</span>
         </div>
         <div class="report-actions">
-          <button type="button" class="btn btn-secondary btn-sm" @click="loadGroups()">刷新节点</button>
-          <button type="button" class="btn btn-primary btn-sm" @click="openGroupModal()">
+          <button
+            type="button"
+            class="btn btn-secondary btn-sm"
+            :aria-pressed="groupsView === 'yaml'"
+            @click="groupsView = groupsView === 'yaml' ? 'list' : 'yaml'"
+          >
+            <FileCode2 :size="14" /> {{ groupsView === 'yaml' ? '返回列表' : 'YAML 编辑' }}
+          </button>
+          <button v-if="groupsView === 'list'" type="button" class="btn btn-secondary btn-sm" @click="loadGroups()">刷新节点</button>
+          <button v-if="groupsView === 'list'" type="button" class="btn btn-primary btn-sm" @click="openGroupModal()">
             <Plus :size="14" /> 新建策略组
           </button>
         </div>
       </div>
 
-      <div v-if="groups.length" class="groups-stack">
+      <div v-if="groupsView === 'list' && groups.length" class="groups-stack">
         <SpotlightCard v-for="group in groups" :key="group.name" class="group-card">
           <div class="group-head" @click="toggleGroupExpand(group.name)">
             <div class="group-title-row">
@@ -217,9 +225,10 @@
           </div>
         </SpotlightCard>
       </div>
-      <SpotlightCard v-else class="report-panel">
+      <SpotlightCard v-else-if="groupsView === 'list'" class="report-panel">
         <p class="report-empty">暂无策略组</p>
       </SpotlightCard>
+      <MihomoCustomYaml v-else kind="groups" @saved="onCustomYamlSaved" />
     </section>
 
     <!-- Tab 2: Custom Routing Rules -->
@@ -238,12 +247,22 @@
             <option v-for="target in ruleTargetOptions" :key="target" :value="target">{{ target }}</option>
           </select>
         </div>
-        <button type="button" class="btn btn-primary btn-sm" @click="openRuleModal()">
-          <Plus :size="14" /> 添加规则
-        </button>
+        <div class="report-actions">
+          <button
+            type="button"
+            class="btn btn-secondary btn-sm"
+            :aria-pressed="rulesView === 'yaml'"
+            @click="rulesView = rulesView === 'yaml' ? 'list' : 'yaml'"
+          >
+            <FileCode2 :size="14" /> {{ rulesView === 'yaml' ? '返回列表' : 'YAML 编辑' }}
+          </button>
+          <button v-if="rulesView === 'list'" type="button" class="btn btn-primary btn-sm" @click="openRuleModal()">
+            <Plus :size="14" /> 添加规则
+          </button>
+        </div>
       </div>
 
-      <SpotlightCard class="report-panel rules-panel">
+      <SpotlightCard v-if="rulesView === 'list'" class="report-panel rules-panel">
         <div v-if="filteredRules.length" class="rules-list">
           <div v-for="rule in filteredRules" :key="rule.id" class="rule-row" :class="{ disabled: !rule.enabled }">
             <div class="rule-main">
@@ -298,6 +317,7 @@
         </div>
         <p v-else class="report-empty">{{ status?.custom_rules?.length ? '无匹配规则' : '暂无自定义分流规则' }}</p>
       </SpotlightCard>
+      <MihomoCustomYaml v-else kind="rules" @saved="onCustomYamlSaved" />
     </section>
 
     <!-- Tab 3: Subscriptions & Special-Line DNS -->
@@ -1155,6 +1175,7 @@ import {
   Zap
 } from 'lucide-vue-next'
 import SpotlightCard from '@/components/SpotlightCard.vue'
+import MihomoCustomYaml from '@/components/MihomoCustomYaml.vue'
 import { adminApi } from '@/api/admin'
 import { useToast } from '@/composables/useToast'
 import '@/styles/reports.css'
@@ -1195,6 +1216,8 @@ const error = ref('')
 const builtinNodeNames = new Set(['DIRECT', 'REJECT', 'PASS', 'COMPATIBLE'])
 
 const activeTab = ref('groups')
+const groupsView = ref('list')
+const rulesView = ref('list')
 const groups = ref([])
 const delays = ref({})
 const allNodes = ref([])
@@ -1383,6 +1406,11 @@ async function loadYaml(kind = yamlKind.value) {
   } finally {
     yamlBusy.value = false
   }
+}
+
+async function onCustomYamlSaved(nextStatus) {
+  if (nextStatus) applyStatus(nextStatus)
+  await loadGroups()
 }
 
 async function switchTab(tabId) {
@@ -2846,10 +2874,11 @@ onBeforeUnmount(() => {
   min-width: 0;
 }
 
+.yaml-editor-shell textarea.form-input.yaml-editor,
 .yaml-editor {
   width: 100%;
-  height: clamp(480px, 64dvh, 780px);
-  min-height: 440px;
+  height: clamp(480px, 64dvh, 780px) !important;
+  min-height: 440px !important;
   padding: 12px 14px;
   font-size: 12.5px;
   line-height: 1.6;
@@ -2877,11 +2906,12 @@ onBeforeUnmount(() => {
 }
 
 .yaml-panel.fullscreen .yaml-editor-shell,
+.yaml-panel.fullscreen .yaml-editor-shell textarea.form-input.yaml-editor,
 .yaml-panel.fullscreen .yaml-editor,
 .yaml-panel.fullscreen .yaml-viewer {
   flex: 1 1 auto;
-  height: 100%;
-  min-height: 0;
+  height: 100% !important;
+  min-height: 0 !important;
 }
 
 .yaml-code-table {
@@ -3051,10 +3081,11 @@ onBeforeUnmount(() => {
     padding: 10px;
   }
 
+  .yaml-editor-shell textarea.form-input.yaml-editor,
   .yaml-editor,
   .yaml-viewer {
-    height: clamp(400px, 60dvh, 640px);
-    min-height: 360px;
+    height: clamp(400px, 60dvh, 640px) !important;
+    min-height: 360px !important;
     font-size: 12px;
   }
 

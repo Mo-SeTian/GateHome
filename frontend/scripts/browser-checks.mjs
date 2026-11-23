@@ -2135,6 +2135,18 @@ try {
   await mihomoDialog.getByRole('button', { name: '添加至顶部' }).click()
   await mihomoPage.locator('.rule-row').filter({ hasText: 'anthropic.com' }).waitFor()
 
+  // The same rules are editable as Mihomo-style YAML; edits flow back into the list (single source).
+  await mihomoPage.getByRole('button', { name: /YAML 编辑/ }).click()
+  const customRulesEditor = mihomoPage.locator('.custom-yaml-editor')
+  await page.waitForFunction(() => (document.querySelector('.mihomo-page .custom-yaml-editor')?.value || '').includes('DOMAIN-SUFFIX,anthropic.com,HK 专线'))
+  const customRulesText = await customRulesEditor.inputValue()
+  await customRulesEditor.fill(customRulesText.trimEnd() + '\n  - DOMAIN-SUFFIX,yaml-added.example,DIRECT\n')
+  await mihomoPage.getByRole('button', { name: '保存并生效' }).click()
+  await page.locator('.toast-text', { hasText: '已保存并合并到运行配置' }).first().waitFor()
+  await mihomoPage.locator('.custom-yaml-panel').getByText('与页面同步').waitFor()
+  await mihomoPage.getByRole('button', { name: '返回列表' }).click()
+  await mihomoPage.locator('.rule-row').filter({ hasText: 'yaml-added.example' }).waitFor()
+
   // Verify synthesized runtime.yaml vs read-only source.yaml dual view
   await mihomoPage.getByRole('tab', { name: '配置文件' }).click()
   await page.waitForFunction(() => {
@@ -2143,6 +2155,7 @@ try {
       val.includes('17853') && val.includes('cdn-hk.example.com') && val.includes('+.corp.internal') &&
       val.includes('HK-01 [专线]') && val.includes('anthropic.com')
   })
+  assert.ok((await mihomoPage.locator('.yaml-editor').boundingBox()).height >= 400, 'runtime yaml editor must keep its expanded height')
   const runtimeYamlText = await mihomoPage.locator('.yaml-editor').inputValue()
   assert.ok(runtimeYamlText.includes('mixed-port: 17890') && runtimeYamlText.includes('port: 17891') && runtimeYamlText.includes('socks-port: 17892'))
   assert.ok(runtimeYamlText.includes('listen: 0.0.0.0:17853') && runtimeYamlText.includes('cdn-hk.example.com') && runtimeYamlText.includes('+.corp.internal'))

@@ -165,6 +165,8 @@ func (a *Admin) mihomoRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/mihomo/geodata/upload", a.requireAuth(a.handleMihomoUploadMMDB))
 	mux.HandleFunc("POST /api/mihomo/zashboard/download", a.requireAuth(a.handleMihomoDownloadZashboard))
 	mux.HandleFunc("GET /api/mihomo/logs", a.requireAuth(a.handleMihomoLogs))
+	mux.HandleFunc("GET /api/mihomo/custom/{kind}/yaml", a.requireAuth(a.handleMihomoGetCustomYAML))
+	mux.HandleFunc("PUT /api/mihomo/custom/{kind}/yaml", a.requireAuth(a.handleMihomoPutCustomYAML))
 	mux.HandleFunc("DELETE /api/mihomo/logs", a.requireAuth(a.handleMihomoClearLogs))
 }
 

@@ -104,6 +104,10 @@ export const adminApi = {
     return request('/api/mihomo/geodata/upload', { method: 'POST', body })
   },
   mihomoLogs: (signal) => request('/api/mihomo/logs', { signal }),
+  mihomoCustomYaml: (kind, signal) => request(`/api/mihomo/custom/${encodeURIComponent(kind)}/yaml`, { signal }),
+  saveMihomoCustomYaml: (kind, content, validateOnly = false) => request(`/api/mihomo/custom/${encodeURIComponent(kind)}/yaml`, {
+    method: 'PUT', body: { content, validate_only: validateOnly }
+  }),
   clearMihomoLogs: () => request('/api/mihomo/logs', { method: 'DELETE', body: {} }),
   uploadMihomoCore: (file) => {
     const body = new FormData()
