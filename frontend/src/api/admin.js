@@ -64,5 +64,35 @@ export const adminApi = {
   importRouteImage: (body) => request('/api/route-images/import', { method: 'POST', body }),
   discoverServices: (body) => request('/api/service-discovery', { method: 'POST', body }),
   discoveryStatus: (id, signal) => request(`/api/service-discovery/${encodeURIComponent(id)}`, { signal }),
-  cancelDiscovery: (id) => request(`/api/service-discovery/${encodeURIComponent(id)}/cancel`, { method: 'POST', body: {} })
+  cancelDiscovery: (id) => request(`/api/service-discovery/${encodeURIComponent(id)}/cancel`, { method: 'POST', body: {} }),
+
+  // Mihomo (代理分流)
+  mihomoStatus: (signal) => request('/api/mihomo/status', { signal }),
+  saveMihomoSettings: (body) => request('/api/mihomo/settings', { method: 'PUT', body }),
+  startMihomo: () => request('/api/mihomo/start', { method: 'POST', body: {} }),
+  stopMihomo: () => request('/api/mihomo/stop', { method: 'POST', body: {} }),
+  restartMihomo: () => request('/api/mihomo/restart', { method: 'POST', body: {} }),
+  reloadMihomo: () => request('/api/mihomo/reload', { method: 'POST', body: {} }),
+  setMihomoMode: (mode) => request('/api/mihomo/mode', { method: 'PATCH', body: { mode } }),
+  mihomoGroups: (signal) => request('/api/mihomo/groups', { signal }),
+  saveMihomoGroup: (body) => request('/api/mihomo/groups', { method: 'POST', body }),
+  deleteMihomoGroup: (id) => request(`/api/mihomo/groups/${encodeURIComponent(id)}`, { method: 'DELETE', body: {} }),
+  selectMihomoProxy: (group, node) => request(`/api/mihomo/groups/${encodeURIComponent(group)}/select`, { method: 'PUT', body: { node } }),
+  testMihomoGroupDelay: (group, body = {}) => request(`/api/mihomo/groups/${encodeURIComponent(group)}/delay`, { method: 'POST', body }),
+  addMihomoRule: (body) => request('/api/mihomo/rules', { method: 'POST', body }),
+  saveMihomoRules: (rules) => request('/api/mihomo/rules', { method: 'PUT', body: { rules } }),
+  deleteMihomoRule: (id) => request(`/api/mihomo/rules/${encodeURIComponent(id)}`, { method: 'DELETE', body: {} }),
+  addMihomoSubscription: (body) => request('/api/mihomo/subscriptions', { method: 'POST', body }),
+  activateMihomoSubscription: (id) => request(`/api/mihomo/subscriptions/${encodeURIComponent(id)}/activate`, { method: 'PUT', body: {} }),
+  refreshMihomoSubscription: (id) => request(`/api/mihomo/subscriptions/${encodeURIComponent(id)}/refresh`, { method: 'POST', body: {} }),
+  deleteMihomoSubscription: (id) => request(`/api/mihomo/subscriptions/${encodeURIComponent(id)}`, { method: 'DELETE', body: {} }),
+  mihomoYaml: (kind = 'runtime', signal) => request(queryPath('/api/mihomo/config/yaml', { kind }), { signal }),
+  saveMihomoYaml: (content) => request('/api/mihomo/config/yaml', { method: 'PUT', body: { content } }),
+  resyncMihomoYaml: () => request('/api/mihomo/config/resync', { method: 'POST', body: {} }),
+  downloadMihomoCore: () => request('/api/mihomo/core/download', { method: 'POST', body: {} }),
+  uploadMihomoCore: (file) => {
+    const body = new FormData()
+    body.append('file', file)
+    return request('/api/mihomo/core/upload', { method: 'POST', body })
+  }
 }

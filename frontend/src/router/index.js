@@ -41,6 +41,12 @@ const routes = [
     meta: { title: '远程回家', icon: 'House' }
   },
   {
+    path: '/mihomo',
+    name: 'Mihomo',
+    component: () => import('@/views/MihomoView.vue'),
+    meta: { title: '代理分流', icon: 'GitFork' }
+  },
+  {
     path: '/ddns',
     name: 'Ddns',
     component: () => import('@/views/DdnsView.vue'),

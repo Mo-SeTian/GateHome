@@ -47,7 +47,12 @@
           <p class="report-note">仅影响 HTTP 反代的日志、防火墙、限速与冻结；管理登录和端口转发仍使用实际连接 IP。私网地址不会自动免除防护。</p>
         </SpotlightCard>
         <SpotlightCard class="report-panel">
-          <h2>出站网络代理</h2>
+          <div class="panel-heading-inline">
+            <h2>出站网络代理</h2>
+            <router-link v-if="mihomoStatus?.outbound_takeover_active" to="/mihomo" class="badge badge-ok takeover-badge">
+              由代理分流接管 {{ mihomoTakeoverPort }}
+            </router-link>
+          </div>
           <label class="toggle-row">
             <span>启用 HTTP / HTTPS / SOCKS5 代理</span>
             <input v-model="draft.outbound_proxy.enabled" name="proxy_enabled" type="checkbox" />
@@ -183,7 +188,7 @@
   </div>
 </template>
 <script setup>
-import { onMounted, onBeforeUnmount, ref } from 'vue'
+import { computed, onMounted, onBeforeUnmount, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import SpotlightCard from '@/components/SpotlightCard.vue'
 import SecretInput from '@/components/SecretInput.vue'
@@ -209,6 +214,7 @@ const themes = [
 const snapshot = ref(null),
   draft = ref(null),
   maintenance = ref(null),
+  mihomoStatus = ref(null),
   origins = ref(''),
   trustedProxies = ref(''),
   loading = ref(false),
@@ -222,6 +228,12 @@ function apply(config) {
   trustedProxies.value = (config.config.trusted_proxies || []).join('\n')
   proxyPassword.value = undefined
 }
+const mihomoTakeoverPort = computed(() => {
+  const s = mihomoStatus.value?.settings
+  if (!s) return ''
+  const port = s.mixed_port || s.http_port || s.socks_port
+  return port ? `:${port}` : ''
+})
 function formatBytes(value) {
   return value == null ? '—' : `${(value / 1024 / 1024).toFixed(2)} MiB`
 }
@@ -230,14 +242,16 @@ async function reload() {
   loading.value = true
   error.value = ''
   try {
-    const [config, state] = await Promise.all([
+    const [config, state, , mihomo] = await Promise.all([
       refreshConfig(controller.signal),
       adminApi.maintenance(controller.signal),
-      refreshStatus(controller.signal)
+      refreshStatus(controller.signal),
+      adminApi.mihomoStatus(controller.signal).catch(() => null)
     ])
     if (!controller.signal.aborted) {
       apply(config)
       maintenance.value = state
+      mihomoStatus.value = mihomo
     }
   } catch (err) {
     if (!controller.signal.aborted) error.value = err.message
@@ -343,6 +357,17 @@ dd {
   gap: 6px;
   color: var(--ink-secondary);
   font-size: 12px;
+}
+.panel-heading-inline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.takeover-badge {
+  text-decoration: none;
+  font-size: 11px;
 }
 @media (max-width: 900px) {
   .settings-layout {

@@ -9,8 +9,28 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
+
+var (
+	mihomoOutboundMu       sync.RWMutex
+	mihomoOutboundResolver func() string
+)
+
+// SetMihomoOutboundResolver registers a dynamic resolver returning the local mihomo proxy URL
+// when built-in takeover is enabled and running. Returns a cleanup function to restore the prior resolver.
+func SetMihomoOutboundResolver(fn func() string) func() {
+	mihomoOutboundMu.Lock()
+	prev := mihomoOutboundResolver
+	mihomoOutboundResolver = fn
+	mihomoOutboundMu.Unlock()
+	return func() {
+		mihomoOutboundMu.Lock()
+		mihomoOutboundResolver = prev
+		mihomoOutboundMu.Unlock()
+	}
+}
 
 func validateOutboundProxy(p OutboundProxyConfig) error {
 	if len(p.Username) > 255 || strings.ContainsAny(p.Username, "\r\n") {
@@ -70,6 +90,19 @@ func outboundClient(s State, timeout time.Duration) *http.Client {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.Proxy = nil
 	transport.DialContext = safeDialContext(transport.DialContext)
+	// Tier 1: Built-in mihomo proxy when takeover_outbound is active and core is running.
+	mihomoOutboundMu.RLock()
+	resolver := mihomoOutboundResolver
+	mihomoOutboundMu.RUnlock()
+	if resolver != nil {
+		if proxyURL := resolver(); proxyURL != "" {
+			if u, err := url.Parse(proxyURL); err == nil && u.Hostname() != "" {
+				transport.Proxy = http.ProxyURL(u)
+				return &http.Client{Transport: transport, Timeout: timeout, CheckRedirect: func(r *http.Request, via []*http.Request) error { return errors.New("不允许重定向") }}
+			}
+		}
+	}
+	// Tier 2: System Settings manual outbound proxy.
 	if s.Config.OutboundProxy.Enabled {
 		u, err := url.Parse(s.Config.OutboundProxy.URL)
 		if err == nil && u.Hostname() != "" {
@@ -79,6 +112,7 @@ func outboundClient(s State, timeout time.Duration) *http.Client {
 			transport.Proxy = http.ProxyURL(u)
 		}
 	}
+	// Tier 3: Direct connection (transport.Proxy == nil).
 	return &http.Client{Transport: transport, Timeout: timeout, CheckRedirect: func(r *http.Request, via []*http.Request) error { return errors.New("不允许重定向") }}
 }
 

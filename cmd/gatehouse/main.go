@@ -223,6 +223,8 @@ func run() error {
 	defer forwards.Close()
 	admin.StartRemoteHome()
 	defer admin.CloseRemoteHome()
+	admin.StartMihomo()
+	defer admin.CloseMihomo()
 	admin.SetPortForwarder(forwards)
 	admin.SetHTTPListeners(listeners)
 	proxy.StartTrafficSampling(ctx)

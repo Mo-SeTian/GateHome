@@ -20,9 +20,11 @@ import (
 var webFiles embed.FS
 
 type Admin struct {
-	remoteHome    remoteHome
-	webDAV        remoteBackupRuntime
-	sunPanel      *SunPanel
+	remoteHome            remoteHome
+	mihomo                *mihomoManager
+	mihomoRestoreOutbound func()
+	webDAV                remoteBackupRuntime
+	sunPanel              *SunPanel
 	store         *Store
 	proxy         *Proxy
 	forwarder     *PortForwarder
@@ -56,7 +58,38 @@ func NewAdmin(store *Store, proxy *Proxy, certs *Certificates, jobs *Jobs, admin
 	proxy.adminPort = adminPort
 	proxy.defense = newIPDefense(store)
 	proxy.ConfigureState(store.Snapshot())
-	return &Admin{store: store, proxy: proxy, certs: certs, jobs: jobs, started: time.Now(), ports: store.Snapshot().Config, adminPort: adminPort, sessions: map[[32]byte]adminSession{}, passkeyFlows: map[string]passkeyFlow{}, attempts: map[string]routeAttempts{}, domainDNS: newDomainDNS(store)}
+	return &Admin{
+		store:        store,
+		proxy:        proxy,
+		certs:        certs,
+		jobs:         jobs,
+		mihomo:       newMihomoManager(store.paths, store, adminPort),
+		started:      time.Now(),
+		ports:        store.Snapshot().Config,
+		adminPort:    adminPort,
+		sessions:     map[[32]byte]adminSession{},
+		passkeyFlows: map[string]passkeyFlow{},
+		attempts:     map[string]routeAttempts{},
+		domainDNS:    newDomainDNS(store),
+	}
+}
+
+func (a *Admin) StartMihomo() {
+	if a.mihomo == nil {
+		return
+	}
+	a.mihomoRestoreOutbound = SetMihomoOutboundResolver(a.mihomo.OutboundProxyURL)
+	a.mihomo.StartIfEnabled()
+}
+
+func (a *Admin) CloseMihomo() {
+	if a.mihomo != nil {
+		_ = a.mihomo.Stop()
+	}
+	if a.mihomoRestoreOutbound != nil {
+		a.mihomoRestoreOutbound()
+		a.mihomoRestoreOutbound = nil
+	}
 }
 
 // SetPortForwarder connects the running listeners before the admin server starts.
@@ -108,6 +141,7 @@ func (a *Admin) Handler() http.Handler {
 	a.adminSessionRoutes(mux)
 	a.passkeyRoutes(mux)
 	a.remoteHomeRoutes(mux)
+	a.mihomoRoutes(mux)
 	mux.HandleFunc("GET /api/exposure", a.requireAuth(a.exposureOverview))
 	a.credentialRoutes(mux)
 	mux.HandleFunc("GET /api/sunpanel/admin-setup", a.requireAuth(a.sunPanelAdminSetup))
@@ -510,6 +544,18 @@ func (a *Admin) putConfig(w http.ResponseWriter, r *http.Request) {
 		for _, f := range input.Config.Forwards {
 			if f.Protocol != "tcp" && f.ListenPort == wgPort {
 				apiError(w, 400, "UDP 转发端口不能与内置 WireGuard 端口相同")
+				return
+			}
+		}
+	}
+	if a.mihomo != nil {
+		a.mihomo.mu.Lock()
+		mCfg := a.mihomo.cfg
+		mActive := mCfg.Enabled || a.mihomo.running
+		a.mihomo.mu.Unlock()
+		if mActive {
+			if err := validateMihomoSettings(mCfg, input.Config, a.adminPort); err != nil {
+				apiError(w, 400, "与代理分流端口冲突: "+err.Error())
 				return
 			}
 		}

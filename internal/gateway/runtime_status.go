@@ -79,6 +79,9 @@ func (a *Admin) runtimeInventory(config Config) ([]runtimeListener, []runtimeRou
 	if port := a.remoteHome.listenPort(); port != 0 {
 		bind(net.JoinHostPort("*", strconv.Itoa(port)), "UDP", "远程回家", "WireGuard")
 	}
+	if a.mihomo != nil {
+		listeners = append(listeners, a.mihomo.ActiveListeners()...)
+	}
 	routes := make([]runtimeRoute, 0, len(config.Routes))
 	options := serviceHealthOptions(config)
 	liveRoutes, _ := a.proxy.routes.Load().(map[string]proxyRoute)

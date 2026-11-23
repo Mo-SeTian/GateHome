@@ -137,6 +137,7 @@ import {
   AlertCircle,
   LayoutDashboard,
   Network,
+  GitFork,
   Images,
   ArrowLeftRight,
   Compass,
@@ -221,6 +222,10 @@ const pages = [
   {
     title: '远程回家 (WireGuard)', subtitle: '管理家庭网段、隧道与授权设备',
     path: '/remote-home', icon: Network, keywords: ['VPN', 'WireGuard', '家庭局域网', '握手']
+  },
+  {
+    title: '代理分流 (Mihomo)', subtitle: '局域网代理端口、策略组节点与自定义分流',
+    path: '/mihomo', icon: GitFork, keywords: ['mihomo', 'clash', '代理分流', '策略组', '订阅', '局域网代理']
   },
   {
     title: '浏览器首页 (SunPanel)',
