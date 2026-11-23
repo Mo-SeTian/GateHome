@@ -758,3 +758,215 @@ func TestMihomoSelectAssetAndGzipUpload(t *testing.T) {
 		}
 	}
 }
+
+func TestMihomoAirportDNSKeepAndIncrementalPolicy(t *testing.T) {
+	cfg := defaultMihomoConfig()
+	if cfg.Settings.DNSEnhancedMode != "keep" {
+		t.Fatalf("expected default DNSEnhancedMode == keep, got %q", cfg.Settings.DNSEnhancedMode)
+	}
+	cold := buildColdStartYAML(cfg)
+	if !strings.Contains(cold, "enhanced-mode: fake-ip") {
+		t.Fatalf("expected cold-start fallback fake-ip even when setting is keep:\n%s", cold)
+	}
+
+	airportSource := []byte(`
+dns:
+  enable: true
+  ipv6: true
+  enhanced-mode: fake-ip
+  use-hosts: true
+  fake-ip-range: 11.18.0.1/16
+  nameserver: [119.29.29.29, 223.5.5.5, 'https://dns.alidns.com/dns-query']
+  default-nameserver: [119.29.29.29, 223.5.5.5, 114.114.114.114]
+  nameserver-policy:
+    cdn-p1-hk.bblink88.com: ['dn-hk.appzhuanyong.com:1066', 'https://dn-jp.appzhuanyong.com/dns-query']
+    ieplqz.bblink88.com: ['dn-hk.appzhuanyong.com:1066']
+    cdn-p1-sg.bblink88.com: ['dn-hk.appzhuanyong.com:1066']
+    cdn-p1-jp.bblink88.com: ['dn-hk.appzhuanyong.com:1066']
+    cdn-p1-us.bblink88.com: ['dn-hk.appzhuanyong.com:1066']
+    cdn-p1-lm.bblink88.com: ['dn-hk.appzhuanyong.com:1066']
+    cdn-p1-kr.bblink88.com: ['dn-hk.appzhuanyong.com:1066']
+    cdn-p1-tw.bblink88.com: ['dn-hk.appzhuanyong.com:1066']
+proxies:
+  - { name: "专线 HK", type: ss, server: cdn-p1-hk.bblink88.com, port: 443 }
+proxy-groups:
+  - name: "节点选择"
+    type: select
+    proxies: ["专线 HK"]
+rules:
+  - "MATCH,节点选择"
+`)
+
+	inherited := extractInheritedDNSPolicies(airportSource)
+	if len(inherited) != 8 {
+		t.Fatalf("expected 8 inherited DNS policies, got %d: %+v", len(inherited), inherited)
+	}
+
+	cfg.Settings.DNSListenPort = 17853
+	cfg.CustomDNSPolicies = []MihomoDNSPolicy{
+		{ID: "d1", Domain: "+.corp.internal", Servers: []string{"10.0.0.53", "tcp://10.0.0.54"}, Enabled: true},
+		{ID: "d2", Domain: "ieplqz.bblink88.com", Servers: []string{"9.9.9.9"}, Enabled: true},
+		{ID: "d3", Domain: "disabled.example", Servers: []string{"8.8.8.8"}, Enabled: false},
+	}
+
+	mergedBytes, err := synthesizeMihomoYAML(airportSource, cfg)
+	if err != nil {
+		t.Fatalf("synthesize airport dns failed: %v", err)
+	}
+	var merged map[string]any
+	if err := yaml.Unmarshal(mergedBytes, &merged); err != nil {
+		t.Fatal(err)
+	}
+	dnsMap, _ := merged["dns"].(map[string]any)
+	if dnsMap["use-hosts"] != true || dnsMap["fake-ip-range"] != "11.18.0.1/16" || dnsMap["enhanced-mode"] != "fake-ip" {
+		t.Fatalf("airport dns settings altered under keep mode: %+v", dnsMap)
+	}
+	if _, hasProxyServerNS := dnsMap["proxy-server-nameserver"]; hasProxyServerNS {
+		t.Fatal("proxy-server-nameserver must NOT be injected automatically")
+	}
+	if dnsMap["listen"] != "0.0.0.0:17853" {
+		t.Fatalf("expected dns.listen 0.0.0.0:17853, got %v", dnsMap["listen"])
+	}
+	if defNS, _ := dnsMap["default-nameserver"].([]any); len(defNS) != 3 {
+		t.Fatalf("expected default-nameserver preserved, got %v", dnsMap["default-nameserver"])
+	}
+	policyMap, _ := dnsMap["nameserver-policy"].(map[string]any)
+	if len(policyMap) != 9 {
+		t.Fatalf("expected 9 nameserver-policy entries (7 preserved + 1 overridden + 1 added), got %d: %+v", len(policyMap), policyMap)
+	}
+	if _, exists := policyMap["cdn-p1-hk.bblink88.com"]; !exists {
+		t.Fatal("airport cdn-p1-hk.bblink88.com policy was lost")
+	}
+	if _, exists := policyMap["disabled.example"]; exists {
+		t.Fatal("disabled custom dns policy must not appear in runtime.yaml")
+	}
+	if corp, _ := policyMap["+.corp.internal"].([]any); len(corp) != 2 || corp[0] != "10.0.0.53" {
+		t.Fatalf("unexpected custom +.corp.internal policy: %v", policyMap["+.corp.internal"])
+	}
+
+	// Verify loopback bind when AllowLAN is false.
+	cfg.Settings.AllowLAN = false
+	loopBytes, err := synthesizeMihomoYAML(airportSource, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(loopBytes), "listen: 127.0.0.1:17853") {
+		t.Fatalf("expected loopback listen binding when AllowLAN=false:\n%s", string(loopBytes))
+	}
+}
+
+func TestMihomoDNSListenPortValidationAndListeners(t *testing.T) {
+	gw := DefaultConfig()
+	gw.Forwards = []PortForward{
+		{ID: "f-udp", Name: "dns-udp", Enabled: true, Protocol: "udp", ListenPort: 5353, Upstream: "127.0.0.1:53"},
+	}
+
+	cfg := defaultMihomoConfig()
+	cfg.Settings.DNSListenPort = 5353
+	if validateMihomoSettings(cfg, gw, 16666) == nil {
+		t.Fatal("expected DNSListenPort to conflict with enabled UDP forward port")
+	}
+	cfg.Settings.DNSListenPort = 7890
+	if validateMihomoSettings(cfg, gw, 16666) == nil {
+		t.Fatal("expected DNSListenPort to conflict with MixedPort")
+	}
+	cfg.Settings.DNSListenPort = 17853
+	if err := validateMihomoSettings(cfg, gw, 16666); err != nil {
+		t.Fatalf("expected valid DNSListenPort, got %v", err)
+	}
+
+	mgr := &mihomoManager{cfg: cfg, running: true}
+	listeners := mgr.ActiveListeners()
+	var sawUDP, sawTCP bool
+	for _, l := range listeners {
+		if l.Port == 17853 && l.Protocol == "UDP" {
+			sawUDP = true
+		}
+		if l.Port == 17853 && l.Protocol == "TCP" {
+			sawTCP = true
+		}
+	}
+	if !sawUDP || !sawTCP {
+		t.Fatalf("expected both UDP and TCP DNS listeners reported when DNSListenPort active, got %+v", listeners)
+	}
+}
+
+func TestMihomoDNSPolicyAPIEndpoints(t *testing.T) {
+	a, h := testAdmin(t)
+	cookie := loginForTest(t, h)
+
+	subYAML := `
+dns:
+  enable: true
+  enhanced-mode: fake-ip
+  nameserver-policy:
+    'node.example.com': ['119.29.29.29', 'https://dns.pub/dns-query']
+proxies:
+  - { name: "N1", type: ss, server: node.example.com, port: 443 }
+proxy-groups:
+  - name: "节点选择"
+    type: select
+    proxies: ["N1"]
+rules:
+  - "MATCH,节点选择"
+`
+	rec := adminRequest(h, "POST", "/api/mihomo/subscriptions", map[string]any{
+		"name":         "专线订阅",
+		"yaml_content": subYAML,
+	}, cookie, "")
+	if rec.Code != 200 {
+		t.Fatalf("add subscription failed: %d %s", rec.Code, rec.Body.String())
+	}
+
+	var st mihomoStatusResponse
+	_ = json.Unmarshal(rec.Body.Bytes(), &st)
+	if len(st.InheritedDNSPolicies) != 1 || st.InheritedDNSPolicies[0].Domain != "node.example.com" {
+		t.Fatalf("expected inherited_dns_policies in status response, got %+v", st.InheritedDNSPolicies)
+	}
+
+	// Add custom DNS policy
+	rec = adminRequest(h, "POST", "/api/mihomo/dns-policies", map[string]any{
+		"domain":  "+.lan.example",
+		"servers": []string{"192.168.1.1"},
+		"enabled": true,
+	}, cookie, "")
+	if rec.Code != 200 {
+		t.Fatalf("POST dns-policies failed: %d %s", rec.Code, rec.Body.String())
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &st)
+	if len(st.CustomDNSPolicies) != 1 || st.CustomDNSPolicies[0].Domain != "+.lan.example" {
+		t.Fatalf("unexpected custom_dns_policies: %+v", st.CustomDNSPolicies)
+	}
+	policyID := st.CustomDNSPolicies[0].ID
+
+	// Toggle policy disabled via PUT
+	st.CustomDNSPolicies[0].Enabled = false
+	rec = adminRequest(h, "PUT", "/api/mihomo/dns-policies", map[string]any{
+		"policies": st.CustomDNSPolicies,
+	}, cookie, "")
+	if rec.Code != 200 {
+		t.Fatalf("PUT dns-policies failed: %d %s", rec.Code, rec.Body.String())
+	}
+	rtBytes, _ := os.ReadFile(a.mihomo.runtimePath())
+	if strings.Contains(string(rtBytes), "+.lan.example") || !strings.Contains(string(rtBytes), "node.example.com") {
+		t.Fatalf("unexpected runtime.yaml after disabling custom policy:\n%s", string(rtBytes))
+	}
+
+	// Delete custom policy
+	rec = adminRequest(h, "DELETE", "/api/mihomo/dns-policies/"+policyID, nil, cookie, "")
+	if rec.Code != 200 {
+		t.Fatalf("DELETE dns-policies failed: %d %s", rec.Code, rec.Body.String())
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &st)
+	if len(st.CustomDNSPolicies) != 0 {
+		t.Fatalf("expected empty custom_dns_policies after delete, got %+v", st.CustomDNSPolicies)
+	}
+
+	// Invalid inputs
+	if adminRequest(h, "POST", "/api/mihomo/dns-policies", map[string]any{"domain": "", "servers": []string{"1.1.1.1"}, "enabled": true}, cookie, "").Code != 400 {
+		t.Fatal("expected 400 on empty domain")
+	}
+	if adminRequest(h, "DELETE", "/api/mihomo/dns-policies/missing", nil, cookie, "").Code != 404 {
+		t.Fatal("expected 404 on deleting missing dns policy")
+	}
+}

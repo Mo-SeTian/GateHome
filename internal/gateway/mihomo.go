@@ -23,6 +23,7 @@ type MihomoCoreSettings struct {
 	MixedPort       int    `json:"mixed_port"`
 	HTTPPort        int    `json:"http_port"`
 	SocksPort       int    `json:"socks_port"`
+	DNSListenPort   int    `json:"dns_listen_port"`
 	AllowLAN        bool   `json:"allow_lan"`
 	Mode            string `json:"mode"`
 	LogLevel        string `json:"log_level"`
@@ -85,6 +86,20 @@ type MihomoCustomRule struct {
 	Comment   string `json:"comment,omitempty"`
 }
 
+// MihomoDNSPolicy represents an incremental custom dns.nameserver-policy entry merged into runtime.yaml.
+type MihomoDNSPolicy struct {
+	ID      string   `json:"id"`
+	Domain  string   `json:"domain"`
+	Servers []string `json:"servers"`
+	Enabled bool     `json:"enabled"`
+}
+
+// MihomoInheritedDNSPolicy summarizes a nameserver-policy entry read from the active subscription source.
+type MihomoInheritedDNSPolicy struct {
+	Domain  string   `json:"domain"`
+	Servers []string `json:"servers"`
+}
+
 // MihomoConfig holds the persisted mihomo configuration managed by GateHome.
 type MihomoConfig struct {
 	Enabled              bool                 `json:"enabled"`
@@ -97,6 +112,7 @@ type MihomoConfig struct {
 	Subscriptions        []MihomoSubscription `json:"subscriptions"`
 	CustomGroups         []MihomoCustomGroup  `json:"custom_groups"`
 	CustomRules          []MihomoCustomRule   `json:"custom_rules"`
+	CustomDNSPolicies    []MihomoDNSPolicy    `json:"custom_dns_policies"`
 	ManualOverride       bool                 `json:"manual_override"`
 }
 
@@ -168,11 +184,12 @@ func defaultMihomoConfig() MihomoConfig {
 			IPv6:            true,
 			UnifiedDelay:    true,
 			TCPConcurrent:   true,
-			DNSEnhancedMode: "fake-ip",
+			DNSEnhancedMode: "keep",
 		},
-		Subscriptions: []MihomoSubscription{},
-		CustomGroups:  []MihomoCustomGroup{},
-		CustomRules:   []MihomoCustomRule{},
+		Subscriptions:     []MihomoSubscription{},
+		CustomGroups:      []MihomoCustomGroup{},
+		CustomRules:       []MihomoCustomRule{},
+		CustomDNSPolicies: []MihomoDNSPolicy{},
 	}
 }
 
@@ -199,7 +216,7 @@ func normalizeMihomoConfig(cfg *MihomoConfig) bool {
 		changed = true
 	}
 	if cfg.Settings.DNSEnhancedMode == "" {
-		cfg.Settings.DNSEnhancedMode = "fake-ip"
+		cfg.Settings.DNSEnhancedMode = "keep"
 		changed = true
 	}
 	if cfg.Subscriptions == nil {
@@ -210,6 +227,9 @@ func normalizeMihomoConfig(cfg *MihomoConfig) bool {
 	}
 	if cfg.CustomRules == nil {
 		cfg.CustomRules = []MihomoCustomRule{}
+	}
+	if cfg.CustomDNSPolicies == nil {
+		cfg.CustomDNSPolicies = []MihomoDNSPolicy{}
 	}
 	return changed
 }
@@ -222,6 +242,7 @@ func validateMihomoSettings(cfg MihomoConfig, gwConfig Config, adminPort int) er
 		{"混合代理端口", cfg.Settings.MixedPort},
 		{"HTTP 代理端口", cfg.Settings.HTTPPort},
 		{"SOCKS5 代理端口", cfg.Settings.SocksPort},
+		{"DNS 监听端口", cfg.Settings.DNSListenPort},
 	} {
 		if p.val < 0 || p.val > 65535 {
 			return fmt.Errorf("%s须为 0（禁用）或 1–65535", p.name)
@@ -253,6 +274,9 @@ func validateMihomoSettings(cfg MihomoConfig, gwConfig Config, adminPort int) er
 	if err := addUniquePort(cfg.Settings.SocksPort, "SOCKS5 代理端口"); err != nil {
 		return err
 	}
+	if err := addUniquePort(cfg.Settings.DNSListenPort, "DNS 监听端口"); err != nil {
+		return err
+	}
 	if err := addUniquePort(cfg.ControllerPort, "内部控制端口"); err != nil {
 		return err
 	}
@@ -282,10 +306,16 @@ func validateMihomoSettings(cfg MihomoConfig, gwConfig Config, adminPort int) er
 		}
 	}
 	for _, f := range gwConfig.Forwards {
-		if !f.Enabled || f.Protocol == "udp" {
+		if !f.Enabled {
 			continue
 		}
-		if label, exists := seenPorts[f.ListenPort]; exists {
+		if cfg.Settings.DNSListenPort > 0 && f.ListenPort == cfg.Settings.DNSListenPort {
+			return fmt.Errorf("DNS 监听端口 (%d) 与端口转发「%s」冲突", f.ListenPort, f.Name)
+		}
+		if f.Protocol == "udp" {
+			continue
+		}
+		if label, exists := seenPorts[f.ListenPort]; exists && f.ListenPort != cfg.Settings.DNSListenPort {
 			return fmt.Errorf("%s (%d) 与端口转发「%s」冲突", label, f.ListenPort, f.Name)
 		}
 	}
@@ -359,6 +389,34 @@ func validateMihomoCustomRule(r MihomoCustomRule) error {
 	}
 	if len(r.Comment) > 256 || strings.ContainsAny(r.Comment, "\r\n") {
 		return errors.New("规则备注不能包含换行且不超过 256 字符")
+	}
+	return nil
+}
+
+func normalizeDNSPolicyServers(servers []string) []string {
+	cleaned := make([]string, 0, len(servers))
+	for _, s := range servers {
+		s = strings.TrimSpace(s)
+		if s != "" {
+			cleaned = append(cleaned, s)
+		}
+	}
+	return cleaned
+}
+
+func validateMihomoDNSPolicy(p MihomoDNSPolicy) error {
+	domain := strings.TrimSpace(p.Domain)
+	if domain == "" || len(domain) > 253 || strings.ContainsAny(domain, " \t\r\n,") {
+		return errors.New("DNS 匹配域名不能为空，不能包含空白、逗号或换行，且不超过 253 字符")
+	}
+	servers := normalizeDNSPolicyServers(p.Servers)
+	if len(servers) == 0 {
+		return errors.New("请至少填写一个 DNS 服务器地址")
+	}
+	for _, srv := range servers {
+		if len(srv) > 256 || strings.ContainsAny(srv, "\r\n") {
+			return errors.New("DNS 服务器地址无效，不能包含换行且不超过 256 字符")
+		}
 	}
 	return nil
 }

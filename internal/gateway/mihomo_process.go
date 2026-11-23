@@ -640,6 +640,17 @@ func (m *mihomoManager) ActiveListeners() []runtimeListener {
 			Services: []string{"Mihomo SOCKS5"},
 		})
 	}
+	if m.cfg.Settings.DNSListenPort > 0 {
+		for _, proto := range []string{"UDP", "TCP"} {
+			out = append(out, runtimeListener{
+				Port:     m.cfg.Settings.DNSListenPort,
+				IP:       listenIP,
+				Protocol: proto,
+				Purpose:  "代理分流 · DNS",
+				Services: []string{"Mihomo DNS"},
+			})
+		}
+	}
 	if m.cfg.ControllerPort > 0 {
 		out = append(out, runtimeListener{
 			Port:     m.cfg.ControllerPort,

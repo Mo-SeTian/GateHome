@@ -34,25 +34,27 @@ func decodeBodyLarge(w http.ResponseWriter, r *http.Request, v any, limit int64)
 const managedSecretPlaceholder = "__GATEHOME_MANAGED_SECRET__"
 
 type mihomoStatusResponse struct {
-	Running                bool                     `json:"running"`
-	PID                    int                      `json:"pid,omitempty"`
-	CoreInstalled          bool                     `json:"core_installed"`
-	CoreVersion            string                   `json:"core_version,omitempty"`
-	BinaryPath             string                   `json:"binary_path,omitempty"`
-	LANIP                  string                   `json:"lan_ip"`
-	OutboundTakeoverActive bool                     `json:"outbound_takeover_active"`
-	OutboundProxyURL       string                   `json:"outbound_proxy_url,omitempty"`
-	ManualOverride         bool                     `json:"manual_override"`
-	LastError              string                   `json:"last_error,omitempty"`
-	RecentLogs             []string                 `json:"recent_logs"`
-	Enabled                bool                     `json:"enabled"`
-	TakeoverOutbound       bool                     `json:"takeover_outbound"`
-	ControllerPort         int                      `json:"controller_port"`
-	Settings               MihomoCoreSettings       `json:"settings"`
-	ActiveSubscriptionID   string                   `json:"active_subscription_id,omitempty"`
-	Subscriptions          []MihomoSubscriptionView `json:"subscriptions"`
-	CustomGroups           []MihomoCustomGroup      `json:"custom_groups"`
-	CustomRules            []MihomoCustomRule       `json:"custom_rules"`
+	Running                bool                       `json:"running"`
+	PID                    int                        `json:"pid,omitempty"`
+	CoreInstalled          bool                       `json:"core_installed"`
+	CoreVersion            string                     `json:"core_version,omitempty"`
+	BinaryPath             string                     `json:"binary_path,omitempty"`
+	LANIP                  string                     `json:"lan_ip"`
+	OutboundTakeoverActive bool                       `json:"outbound_takeover_active"`
+	OutboundProxyURL       string                     `json:"outbound_proxy_url,omitempty"`
+	ManualOverride         bool                       `json:"manual_override"`
+	LastError              string                     `json:"last_error,omitempty"`
+	RecentLogs             []string                   `json:"recent_logs"`
+	Enabled                bool                       `json:"enabled"`
+	TakeoverOutbound       bool                       `json:"takeover_outbound"`
+	ControllerPort         int                        `json:"controller_port"`
+	Settings               MihomoCoreSettings         `json:"settings"`
+	ActiveSubscriptionID   string                     `json:"active_subscription_id,omitempty"`
+	Subscriptions          []MihomoSubscriptionView   `json:"subscriptions"`
+	CustomGroups           []MihomoCustomGroup        `json:"custom_groups"`
+	CustomRules            []MihomoCustomRule         `json:"custom_rules"`
+	CustomDNSPolicies      []MihomoDNSPolicy          `json:"custom_dns_policies"`
+	InheritedDNSPolicies   []MihomoInheritedDNSPolicy `json:"inherited_dns_policies"`
 }
 
 func (m *mihomoManager) statusSnapshot() mihomoStatusResponse {
@@ -71,6 +73,8 @@ func (m *mihomoManager) statusSnapshot() mihomoStatusResponse {
 		outboundURL = activeOutboundURL(m.cfg.Settings)
 		takeoverActive = outboundURL != ""
 	}
+	sourceRaw, _ := m.readSourceYAML(m.cfg)
+	inheritedDNS := extractInheritedDNSPolicies(sourceRaw)
 	return mihomoStatusResponse{
 		Running:                m.running,
 		PID:                    m.pid,
@@ -91,6 +95,8 @@ func (m *mihomoManager) statusSnapshot() mihomoStatusResponse {
 		Subscriptions:          toSubscriptionViews(m.cfg.Subscriptions),
 		CustomGroups:           slices.Clone(m.cfg.CustomGroups),
 		CustomRules:            slices.Clone(m.cfg.CustomRules),
+		CustomDNSPolicies:      slices.Clone(m.cfg.CustomDNSPolicies),
+		InheritedDNSPolicies:   inheritedDNS,
 	}
 }
 
@@ -112,6 +118,10 @@ func (a *Admin) mihomoRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/mihomo/rules", a.requireAuth(a.handleMihomoAddRule))
 	mux.HandleFunc("PUT /api/mihomo/rules", a.requireAuth(a.handleMihomoSaveRules))
 	mux.HandleFunc("DELETE /api/mihomo/rules/{id}", a.requireAuth(a.handleMihomoDeleteRule))
+
+	mux.HandleFunc("POST /api/mihomo/dns-policies", a.requireAuth(a.handleMihomoAddDNSPolicy))
+	mux.HandleFunc("PUT /api/mihomo/dns-policies", a.requireAuth(a.handleMihomoSaveDNSPolicies))
+	mux.HandleFunc("DELETE /api/mihomo/dns-policies/{id}", a.requireAuth(a.handleMihomoDeleteDNSPolicy))
 
 	mux.HandleFunc("POST /api/mihomo/subscriptions", a.requireAuth(a.handleMihomoAddSubscription))
 	mux.HandleFunc("PUT /api/mihomo/subscriptions/{id}/activate", a.requireAuth(a.handleMihomoActivateSubscription))
@@ -164,7 +174,7 @@ func (a *Admin) handleMihomoSettings(w http.ResponseWriter, r *http.Request) {
 		next.Settings.LogLevel = "info"
 	}
 	if next.Settings.DNSEnhancedMode == "" {
-		next.Settings.DNSEnhancedMode = "fake-ip"
+		next.Settings.DNSEnhancedMode = "keep"
 	}
 
 	if err := validateMihomoSettings(next, gwCfg, a.adminPort); err != nil {
@@ -177,6 +187,7 @@ func (a *Admin) handleMihomoSettings(w http.ResponseWriter, r *http.Request) {
 		next.Settings.MixedPort != m.cfg.Settings.MixedPort ||
 		next.Settings.HTTPPort != m.cfg.Settings.HTTPPort ||
 		next.Settings.SocksPort != m.cfg.Settings.SocksPort ||
+		next.Settings.DNSListenPort != m.cfg.Settings.DNSListenPort ||
 		next.Settings.AllowLAN != m.cfg.Settings.AllowLAN
 
 	next.ManualOverride = false
@@ -535,6 +546,99 @@ func (a *Admin) handleMihomoDeleteRule(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, 200, m.statusSnapshot())
 }
 
+func (a *Admin) applyDNSPoliciesMutation(w http.ResponseWriter, mutate func([]MihomoDNSPolicy) ([]MihomoDNSPolicy, int, string)) {
+	m := a.mihomo
+	m.mu.Lock()
+	nextList, statusCode, errMsg := mutate(m.cfg.CustomDNSPolicies)
+	if errMsg != "" {
+		m.mu.Unlock()
+		apiError(w, statusCode, errMsg)
+		return
+	}
+	next := m.cfg
+	next.CustomDNSPolicies = nextList
+	next.ManualOverride = false
+	if err := saveMihomoConfig(m.dir, next); err != nil {
+		m.mu.Unlock()
+		apiError(w, 500, err.Error())
+		return
+	}
+	m.cfg = next
+	if err := m.synthesizeAndWriteLocked(); err != nil {
+		m.mu.Unlock()
+		apiError(w, 500, err.Error())
+		return
+	}
+	running := m.running
+	m.mu.Unlock()
+
+	if running {
+		_ = m.Reload()
+	}
+	jsonResponse(w, 200, m.statusSnapshot())
+}
+
+func (a *Admin) handleMihomoAddDNSPolicy(w http.ResponseWriter, r *http.Request) {
+	var input MihomoDNSPolicy
+	if !decodeBody(w, r, &input) {
+		return
+	}
+	input.Domain = strings.TrimSpace(input.Domain)
+	input.Servers = normalizeDNSPolicyServers(input.Servers)
+	if input.ID == "" {
+		input.ID = randomMihomoID("dns")
+	}
+	if err := validateMihomoDNSPolicy(input); err != nil {
+		apiError(w, 400, err.Error())
+		return
+	}
+	a.applyDNSPoliciesMutation(w, func(curr []MihomoDNSPolicy) ([]MihomoDNSPolicy, int, string) {
+		next := append(slices.Clone(curr), input)
+		return next, 0, ""
+	})
+}
+
+func (a *Admin) handleMihomoSaveDNSPolicies(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Policies []MihomoDNSPolicy `json:"policies"`
+	}
+	if !decodeBody(w, r, &input) {
+		return
+	}
+	clean := make([]MihomoDNSPolicy, 0, len(input.Policies))
+	for _, p := range input.Policies {
+		p.Domain = strings.TrimSpace(p.Domain)
+		p.Servers = normalizeDNSPolicyServers(p.Servers)
+		if p.ID == "" {
+			p.ID = randomMihomoID("dns")
+		}
+		if err := validateMihomoDNSPolicy(p); err != nil {
+			apiError(w, 400, err.Error())
+			return
+		}
+		clean = append(clean, p)
+	}
+	a.applyDNSPoliciesMutation(w, func([]MihomoDNSPolicy) ([]MihomoDNSPolicy, int, string) {
+		return clean, 0, ""
+	})
+}
+
+func (a *Admin) handleMihomoDeleteDNSPolicy(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		apiError(w, 400, "缺少 DNS 策略 ID")
+		return
+	}
+	a.applyDNSPoliciesMutation(w, func(curr []MihomoDNSPolicy) ([]MihomoDNSPolicy, int, string) {
+		idx := slices.IndexFunc(curr, func(item MihomoDNSPolicy) bool { return item.ID == id })
+		if idx < 0 {
+			return nil, 404, "未找到该 DNS 策略"
+		}
+		next := slices.Clone(curr)
+		next = append(next[:idx], next[idx+1:]...)
+		return next, 0, ""
+	})
+}
 func (a *Admin) handleMihomoAddSubscription(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		Name        string `json:"name"`

@@ -37,9 +37,11 @@ func buildColdStartYAML(cfg MihomoConfig) string {
 	b.WriteString("dns:\n")
 	b.WriteString("  enable: true\n")
 	fmt.Fprintf(&b, "  ipv6: %t\n", cfg.Settings.IPv6)
-	if cfg.Settings.DNSEnhancedMode != "" && cfg.Settings.DNSEnhancedMode != "keep" {
-		fmt.Fprintf(&b, "  enhanced-mode: %s\n", cfg.Settings.DNSEnhancedMode)
+	coldDNSMode := cfg.Settings.DNSEnhancedMode
+	if coldDNSMode == "" || coldDNSMode == "keep" {
+		coldDNSMode = "fake-ip"
 	}
+	fmt.Fprintf(&b, "  enhanced-mode: %s\n", coldDNSMode)
 	b.WriteString("  fake-ip-range: 198.18.0.1/16\n")
 	b.WriteString("  nameserver:\n")
 	b.WriteString("    - 223.5.5.5\n")
@@ -108,6 +110,39 @@ func synthesizeMihomoYAML(sourceYAML []byte, cfg MihomoConfig) ([]byte, error) {
 			if v, _ := yamlMapFind(dnsNode, "fake-ip-range"); v == nil {
 				yamlMapSet(dnsNode, "fake-ip-range", yamlStrNode("198.18.0.1/16"))
 			}
+		}
+	}
+	if cfg.Settings.DNSListenPort > 0 {
+		listenHost := "127.0.0.1"
+		if cfg.Settings.AllowLAN {
+			listenHost = "0.0.0.0"
+		}
+		yamlMapSet(dnsNode, "enable", yamlBoolNode(true))
+		yamlMapSet(dnsNode, "listen", yamlStrNode(fmt.Sprintf("%s:%d", listenHost, cfg.Settings.DNSListenPort)))
+	}
+	hasEnabledCustomDNS := false
+	for _, p := range cfg.CustomDNSPolicies {
+		if p.Enabled && strings.TrimSpace(p.Domain) != "" && len(normalizeDNSPolicyServers(p.Servers)) > 0 {
+			hasEnabledCustomDNS = true
+			break
+		}
+	}
+	if hasEnabledCustomDNS {
+		policyNode := yamlMapEnsureMapping(dnsNode, "nameserver-policy")
+		for _, p := range cfg.CustomDNSPolicies {
+			if !p.Enabled {
+				continue
+			}
+			domain := strings.TrimSpace(p.Domain)
+			servers := normalizeDNSPolicyServers(p.Servers)
+			if domain == "" || len(servers) == 0 {
+				continue
+			}
+			seq := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
+			for _, srv := range servers {
+				seq.Content = append(seq.Content, yamlStrNode(srv))
+			}
+			yamlMapSet(policyNode, domain, seq)
 		}
 	}
 
@@ -346,6 +381,51 @@ func extractYAMLGroupsAndNodes(raw []byte, customGroups []MihomoCustomGroup) ([]
 		})
 	}
 	return groups, nodes
+}
+
+func extractInheritedDNSPolicies(raw []byte) []MihomoInheritedDNSPolicy {
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return []MihomoInheritedDNSPolicy{}
+	}
+	var doc yaml.Node
+	if err := yaml.Unmarshal(raw, &doc); err != nil || doc.Kind != yaml.DocumentNode || len(doc.Content) == 0 {
+		return []MihomoInheritedDNSPolicy{}
+	}
+	dnsNode, _ := yamlMapFind(doc.Content[0], "dns")
+	policyNode, _ := yamlMapFind(dnsNode, "nameserver-policy")
+	if policyNode == nil || policyNode.Kind != yaml.MappingNode {
+		return []MihomoInheritedDNSPolicy{}
+	}
+	out := make([]MihomoInheritedDNSPolicy, 0, len(policyNode.Content)/2)
+	for i := 0; i+1 < len(policyNode.Content); i += 2 {
+		domain := strings.TrimSpace(policyNode.Content[i].Value)
+		valNode := policyNode.Content[i+1]
+		if domain == "" {
+			continue
+		}
+		var servers []string
+		switch valNode.Kind {
+		case yaml.ScalarNode:
+			if v := strings.TrimSpace(valNode.Value); v != "" {
+				servers = []string{v}
+			}
+		case yaml.SequenceNode:
+			for _, item := range valNode.Content {
+				if item.Kind == yaml.ScalarNode {
+					if v := strings.TrimSpace(item.Value); v != "" {
+						servers = append(servers, v)
+					}
+				}
+			}
+		}
+		if len(servers) > 0 {
+			out = append(out, MihomoInheritedDNSPolicy{Domain: domain, Servers: servers})
+		}
+	}
+	slices.SortFunc(out, func(a, b MihomoInheritedDNSPolicy) int {
+		return strings.Compare(a.Domain, b.Domain)
+	})
+	return out
 }
 
 func yamlMapFind(m *yaml.Node, key string) (*yaml.Node, int) {

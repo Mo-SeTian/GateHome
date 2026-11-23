@@ -314,6 +314,18 @@
               />
             </label>
             <label class="form-field">
+              <span>DNS 监听端口</span>
+              <input
+                v-model.number="settingsDraft.settings.dns_listen_port"
+                name="dns_listen_port"
+                type="number"
+                min="0"
+                max="65535"
+                class="form-input mono-text"
+                placeholder="0 表示停用"
+              />
+            </label>
+            <label class="form-field">
               <span>内部控制端口 (仅 127.0.0.1)</span>
               <input
                 v-model.number="settingsDraft.controller_port"
@@ -331,9 +343,9 @@
             <label class="form-field">
               <span>DNS 增强模式</span>
               <select v-model="settingsDraft.settings.dns_enhanced_mode" name="dns_enhanced_mode" class="form-input">
+                <option value="keep">沿用订阅原配置 (keep)</option>
                 <option value="fake-ip">fake-ip</option>
                 <option value="redir-host">redir-host</option>
-                <option value="keep">沿用订阅原配置</option>
               </select>
             </label>
             <label class="form-field">
@@ -438,6 +450,74 @@
           </div>
         </div>
         <p v-else class="report-empty">未导入订阅（当前基于冷启动默认基线运行）</p>
+      </SpotlightCard>
+
+      <!-- Incremental & Inherited DNS Policies Card -->
+      <SpotlightCard v-if="status" class="report-panel">
+        <div class="panel-header-row">
+          <div class="dns-heading-group">
+            <h2>专线 DNS 策略 (nameserver-policy)</h2>
+            <button
+              v-if="status.inherited_dns_policies?.length"
+              type="button"
+              class="badge badge-ok inherited-dns-toggle"
+              :aria-expanded="showInheritedDNS"
+              @click="showInheritedDNS = !showInheritedDNS"
+            >
+              已继承订阅 {{ status.inherited_dns_policies.length }} 条
+              <ChevronDown :size="12" class="tiny-chevron" :class="{ rotated: showInheritedDNS }" aria-hidden="true" />
+            </button>
+            <span v-else class="badge badge-neutral">订阅无自带策略</span>
+          </div>
+          <button type="button" class="btn btn-primary btn-sm" @click="openDNSPolicyModal()">
+            <Plus :size="14" /> 添加 DNS 策略
+          </button>
+        </div>
+
+        <div v-if="showInheritedDNS && status.inherited_dns_policies?.length" class="inherited-dns-box">
+          <div v-for="item in status.inherited_dns_policies" :key="item.domain" class="dns-policy-row readonly">
+            <span class="rule-value mono-text">{{ item.domain }}</span>
+            <ArrowRight :size="13" class="rule-arrow" aria-hidden="true" />
+            <span class="dns-servers mono-text">{{ item.servers.join(', ') }}</span>
+          </div>
+        </div>
+
+        <div v-if="status.custom_dns_policies?.length" class="rules-list">
+          <div
+            v-for="item in status.custom_dns_policies"
+            :key="item.id"
+            class="rule-row"
+            :class="{ disabled: !item.enabled }"
+          >
+            <div class="rule-main">
+              <span class="badge badge-brand">增量</span>
+              <span class="rule-value mono-text">{{ item.domain }}</span>
+              <ArrowRight :size="14" class="rule-arrow" aria-hidden="true" />
+              <span class="dns-servers mono-text">{{ (item.servers || []).join(', ') }}</span>
+            </div>
+            <div class="rule-actions">
+              <label class="switch" :aria-label="`启用 DNS 策略 ${item.domain}`">
+                <input
+                  type="checkbox"
+                  :checked="item.enabled"
+                  :disabled="savingDNSPolicies"
+                  @change="toggleDNSPolicy(item.id)"
+                />
+                <span class="switch-slider" />
+              </label>
+              <button
+                type="button"
+                class="btn btn-ghost btn-sm text-bad"
+                :disabled="savingDNSPolicies"
+                :aria-label="`删除 DNS 策略 ${item.domain}`"
+                @click="removeDNSPolicy(item.id)"
+              >
+                <Trash2 :size="14" />
+              </button>
+            </div>
+          </div>
+        </div>
+        <p v-else-if="!status.inherited_dns_policies?.length" class="report-empty">暂无自定义 DNS 策略</p>
       </SpotlightCard>
 
       <!-- Core Binary Management Card -->
@@ -655,6 +735,44 @@
         <button type="submit" form="mihomo-sub-form" class="btn btn-primary" :disabled="modalBusy">{{ modalBusy ? '导入中…' : '保存订阅' }}</button>
       </div>
     </dialog>
+
+    <!-- Dialog: Add Custom DNS Policy -->
+    <dialog ref="dnsDialog" class="modal-dialog" aria-labelledby="mihomo-dns-dialog-title">
+      <div class="modal-header">
+        <h2 id="mihomo-dns-dialog-title" class="modal-title">添加增量 DNS 策略</h2>
+        <button type="button" class="close-modal-btn" aria-label="关闭" @click="dnsDialog?.close()">
+          <X :size="18" />
+        </button>
+      </div>
+      <form id="mihomo-dns-form" class="modal-body mihomo-modal-form" @submit.prevent="submitDNSPolicy">
+        <p v-if="modalError" class="report-error" role="alert">{{ modalError }}</p>
+        <label class="form-field">
+          <span>匹配域名 / 通配符 / Geosite</span>
+          <input
+            v-model.trim="dnsForm.domain"
+            name="dns_domain"
+            class="form-input mono-text"
+            required
+            placeholder="例如：+.corp.internal 或 geosite:cn"
+          />
+        </label>
+        <label class="form-field">
+          <span>指定 DNS 服务器（每行一个或逗号分隔）</span>
+          <textarea
+            v-model="dnsForm.serversText"
+            name="dns_servers"
+            class="form-input mono-text"
+            rows="3"
+            required
+            placeholder="10.0.0.53&#10;https://dns.example.com/dns-query#专线"
+          />
+        </label>
+      </form>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" @click="dnsDialog?.close()">取消</button>
+        <button type="submit" form="mihomo-dns-form" class="btn btn-primary" :disabled="modalBusy">保存 DNS 策略</button>
+      </div>
+    </dialog>
   </div>
 </template>
 
@@ -709,6 +827,8 @@ const loading = ref(false)
 const busyAction = ref(false)
 const savingSettings = ref(false)
 const savingRules = ref(false)
+const savingDNSPolicies = ref(false)
+const showInheritedDNS = ref(false)
 const busySub = ref('')
 const coreBusy = ref(false)
 const testingGroup = ref('')
@@ -732,6 +852,7 @@ const yamlBusy = ref(false)
 const groupDialog = ref(null)
 const ruleDialog = ref(null)
 const subDialog = ref(null)
+const dnsDialog = ref(null)
 const coreFileInput = ref(null)
 const modalError = ref('')
 const modalBusy = ref(false)
@@ -759,6 +880,11 @@ const subForm = reactive({
   yaml_content: ''
 })
 
+const dnsForm = reactive({
+  domain: '',
+  serversText: ''
+})
+
 const currentMode = computed(() => status.value?.settings?.mode || 'rule')
 
 const activePortEntries = computed(() => {
@@ -769,6 +895,7 @@ const activePortEntries = computed(() => {
   if (s.mixed_port > 0) entries.push({ label: 'Mixed', address: `${host}:${s.mixed_port}` })
   if (s.http_port > 0) entries.push({ label: 'HTTP', address: `${host}:${s.http_port}` })
   if (s.socks_port > 0) entries.push({ label: 'SOCKS5', address: `${host}:${s.socks_port}` })
+  if (s.dns_listen_port > 0) entries.push({ label: 'DNS', address: `${host}:${s.dns_listen_port}` })
   return entries
 })
 
@@ -1065,7 +1192,8 @@ async function saveCoreSettings() {
         ...settingsDraft.value.settings,
         mixed_port: Number(settingsDraft.value.settings.mixed_port) || 0,
         http_port: Number(settingsDraft.value.settings.http_port) || 0,
-        socks_port: Number(settingsDraft.value.settings.socks_port) || 0
+        socks_port: Number(settingsDraft.value.settings.socks_port) || 0,
+        dns_listen_port: Number(settingsDraft.value.settings.dns_listen_port) || 0
       }
     }
     const data = await adminApi.saveMihomoSettings(payload)
@@ -1145,6 +1273,64 @@ async function deleteSub(sub) {
     toast.error(err.message)
   } finally {
     busySub.value = ''
+  }
+}
+
+function openDNSPolicyModal() {
+  modalError.value = ''
+  dnsForm.domain = ''
+  dnsForm.serversText = ''
+  dnsDialog.value?.showModal()
+}
+
+async function submitDNSPolicy() {
+  modalError.value = ''
+  const servers = dnsForm.serversText
+    .split(/[\n,]+/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+  modalBusy.value = true
+  try {
+    const data = await adminApi.addMihomoDNSPolicy({
+      domain: dnsForm.domain,
+      servers,
+      enabled: true
+    })
+    applyStatus(data)
+    dnsDialog.value?.close()
+    toast.success('增量 DNS 策略已添加')
+  } catch (err) {
+    modalError.value = err.message
+  } finally {
+    modalBusy.value = false
+  }
+}
+
+async function toggleDNSPolicy(id) {
+  savingDNSPolicies.value = true
+  try {
+    const next = (status.value?.custom_dns_policies || []).map((p) =>
+      p.id === id ? { ...p, enabled: !p.enabled } : p
+    )
+    const data = await adminApi.saveMihomoDNSPolicies(next)
+    applyStatus(data)
+  } catch (err) {
+    toast.error(err.message)
+  } finally {
+    savingDNSPolicies.value = false
+  }
+}
+
+async function removeDNSPolicy(id) {
+  savingDNSPolicies.value = true
+  try {
+    const data = await adminApi.deleteMihomoDNSPolicy(id)
+    applyStatus(data)
+    toast.success('DNS 策略已删除')
+  } catch (err) {
+    toast.error(err.message)
+  } finally {
+    savingDNSPolicies.value = false
   }
 }
 
@@ -1686,6 +1872,50 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+.dns-heading-group {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.inherited-dns-toggle {
+  cursor: pointer;
+}
+
+.tiny-chevron {
+  transition: transform 0.2s ease;
+  transform: rotate(-90deg);
+}
+
+.tiny-chevron.rotated {
+  transform: rotate(0deg);
+}
+
+.inherited-dns-box {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--strip-bg);
+  border: 1px dashed var(--line);
+}
+
+.dns-policy-row.readonly {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.dns-servers {
+  font-size: 12px;
+  color: var(--ink-secondary);
+  overflow-wrap: anywhere;
 }
 
 .core-meta {

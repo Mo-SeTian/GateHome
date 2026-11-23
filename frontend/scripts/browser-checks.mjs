@@ -2054,6 +2054,11 @@ try {
   const mihomoDialog = dialog()
   await mihomoDialog.locator('input[name="sub_name"]').fill('浏览器测试机场')
   await mihomoDialog.locator('textarea[name="sub_yaml"]').fill([
+    'dns:',
+    '  enable: true',
+    '  enhanced-mode: fake-ip',
+    '  nameserver-policy:',
+    '    "cdn-hk.example.com": ["dn-hk.example.com:1066"]',
     'proxies:',
     '  - { name: "HK-01", type: ss, server: 1.2.3.4, port: 443 }',
     '  - { name: "US-01", type: ss, server: 1.2.3.5, port: 443 }',
@@ -2066,16 +2071,27 @@ try {
   ].join('\n'))
   await mihomoDialog.getByRole('button', { name: '保存订阅' }).click()
   await mihomoPage.getByText('浏览器测试机场', { exact: true }).waitFor()
+  await mihomoPage.getByRole('button', { name: /已继承订阅 1 条/ }).click()
+  await mihomoPage.getByText('cdn-hk.example.com', { exact: true }).waitFor()
 
-  // Configure 3 custom ports + IPv6 toggle + outbound takeover and save
+  // Configure 4 custom ports (including DNS listen port) + outbound takeover and save
   await mihomoPage.locator('input[name="mixed_port"]').fill('17890')
   await mihomoPage.locator('input[name="http_port"]').fill('17891')
   await mihomoPage.locator('input[name="socks_port"]').fill('17892')
+  await mihomoPage.locator('input[name="dns_listen_port"]').fill('17853')
   await mihomoPage.locator('input[name="takeover_outbound"]').check()
   await mihomoPage.getByRole('button', { name: '保存并生效' }).click()
   await mihomoPage.getByText(/^Mixed .*:17890$/).waitFor()
   await mihomoPage.getByText(/^HTTP .*:17891$/).waitFor()
   await mihomoPage.getByText(/^SOCKS5 .*:17892$/).waitFor()
+  await mihomoPage.getByText(/^DNS .*:17853$/).waitFor()
+
+  // Add incremental custom DNS policy
+  await mihomoPage.getByRole('button', { name: /添加 DNS 策略/ }).click()
+  await mihomoDialog.locator('input[name="dns_domain"]').fill('+.corp.internal')
+  await mihomoDialog.locator('textarea[name="dns_servers"]').fill('10.0.0.53')
+  await mihomoDialog.getByRole('button', { name: '保存 DNS 策略' }).click()
+  await mihomoPage.locator('.rule-row').filter({ hasText: '+.corp.internal' }).waitFor()
 
   // Create custom proxy group on Groups tab
   await mihomoPage.getByRole('tab', { name: '策略组与节点' }).click()
@@ -2098,10 +2114,13 @@ try {
   await mihomoPage.getByRole('tab', { name: '配置文件' }).click()
   await page.waitForFunction(() => {
     const val = document.querySelector('.mihomo-page .yaml-editor')?.value || ''
-    return val.includes('17890') && val.includes('17891') && val.includes('17892') && val.includes('anthropic.com')
+    return val.includes('17890') && val.includes('17891') && val.includes('17892') &&
+      val.includes('17853') && val.includes('cdn-hk.example.com') && val.includes('+.corp.internal') &&
+      val.includes('anthropic.com')
   })
   const runtimeYamlText = await mihomoPage.locator('.yaml-editor').inputValue()
   assert.ok(runtimeYamlText.includes('mixed-port: 17890') && runtimeYamlText.includes('port: 17891') && runtimeYamlText.includes('socks-port: 17892'))
+  assert.ok(runtimeYamlText.includes('listen: 0.0.0.0:17853') && runtimeYamlText.includes('cdn-hk.example.com') && runtimeYamlText.includes('+.corp.internal'))
   assert.ok(runtimeYamlText.includes('DOMAIN-SUFFIX,anthropic.com,HK 专线'))
   await mihomoPage.getByRole('button', { name: /订阅原件/ }).click()
   await mihomoPage.getByText('只读原件', { exact: true }).waitFor()
