@@ -540,11 +540,15 @@ onBeforeUnmount(() => {
 
 .conn-controls-card {
   padding: 16px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.conn-controls-card :deep(.card-inner) {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 12px;
   min-width: 0;
-  max-width: 100%;
 }
 
 .conn-top-row {
@@ -682,11 +686,15 @@ onBeforeUnmount(() => {
 
 .conn-card {
   padding: 14px 16px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.conn-card :deep(.card-inner) {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 8px;
   min-width: 0;
-  max-width: 100%;
 }
 
 .conn-card-head {

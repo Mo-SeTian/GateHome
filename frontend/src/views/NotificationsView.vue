@@ -350,7 +350,7 @@ watch(push, async (open, _, cleanup) => {
 
 .notice-page .report-panel { min-width: 0; }
 .notice-toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; }
-.notice-filters { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; flex: 1; min-width: 0; }
+.notice-filters { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; flex: 1 1 320px; min-width: 0; }
 .notice-segments {
   display: inline-flex; background: var(--strip-bg); border: 1px solid var(--line);
   border-radius: var(--radius-sm); padding: 3px; gap: 2px;
