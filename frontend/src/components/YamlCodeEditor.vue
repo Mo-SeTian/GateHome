@@ -450,6 +450,24 @@ defineExpose({ jumpToLine })
 
 <style scoped>
 .yaml-code-shell {
+  --yaml-gutter-bg: rgba(15, 23, 42, 0.45);
+  --yaml-footer-bg: rgba(15, 23, 42, 0.55);
+  --yaml-active-num-color: var(--brand-light);
+  --yaml-active-num-bg: rgba(99, 102, 241, 0.12);
+  --yaml-active-row-bg: rgba(99, 102, 241, 0.11);
+  --yaml-active-row-shadow: inset 0 1px 0 rgba(99, 102, 241, 0.2), inset 0 -1px 0 rgba(99, 102, 241, 0.2);
+  --yaml-guide-bg: rgba(148, 163, 184, 0.2);
+  --yaml-guide-active-bg: rgba(129, 140, 248, 0.72);
+  --yaml-guide-active-shadow: 0 0 6px rgba(99, 102, 241, 0.35);
+  --yaml-tok-key: #818cf8;
+  --yaml-tok-punct: #94a3b8;
+  --yaml-tok-str: #34d399;
+  --yaml-tok-num: #fbbf24;
+  --yaml-tok-bool: #22d3ee;
+  --yaml-tok-anchor: #c084fc;
+  --yaml-tok-rule: #38bdf8;
+  --yaml-tok-target: #f472b6;
+  --yaml-error-jump-color: #fb7185;
   width: 100%;
   min-width: 0;
   max-width: 100%;
@@ -499,7 +517,7 @@ defineExpose({ jumpToLine })
   position: relative;
   overflow: hidden;
   border-right: 1px solid var(--line);
-  background: rgba(15, 23, 42, 0.45);
+  background: var(--yaml-gutter-bg);
   user-select: none;
   flex-shrink: 0;
 }
@@ -531,8 +549,8 @@ defineExpose({ jumpToLine })
 }
 
 .yaml-gutter-num.active {
-  color: var(--brand-light);
-  background: rgba(99, 102, 241, 0.12);
+  color: var(--yaml-active-num-color);
+  background: var(--yaml-active-num-bg);
   border-left-color: var(--brand);
   font-weight: 600;
 }
@@ -603,8 +621,8 @@ defineExpose({ jumpToLine })
 }
 
 .yaml-code-row.active {
-  background: rgba(99, 102, 241, 0.11);
-  box-shadow: inset 0 1px 0 rgba(99, 102, 241, 0.2), inset 0 -1px 0 rgba(99, 102, 241, 0.2);
+  background: var(--yaml-active-row-bg);
+  box-shadow: var(--yaml-active-row-shadow);
 }
 
 .yaml-code-row.error {
@@ -618,13 +636,13 @@ defineExpose({ jumpToLine })
   top: 0;
   bottom: 0;
   width: 1px;
-  background: rgba(148, 163, 184, 0.2);
+  background: var(--yaml-guide-bg);
   pointer-events: none;
 }
 
 .yaml-indent-guide.active {
-  background: rgba(129, 140, 248, 0.72);
-  box-shadow: 0 0 6px rgba(99, 102, 241, 0.35);
+  background: var(--yaml-guide-active-bg);
+  box-shadow: var(--yaml-guide-active-shadow);
 }
 
 .yaml-row-text {
@@ -671,14 +689,14 @@ defineExpose({ jumpToLine })
 }
 
 /* Syntax Token Colors (strictly weight 400 to guarantee zero glyph width drift vs textarea) */
-.tok-key { color: #818cf8; font-weight: 400; }
-.tok-punct { color: #94a3b8; font-weight: 400; }
-.tok-str { color: #34d399; font-weight: 400; }
-.tok-num { color: #fbbf24; font-weight: 400; }
-.tok-bool { color: #22d3ee; font-weight: 400; }
-.tok-anchor { color: #c084fc; font-weight: 400; }
-.tok-rule { color: #38bdf8; font-weight: 400; }
-.tok-target { color: #f472b6; font-weight: 400; }
+.tok-key { color: var(--yaml-tok-key); font-weight: 400; }
+.tok-punct { color: var(--yaml-tok-punct); font-weight: 400; }
+.tok-str { color: var(--yaml-tok-str); font-weight: 400; }
+.tok-num { color: var(--yaml-tok-num); font-weight: 400; }
+.tok-bool { color: var(--yaml-tok-bool); font-weight: 400; }
+.tok-anchor { color: var(--yaml-tok-anchor); font-weight: 400; }
+.tok-rule { color: var(--yaml-tok-rule); font-weight: 400; }
+.tok-target { color: var(--yaml-tok-target); font-weight: 400; }
 .tok-val { color: var(--ink); font-weight: 400; }
 .tok-ws { color: transparent; }
 .tok-comment { color: var(--faint); font-style: italic; font-weight: 400; }
@@ -692,7 +710,7 @@ defineExpose({ jumpToLine })
   gap: 8px;
   padding: 5px 12px;
   border-top: 1px solid var(--line);
-  background: rgba(15, 23, 42, 0.55);
+  background: var(--yaml-footer-bg);
   font-size: 11.5px;
   color: var(--muted);
 }
@@ -722,7 +740,7 @@ defineExpose({ jumpToLine })
   border-radius: var(--radius-pill);
   border: 1px solid rgba(244, 63, 94, 0.4);
   background: rgba(244, 63, 94, 0.14);
-  color: #fb7185;
+  color: var(--yaml-error-jump-color);
   font-size: 11.5px;
   font-weight: 500;
   cursor: pointer;
@@ -745,44 +763,6 @@ defineExpose({ jumpToLine })
   opacity: 0.9;
 }
 
-/* VisionOS Light Theme Palette */
-:global(body.theme-light) .yaml-gutter {
-  background: #f8fafc;
-}
-
-:global(body.theme-light) .yaml-code-footer {
-  background: #f8fafc;
-}
-
-:global(body.theme-light) .yaml-gutter-num.active {
-  color: var(--brand);
-  background: rgba(99, 102, 241, 0.08);
-}
-
-:global(body.theme-light) .yaml-code-row.active {
-  background: rgba(99, 102, 241, 0.07);
-  box-shadow: inset 0 1px 0 rgba(99, 102, 241, 0.14), inset 0 -1px 0 rgba(99, 102, 241, 0.14);
-}
-
-:global(body.theme-light) .yaml-indent-guide {
-  background: rgba(148, 163, 184, 0.34);
-}
-
-:global(body.theme-light) .yaml-indent-guide.active {
-  background: rgba(99, 102, 241, 0.72);
-  box-shadow: none;
-}
-
-:global(body.theme-light) .tok-key { color: #4f46e5; }
-:global(body.theme-light) .tok-punct { color: #64748b; }
-:global(body.theme-light) .tok-str { color: #059669; }
-:global(body.theme-light) .tok-num { color: #d97706; }
-:global(body.theme-light) .tok-bool { color: #0891b2; }
-:global(body.theme-light) .tok-anchor { color: #9333ea; }
-:global(body.theme-light) .tok-rule { color: #0284c7; }
-:global(body.theme-light) .tok-target { color: #db2777; }
-:global(body.theme-light) .yaml-error-jump { color: #e11d48; }
-
 @media (max-width: 768px) {
   .yaml-code-shell.preset-tall {
     height: clamp(420px, 60dvh, 640px);
@@ -793,5 +773,29 @@ defineExpose({ jumpToLine })
     height: clamp(320px, 52dvh, 560px);
     min-height: 300px;
   }
+}
+</style>
+
+<style>
+/* VisionOS Light Theme Palette scoped via .yaml-code-shell custom properties */
+body.theme-light .yaml-code-shell {
+  --yaml-gutter-bg: #f8fafc;
+  --yaml-footer-bg: #f8fafc;
+  --yaml-active-num-color: var(--brand);
+  --yaml-active-num-bg: rgba(99, 102, 241, 0.08);
+  --yaml-active-row-bg: rgba(99, 102, 241, 0.07);
+  --yaml-active-row-shadow: inset 0 1px 0 rgba(99, 102, 241, 0.14), inset 0 -1px 0 rgba(99, 102, 241, 0.14);
+  --yaml-guide-bg: rgba(148, 163, 184, 0.34);
+  --yaml-guide-active-bg: rgba(99, 102, 241, 0.72);
+  --yaml-guide-active-shadow: none;
+  --yaml-tok-key: #4f46e5;
+  --yaml-tok-punct: #64748b;
+  --yaml-tok-str: #059669;
+  --yaml-tok-num: #d97706;
+  --yaml-tok-bool: #0891b2;
+  --yaml-tok-anchor: #9333ea;
+  --yaml-tok-rule: #0284c7;
+  --yaml-tok-target: #db2777;
+  --yaml-error-jump-color: #e11d48;
 }
 </style>

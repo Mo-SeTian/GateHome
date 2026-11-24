@@ -2053,6 +2053,7 @@ try {
   await route('mihomo')
   const mihomoPage = page.locator('.mihomo-page')
   await mihomoPage.getByRole('tab', { name: '策略组与节点' }).waitFor()
+  assert.equal(await page.evaluate(() => getComputedStyle(document.body).backgroundColor), 'rgb(241, 245, 249)', 'mihomo light theme body background must stay slate #f1f5f9')
   await mihomoPage.getByRole('button', { name: /Zashboard 面板/ }).waitFor()
   await mihomoPage.getByRole('tab', { name: '订阅管理' }).click()
   await mihomoPage.getByRole('button', { name: /添加订阅/ }).click()
