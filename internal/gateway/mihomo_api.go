@@ -1108,12 +1108,7 @@ func maskYAMLSecret(raw []byte) string {
 			}
 		}
 		if changed {
-			var out bytes.Buffer
-			enc := yaml.NewEncoder(&out)
-			enc.SetIndent(2)
-			if enc.Encode(&doc) == nil {
-				_ = enc.Close()
-				rendered := out.String()
+			if rendered, err := encodeYAMLIndent2(&doc); err == nil {
 				if strings.HasPrefix(rendered, mihomoHeaderComment) {
 					return rendered
 				}
@@ -1166,14 +1161,11 @@ func injectManagedKeys(raw []byte, cfg MihomoConfig) ([]byte, error) {
 		yamlMapDelete(root, "skip-auth-prefixes")
 	}
 
-	var out bytes.Buffer
-	enc := yaml.NewEncoder(&out)
-	enc.SetIndent(2)
-	if err := enc.Encode(&doc); err != nil {
+	rendered, err := encodeYAMLIndent2(&doc)
+	if err != nil {
 		return nil, err
 	}
-	_ = enc.Close()
-	return out.Bytes(), nil
+	return []byte(rendered), nil
 }
 
 func (a *Admin) handleMihomoGetYAML(w http.ResponseWriter, r *http.Request) {
@@ -1241,7 +1233,6 @@ func (a *Admin) handleMihomoValidateYAML(w http.ResponseWriter, r *http.Request)
 	var input struct {
 		Content string `json:"content"`
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 4<<20)
 	if !decodeBodyLarge(w, r, &input, 4<<20) {
 		return
 	}
@@ -1253,8 +1244,6 @@ func (a *Admin) handleMihomoPutYAML(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		Content string `json:"content"`
 	}
-	// Limit manual YAML uploads up to 4 MiB via custom MaxBytesReader
-	r.Body = http.MaxBytesReader(w, r.Body, 4<<20)
 	if !decodeBodyLarge(w, r, &input, 4<<20) {
 		return
 	}

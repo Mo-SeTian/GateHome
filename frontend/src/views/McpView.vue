@@ -237,6 +237,7 @@ import SpotlightCard from '@/components/SpotlightCard.vue'
 import McpPermissions from '@/components/McpPermissions.vue'
 import SecretInput from '@/components/SecretInput.vue'
 import { adminApi } from '@/api/admin'
+import { copyText } from '@/api/clipboard'
 import { mcpRequest } from '@/api/mcp'
 import { useGatewayStatus } from '@/composables/useGatewayStatus'
 import { useToast } from '@/composables/useToast'
@@ -437,7 +438,7 @@ async function clientOperation(client, operation) {
 }
 async function copy(value) {
   try {
-    await navigator.clipboard.writeText(value)
+    await copyText(value)
     toast.success('已复制')
   } catch {
     toast.error('浏览器未允许复制，请在输入框中手动复制')

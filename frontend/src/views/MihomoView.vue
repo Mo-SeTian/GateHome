@@ -1249,6 +1249,8 @@ import MihomoCustomYaml from '@/components/MihomoCustomYaml.vue'
 import MihomoConnections from '@/components/MihomoConnections.vue'
 import MihomoRuleSets from '@/components/MihomoRuleSets.vue'
 import { adminApi } from '@/api/admin'
+import { copyText as copyToClipboard } from '@/api/clipboard'
+import { formatBytes } from '@/api/reports'
 import { useToast } from '@/composables/useToast'
 import '@/styles/reports.css'
 
@@ -2017,13 +2019,6 @@ async function handleMMDBUpload(event) {
   }
 }
 
-function formatBytes(n) {
-  if (!n || n <= 0) return '0 B'
-  if (n >= 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(2)} MiB`
-  if (n >= 1024) return `${(n / 1024).toFixed(1)} KiB`
-  return `${n} B`
-}
-
 function onYamlInput() {
   yamlDirty.value = true
   yamlValidated.value = false
@@ -2243,7 +2238,7 @@ function formatQuota(sub) {
 
 async function copyText(text, msg) {
   try {
-    await navigator.clipboard.writeText(text)
+    await copyToClipboard(text)
     toast.success(msg)
   } catch {
     toast.info(text)

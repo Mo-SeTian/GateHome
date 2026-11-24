@@ -223,8 +223,8 @@ func iconDimensions(r io.Reader, format string) (int, int, error) {
 			}
 		}
 	case "ico":
-		data, err := io.ReadAll(r)
-		if err != nil || !validDiscoveryICO(data) {
+		data, err := io.ReadAll(io.LimitReader(r, maxImageUpload+1))
+		if err != nil || len(data) > maxImageUpload || !validDiscoveryICO(data) {
 			return 0, 0, fs.ErrInvalid
 		}
 		w, h := 1+(int(data[6])+255)%256, 1+(int(data[7])+255)%256

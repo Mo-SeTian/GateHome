@@ -10,9 +10,11 @@
 !frontend/**
 frontend/node_modules
 frontend/dist
-!scripts/
+frontend/scripts
+frontend/src/**/*.test.js
 !cmd/
 !cmd/**
+cmd/**/*_test.go
 !internal/
 !internal/**
 internal/**/*_test.go

@@ -360,6 +360,10 @@ func (a *Admin) assistantRoutes(mux *http.ServeMux) {
 			apiError(w, 400, err.Error())
 			return
 		}
+		if err := a.validateAssistantEndpoint(e); err != nil {
+			apiError(w, 400, err.Error())
+			return
+		}
 		switch input.ID {
 		case "", "default":
 			e.ID = ""

@@ -323,7 +323,7 @@ func probeService(ctx context.Context, client *http.Client, ip netip.Addr, port 
 		if name == "" {
 			result.Name = "Web 服务 · " + strconv.Itoa(port)
 		}
-		if final.Scheme == "https" && response.TLS != nil {
+		if final.Scheme == "https" && response.TLS != nil && len(response.TLS.PeerCertificates) > 0 {
 			intermediates := x509.NewCertPool()
 			for _, cert := range response.TLS.PeerCertificates[1:] {
 				intermediates.AddCert(cert)

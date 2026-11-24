@@ -1,0 +1,578 @@
+package gateway
+
+import (
+	"archive/zip"
+	"bytes"
+	"compress/gzip"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"runtime"
+	"strings"
+	"time"
+)
+
+const (
+	mihomoReleaseLatestAPI    = "https://api.github.com/repos/MetaCubeX/mihomo/releases/latest"
+	zashboardReleaseLatestAPI = "https://api.github.com/repos/Zephyruso/zashboard/releases/latest"
+	maxMihomoBinaryBytes      = 128 << 20
+	maxMihomoUnzipBytes       = 200 << 20
+	maxZashboardZipBytes      = 32 << 20
+	maxZashboardExtractBytes  = 96 << 20
+	maxZashboardExtractFiles  = 2000
+	maxMihomoMMDBBytes        = 32 << 20
+)
+
+var mmdbMetadataMarker = []byte{0xab, 0xcd, 0xef, 'M', 'a', 'x', 'M', 'i', 'n', 'd', '.', 'c', 'o', 'm'}
+
+func (m *mihomoManager) probeBinaryVersion(path string) string {
+	if path == "" {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, path, "-v").CombinedOutput()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(strings.Split(string(out), "\n")[0])
+}
+
+func isSupportedExecutableBinary(data []byte) bool {
+	if len(data) < 4 {
+		return false
+	}
+	if bytes.HasPrefix(data, []byte{0x7f, 'E', 'L', 'F'}) {
+		return true
+	}
+	if bytes.HasPrefix(data, []byte{0xfe, 0xed, 0xfa, 0xce}) ||
+		bytes.HasPrefix(data, []byte{0xce, 0xfa, 0xed, 0xfe}) ||
+		bytes.HasPrefix(data, []byte{0xfe, 0xed, 0xfa, 0xcf}) ||
+		bytes.HasPrefix(data, []byte{0xcf, 0xfa, 0xed, 0xfe}) ||
+		bytes.HasPrefix(data, []byte{0xbe, 0xba, 0xfe, 0xca}) {
+		return true
+	}
+	if bytes.HasPrefix(data, []byte{0xca, 0xfe, 0xba, 0xbe}) && len(data) >= 8 {
+		nfat := uint32(data[4])<<24 | uint32(data[5])<<16 | uint32(data[6])<<8 | uint32(data[7])
+		if nfat > 0 && nfat <= 20 {
+			return true
+		}
+	}
+	return len(data) >= 64 && data[0] == 'M' && data[1] == 'Z'
+}
+
+func (m *mihomoManager) installBinaryData(raw []byte) (string, error) {
+	if len(raw) == 0 {
+		return "", errors.New("上传的文件为空")
+	}
+	// Transparently gunzip if gzip header 0x1f 0x8b is present.
+	payload := raw
+	if len(raw) >= 2 && raw[0] == 0x1f && raw[1] == 0x8b {
+		gz, err := gzip.NewReader(bytes.NewReader(raw))
+		if err != nil {
+			return "", fmt.Errorf("gzip 解压失败: %v", err)
+		}
+		defer gz.Close()
+		decompressed, err := io.ReadAll(io.LimitReader(gz, maxMihomoUnzipBytes+1))
+		if err != nil {
+			return "", fmt.Errorf("gzip 解压读取失败: %v", err)
+		}
+		if int64(len(decompressed)) > maxMihomoUnzipBytes {
+			return "", errors.New("解压后二进制文件超过大小限制")
+		}
+		payload = decompressed
+	}
+	if len(payload) < 1024 {
+		return "", errors.New("内核文件大小异常")
+	}
+	if !isSupportedExecutableBinary(payload) {
+		return "", errors.New("内核文件必须为有效的可执行二进制文件（ELF / Mach-O / PE），禁止上传脚本")
+	}
+
+	binDir := filepath.Join(m.dir, "bin")
+	if err := os.MkdirAll(binDir, 0700); err != nil {
+		return "", err
+	}
+	tmp, err := os.CreateTemp(binDir, ".mihomo-upload-*")
+	if err != nil {
+		return "", err
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+
+	if _, err := tmp.Write(payload); err != nil {
+		tmp.Close()
+		return "", err
+	}
+	if err := tmp.Chmod(0755); err != nil {
+		tmp.Close()
+		return "", err
+	}
+	if err := tmp.Close(); err != nil {
+		return "", err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, tmpPath, "-v").CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("校验内核失败 (-v 返回错误): %v", err)
+	}
+	verLine := strings.TrimSpace(strings.Split(string(out), "\n")[0])
+	if !strings.Contains(strings.ToLower(verLine), "mihomo") && !strings.Contains(strings.ToLower(verLine), "meta") {
+		return "", fmt.Errorf("无效的 mihomo 内核输出: %s", verLine)
+	}
+
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
+
+	dest := m.managedBinaryPath()
+	m.mu.Lock()
+	wasRunning := m.running
+	m.mu.Unlock()
+	if wasRunning {
+		_ = m.stopWithLifecycleHeld()
+	}
+
+	if err := os.Rename(tmpPath, dest); err != nil {
+		return "", err
+	}
+	_ = os.Chmod(dest, 0755)
+
+	m.mu.Lock()
+	m.version = verLine
+	m.mu.Unlock()
+
+	if wasRunning {
+		_ = m.startWithLifecycleHeld()
+	}
+	return verLine, nil
+}
+
+func selectMihomoAsset(assets []githubReleaseAsset, goos, goarch string) (githubReleaseAsset, bool) {
+	archToken := goarch
+	prefix := fmt.Sprintf("mihomo-%s-%s", goos, archToken)
+	var fallback *githubReleaseAsset
+	for i := range assets {
+		name := strings.ToLower(assets[i].Name)
+		if !strings.HasPrefix(name, prefix) || !strings.HasSuffix(name, ".gz") {
+			continue
+		}
+		if strings.Contains(name, "alpha") || strings.Contains(name, "go120") || strings.Contains(name, "go122") || strings.Contains(name, "cgo") {
+			continue
+		}
+		if goarch == "amd64" && goos == "linux" && strings.Contains(name, "-compatible-") {
+			return assets[i], true
+		}
+		if regexp.MustCompile(`^`+regexp.QuoteMeta(prefix)+`-v[0-9]`).MatchString(name) {
+			fallback = &assets[i]
+		} else if fallback == nil {
+			fallback = &assets[i]
+		}
+	}
+	if fallback != nil {
+		return *fallback, true
+	}
+	return githubReleaseAsset{}, false
+}
+
+type githubReleaseAsset struct {
+	Name string `json:"name"`
+	URL  string `json:"browser_download_url"`
+	Size int64  `json:"size"`
+}
+
+func (m *mihomoManager) DownloadCore(ctx context.Context, state State) (string, error) {
+	client := onlineUpdateClient(state)
+	defer closeClient(client)
+
+	metaBytes, err := fetchOnlineUpdate(ctx, client, mihomoReleaseLatestAPI, 2<<20, state.GitHubToken)
+	if err != nil {
+		return "", fmt.Errorf("获取 mihomo 发布信息失败: %v", err)
+	}
+	var release struct {
+		TagName string               `json:"tag_name"`
+		Assets  []githubReleaseAsset `json:"assets"`
+	}
+	if err := json.Unmarshal(metaBytes, &release); err != nil {
+		return "", errors.New("解析 mihomo 版本信息失败")
+	}
+	asset, ok := selectMihomoAsset(release.Assets, runtime.GOOS, runtime.GOARCH)
+	if !ok || asset.URL == "" {
+		return "", fmt.Errorf("未找到适用于 %s/%s 的 mihomo 发行包 (%s)", runtime.GOOS, runtime.GOARCH, release.TagName)
+	}
+	raw, err := fetchOnlineUpdate(ctx, client, asset.URL, maxMihomoBinaryBytes, "")
+	if err != nil {
+		return "", fmt.Errorf("下载内核包失败: %v", err)
+	}
+	ver, err := m.installBinaryData(raw)
+	if err != nil {
+		return "", err
+	}
+	return ver, nil
+}
+
+func (m *mihomoManager) zashboardDir() string {
+	return filepath.Join(m.dir, "ui", "zashboard")
+}
+
+func (m *mihomoManager) zashboardStatus() (bool, string) {
+	dir := m.zashboardDir()
+	info, err := os.Stat(filepath.Join(dir, "index.html"))
+	if err != nil || info.IsDir() {
+		return false, ""
+	}
+	verBytes, err := os.ReadFile(filepath.Join(dir, ".version"))
+	if err != nil {
+		return true, ""
+	}
+	return true, strings.TrimSpace(string(verBytes))
+}
+
+func selectZashboardAsset(assets []githubReleaseAsset) (githubReleaseAsset, bool) {
+	var cdnFallback *githubReleaseAsset
+	for i := range assets {
+		name := strings.ToLower(strings.TrimSpace(assets[i].Name))
+		if name == "dist.zip" {
+			return assets[i], true
+		}
+		if name == "dist-cdn-fonts.zip" && cdnFallback == nil {
+			cdnFallback = &assets[i]
+		}
+	}
+	if cdnFallback != nil {
+		return *cdnFallback, true
+	}
+	return githubReleaseAsset{}, false
+}
+
+func detectZashboardStripPrefix(files []*zip.File) string {
+	hasRootIndex := false
+	topDirs := map[string]bool{}
+	for _, f := range files {
+		clean := strings.TrimPrefix(filepath.ToSlash(f.Name), "./")
+		clean = strings.TrimLeft(clean, "/")
+		if clean == "" || strings.HasSuffix(clean, "/") {
+			continue
+		}
+		if clean == "index.html" {
+			hasRootIndex = true
+			break
+		}
+		if idx := strings.IndexByte(clean, '/'); idx > 0 {
+			topDirs[clean[:idx]] = true
+		} else {
+			topDirs[""] = true
+		}
+	}
+	if hasRootIndex || len(topDirs) != 1 {
+		return ""
+	}
+	for dir := range topDirs {
+		if dir != "" && dir != "." && dir != ".." {
+			return dir + "/"
+		}
+	}
+	return ""
+}
+
+func (m *mihomoManager) installZashboardZip(raw []byte, version string) (string, error) {
+	if len(raw) == 0 {
+		return "", errors.New("Zashboard 压缩包为空")
+	}
+	zr, err := zip.NewReader(bytes.NewReader(raw), int64(len(raw)))
+	if err != nil {
+		return "", fmt.Errorf("解析 Zashboard 压缩包失败: %v", err)
+	}
+	if len(zr.File) > maxZashboardExtractFiles {
+		return "", fmt.Errorf("压缩包文件数量过多 (%d)", len(zr.File))
+	}
+
+	uiParent := filepath.Join(m.dir, "ui")
+	if err := os.MkdirAll(uiParent, 0700); err != nil {
+		return "", err
+	}
+	tmpDir, err := os.MkdirTemp(uiParent, ".zashboard-tmp-*")
+	if err != nil {
+		return "", err
+	}
+	defer os.RemoveAll(tmpDir)
+
+	stripPrefix := detectZashboardStripPrefix(zr.File)
+	var totalWritten int64
+
+	for _, f := range zr.File {
+		if f.FileInfo().Mode()&os.ModeSymlink != 0 {
+			return "", errors.New("压缩包包含不允许的符号链接")
+		}
+		slashName := strings.TrimPrefix(filepath.ToSlash(f.Name), "./")
+		if stripPrefix != "" {
+			slashName = strings.TrimPrefix(slashName, stripPrefix)
+		}
+		slashName = strings.TrimPrefix(slashName, "/")
+		if slashName == "" {
+			continue
+		}
+		if strings.Contains(slashName, "\\") || filepath.IsAbs(slashName) {
+			return "", fmt.Errorf("压缩包包含非法路径: %s", f.Name)
+		}
+		parts := strings.Split(slashName, "/")
+		for _, p := range parts {
+			if p == ".." {
+				return "", fmt.Errorf("压缩包路径越界: %s", f.Name)
+			}
+		}
+
+		destPath := filepath.Join(tmpDir, filepath.FromSlash(slashName))
+		rel, err := filepath.Rel(tmpDir, destPath)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return "", fmt.Errorf("压缩包路径越界: %s", f.Name)
+		}
+
+		if f.FileInfo().IsDir() || strings.HasSuffix(slashName, "/") {
+			if err := os.MkdirAll(destPath, 0700); err != nil {
+				return "", err
+			}
+			continue
+		}
+
+		if err := os.MkdirAll(filepath.Dir(destPath), 0700); err != nil {
+			return "", err
+		}
+		rc, err := f.Open()
+		if err != nil {
+			return "", err
+		}
+		out, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+		if err != nil {
+			rc.Close()
+			return "", err
+		}
+		remaining := maxZashboardExtractBytes - totalWritten + 1
+		n, copyErr := io.Copy(out, io.LimitReader(rc, remaining))
+		closeErr := out.Close()
+		rc.Close()
+		if copyErr != nil {
+			return "", copyErr
+		}
+		if closeErr != nil {
+			return "", closeErr
+		}
+		totalWritten += n
+		if totalWritten > maxZashboardExtractBytes {
+			return "", errors.New("Zashboard 解压内容超过大小限制")
+		}
+	}
+
+	idxInfo, err := os.Stat(filepath.Join(tmpDir, "index.html"))
+	if err != nil || idxInfo.IsDir() || idxInfo.Size() == 0 {
+		return "", errors.New("压缩包缺少有效的 index.html")
+	}
+	cleanVer := strings.TrimSpace(version)
+	if cleanVer != "" {
+		if err := os.WriteFile(filepath.Join(tmpDir, ".version"), []byte(cleanVer+"\n"), 0600); err != nil {
+			return "", err
+		}
+	}
+
+	target := m.zashboardDir()
+	backup := target + ".old"
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	_ = os.RemoveAll(backup)
+	hasExisting := false
+	if _, err := os.Stat(target); err == nil {
+		if err := os.Rename(target, backup); err != nil {
+			return "", err
+		}
+		hasExisting = true
+	}
+	if err := os.Rename(tmpDir, target); err != nil {
+		if hasExisting {
+			_ = os.Rename(backup, target)
+		}
+		return "", err
+	}
+	if hasExisting {
+		_ = os.RemoveAll(backup)
+	}
+	return cleanVer, nil
+}
+
+func (m *mihomoManager) DownloadZashboard(ctx context.Context, state State) (string, error) {
+	client := onlineUpdateClient(state)
+	defer closeClient(client)
+
+	metaBytes, err := fetchOnlineUpdate(ctx, client, zashboardReleaseLatestAPI, 2<<20, state.GitHubToken)
+	if err != nil {
+		return "", fmt.Errorf("获取 Zashboard 发布信息失败: %v", err)
+	}
+	var release struct {
+		TagName string               `json:"tag_name"`
+		Assets  []githubReleaseAsset `json:"assets"`
+	}
+	if err := json.Unmarshal(metaBytes, &release); err != nil {
+		return "", errors.New("解析 Zashboard 版本信息失败")
+	}
+	asset, ok := selectZashboardAsset(release.Assets)
+	if !ok || asset.URL == "" {
+		return "", fmt.Errorf("未找到 Zashboard 发行包 (%s)", release.TagName)
+	}
+	raw, err := fetchOnlineUpdate(ctx, client, asset.URL, maxZashboardZipBytes, "")
+	if err != nil {
+		return "", fmt.Errorf("下载 Zashboard 压缩包失败: %v", err)
+	}
+	return m.installZashboardZip(raw, release.TagName)
+}
+
+func (m *mihomoManager) mmdbPath() string {
+	return filepath.Join(m.dir, "country.mmdb")
+}
+
+func isValidMMDBData(raw []byte) bool {
+	if len(raw) < 1024 || len(raw) > maxMihomoMMDBBytes {
+		return false
+	}
+	tailStart := 0
+	if len(raw) > 128<<10 {
+		tailStart = len(raw) - (128 << 10)
+	}
+	return bytes.Contains(raw[tailStart:], mmdbMetadataMarker)
+}
+
+func isValidMMDBFile(path string) (bool, int64, time.Time) {
+	info, err := os.Stat(path)
+	if err != nil || info.IsDir() {
+		return false, 0, time.Time{}
+	}
+	size := info.Size()
+	if size < 1024 || size > maxMihomoMMDBBytes {
+		return false, 0, time.Time{}
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return false, 0, time.Time{}
+	}
+	defer f.Close()
+	readSize := size
+	var offset int64
+	if readSize > 128<<10 {
+		offset = size - (128 << 10)
+		readSize = 128 << 10
+	}
+	buf := make([]byte, readSize)
+	if _, err := f.ReadAt(buf, offset); err != nil && !errors.Is(err, io.EOF) {
+		return false, 0, time.Time{}
+	}
+	if !bytes.Contains(buf, mmdbMetadataMarker) {
+		return false, 0, time.Time{}
+	}
+	return true, size, info.ModTime()
+}
+
+func (m *mihomoManager) mmdbStatus() (bool, int64, time.Time) {
+	return isValidMMDBFile(m.mmdbPath())
+}
+
+func (m *mihomoManager) installMMDBData(raw []byte) (int64, error) {
+	if !isValidMMDBData(raw) {
+		return 0, errors.New("无效的 country.mmdb 文件（缺少 MaxMind 数据库标识或大小异常）")
+	}
+	if err := os.MkdirAll(m.dir, 0700); err != nil {
+		return 0, err
+	}
+	_ = os.Chmod(m.dir, 0700)
+	if err := atomicWrite(m.mmdbPath(), raw); err != nil {
+		return 0, err
+	}
+	return int64(len(raw)), nil
+}
+
+func allowedMMDBHost(u *url.URL) bool {
+	if u == nil || u.Scheme != "https" || u.User != nil || (u.Port() != "" && u.Port() != "443") {
+		return false
+	}
+	switch strings.ToLower(u.Hostname()) {
+	case "fastly.jsdelivr.net", "testingcf.jsdelivr.net", "cdn.jsdelivr.net",
+		"github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com", "github-releases.githubusercontent.com":
+		return true
+	}
+	return false
+}
+
+func (m *mihomoManager) DownloadMMDB(ctx context.Context, state State) (int64, string, error) {
+	client := outboundClient(state, 30*time.Second)
+	defer closeClient(client)
+	client.CheckRedirect = func(r *http.Request, via []*http.Request) error {
+		if len(via) >= 5 || !allowedMMDBHost(r.URL) {
+			return errors.New("GeoIP 下载重定向地址不受信任")
+		}
+		r.Header.Del("Authorization")
+		r.Header.Del("Cookie")
+		return nil
+	}
+
+	mirrors := []string{
+		"https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/country.mmdb",
+		"https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/country.mmdb",
+		"https://cdn.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/country.mmdb",
+		"https://github.com/MetaCubeX/meta-rules-dat/releases/latest/download/country.mmdb",
+	}
+
+	var lastErr error
+	for _, mirrorURL := range mirrors {
+		u, err := url.Parse(mirrorURL)
+		if err != nil || !allowedMMDBHost(u) {
+			continue
+		}
+		attemptCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+		req, err := http.NewRequestWithContext(attemptCtx, http.MethodGet, mirrorURL, nil)
+		if err != nil {
+			cancel()
+			lastErr = err
+			continue
+		}
+		req.Header.Set("User-Agent", "GateHome/"+Version)
+		resp, err := client.Do(req)
+		if err != nil {
+			cancel()
+			lastErr = err
+			continue
+		}
+		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close()
+			cancel()
+			lastErr = fmt.Errorf("%s 返回 HTTP %d", u.Hostname(), resp.StatusCode)
+			continue
+		}
+		raw, readErr := io.ReadAll(io.LimitReader(resp.Body, maxMihomoMMDBBytes+1))
+		resp.Body.Close()
+		cancel()
+		if readErr != nil {
+			lastErr = readErr
+			continue
+		}
+		if int64(len(raw)) > maxMihomoMMDBBytes {
+			lastErr = errors.New("country.mmdb 文件超过 32 MiB 限制")
+			continue
+		}
+		size, installErr := m.installMMDBData(raw)
+		if installErr != nil {
+			lastErr = installErr
+			continue
+		}
+		return size, u.Hostname(), nil
+	}
+	if lastErr == nil {
+		lastErr = errors.New("无可用下载镜像")
+	}
+	return 0, "", fmt.Errorf("country.mmdb 下载失败 (%v)，请在「端口与核心」手动上传 country.mmdb", lastErr)
+}

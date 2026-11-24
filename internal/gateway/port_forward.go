@@ -351,7 +351,9 @@ func (p *PortForwarder) forwardTCP(b *forwardBinding, client net.Conn) {
 			src.Close()
 			return
 		}
-		dst.(*net.TCPConn).CloseWrite()
+		if cw, ok := dst.(interface{ CloseWrite() error }); ok {
+			_ = cw.CloseWrite()
+		}
 		// Bound half-closed TCP connections so stalled peers cannot pin global forwarding slots indefinitely.
 		_ = dst.SetReadDeadline(time.Now().Add(30 * time.Second))
 	}

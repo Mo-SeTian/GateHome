@@ -259,8 +259,14 @@ func maintenanceUpload(w http.ResponseWriter, r *http.Request) ([]byte, string, 
 		case "file":
 			data, err = readUpload(part, maxUpdateBytes)
 		case "password":
+			const maxPasswordBytes = 128 << 10
 			var b []byte
-			b, err = io.ReadAll(part)
+			b, err = io.ReadAll(io.LimitReader(part, maxPasswordBytes+1))
+			if err == nil && len(b) > maxPasswordBytes {
+				clear(b)
+				err = errors.New("恢复密码过长")
+				break
+			}
 			password = string(b)
 			clear(b)
 		default:

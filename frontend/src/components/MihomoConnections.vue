@@ -190,6 +190,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ArrowDown, ArrowRight, ArrowUp, Pause, Play, RefreshCw, Search, Trash2, X } from 'lucide-vue-next'
 import SpotlightCard from '@/components/SpotlightCard.vue'
 import { adminApi } from '@/api/admin'
+import { formatBytes } from '@/api/reports'
 import { useToast } from '@/composables/useToast'
 
 const props = defineProps({
@@ -256,14 +257,6 @@ function formatRuleText(conn) {
 
 function networkBadgeClass(network) {
   return String(network || '').toLowerCase() === 'udp' ? 'badge-warn' : 'badge-info'
-}
-
-function formatBytes(bytes) {
-  const n = Number(bytes) || 0
-  if (n < 1024) return `${n} B`
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
-  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(2)} MB`
-  return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`
 }
 
 function formatSpeed(bps) {

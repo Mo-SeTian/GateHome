@@ -213,6 +213,7 @@
 import { onMounted, onUnmounted, ref } from 'vue'
 import { Copy, Github, Link2, RefreshCw, Search, Trash2, Upload, X } from 'lucide-vue-next'
 import { iconsApi, iconSources, iconStyles } from '@/api/icons'
+import { copyText } from '@/api/clipboard'
 import { formatBytes } from '@/api/reports'
 import { useIconSearch } from '@/composables/useIconSearch'
 import { useToast } from '@/composables/useToast'
@@ -485,12 +486,7 @@ function absoluteURL(url) {
 
 async function copyURL() {
   try {
-    if (navigator.clipboard) {
-      await navigator.clipboard.writeText(detailURL.value.value)
-    } else {
-      detailURL.value.select()
-      if (!document.execCommand('copy')) throw new Error('copy failed')
-    }
+    await copyText(detailURL.value.value)
     toast.success('访问 URL 已复制')
   } catch {
     detailURL.value.focus()

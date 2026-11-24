@@ -2310,3 +2310,27 @@ func TestMihomoHardeningOverlaySanitizationErrorRedactionAndLifecycle(t *testing
 		t.Fatalf("maskYAMLSecret duplicated header comment:\n%s", masked2)
 	}
 }
+
+func TestMihomoLogRingRedactsSensitivePatterns(t *testing.T) {
+	var ring mihomoLogRing
+	ring.add("normal proxy connection ready")
+	ring.add("header Authorization: Basic abcdef")
+	ring.add("token header Bearer super-secret-jwt")
+	ring.add("upstream config password=my-secret")
+	ring.add("socks auth pass=hunter2")
+	ring.add("url query secret=topsecret")
+	ring.add("url query token=xyz123")
+
+	snap := ring.snapshot()
+	if len(snap) != 7 {
+		t.Fatalf("expected 7 log lines, got %d", len(snap))
+	}
+	if snap[0] != "normal proxy connection ready" {
+		t.Fatalf("expected normal line intact, got %q", snap[0])
+	}
+	for i := 1; i < len(snap); i++ {
+		if snap[i] != "[redacted sensitive log line]" {
+			t.Fatalf("expected redacted placeholder at index %d, got %q", i, snap[i])
+		}
+	}
+}

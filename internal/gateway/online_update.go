@@ -254,7 +254,7 @@ func latestBetaRelease(ctx context.Context, c *http.Client, token string) (onlin
 	const pageSize = 100
 	var latest githubRelease
 	var highest string
-	for page := 1; ; page++ {
+	for page := 1; page <= 10; page++ {
 		address := fmt.Sprintf("%s?per_page=%d&page=%d", onlineReleasesAPI, pageSize, page)
 		data, err := fetchOnlineUpdate(ctx, c, address, 8<<20, token)
 		if err != nil {

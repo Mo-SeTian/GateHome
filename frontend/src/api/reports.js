@@ -46,7 +46,7 @@ export function reportDate(value) {
 
 export function formatBytes(value) {
   const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB']
-  let amount = value, unit = 0
+  let amount = Math.max(0, Number(value) || 0), unit = 0
   while (amount >= 1024 && unit < units.length - 1) { amount /= 1024; unit++ }
   return `${amount.toLocaleString(undefined, { maximumFractionDigits: unit ? 2 : 0 })} ${units[unit]}`
 }

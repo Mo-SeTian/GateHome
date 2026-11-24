@@ -556,6 +556,7 @@ import ProxyTrafficMetrics from '@/components/ProxyTrafficMetrics.vue'
 import { routeImageUrl } from '@/api/icons'
 import ServiceDiscovery from '@/components/ServiceDiscovery.vue'
 import { formatByteRate, formatBytes } from '@/api/reports'
+import { copyText } from '@/api/clipboard'
 import { adminApi } from '@/api/admin'
 import { defaultRouteTLS, replaceConfigItem, routeAccessURL, routeHost, routeKey, routeUsesFullHost } from '@/api/configuration'
 import { useGatewayStatus, useStatusPolling } from '@/composables/useGatewayStatus'
@@ -890,25 +891,7 @@ function deleteGroup(group) {
 }
 async function copyURL(url) {
   try {
-    try {
-      await navigator.clipboard.writeText(url)
-    } catch {
-      // LAN HTTP pages have no Clipboard API; copy during the original click.
-      if (document.visibilityState === 'hidden' || !document.hasFocus()) throw new Error('Page inactive')
-      const active = document.activeElement
-      const input = document.createElement('textarea')
-      input.value = url
-      input.readOnly = true
-      input.style.cssText = 'position:fixed;left:-9999px;top:0;font-size:16px'
-      document.body.append(input)
-      try {
-        input.select()
-        if (!document.execCommand('copy')) throw new Error('Copy rejected')
-      } finally {
-        input.remove()
-        if (document.visibilityState === 'visible' && document.hasFocus()) active?.focus({ preventScroll: true })
-      }
-    }
+    await copyText(url)
     toast.success('访问地址已复制')
   } catch {
     toast.error('复制失败，请手动复制访问地址')

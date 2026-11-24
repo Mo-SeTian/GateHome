@@ -1,7 +1,6 @@
 package gateway
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -377,14 +376,11 @@ func formatManualRuleSetFileBytes(rs MihomoRuleSet) ([]byte, error) {
 		return []byte(trimmed), nil
 	}
 	lines := normalizeManualRuleLines(rs.Content)
-	var out bytes.Buffer
-	enc := yaml.NewEncoder(&out)
-	enc.SetIndent(2)
-	if err := enc.Encode(map[string][]string{"payload": lines}); err != nil {
+	encoded, err := encodeYAMLIndent2(map[string][]string{"payload": lines})
+	if err != nil {
 		return nil, err
 	}
-	_ = enc.Close()
-	return out.Bytes(), nil
+	return []byte(encoded), nil
 }
 
 func resolveRuleSetDiskPath(baseDir, relPath string) (string, error) {

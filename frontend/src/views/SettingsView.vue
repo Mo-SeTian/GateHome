@@ -104,7 +104,9 @@
           <p class="report-note">
             已使用
             {{
-              formatBytes(gatewayStatus?.log_storage?.used_bytes)
+              gatewayStatus?.log_storage?.used_bytes == null
+                ? '—'
+                : formatBytes(gatewayStatus.log_storage.used_bytes)
             }}。保存后会按配额清理旧日志，请确认保留范围。
           </p>
           <p v-if="gatewayStatus?.log_storage?.write_error" class="report-error">
@@ -194,6 +196,7 @@ import SpotlightCard from '@/components/SpotlightCard.vue'
 import SecretInput from '@/components/SecretInput.vue'
 import RestartNotice from '@/components/RestartNotice.vue'
 import { adminApi } from '@/api/admin'
+import { formatBytes } from '@/api/reports'
 import { useGatewayStatus } from '@/composables/useGatewayStatus'
 import { useAppStore } from '@/composables/useAppStore'
 import { useSession } from '@/composables/useSession'
@@ -234,9 +237,6 @@ const mihomoTakeoverPort = computed(() => {
   const port = s.mixed_port || s.http_port || s.socks_port
   return port ? `:${port}` : ''
 })
-function formatBytes(value) {
-  return value == null ? '—' : `${(value / 1024 / 1024).toFixed(2)} MiB`
-}
 async function reload() {
   if (loading.value || isSavingConfig.value) return
   loading.value = true

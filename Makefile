@@ -10,7 +10,7 @@ frontend:
 
 build: frontend
 	mkdir -p dist
-	go build -trimpath -ldflags='$(LDFLAGS)' -o dist/gatehouse ./cmd/gatehouse
+	CGO_ENABLED=0 go build -trimpath -ldflags='$(LDFLAGS)' -o dist/gatehouse ./cmd/gatehouse
 
 test: frontend
 	npm --prefix frontend test

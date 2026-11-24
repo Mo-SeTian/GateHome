@@ -268,19 +268,16 @@ func synthesizeMihomoYAML(sourceYAML []byte, cfg MihomoConfig) ([]byte, error) {
 		rulesSeq.Content = append(rulesSeq.Content, yamlStrNode("MATCH,DIRECT"))
 	}
 
-	var out bytes.Buffer
-	out.WriteString(mihomoHeaderComment)
-	enc := yaml.NewEncoder(&out)
-	enc.SetIndent(2)
-	if err := enc.Encode(&doc); err != nil {
+	rendered, err := encodeYAMLIndent2(&doc)
+	if err != nil {
 		return nil, fmt.Errorf("YAML 序列化失败: %v", err)
 	}
-	_ = enc.Close()
+	outBytes := []byte(mihomoHeaderComment + rendered)
 
-	if err := validateMihomoYAML(out.Bytes()); err != nil {
+	if err := validateMihomoYAML(outBytes); err != nil {
 		return nil, err
 	}
-	return out.Bytes(), nil
+	return outBytes, nil
 }
 
 func activeSubscription(cfg MihomoConfig) (MihomoSubscription, bool) {

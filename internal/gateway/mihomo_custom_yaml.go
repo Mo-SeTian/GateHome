@@ -736,7 +736,6 @@ func (a *Admin) handleMihomoPutCustomYAML(w http.ResponseWriter, r *http.Request
 		Content      string `json:"content"`
 		ValidateOnly bool   `json:"validate_only"`
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 2<<20)
 	if !decodeBodyLarge(w, r, &input, 2<<20) {
 		return
 	}
