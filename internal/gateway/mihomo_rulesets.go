@@ -1,12 +1,20 @@
 package gateway
 
 import (
+	"bytes"
+	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -477,4 +485,246 @@ func removeManualRuleSetFile(baseDir string, rs MihomoRuleSet) {
 		return
 	}
 	_ = os.Remove(targetPath)
+}
+
+type MihomoRuleSetRuntimeInfo struct {
+	Name        string `json:"name"`
+	RuleCount   *int   `json:"rule_count,omitempty"`
+	UpdatedAt   string `json:"updated_at,omitempty"`
+	VehicleType string `json:"vehicle_type,omitempty"`
+}
+
+type MihomoRuleSetUpdateResult struct {
+	Name  string `json:"name"`
+	OK    bool   `json:"ok"`
+	Error string `json:"error,omitempty"`
+}
+
+func countRuleSetRulesFromBytes(format string, data []byte) int {
+	if format == "yaml" {
+		var doc struct {
+			Payload []any `yaml:"payload"`
+		}
+		if err := yaml.Unmarshal(data, &doc); err == nil && len(doc.Payload) > 0 {
+			return len(doc.Payload)
+		}
+	}
+	return len(normalizeManualRuleLines(string(data)))
+}
+
+func (m *mihomoManager) GetRuleSetStats() (live bool, providers map[string]MihomoRuleSetRuntimeInfo) {
+	providers = map[string]MihomoRuleSetRuntimeInfo{}
+	m.mu.Lock()
+	running := m.running
+	hasOverride := m.ctrlBaseURL != ""
+	ctrlURL, secret := m.controllerURLAndSecretLocked()
+	dir := m.dir
+	ruleSets := slices.Clone(m.cfg.CustomRuleSets)
+	m.mu.Unlock()
+
+	if running || hasOverride {
+		var payload struct {
+			Providers map[string]struct {
+				Name        string `json:"name"`
+				RuleCount   int    `json:"ruleCount"`
+				UpdatedAt   string `json:"updatedAt"`
+				VehicleType string `json:"vehicleType"`
+			} `json:"providers"`
+		}
+		if err := m.doControllerJSONWithTimeout(http.MethodGet, ctrlURL+"/providers/rules", secret, nil, &payload, 5*time.Second); err == nil {
+			live = true
+			for name, rec := range payload.Providers {
+				key := strings.TrimSpace(rec.Name)
+				if key == "" {
+					key = name
+				}
+				cnt := rec.RuleCount
+				providers[key] = MihomoRuleSetRuntimeInfo{
+					Name:        key,
+					RuleCount:   &cnt,
+					UpdatedAt:   strings.TrimSpace(rec.UpdatedAt),
+					VehicleType: strings.TrimSpace(rec.VehicleType),
+				}
+			}
+		}
+	}
+
+	for _, rs := range ruleSets {
+		if _, exists := providers[rs.Name]; exists {
+			continue
+		}
+		if rs.Source == "manual" && rs.Format != "mrs" {
+			cnt := countRuleSetRulesFromBytes(rs.Format, []byte(rs.Content))
+			providers[rs.Name] = MihomoRuleSetRuntimeInfo{
+				Name:        rs.Name,
+				RuleCount:   &cnt,
+				VehicleType: "Inline",
+			}
+			continue
+		}
+		if dir == "" || rs.Path == "" {
+			continue
+		}
+		targetPath, err := resolveRuleSetDiskPath(dir, rs.Path)
+		if err != nil {
+			continue
+		}
+		info, err := os.Stat(targetPath)
+		if err != nil || info.IsDir() {
+			continue
+		}
+		entry := MihomoRuleSetRuntimeInfo{
+			Name:        rs.Name,
+			UpdatedAt:   info.ModTime().UTC().Format(time.RFC3339),
+			VehicleType: "File",
+		}
+		if rs.Format != "mrs" && info.Size() <= 16<<20 {
+			if data, readErr := os.ReadFile(targetPath); readErr == nil {
+				cnt := countRuleSetRulesFromBytes(rs.Format, data)
+				entry.RuleCount = &cnt
+			}
+		}
+		providers[rs.Name] = entry
+	}
+	return live, providers
+}
+
+func (m *mihomoManager) fetchRuleSetFileOffline(ctx context.Context, state State, dir string, rs MihomoRuleSet) error {
+	if err := validateMihomoSubscriptionURL(rs.URL); err != nil {
+		return err
+	}
+	targetPath, err := resolveRuleSetDiskPath(dir, rs.Path)
+	if err != nil {
+		return err
+	}
+	client := outboundClient(state, 25*time.Second)
+	defer closeClient(client)
+	client.CheckRedirect = func(r *http.Request, via []*http.Request) error {
+		if len(via) >= 5 {
+			return errors.New("规则集重定向次数过多")
+		}
+		if err := validateMihomoSubscriptionURL(r.URL.String()); err != nil {
+			return err
+		}
+		r.Header.Del("Authorization")
+		r.Header.Del("Cookie")
+		return nil
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rs.URL, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("User-Agent", "clash-verge/v2.0.3 mihomo/1.19")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("下载失败: %s", sanitizeFetchError(err))
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("服务器返回 HTTP %d", resp.StatusCode)
+	}
+	const maxRuleSetBytes = 32 << 20
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxRuleSetBytes+1))
+	if err != nil {
+		return err
+	}
+	if len(body) > maxRuleSetBytes {
+		return errors.New("规则集文件超过 32 MiB 上限")
+	}
+	if len(bytes.TrimSpace(body)) == 0 {
+		return errors.New("规则集返回内容为空")
+	}
+	if rs.Format == "yaml" {
+		var check any
+		if err := yaml.Unmarshal(body, &check); err != nil {
+			return fmt.Errorf("YAML 内容无效: %v", err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Dir(targetPath), 0700); err != nil {
+		return err
+	}
+	return atomicWrite(targetPath, body)
+}
+
+func (m *mihomoManager) UpdateRuleSets(ctx context.Context, names []string) (results []MihomoRuleSetUpdateResult, live bool, providers map[string]MihomoRuleSetRuntimeInfo, err error) {
+	m.mu.Lock()
+	running := m.running
+	hasOverride := m.ctrlBaseURL != ""
+	ctrlURL, secret := m.controllerURLAndSecretLocked()
+	dir := m.dir
+	configured := slices.Clone(m.cfg.CustomRuleSets)
+	m.mu.Unlock()
+
+	var targets []MihomoRuleSet
+	if len(names) > 0 {
+		byName := make(map[string]MihomoRuleSet, len(configured))
+		for _, rs := range configured {
+			byName[rs.Name] = rs
+		}
+		seen := map[string]bool{}
+		for _, rawName := range names {
+			name := strings.TrimSpace(rawName)
+			if name == "" || seen[name] {
+				continue
+			}
+			seen[name] = true
+			rs, ok := byName[name]
+			if !ok {
+				return nil, false, nil, fmt.Errorf("未找到规则集「%s」", name)
+			}
+			if !rs.Enabled {
+				return nil, false, nil, fmt.Errorf("规则集「%s」已停用，请先启用后再更新", name)
+			}
+			if rs.Source == "manual" || strings.TrimSpace(rs.URL) == "" {
+				return nil, false, nil, fmt.Errorf("规则集「%s」为本地手动规则集，无需远程更新", name)
+			}
+			targets = append(targets, rs)
+		}
+	} else {
+		for _, rs := range configured {
+			if rs.Enabled && rs.Source != "manual" && strings.TrimSpace(rs.URL) != "" {
+				targets = append(targets, rs)
+			}
+		}
+	}
+
+	if len(targets) == 0 {
+		return nil, false, nil, errors.New("暂无可更新的已启用远端或内置规则集")
+	}
+
+	var state State
+	if !running && !hasOverride && m.store != nil {
+		state = m.store.Snapshot()
+	}
+
+	results = make([]MihomoRuleSetUpdateResult, len(targets))
+	sem := make(chan struct{}, 4)
+	var wg sync.WaitGroup
+	for idx, rs := range targets {
+		wg.Add(1)
+		go func(i int, item MihomoRuleSet) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			var updateErr error
+			if running || hasOverride {
+				target := ctrlURL + "/providers/rules/" + url.PathEscape(item.Name)
+				updateErr = m.doControllerJSONWithTimeout(http.MethodPut, target, secret, nil, nil, 25*time.Second)
+			} else {
+				updateErr = m.fetchRuleSetFileOffline(ctx, state, dir, item)
+			}
+			res := MihomoRuleSetUpdateResult{Name: item.Name, OK: updateErr == nil}
+			if updateErr != nil {
+				res.Error = updateErr.Error()
+			}
+			results[i] = res
+		}(idx, rs)
+	}
+	wg.Wait()
+
+	live, providers = m.GetRuleSetStats()
+	return results, live, providers, nil
 }

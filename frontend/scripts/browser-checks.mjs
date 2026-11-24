@@ -2151,8 +2151,16 @@ try {
   await mihomoPage.getByRole('button', { name: '分流规则', exact: true }).click()
   await mihomoPage.locator('.rule-row').filter({ hasText: 'yaml-added.example' }).waitFor()
 
-  // Configure a manual TXT rule-set and verify RULE-SET creation + runtime.yaml merge
+  // Configure a manual TXT rule-set and verify RULE-SET creation + toolbar stability + rule counts
+  const rulesSwitch = mihomoPage.locator('.rules-view-switch')
+  const switchBefore = await rulesSwitch.boundingBox()
   await mihomoPage.getByRole('button', { name: /规则集 \(/ }).click()
+  const switchAfter = await rulesSwitch.boundingBox()
+  assert.ok(
+    Math.abs(switchBefore.x - switchAfter.x) <= 1 && Math.abs(switchBefore.y - switchAfter.y) <= 1,
+    `rules view switch shifted position on click: before=${JSON.stringify(switchBefore)} after=${JSON.stringify(switchAfter)}`
+  )
+  await mihomoPage.getByRole('button', { name: '批量更新' }).waitFor()
   await mihomoPage.getByRole('button', { name: /新建规则集/ }).first().click()
   await mihomoDialog.getByRole('button', { name: '手动编写' }).click()
   await mihomoDialog.locator('input[name="ruleset_name"]').fill('lan-custom')
@@ -2161,7 +2169,10 @@ try {
   await mihomoDialog.locator('textarea[name="ruleset_content"]').fill('+.mycorp.lan')
   await mihomoDialog.locator('select[name="ruleset_rule_target"]').selectOption('HK 专线')
   await mihomoDialog.getByRole('button', { name: '保存规则集' }).click()
-  await mihomoPage.locator('.ruleset-card').filter({ hasText: 'lan-custom' }).waitFor()
+  const lanCard = mihomoPage.locator('.ruleset-card').filter({ hasText: 'lan-custom' })
+  await lanCard.waitFor()
+  await lanCard.getByText('1 条规则', { exact: true }).waitFor()
+  await mihomoPage.locator('.rulesets-panel').getByText('合计 1 条规则', { exact: true }).waitFor()
   await mihomoPage.getByRole('button', { name: '分流规则', exact: true }).click()
   await mihomoPage.locator('.rule-row').filter({ hasText: 'lan-custom' }).getByText('RULE-SET').waitFor()
 

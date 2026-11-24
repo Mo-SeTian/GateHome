@@ -162,6 +162,8 @@ func (a *Admin) mihomoRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/mihomo/rules", a.requireAuth(a.handleMihomoAddRule))
 	mux.HandleFunc("PUT /api/mihomo/rules", a.requireAuth(a.handleMihomoSaveRules))
 	mux.HandleFunc("DELETE /api/mihomo/rules/{id}", a.requireAuth(a.handleMihomoDeleteRule))
+	mux.HandleFunc("GET /api/mihomo/rule-sets/stats", a.requireAuth(a.handleMihomoRuleSetStats))
+	mux.HandleFunc("POST /api/mihomo/rule-sets/update", a.requireAuth(a.handleMihomoUpdateRuleSets))
 	mux.HandleFunc("POST /api/mihomo/rule-sets", a.requireAuth(a.handleMihomoSaveRuleSet))
 	mux.HandleFunc("PUT /api/mihomo/rule-sets/{id}/toggle", a.requireAuth(a.handleMihomoToggleRuleSet))
 	mux.HandleFunc("DELETE /api/mihomo/rule-sets/{id}", a.requireAuth(a.handleMihomoDeleteRuleSet))
@@ -1754,4 +1756,43 @@ func (a *Admin) handleMihomoDeleteRuleSet(w http.ResponseWriter, r *http.Request
 		_ = m.Reload()
 	}
 	jsonResponse(w, 200, m.statusSnapshot())
+}
+
+func (a *Admin) handleMihomoRuleSetStats(w http.ResponseWriter, r *http.Request) {
+	live, providers := a.mihomo.GetRuleSetStats()
+	jsonResponse(w, 200, map[string]any{
+		"live":      live,
+		"providers": providers,
+	})
+}
+
+func (a *Admin) handleMihomoUpdateRuleSets(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Names []string `json:"names"`
+	}
+	if r.ContentLength > 0 {
+		if !decodeBody(w, r, &input) {
+			return
+		}
+	}
+	results, live, providers, err := a.mihomo.UpdateRuleSets(r.Context(), input.Names)
+	if err != nil {
+		apiError(w, 400, err.Error())
+		return
+	}
+	updated, failed := 0, 0
+	for _, res := range results {
+		if res.OK {
+			updated++
+		} else {
+			failed++
+		}
+	}
+	jsonResponse(w, 200, map[string]any{
+		"results":   results,
+		"updated":   updated,
+		"failed":    failed,
+		"live":      live,
+		"providers": providers,
+	})
 }

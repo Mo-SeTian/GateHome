@@ -2426,3 +2426,148 @@ proxy-groups:
 		t.Fatalf("UI update stripped extra fields: %s", rec.Body.String())
 	}
 }
+
+func TestMihomoRuleSetStatsAndBatchUpdate(t *testing.T) {
+	a, h := testAdmin(t)
+	cookie := loginForTest(t, h)
+
+	// 1. Add manual YAML, remote HTTP, builtin MRS, and disabled HTTP rule-sets.
+	for _, body := range []map[string]any{
+		{
+			"name":     "local-yaml",
+			"source":   "manual",
+			"behavior": "domain",
+			"format":   "yaml",
+			"path":     "./ruleset/local-yaml.yaml",
+			"content":  "+.corp.local\n+.intranet.local\n",
+			"enabled":  true,
+		},
+		{
+			"name":     "remote-ai",
+			"source":   "http",
+			"behavior": "domain",
+			"format":   "yaml",
+			"url":      "https://example.com/ai.yaml",
+			"path":     "./ruleset/remote-ai.yaml",
+			"interval": 3600,
+			"enabled":  true,
+		},
+		{
+			"name":     "openai",
+			"source":   "builtin",
+			"preset":   "openai",
+			"behavior": "domain",
+			"format":   "mrs",
+			"url":      "https://cdn.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@meta/geo/geosite/openai.mrs",
+			"path":     "./ruleset/openai.mrs",
+			"interval": 86400,
+			"enabled":  true,
+		},
+		{
+			"name":     "disabled-rs",
+			"source":   "http",
+			"behavior": "ipcidr",
+			"format":   "text",
+			"url":      "https://example.com/disabled.txt",
+			"path":     "./ruleset/disabled.txt",
+			"interval": 3600,
+			"enabled":  false,
+		},
+	} {
+		if rec := adminRequest(h, "POST", "/api/mihomo/rule-sets", body, cookie, ""); rec.Code != 200 {
+			t.Fatalf("create ruleset %v failed: %d %s", body["name"], rec.Code, rec.Body.String())
+		}
+	}
+
+	// 2. Offline stats report manual rule count without running controller.
+	rec := adminRequest(h, "GET", "/api/mihomo/rule-sets/stats", nil, cookie, "")
+	if rec.Code != 200 {
+		t.Fatalf("offline stats failed: %d %s", rec.Code, rec.Body.String())
+	}
+	var offlineResp struct {
+		Live      bool                                `json:"live"`
+		Providers map[string]MihomoRuleSetRuntimeInfo `json:"providers"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &offlineResp)
+	if offlineResp.Live {
+		t.Fatalf("expected offline stats live=false")
+	}
+	if offlineResp.Providers["local-yaml"].RuleCount == nil || *offlineResp.Providers["local-yaml"].RuleCount != 2 {
+		t.Fatalf("expected manual rule count 2, got %+v", offlineResp.Providers["local-yaml"])
+	}
+
+	// 3. Attach mock Mihomo controller returning live provider stats and handling PUT updates.
+	var mu sync.Mutex
+	counts := map[string]int{"remote-ai": 42, "openai": 128}
+	putCalls := map[string]int{}
+	ctrl := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/providers/rules":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"providers": map[string]any{
+					"remote-ai": map[string]any{
+						"name":        "remote-ai",
+						"ruleCount":   counts["remote-ai"],
+						"updatedAt":   "2026-11-24T12:00:00Z",
+						"vehicleType": "HTTP",
+					},
+					"openai": map[string]any{
+						"name":        "openai",
+						"ruleCount":   counts["openai"],
+						"updatedAt":   "2026-11-24T12:00:00Z",
+						"vehicleType": "HTTP",
+					},
+				},
+			})
+		case r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, "/providers/rules/"):
+			name := strings.TrimPrefix(r.URL.Path, "/providers/rules/")
+			putCalls[name]++
+			counts[name] += 5
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer ctrl.Close()
+
+	a.mihomo.mu.Lock()
+	a.mihomo.ctrlBaseURL = ctrl.URL
+	a.mihomo.mu.Unlock()
+
+	// 4. Batch update updates enabled remote/builtin providers and skips manual & disabled ones.
+	rec = adminRequest(h, "POST", "/api/mihomo/rule-sets/update", map[string]any{}, cookie, "")
+	if rec.Code != 200 {
+		t.Fatalf("batch update failed: %d %s", rec.Code, rec.Body.String())
+	}
+	var batchResp struct {
+		Updated   int                                 `json:"updated"`
+		Failed    int                                 `json:"failed"`
+		Live      bool                                `json:"live"`
+		Providers map[string]MihomoRuleSetRuntimeInfo `json:"providers"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &batchResp)
+	if !batchResp.Live || batchResp.Updated != 2 || batchResp.Failed != 0 {
+		t.Fatalf("unexpected batch update result: %+v", batchResp)
+	}
+	if putCalls["remote-ai"] != 1 || putCalls["openai"] != 1 || putCalls["local-yaml"] != 0 || putCalls["disabled-rs"] != 0 {
+		t.Fatalf("unexpected PUT calls: %+v", putCalls)
+	}
+	if batchResp.Providers["remote-ai"].RuleCount == nil || *batchResp.Providers["remote-ai"].RuleCount != 47 ||
+		batchResp.Providers["openai"].RuleCount == nil || *batchResp.Providers["openai"].RuleCount != 133 ||
+		batchResp.Providers["local-yaml"].RuleCount == nil || *batchResp.Providers["local-yaml"].RuleCount != 2 {
+		t.Fatalf("unexpected updated provider counts: %+v", batchResp.Providers)
+	}
+
+	// 5. Reject updating manual rule-set explicitly, allow single-target update.
+	if rec := adminRequest(h, "POST", "/api/mihomo/rule-sets/update", map[string]any{"names": []string{"local-yaml"}}, cookie, ""); rec.Code != 400 {
+		t.Fatalf("expected 400 updating manual rule-set, got %d", rec.Code)
+	}
+	if rec := adminRequest(h, "POST", "/api/mihomo/rule-sets/update", map[string]any{"names": []string{"remote-ai"}}, cookie, ""); rec.Code != 200 {
+		t.Fatalf("single ruleset update failed: %d %s", rec.Code, rec.Body.String())
+	}
+	if putCalls["remote-ai"] != 2 {
+		t.Fatalf("expected single update to call PUT again, got %d", putCalls["remote-ai"])
+	}
+}

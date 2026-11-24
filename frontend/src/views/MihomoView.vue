@@ -233,40 +233,55 @@
 
     <!-- Tab 2: Custom Routing Rules -->
     <section v-show="activeTab === 'rules'" class="tab-section" role="tabpanel" aria-label="自定义分流">
-      <div class="section-toolbar">
-        <div class="filter-inputs" v-show="rulesView === 'list'">
-          <input
-            v-model.trim="ruleSearch"
-            type="search"
-            class="form-input toolbar-input"
-            aria-label="搜索规则"
-            placeholder="搜索域名 / 网段 / 端口…"
-          />
-          <select v-model="ruleTargetFilter" class="form-input toolbar-select" aria-label="按目标策略组筛选">
-            <option value="">全部出站目标</option>
-            <option v-for="target in ruleTargetOptions" :key="target" :value="target">{{ target }}</option>
-          </select>
+      <div class="section-toolbar rules-toolbar">
+        <div class="mode-segment rules-view-switch" role="group" aria-label="分流视图切换">
+          <button type="button" class="mode-btn" :class="{ active: rulesView === 'list' }" @click="rulesView = 'list'">
+            分流规则
+          </button>
+          <button
+            type="button"
+            class="mode-btn"
+            :class="{ active: rulesView === 'rulesets' }"
+            @click="rulesView = 'rulesets'"
+          >
+            规则集 ({{ status?.custom_rule_sets?.length || 0 }})
+          </button>
+          <button type="button" class="mode-btn" :class="{ active: rulesView === 'yaml' }" @click="rulesView = 'yaml'">
+            YAML 编辑
+          </button>
         </div>
-        <div class="report-actions">
-          <div class="mode-switch rules-view-switch" role="group" aria-label="分流视图切换">
-            <button type="button" class="mode-btn" :class="{ active: rulesView === 'list' }" @click="rulesView = 'list'">
-              分流规则
-            </button>
-            <button
-              type="button"
-              class="mode-btn"
-              :class="{ active: rulesView === 'rulesets' }"
-              @click="rulesView = 'rulesets'"
-            >
-              规则集 ({{ status?.custom_rule_sets?.length || 0 }})
-            </button>
-            <button type="button" class="mode-btn" :class="{ active: rulesView === 'yaml' }" @click="rulesView = 'yaml'">
-              YAML 编辑
+
+        <div class="report-actions rules-toolbar-actions">
+          <div v-if="rulesView === 'list'" class="filter-inputs">
+            <input
+              v-model.trim="ruleSearch"
+              type="search"
+              class="form-input toolbar-input"
+              aria-label="搜索规则"
+              placeholder="搜索域名 / 网段 / 端口…"
+            />
+            <select v-model="ruleTargetFilter" class="form-input toolbar-select" aria-label="按目标策略组筛选">
+              <option value="">全部出站目标</option>
+              <option v-for="target in ruleTargetOptions" :key="target" :value="target">{{ target }}</option>
+            </select>
+            <button type="button" class="btn btn-primary btn-sm" @click="openRuleModal()">
+              <Plus :size="14" /> 添加规则
             </button>
           </div>
-          <button v-if="rulesView === 'list'" type="button" class="btn btn-primary btn-sm" @click="openRuleModal()">
-            <Plus :size="14" /> 添加规则
-          </button>
+          <template v-else-if="rulesView === 'rulesets'">
+            <button
+              type="button"
+              class="btn btn-secondary btn-sm"
+              :disabled="ruleSetToolbar.updatingAll || !ruleSetToolbar.hasUpdatable"
+              @click="ruleSetsRef?.updateAll()"
+            >
+              <RefreshCw :size="13" :class="{ spinning: ruleSetToolbar.updatingAll }" />
+              {{ ruleSetToolbar.updatingAll ? '更新中…' : '批量更新' }}
+            </button>
+            <button type="button" class="btn btn-primary btn-sm" @click="ruleSetsRef?.openModal()">
+              <Plus :size="14" /> 新建规则集
+            </button>
+          </template>
         </div>
       </div>
 
@@ -327,10 +342,13 @@
       </SpotlightCard>
       <MihomoRuleSets
         v-else-if="rulesView === 'rulesets'"
+        ref="ruleSetsRef"
         :rule-sets="status?.custom_rule_sets || []"
         :presets="status?.rule_set_presets || []"
         :target-options="ruleTargetOptions"
+        :core-running="!!status?.running"
         @updated="applyStatus"
+        @toolbar-state="ruleSetToolbar = $event"
       />
       <MihomoCustomYaml v-else kind="rules" @saved="onCustomYamlSaved" />
     </section>
@@ -1309,6 +1327,8 @@ const builtinNodeNames = new Set(['DIRECT', 'REJECT', 'PASS', 'COMPATIBLE'])
 const activeTab = ref('groups')
 const groupsView = ref('list')
 const rulesView = ref('list')
+const ruleSetsRef = ref(null)
+const ruleSetToolbar = ref({ updatingAll: false, hasUpdatable: false })
 const groups = ref([])
 const delays = ref({})
 const allNodes = ref([])
@@ -2588,8 +2608,38 @@ onBeforeUnmount(() => {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  flex: 1 1 280px;
+  align-items: center;
   min-width: 0;
+}
+
+.rules-toolbar {
+  min-height: 40px;
+}
+
+.rules-view-switch {
+  flex-shrink: 0;
+}
+
+.rules-toolbar-actions {
+  margin-left: auto;
+  flex: 1 1 280px;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.rules-toolbar-actions .filter-inputs {
+  flex: 1 1 auto;
+  justify-content: flex-end;
+}
+
+.spinning {
+  animation: mihomo-spin 0.85s linear infinite;
+}
+
+@keyframes mihomo-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .form-input.toolbar-input {
@@ -3194,6 +3244,27 @@ onBeforeUnmount(() => {
   .filter-inputs {
     flex: 1 1 100%;
     width: 100%;
+  }
+
+  .rules-toolbar .rules-view-switch {
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .rules-toolbar .rules-view-switch .mode-btn {
+    text-align: center;
+    font-size: 11.5px;
+    padding: 6px 4px;
+  }
+
+  .rules-toolbar-actions {
+    flex: 1 1 100%;
+    justify-content: flex-start;
+  }
+
+  .rules-toolbar-actions .filter-inputs {
+    justify-content: flex-start;
   }
 
   .section-toolbar > .report-actions {

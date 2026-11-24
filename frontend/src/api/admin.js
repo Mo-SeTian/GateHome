@@ -83,6 +83,9 @@ export const adminApi = {
   addMihomoRule: (body) => request('/api/mihomo/rules', { method: 'POST', body }),
   saveMihomoRules: (rules) => request('/api/mihomo/rules', { method: 'PUT', body: { rules } }),
   deleteMihomoRule: (id) => request(`/api/mihomo/rules/${encodeURIComponent(id)}`, { method: 'DELETE', body: {} }),
+  mihomoRuleSetStats: (signal) => request('/api/mihomo/rule-sets/stats', { signal }),
+  updateMihomoRuleSets: (names = []) =>
+    request('/api/mihomo/rule-sets/update', { method: 'POST', body: names.length ? { names } : {} }),
   saveMihomoRuleSet: (body) => request('/api/mihomo/rule-sets', { method: 'POST', body }),
   toggleMihomoRuleSet: (id) => request(`/api/mihomo/rule-sets/${encodeURIComponent(id)}/toggle`, { method: 'PUT', body: {} }),
   deleteMihomoRuleSet: (id) => request(`/api/mihomo/rule-sets/${encodeURIComponent(id)}`, { method: 'DELETE', body: {} }),

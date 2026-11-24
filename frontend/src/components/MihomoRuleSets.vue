@@ -4,11 +4,13 @@
       <div class="panel-header-row">
         <div class="rulesets-title">
           <h2>规则集 (rule-providers)</h2>
-          <span class="meta-pill">支持远端订阅 / 内置精选 / 手动编写（YAML · TXT · MRS）</span>
+          <span class="badge badge-neutral">共 {{ ruleSets.length }} 个</span>
+          <span v-if="ruleStatsSummary.known > 0" class="badge badge-ok mono-text">
+            合计 {{ ruleStatsSummary.total.toLocaleString() }} 条规则
+          </span>
+          <span v-if="statsLive" class="badge badge-brand">内核实时统计</span>
         </div>
-        <button type="button" class="btn btn-primary btn-sm" @click="openModal()">
-          <Plus :size="14" /> 新建规则集
-        </button>
+        <span class="meta-pill">支持远端订阅 / 内置精选 / 手动编写（YAML · TXT · MRS）</span>
       </div>
 
       <div v-if="ruleSets.length" class="rulesets-list">
@@ -19,14 +21,17 @@
               <span class="badge" :class="sourceBadgeClass(rs.source)">{{ sourceLabel(rs.source) }}</span>
               <span class="badge badge-neutral">{{ behaviorLabel(rs.behavior) }}</span>
               <span class="badge badge-neutral mono-text">{{ formatLabel(rs.format) }}</span>
+              <span class="badge mono-text" :class="ruleCountOf(rs) != null ? 'badge-ok' : 'badge-neutral'">
+                {{ ruleCountLabel(rs) }}
+              </span>
               <span v-if="rs.comment" class="rule-comment">{{ rs.comment }}</span>
             </div>
 
             <div class="ruleset-meta mono-text">
               <span>路径: {{ rs.path }}</span>
               <span v-if="rs.source !== 'manual'"> · 刷新: {{ formatInterval(rs.interval) }}</span>
-              <span v-if="rs.source === 'manual' && rs.format !== 'mrs'">
-                · 条目: {{ countContentLines(rs.content) }} 行
+              <span v-if="statsMap[rs.name]?.updated_at">
+                · 更新于: {{ formatUpdatedAt(statsMap[rs.name].updated_at) }}
               </span>
             </div>
 
@@ -34,6 +39,18 @@
           </div>
 
           <div class="rule-actions">
+            <button
+              v-if="rs.source !== 'manual'"
+              type="button"
+              class="btn btn-secondary btn-sm"
+              :disabled="busyId === rs.id || updatingAll || updatingName === rs.name || !rs.enabled"
+              :title="rs.enabled ? '立即拉取最新规则集内容' : '请先启用后再更新'"
+              :aria-label="`更新规则集 ${rs.name}`"
+              @click="updateOne(rs)"
+            >
+              <RefreshCw :size="13" :class="{ spinning: updatingName === rs.name }" />
+              {{ updatingName === rs.name ? '更新中' : '更新' }}
+            </button>
             <label class="switch" :aria-label="`启用规则集 ${rs.name}`">
               <input
                 type="checkbox"
@@ -237,8 +254,8 @@
 </template>
 
 <script setup>
-import { computed, reactive, ref } from 'vue'
-import { Pencil, Plus, Trash2, X } from 'lucide-vue-next'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { Pencil, Plus, RefreshCw, Trash2, X } from 'lucide-vue-next'
 import SpotlightCard from '@/components/SpotlightCard.vue'
 import { adminApi } from '@/api/admin'
 import { useToast } from '@/composables/useToast'
@@ -246,9 +263,10 @@ import { useToast } from '@/composables/useToast'
 const props = defineProps({
   ruleSets: { type: Array, default: () => [] },
   presets: { type: Array, default: () => [] },
-  targetOptions: { type: Array, default: () => ['DIRECT', 'REJECT'] }
+  targetOptions: { type: Array, default: () => ['DIRECT', 'REJECT'] },
+  coreRunning: { type: Boolean, default: false }
 })
-const emit = defineEmits(['updated'])
+const emit = defineEmits(['updated', 'toolbar-state'])
 
 const toast = useToast()
 const rsDialog = ref(null)
@@ -256,6 +274,114 @@ const modalError = ref('')
 const modalBusy = ref(false)
 const busyId = ref('')
 const pathCustom = ref(false)
+const statsMap = ref({})
+const statsLive = ref(false)
+const updatingAll = ref(false)
+const updatingName = ref('')
+const controller = new AbortController()
+
+const updatableSets = computed(() =>
+  props.ruleSets.filter((rs) => rs.enabled !== false && rs.source !== 'manual' && !!rs.url)
+)
+const hasUpdatable = computed(() => updatableSets.value.length > 0)
+
+function ruleCountOf(rs) {
+  const liveCount = statsMap.value?.[rs.name]?.rule_count
+  if (typeof liveCount === 'number' && Number.isFinite(liveCount)) return liveCount
+  if (rs.source === 'manual' && rs.format !== 'mrs') return countContentLines(rs.content)
+  return null
+}
+
+function ruleCountLabel(rs) {
+  const cnt = ruleCountOf(rs)
+  if (cnt != null) return `${cnt.toLocaleString()} 条规则`
+  if (!rs.enabled) return '已停用'
+  if (rs.format === 'mrs') return '启动后统计'
+  return '待更新'
+}
+
+const ruleStatsSummary = computed(() => {
+  let total = 0
+  let known = 0
+  for (const rs of props.ruleSets) {
+    const cnt = ruleCountOf(rs)
+    if (cnt != null) {
+      total += cnt
+      known++
+    }
+  }
+  return { total, known }
+})
+
+async function loadStats() {
+  try {
+    const res = await adminApi.mihomoRuleSetStats(controller.signal)
+    if (controller.signal.aborted) return
+    statsLive.value = !!res?.live
+    statsMap.value = res?.providers || {}
+  } catch (err) {
+    if (err?.name !== 'AbortError') {
+      // Non-fatal: fallback manual line counts remain available
+    }
+  }
+}
+
+async function runUpdate(names = []) {
+  const isSingle = names.length === 1
+  if (isSingle) updatingName.value = names[0]
+  else updatingAll.value = true
+  try {
+    const res = await adminApi.updateMihomoRuleSets(names)
+    if (res?.providers) {
+      statsLive.value = !!res.live
+      statsMap.value = res.providers
+    }
+    if (isSingle) {
+      const item = res?.results?.[0]
+      if (item && !item.ok) {
+        toast.error(`规则集「${names[0]}」更新失败: ${item.error || '未知错误'}`)
+      } else {
+        toast.success(`规则集「${names[0]}」已更新`)
+      }
+    } else if (res?.failed > 0) {
+      const firstErr = res.results?.find((r) => !r.ok)?.error
+      toast.warning(`更新完成：${res.updated} 个成功，${res.failed} 个失败${firstErr ? `（${firstErr}）` : ''}`)
+    } else {
+      toast.success(`已完成 ${res?.updated || 0} 个规则集的批量更新`)
+    }
+  } catch (err) {
+    toast.error(err.message)
+  } finally {
+    if (isSingle) updatingName.value = ''
+    else updatingAll.value = false
+  }
+}
+
+function updateAll() {
+  if (updatingAll.value || !hasUpdatable.value) return
+  return runUpdate([])
+}
+
+function updateOne(rs) {
+  if (!rs?.name || updatingAll.value || updatingName.value) return
+  return runUpdate([rs.name])
+}
+
+watch(
+  [updatingAll, hasUpdatable],
+  () => {
+    emit('toolbar-state', { updatingAll: updatingAll.value, hasUpdatable: hasUpdatable.value })
+  },
+  { immediate: true }
+)
+
+watch(
+  () => [props.ruleSets, props.coreRunning],
+  () => loadStats()
+)
+
+onMounted(loadStats)
+onBeforeUnmount(() => controller.abort())
 
 const sourceOptions = [
   { id: 'http', label: '远端规则集' },
@@ -407,6 +533,7 @@ async function submit() {
     emit('updated', status)
     rsDialog.value?.close()
     toast.success(form.id ? '规则集已更新' : '规则集已保存')
+    await loadStats()
   } catch (err) {
     modalError.value = err.message
   } finally {
@@ -419,6 +546,7 @@ async function toggle(id) {
   try {
     const status = await adminApi.toggleMihomoRuleSet(id)
     emit('updated', status)
+    await loadStats()
   } catch (err) {
     toast.error(err.message)
   } finally {
@@ -432,6 +560,7 @@ async function remove(rs) {
     const status = await adminApi.deleteMihomoRuleSet(rs.id)
     emit('updated', status)
     toast.success(`规则集「${rs.name}」已删除`)
+    await loadStats()
   } catch (err) {
     toast.error(err.message)
   } finally {
@@ -470,6 +599,12 @@ function formatInterval(sec) {
   return `${n}s`
 }
 
+function formatUpdatedAt(iso) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString()
+}
+
 function countContentLines(content) {
   if (!content) return 0
   return content
@@ -478,7 +613,7 @@ function countContentLines(content) {
     .filter((l) => l && !l.startsWith('#') && l !== 'payload:').length
 }
 
-defineExpose({ openModal })
+defineExpose({ openModal, updateAll })
 </script>
 
 <style scoped>
@@ -678,5 +813,15 @@ defineExpose({ openModal })
   font-size: 12px;
   color: var(--muted);
   line-height: 1.5;
+}
+
+.spinning {
+  animation: ruleset-spin 0.85s linear infinite;
+}
+
+@keyframes ruleset-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 </style>
