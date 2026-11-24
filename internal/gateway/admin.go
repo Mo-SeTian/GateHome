@@ -109,8 +109,12 @@ func apiError(w http.ResponseWriter, code int, message string) {
 }
 
 func decodeBody(w http.ResponseWriter, r *http.Request, v any) bool {
+	timeout := 15 * time.Second
+	if r.URL.Path == "/api/login" {
+		timeout = 3 * time.Second
+	}
 	controller := http.NewResponseController(w)
-	if controller.SetReadDeadline(time.Now().Add(15*time.Second)) == nil {
+	if controller.SetReadDeadline(time.Now().Add(timeout)) == nil {
 		defer controller.SetReadDeadline(time.Time{})
 	}
 	limit := int64(128 << 10)
@@ -378,7 +382,19 @@ func (a *Admin) Handler() http.Handler {
 			return
 		}
 		if (r.URL.Path == "/api/mihomo/ctrl" || strings.HasPrefix(r.URL.Path, "/api/mihomo/ctrl/")) && a.mihomo != nil {
-			a.requireAuth(a.handleMihomoControllerProxy)(w, r)
+			a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
+				isWS := strings.EqualFold(r.Header.Get("Upgrade"), "websocket")
+				if (r.Method != "GET" && r.Method != "HEAD") || isWS {
+					fetchSite := r.Header.Get("Sec-Fetch-Site")
+					if fetchSite == "cross-site" || fetchSite == "same-site" || !a.requestOriginAllowed(r) {
+						apiError(w, 403, "请求来源未获允许")
+						return
+					}
+				}
+				w.Header().Set("X-Content-Type-Options", "nosniff")
+				w.Header().Set("Referrer-Policy", "no-referrer")
+				a.handleMihomoControllerProxy(w, r)
+			})(w, r)
 			return
 		}
 		if strings.HasPrefix(r.URL.Path, "/sunpanel/") && a.sunPanel != nil {
@@ -442,12 +458,6 @@ func (a *Admin) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 }
 
 func (a *Admin) login(w http.ResponseWriter, r *http.Request) {
-	if !a.beginCredentialAttempt(r) {
-		w.Header().Set("Retry-After", "60")
-		apiError(w, 429, "登录尝试过于频繁，请一分钟后再试")
-		return
-	}
-	defer a.endCredentialAttempt()
 	var input struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
@@ -455,6 +465,12 @@ func (a *Admin) login(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &input) {
 		return
 	}
+	if !a.beginCredentialAttempt(r) {
+		w.Header().Set("Retry-After", "60")
+		apiError(w, 429, "登录尝试过于频繁，请一分钟后再试")
+		return
+	}
+	defer a.endCredentialAttempt()
 	a.authMu.RLock()
 	defer a.authMu.RUnlock()
 	state := a.store.Snapshot()

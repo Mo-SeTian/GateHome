@@ -86,10 +86,7 @@ func safeDialContext(dial func(context.Context, string, string) (net.Conn, error
 	}
 }
 
-func outboundClient(s State, timeout time.Duration) *http.Client {
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.Proxy = nil
-	transport.DialContext = safeDialContext(transport.DialContext)
+func rawOutboundProxy(s State) func(*http.Request) (*url.URL, error) {
 	// Tier 1: Built-in mihomo proxy when takeover_outbound is active and core is running.
 	mihomoOutboundMu.RLock()
 	resolver := mihomoOutboundResolver
@@ -97,8 +94,7 @@ func outboundClient(s State, timeout time.Duration) *http.Client {
 	if resolver != nil {
 		if proxyURL := resolver(); proxyURL != "" {
 			if u, err := url.Parse(proxyURL); err == nil && u.Hostname() != "" {
-				transport.Proxy = http.ProxyURL(u)
-				return &http.Client{Transport: transport, Timeout: timeout, CheckRedirect: func(r *http.Request, via []*http.Request) error { return errors.New("不允许重定向") }}
+				return http.ProxyURL(u)
 			}
 		}
 	}
@@ -109,7 +105,39 @@ func outboundClient(s State, timeout time.Duration) *http.Client {
 			if s.Config.OutboundProxy.Username != "" {
 				u.User = url.UserPassword(s.Config.OutboundProxy.Username, s.ProxyPassword)
 			}
-			transport.Proxy = http.ProxyURL(u)
+			return http.ProxyURL(u)
+		}
+	}
+	return nil
+}
+
+func validateOutboundProxyTarget(ctx context.Context, target *url.URL) ([]netip.Addr, error) {
+	if target == nil || target.Hostname() == "" {
+		return nil, errors.New("目标域名解析失败")
+	}
+	addresses, err := net.DefaultResolver.LookupNetIP(ctx, "ip", target.Hostname())
+	if err != nil {
+		return nil, errors.New("目标域名解析失败")
+	}
+	for _, ip := range addresses {
+		ip = ip.Unmap()
+		if !allowedServiceIP(ip) {
+			return nil, errors.New("目标地址不允许访问")
+		}
+	}
+	return addresses, nil
+}
+
+func outboundClient(s State, timeout time.Duration) *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = nil
+	transport.DialContext = safeDialContext(transport.DialContext)
+	if baseProxy := rawOutboundProxy(s); baseProxy != nil {
+		transport.Proxy = func(r *http.Request) (*url.URL, error) {
+			if _, err := validateOutboundProxyTarget(r.Context(), r.URL); err != nil {
+				return nil, err
+			}
+			return baseProxy(r)
 		}
 	}
 	// Tier 3: Direct connection (transport.Proxy == nil).
@@ -153,30 +181,26 @@ func allowedServiceIP(ip netip.Addr) bool {
 }
 
 func serviceEndpointClient(state State, timeout time.Duration) *http.Client {
-	client := outboundClient(state, timeout)
-	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = nil
+	transport.DialContext = safeDialContext(transport.DialContext)
 	// Connect directly to LAN services and pin resolved addresses when dialing.
-	transport := client.Transport.(*http.Transport)
-	if transport.Proxy != nil {
-		proxy := transport.Proxy
+	if baseProxy := rawOutboundProxy(state); baseProxy != nil {
 		transport.Proxy = func(r *http.Request) (*url.URL, error) {
-			addresses, err := net.DefaultResolver.LookupNetIP(r.Context(), "ip", r.URL.Hostname())
+			addresses, err := validateOutboundProxyTarget(r.Context(), r.URL)
 			if err != nil {
-				return nil, errors.New("目标域名解析失败")
+				return nil, err
 			}
 			local := false
 			for _, ip := range addresses {
 				ip = ip.Unmap()
-				if !allowedServiceIP(ip) {
-					return nil, errors.New("目标地址不允许访问")
-				}
 				local = local || ip.IsPrivate() || ip.IsLoopback()
 			}
 			if local {
 				return nil, nil
 			}
-			return proxy(r)
+			return baseProxy(r)
 		}
 	}
-	return client
+	return &http.Client{Transport: transport, Timeout: timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 }

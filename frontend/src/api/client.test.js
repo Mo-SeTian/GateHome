@@ -179,3 +179,20 @@ test('requestStream throws ApiError on SSE error event and supports JSON fallbac
   assert.deepEqual(fallback, { text: '非流式回退' })
   assert.deepEqual(seen, [['done', { text: '非流式回退' }]])
 })
+
+test('non-GET/HEAD requests without body still include X-Gatehouse-Request header', async () => {
+  const sentHeaders = []
+  globalThis.fetch = async (_, options) => {
+    sentHeaders.push(options.headers)
+    return response(200, { ok: true })
+  }
+
+  await request('/api/mihomo/start', { method: 'POST' })
+  await request('/api/ip-blocks', { method: 'DELETE' })
+  await request('/api/status', { method: 'GET' })
+
+  assert.equal(sentHeaders[0]['X-Gatehouse-Request'], '1')
+  assert.equal(sentHeaders[0]['Content-Type'], undefined)
+  assert.equal(sentHeaders[1]['X-Gatehouse-Request'], '1')
+  assert.equal(sentHeaders[2]['X-Gatehouse-Request'], undefined)
+})

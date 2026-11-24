@@ -2,10 +2,38 @@ package gateway
 
 import (
 	"net/http"
+	"path"
 	"strings"
 	"sync"
 	"time"
 )
+
+func canonicalRequestPath(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return "/"
+	}
+	if !strings.HasPrefix(trimmed, "/") {
+		trimmed = "/" + trimmed
+	}
+	cleaned := path.Clean(trimmed)
+	if cleaned != "/" && strings.HasSuffix(raw, "/") && !strings.HasSuffix(cleaned, "/") {
+		cleaned += "/"
+	}
+	return cleaned
+}
+
+func pathMatchesPrefix(cleanPath, prefix string) bool {
+	p := canonicalRequestPath(prefix)
+	if p == "/" {
+		return true
+	}
+	pNoSlash := strings.TrimSuffix(p, "/")
+	if strings.HasSuffix(p, "/") {
+		return strings.HasPrefix(cleanPath, pNoSlash+"/")
+	}
+	return cleanPath == pNoSlash || strings.HasPrefix(cleanPath, pNoSlash+"/")
+}
 
 func (p *Proxy) inspectProtection(route proxyRoute, r *http.Request) ([]SecurityHit, int, int) {
 	f := route.firewall
@@ -14,7 +42,8 @@ func (p *Proxy) inspectProtection(route proxyRoute, r *http.Request) ([]Security
 	if !ok {
 		return []SecurityHit{{Engine: "system", RuleID: 1, Name: "来源 IP 无效", Action: "block"}}, 403, 0
 	}
-	if policy.Rate.Enabled && strings.HasPrefix(r.URL.Path, policy.Rate.Path) {
+	cleanPath := canonicalRequestPath(r.URL.Path)
+	if policy.Rate.Enabled && pathMatchesPrefix(cleanPath, policy.Rate.Path) {
 		if limited, retry, available := f.counters.increment(routeKey(route.route)+"|"+ip+"|rate", policy.Rate.WindowSeconds, policy.Rate.Requests); !available {
 			return []SecurityHit{{Engine: "system", RuleID: 3, Name: "访问计数容量已满，请稍后重试", Action: "block"}}, 503, retry
 		} else if limited {
@@ -23,14 +52,17 @@ func (p *Proxy) inspectProtection(route proxyRoute, r *http.Request) ([]Security
 	}
 	hits := []SecurityHit{}
 	for i, rule := range policy.Rules {
-		value := r.UserAgent()
+		matched := false
 		if rule.Target == "path" {
-			value = r.URL.Path
+			matched = f.rules[i].MatchString(cleanPath) || (r.URL.Path != cleanPath && f.rules[i].MatchString(r.URL.Path))
+		} else {
+			value := r.UserAgent()
+			if rule.Target == "method" {
+				value = r.Method
+			}
+			matched = f.rules[i].MatchString(value)
 		}
-		if rule.Target == "method" {
-			value = r.Method
-		}
-		if f.rules[i].MatchString(value) {
+		if matched {
 			hits = append(hits, SecurityHit{Engine: "custom", RuleID: 10000 + i, Name: rule.Name, Action: rule.Action})
 			if rule.Action == "block" {
 				return hits, 403, 0

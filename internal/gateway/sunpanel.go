@@ -161,7 +161,10 @@ func (s *SunPanel) start() error {
 		return errors.New("Sun-Panel 管理连接初始化失败")
 	}
 	keyWriter.Close()
-	client := &http.Client{Timeout: 300 * time.Millisecond}
+	localTransport := http.DefaultTransport.(*http.Transport).Clone()
+	localTransport.Proxy = nil
+	client := &http.Client{Transport: localTransport, Timeout: 300 * time.Millisecond}
+	defer client.CloseIdleConnections()
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		select {
@@ -177,6 +180,7 @@ func (s *SunPanel) start() error {
 				s.bridgeKey, s.bridgeURL = bridgeKey, target.String()
 				s.bridgePort.Store(int32(listener.Addr().(*net.TCPAddr).Port))
 				s.proxy = httputil.NewSingleHostReverseProxy(target)
+				s.proxy.Transport = localTransport
 				s.proxy.ErrorLog = nil
 				s.proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
 					http.Error(w, "Sun-Panel 暂时不可用", 503)

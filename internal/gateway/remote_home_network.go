@@ -336,7 +336,10 @@ func (r *homeRuntime) relay(ctx context.Context, id stack.TransportEndpointID, n
 		if !peer.Admin {
 			if localAP, parseErr := netip.ParseAddrPort(wan.LocalAddr().String()); parseErr == nil {
 				localIP := localAP.Addr().Unmap()
-				if localIP.Is4() && !localIP.IsLoopback() && !r.policy.lan.Contains(localIP) {
+				r.mu.Lock()
+				lan := r.policy.lan
+				r.mu.Unlock()
+				if localIP.Is4() && !localIP.IsLoopback() && !lan.Contains(localIP) {
 					r.admin.proxy.trackHomeBridgeRelay(localIP, id.LocalPort, 1)
 					defer r.admin.proxy.trackHomeBridgeRelay(localIP, id.LocalPort, -1)
 				}

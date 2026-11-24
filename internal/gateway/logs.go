@@ -167,21 +167,7 @@ func (l *Logs) Add(e LogEntry) {
 		}
 	}
 	if l.store != nil {
-		s := l.store.Snapshot()
-		secrets := []string{s.CloudflareToken, s.ProxyPassword, s.PasswordHash, s.GitHubToken, s.Alerts.URL, s.WxPusher.AppToken, s.WebDAVBackup.Password, s.WebDAVBackup.BackupPassword, s.MCPToken, s.MCPTokenHash}
-		for _, client := range s.MCPClients {
-			secrets = append(secrets, client.Token, client.Hash)
-		}
-		for _, hash := range s.RoutePasswordHashes {
-			secrets = append(secrets, hash)
-		}
-		for _, credential := range s.DNSCredentials {
-			secrets = append(secrets, credential.Token)
-		}
-		for _, credential := range s.CertificateCredentials {
-			secrets = append(secrets, credential.Token)
-		}
-		for _, secret := range secrets {
+		for _, secret := range stateSecrets(l.store.Snapshot()) {
 			if secret == "" {
 				continue
 			}
@@ -231,6 +217,30 @@ func (l *Logs) Add(e LogEntry) {
 	if err == nil && (l.totalSize > limit || e.Time.Sub(l.lastCleanup) >= time.Minute) {
 		l.cleanupError = l.cleanupLocked(c, e.Time) != nil
 	}
+}
+
+func stateSecrets(s State) []string {
+	secrets := []string{
+		s.CloudflareToken, s.ProxyPassword, s.PasswordHash, s.GitHubToken,
+		s.Alerts.URL, s.WxPusher.AppToken, s.WebDAVBackup.Password,
+		s.WebDAVBackup.BackupPassword, s.MCPToken, s.MCPTokenHash, s.Assistant.Key,
+	}
+	for _, client := range s.MCPClients {
+		secrets = append(secrets, client.Token, client.Hash)
+	}
+	for _, provider := range s.AssistantProviders {
+		secrets = append(secrets, provider.Key)
+	}
+	for _, hash := range s.RoutePasswordHashes {
+		secrets = append(secrets, hash)
+	}
+	for _, credential := range s.DNSCredentials {
+		secrets = append(secrets, credential.Token)
+	}
+	for _, credential := range s.CertificateCredentials {
+		secrets = append(secrets, credential.Token)
+	}
+	return secrets
 }
 
 func (l *Logs) List(category, result string, before int64, limit int) ([]LogEntry, int64, bool) {

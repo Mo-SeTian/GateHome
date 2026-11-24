@@ -178,10 +178,17 @@ watch(
   },
   { immediate: true }
 )
+const onMonitorVisibility = () => {
+  if (!document.hidden && !controller.signal.aborted) read()
+}
 onMounted(() => {
-  timer = setInterval(() => read(), 5000)
+  document.addEventListener('visibilitychange', onMonitorVisibility)
+  timer = setInterval(() => {
+    if (!document.hidden) read()
+  }, 5000)
 })
 onUnmounted(() => {
+  document.removeEventListener('visibilitychange', onMonitorVisibility)
   clearInterval(timer)
   controller.abort()
 })

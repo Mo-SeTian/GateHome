@@ -111,8 +111,8 @@ export const adminApi = {
   closeMihomoConnection: (id) => request(`/api/mihomo/connections/${encodeURIComponent(id)}`, { method: 'DELETE', body: {} }),
   closeAllMihomoConnections: () => request('/api/mihomo/connections', { method: 'DELETE', body: {} }),
   mihomoCustomYaml: (kind, signal) => request(`/api/mihomo/custom/${encodeURIComponent(kind)}/yaml`, { signal }),
-  saveMihomoCustomYaml: (kind, content, validateOnly = false) => request(`/api/mihomo/custom/${encodeURIComponent(kind)}/yaml`, {
-    method: 'PUT', body: { content, validate_only: validateOnly }
+  saveMihomoCustomYaml: (kind, content, validateOnly = false, signal) => request(`/api/mihomo/custom/${encodeURIComponent(kind)}/yaml`, {
+    method: 'PUT', body: { content, validate_only: validateOnly }, signal
   }),
   clearMihomoLogs: () => request('/api/mihomo/logs', { method: 'DELETE', body: {} }),
   uploadMihomoCore: (file) => {

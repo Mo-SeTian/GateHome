@@ -354,10 +354,12 @@ async function fetchSnapshot(silent = true) {
   if (activeAbort) {
     activeAbort.abort()
   }
-  activeAbort = new AbortController()
+  const currentController = new AbortController()
+  activeAbort = currentController
   if (!silent) busy.value = true
   try {
-    const snap = await adminApi.mihomoConnections(activeAbort.signal)
+    const snap = await adminApi.mihomoConnections(currentController.signal)
+    if (activeAbort !== currentController) return
     fetchError.value = ''
     nowTick.value = Date.now()
 
@@ -392,11 +394,13 @@ async function fetchSnapshot(silent = true) {
     prevById = nextMap
     activeList.value = nextList
   } catch (err) {
-    if (err?.name !== 'AbortError') {
+    if (err?.name !== 'AbortError' && activeAbort === currentController) {
       fetchError.value = err.message || '读取连接状态失败'
     }
   } finally {
-    busy.value = false
+    if (activeAbort === currentController) {
+      busy.value = false
+    }
   }
 }
 
@@ -494,8 +498,8 @@ function onVisibilityChange() {
   if (document.hidden) {
     stopPolling()
   } else if (props.active && props.running && !paused.value) {
-    fetchSnapshot(true)
     syncPolling()
+    fetchSnapshot(true)
   }
 }
 
@@ -503,8 +507,8 @@ watch(
   () => [props.active, props.running],
   ([active, running]) => {
     if (active && running) {
-      fetchSnapshot(true)
       syncPolling()
+      fetchSnapshot(true)
     } else if (!running) {
       stopPolling()
       if (prevById.size > 0) {

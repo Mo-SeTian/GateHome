@@ -72,30 +72,45 @@ type mihomoStatusResponse struct {
 
 func (m *mihomoManager) statusSnapshot() mihomoStatusResponse {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	bin := m.resolveBinaryLocked()
 	ver := m.version
+	running := m.running
+	pid := m.pid
+	lastError := m.lastError
+	cfgCopy := m.cfg
+	cfgCopy.Subscriptions = slices.Clone(m.cfg.Subscriptions)
+	cfgCopy.CustomGroups = slices.Clone(m.cfg.CustomGroups)
+	cfgCopy.CustomRules = slices.Clone(m.cfg.CustomRules)
+	cfgCopy.CustomRuleSets = slices.Clone(m.cfg.CustomRuleSets)
+	cfgCopy.CustomDNSPolicies = slices.Clone(m.cfg.CustomDNSPolicies)
+	m.mu.Unlock()
+
 	if ver == "" && bin != "" {
-		ver = m.probeBinaryVersion(bin)
-		m.version = ver
+		if probed := m.probeBinaryVersion(bin); probed != "" {
+			ver = probed
+			m.mu.Lock()
+			if m.version == "" && m.resolveBinaryLocked() == bin {
+				m.version = probed
+			}
+			m.mu.Unlock()
+		}
 	}
 	zashInstalled, zashVersion := m.zashboardStatus()
 	mmdbInstalled, mmdbSize, mmdbUpdatedAt := m.mmdbStatus()
 	outboundURL := ""
 	takeoverActive := false
-	if m.running && m.cfg.TakeoverOutbound {
-		outboundURL = activeOutboundURL(m.cfg.Settings)
+	if running && cfgCopy.TakeoverOutbound {
+		outboundURL = activeOutboundURL(cfgCopy.Settings)
 		takeoverActive = outboundURL != ""
 	}
-	sourceRaw, _ := m.readSourceYAML(m.cfg)
+	sourceRaw, _ := m.readSourceYAML(cfgCopy)
 	inheritedDNS := extractInheritedDNSPolicies(sourceRaw)
-	sanitizedSettings := m.cfg.Settings
+	sanitizedSettings := cfgCopy.Settings
 	authPwdConfigured := sanitizedSettings.AuthPassword != ""
 	sanitizedSettings.AuthPassword = ""
 	return mihomoStatusResponse{
-		Running:                m.running,
-		PID:                    m.pid,
+		Running:                running,
+		PID:                    pid,
 		CoreInstalled:          bin != "",
 		CoreVersion:            ver,
 		BinaryPath:             bin,
@@ -107,21 +122,21 @@ func (m *mihomoManager) statusSnapshot() mihomoStatusResponse {
 		LANIP:                  detectLANIP(),
 		OutboundTakeoverActive: takeoverActive,
 		OutboundProxyURL:       outboundURL,
-		ManualOverride:         m.cfg.ManualOverride,
-		LastError:              m.lastError,
+		ManualOverride:         cfgCopy.ManualOverride,
+		LastError:              lastError,
 		RecentLogs:             m.logs.snapshot(),
-		Enabled:                m.cfg.Enabled,
-		TakeoverOutbound:       m.cfg.TakeoverOutbound,
-		ControllerPort:         m.cfg.ControllerPort,
+		Enabled:                cfgCopy.Enabled,
+		TakeoverOutbound:       cfgCopy.TakeoverOutbound,
+		ControllerPort:         cfgCopy.ControllerPort,
 		Settings:               sanitizedSettings,
 		AuthPasswordConfigured: authPwdConfigured,
-		ActiveSubscriptionID:   m.cfg.ActiveSubscriptionID,
-		Subscriptions:          toSubscriptionViews(m.cfg.Subscriptions),
-		CustomGroups:           slices.Clone(m.cfg.CustomGroups),
-		CustomRules:            slices.Clone(m.cfg.CustomRules),
-		CustomRuleSets:         slices.Clone(m.cfg.CustomRuleSets),
+		ActiveSubscriptionID:   cfgCopy.ActiveSubscriptionID,
+		Subscriptions:          toSubscriptionViews(cfgCopy.Subscriptions),
+		CustomGroups:           cfgCopy.CustomGroups,
+		CustomRules:            cfgCopy.CustomRules,
+		CustomRuleSets:         cfgCopy.CustomRuleSets,
 		RuleSetPresets:         mihomoBuiltInRuleSetPresets(),
-		CustomDNSPolicies:      slices.Clone(m.cfg.CustomDNSPolicies),
+		CustomDNSPolicies:      cfgCopy.CustomDNSPolicies,
 		InheritedDNSPolicies:   inheritedDNS,
 	}
 }
@@ -993,8 +1008,8 @@ func (a *Admin) handleMihomoRefreshSubscription(w http.ResponseWriter, r *http.R
 	data, up, down, total, exp, err := m.fetchSubscriptionYAML(ctx, sub.URL)
 	if err != nil {
 		m.mu.Lock()
-		if idx < len(m.cfg.Subscriptions) && m.cfg.Subscriptions[idx].ID == id {
-			m.cfg.Subscriptions[idx].LastError = err.Error()
+		if curIdx := slices.IndexFunc(m.cfg.Subscriptions, func(s MihomoSubscription) bool { return s.ID == id }); curIdx >= 0 {
+			m.cfg.Subscriptions[curIdx].LastError = err.Error()
 			_ = saveMihomoConfig(m.dir, m.cfg)
 		}
 		m.mu.Unlock()
@@ -1002,23 +1017,27 @@ func (a *Admin) handleMihomoRefreshSubscription(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	m.mu.Lock()
+	curIdx := slices.IndexFunc(m.cfg.Subscriptions, func(s MihomoSubscription) bool { return s.ID == id })
+	if curIdx < 0 {
+		m.mu.Unlock()
+		apiError(w, 404, "订阅已被删除")
+		return
+	}
 	subDir := filepath.Join(m.dir, "subscriptions")
 	_ = os.MkdirAll(subDir, 0700)
 	if err := atomicWrite(m.subscriptionFile(id), data); err != nil {
+		m.mu.Unlock()
 		apiError(w, 500, err.Error())
 		return
 	}
-
-	m.mu.Lock()
-	if idx < len(m.cfg.Subscriptions) && m.cfg.Subscriptions[idx].ID == id {
-		m.cfg.Subscriptions[idx].UpdatedAt = time.Now()
-		m.cfg.Subscriptions[idx].NodeCount = countYAMLProxies(data)
-		m.cfg.Subscriptions[idx].LastError = ""
-		m.cfg.Subscriptions[idx].Upload = up
-		m.cfg.Subscriptions[idx].Download = down
-		m.cfg.Subscriptions[idx].Total = total
-		m.cfg.Subscriptions[idx].Expire = exp
-	}
+	m.cfg.Subscriptions[curIdx].UpdatedAt = time.Now()
+	m.cfg.Subscriptions[curIdx].NodeCount = countYAMLProxies(data)
+	m.cfg.Subscriptions[curIdx].LastError = ""
+	m.cfg.Subscriptions[curIdx].Upload = up
+	m.cfg.Subscriptions[curIdx].Download = down
+	m.cfg.Subscriptions[curIdx].Total = total
+	m.cfg.Subscriptions[curIdx].Expire = exp
 	isActive := m.cfg.ActiveSubscriptionID == id
 	if isActive {
 		m.cfg.ManualOverride = false
@@ -1094,7 +1113,11 @@ func maskYAMLSecret(raw []byte) string {
 			enc.SetIndent(2)
 			if enc.Encode(&doc) == nil {
 				_ = enc.Close()
-				return mihomoHeaderComment + out.String()
+				rendered := out.String()
+				if strings.HasPrefix(rendered, mihomoHeaderComment) {
+					return rendered
+				}
+				return mihomoHeaderComment + rendered
 			}
 		}
 	}
@@ -1112,6 +1135,10 @@ func injectManagedKeys(raw []byte, cfg MihomoConfig) ([]byte, error) {
 	root := doc.Content[0]
 	yamlMapSet(root, "external-controller", yamlStrNode(fmt.Sprintf("127.0.0.1:%d", cfg.ControllerPort)))
 	yamlMapSet(root, "secret", yamlStrNode(cfg.ControllerSecret))
+	sanitizeDangerousMihomoKeys(root)
+	if err := validateManagedProviderPaths(root); err != nil {
+		return nil, err
+	}
 	if authNode, idx := yamlMapFind(root, "authentication"); idx >= 0 && authNode.Kind == yaml.SequenceNode {
 		hasPlaceholder := false
 		for _, item := range authNode.Content {
@@ -1123,10 +1150,20 @@ func injectManagedKeys(raw []byte, cfg MihomoConfig) ([]byte, error) {
 		if hasPlaceholder {
 			if cfg.Settings.AuthEnabled && cfg.Settings.AuthUsername != "" && cfg.Settings.AuthPassword != "" {
 				authNode.Content = []*yaml.Node{yamlStrNode(cfg.Settings.AuthUsername + ":" + cfg.Settings.AuthPassword)}
+				skipSeq := &yaml.Node{
+					Kind:    yaml.SequenceNode,
+					Tag:     "!!seq",
+					Content: []*yaml.Node{yamlStrNode("127.0.0.1/32"), yamlStrNode("::1/128")},
+				}
+				yamlMapSet(root, "skip-auth-prefixes", skipSeq)
 			} else {
 				yamlMapDelete(root, "authentication")
+				yamlMapDelete(root, "skip-auth-prefixes")
 			}
 		}
+	}
+	if _, idx := yamlMapFind(root, "authentication"); idx < 0 {
+		yamlMapDelete(root, "skip-auth-prefixes")
 	}
 
 	var out bytes.Buffer
@@ -1408,7 +1445,10 @@ func (a *Admin) handleMihomoControllerProxy(w http.ResponseWriter, r *http.Reque
 	}
 	isWS := strings.EqualFold(r.Header.Get("Upgrade"), "websocket")
 
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.Proxy = nil
 	proxy := &httputil.ReverseProxy{
+		Transport:     tr,
 		FlushInterval: -1,
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.SetURL(targetURL)

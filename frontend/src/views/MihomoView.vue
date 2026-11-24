@@ -1254,6 +1254,8 @@ import '@/styles/reports.css'
 
 const toast = useToast()
 const controller = new AbortController()
+let yamlRequestSeq = 0
+let yamlAbort = null
 
 const modes = [
   { id: 'rule', label: '规则' },
@@ -1468,18 +1470,28 @@ async function loadYaml(kind = yamlKind.value) {
   if (kind === 'source') {
     yamlPreviewMode.value = false
   }
+  const seq = ++yamlRequestSeq
+  if (yamlAbort) {
+    yamlAbort.abort()
+  }
+  const currentAbort = new AbortController()
+  yamlAbort = currentAbort
   yamlBusy.value = true
   try {
     const res = kind === 'custom'
-      ? await adminApi.mihomoCustomYaml('all', controller.signal)
-      : await adminApi.mihomoYaml(kind, controller.signal)
-    if (controller.signal.aborted) return
+      ? await adminApi.mihomoCustomYaml('all', currentAbort.signal)
+      : await adminApi.mihomoYaml(kind, currentAbort.signal)
+    if (controller.signal.aborted || seq !== yamlRequestSeq) return
     yamlContent.value = res.content || ''
     yamlManualOverride.value = !!res.manual_override
   } catch (err) {
-    if (!controller.signal.aborted) toast.error(err.message)
+    if (!controller.signal.aborted && seq === yamlRequestSeq && err?.name !== 'AbortError') {
+      toast.error(err.message)
+    }
   } finally {
-    yamlBusy.value = false
+    if (seq === yamlRequestSeq) {
+      yamlBusy.value = false
+    }
   }
 }
 
@@ -2257,7 +2269,11 @@ const filteredLogLines = computed(() => {
   return out
 })
 
+let logsInFlight = false
+
 async function loadLogs(silent = false) {
+  if (silent && logsInFlight) return
+  logsInFlight = true
   if (!silent) logsLoading.value = true
   try {
     const el = logViewerEl.value
@@ -2276,6 +2292,7 @@ async function loadLogs(silent = false) {
   } catch (err) {
     if (!controller.signal.aborted && !silent) toast.error(err.message)
   } finally {
+    logsInFlight = false
     if (!silent) logsLoading.value = false
   }
 }
@@ -2319,6 +2336,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   stopLogPolling()
+  if (yamlAbort) yamlAbort.abort()
   controller.abort()
 })
 </script>

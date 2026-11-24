@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -46,10 +47,19 @@ SecAction "id:10000,phase:1,pass,nolog,setvar:tx.blocking_paranoia_level=%d,setv
 		if e.Parameter != "" {
 			ctl = fmt.Sprintf("ctl:ruleRemoveTargetById=%d;ARGS:%s", e.RuleID, e.Parameter)
 		}
+		cleanPath := canonicalRequestPath(e.Path)
+		op := fmt.Sprintf(`@beginsWith %s`, cleanPath)
+		if cleanPath != "/" {
+			if strings.HasSuffix(cleanPath, "/") {
+				op = fmt.Sprintf(`@beginsWith %s`, cleanPath)
+			} else {
+				op = fmt.Sprintf(`@rx ^%s(?:/|$)`, regexp.QuoteMeta(cleanPath))
+			}
+		}
 		if e.Host != "" {
-			directives += fmt.Sprintf("SecRule SERVER_NAME \"@streq %s\" \"id:%d,phase:1,pass,nolog,t:none,chain\"\nSecRule REQUEST_URI \"@beginsWith %s\" \"t:none,%s\"\n", e.Host, 11000+i, e.Path, ctl)
+			directives += fmt.Sprintf("SecRule SERVER_NAME \"@streq %s\" \"id:%d,phase:1,pass,nolog,t:none,chain\"\nSecRule REQUEST_FILENAME %q \"t:none,t:urlDecodeUni,t:normalisePath,%s\"\n", e.Host, 11000+i, op, ctl)
 		} else {
-			directives += fmt.Sprintf("SecRule REQUEST_URI \"@beginsWith %s\" \"id:%d,phase:1,pass,nolog,t:none,%s\"\n", e.Path, 11000+i, ctl)
+			directives += fmt.Sprintf("SecRule REQUEST_FILENAME %q \"id:%d,phase:1,pass,nolog,t:none,t:urlDecodeUni,t:normalisePath,%s\"\n", op, 11000+i, ctl)
 		}
 	}
 	waf, err := coraza.NewWAF(coraza.NewWAFConfig().WithRootFS(crs.FS).

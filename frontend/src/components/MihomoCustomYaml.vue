@@ -31,7 +31,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { CheckCircle2, RefreshCw, Save } from 'lucide-vue-next'
 import SpotlightCard from '@/components/SpotlightCard.vue'
 import { adminApi } from '@/api/admin'
@@ -67,52 +67,64 @@ function insertTab(event) {
   })
 }
 
+const controller = new AbortController()
+
 async function load() {
   busy.value = true
   try {
-    const res = await adminApi.mihomoCustomYaml(props.kind)
+    const res = await adminApi.mihomoCustomYaml(props.kind, controller.signal)
+    if (controller.signal.aborted) return
     content.value = res.content || ''
     original.value = content.value
     message.value = ''
   } catch (err) {
-    toast.error(err.message)
+    if (!controller.signal.aborted && err?.name !== 'AbortError') {
+      toast.error(err.message)
+    }
   } finally {
-    busy.value = false
+    if (!controller.signal.aborted) busy.value = false
   }
 }
 
 async function validate() {
   busy.value = true
   try {
-    await adminApi.saveMihomoCustomYaml(props.kind, content.value, true)
+    await adminApi.saveMihomoCustomYaml(props.kind, content.value, true, controller.signal)
+    if (controller.signal.aborted) return
     message.value = '校验通过，可保存'
     messageOk.value = true
   } catch (err) {
-    message.value = err.message
-    messageOk.value = false
+    if (!controller.signal.aborted && err?.name !== 'AbortError') {
+      message.value = err.message
+      messageOk.value = false
+    }
   } finally {
-    busy.value = false
+    if (!controller.signal.aborted) busy.value = false
   }
 }
 
 async function save() {
   busy.value = true
   try {
-    const res = await adminApi.saveMihomoCustomYaml(props.kind, content.value, false)
+    const res = await adminApi.saveMihomoCustomYaml(props.kind, content.value, false, controller.signal)
+    if (controller.signal.aborted) return
     content.value = res.content || content.value
     original.value = content.value
     message.value = ''
     toast.success('已保存并合并到运行配置')
     emit('saved', res.status)
   } catch (err) {
-    message.value = err.message
-    messageOk.value = false
+    if (!controller.signal.aborted && err?.name !== 'AbortError') {
+      message.value = err.message
+      messageOk.value = false
+    }
   } finally {
-    busy.value = false
+    if (!controller.signal.aborted) busy.value = false
   }
 }
 
 onMounted(load)
+onBeforeUnmount(() => controller.abort())
 </script>
 
 <style scoped>

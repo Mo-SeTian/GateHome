@@ -89,18 +89,61 @@ func TestMCPScopedWritesKeepLegacyGrantsAndAccountIsolation(t *testing.T) {
 	args["revision"] = a.store.Snapshot().Revision
 	mcpTestCall(t, ctx, editor, "gatehome_update_config", args, false)
 	mcpTestCall(t, ctx, editor, "sunpanel_save_group", group, true)
-	for _, section := range []string{"firewalls", "admin_access", "trusted_proxies"} {
+	for _, section := range []string{"firewalls", "admin_access", "trusted_proxies", "subscriptions", "outbound_proxy"} {
 		args = map[string]any{"revision": a.store.Snapshot().Revision, "section": section, "value": []any{}}
+		if section == "outbound_proxy" {
+			args["value"] = map[string]any{"enabled": true, "url": "http://127.0.0.1:7890"}
+		}
 		message := mcpTestCall(t, ctx, editor, "gatehome_update_config", args, true)
 		if !strings.Contains(message, "安全策略") {
-			t.Fatal("security scope was not enforced before config parsing")
+			t.Fatalf("security scope was not enforced for %s: %s", section, message)
 		}
 	}
+
+	// Setup a route protected by a firewall and route auth; non-security MCP editor must not weaken or remove protection.
+	cfgWithSec := a.store.Snapshot().Config
+	cfgWithSec.Firewalls = []Firewall{{ID: "fw-1", Name: "Strict", DefaultAction: "allow"}}
+	cfgWithSec.Routes = []Route{{
+		ID:         "route-sec-1",
+		GroupID:    "default",
+		Name:       "Protected App",
+		Host:       "sec.example.test",
+		Upstream:   "http://127.0.0.1:8080",
+		Enabled:    true,
+		FirewallID: "fw-1",
+		Auth:       RouteAuthConfig{Enabled: true, Username: "alice"},
+	}}
+	secPass := "TEST_ONLY_SERVICE_PASSWORD"
+	if err := a.store.UpdateRouteCredentials(cfgWithSec, nil, nil, nil, nil, map[string]*string{"default/sec.example.test": &secPass}, nil, a.store.Snapshot().Revision); err != nil {
+		t.Fatal(err)
+	}
+	curCfg := a.store.Snapshot().Config
+	// Try clearing FirewallID on existing route.
+	badRoutes1 := append([]Route(nil), curCfg.Routes...)
+	badRoutes1[0].FirewallID = ""
+	if msg := mcpTestCall(t, ctx, editor, "gatehome_update_config", map[string]any{"revision": a.store.Snapshot().Revision, "section": "routes", "value": badRoutes1}, true); !strings.Contains(msg, "安全策略") {
+		t.Fatalf("expected FirewallID clear to be rejected, got: %s", msg)
+	}
+	// Try disabling route auth or deleting+recreating without protection.
+	badRoutes2 := append([]Route(nil), curCfg.Routes...)
+	badRoutes2[0].ID = "route-new-id"
+	badRoutes2[0].Auth = RouteAuthConfig{Enabled: false}
+	if msg := mcpTestCall(t, ctx, editor, "gatehome_update_config", map[string]any{"revision": a.store.Snapshot().Revision, "section": "routes", "value": badRoutes2}, true); !strings.Contains(msg, "安全策略") {
+		t.Fatalf("expected Auth disable via delete+recreate to be rejected, got: %s", msg)
+	}
+	// Editing non-security fields (Name/Upstream) on the same protected route must still succeed.
+	okRoutes := append([]Route(nil), curCfg.Routes...)
+	okRoutes[0].Name = "Renamed App"
+	mcpTestCall(t, ctx, editor, "gatehome_update_config", map[string]any{"revision": a.store.Snapshot().Revision, "section": "routes", "value": okRoutes}, false)
+	if a.store.Snapshot().Config.Routes[0].Name != "Renamed App" || a.store.Snapshot().Config.Routes[0].FirewallID != "fw-1" {
+		t.Fatalf("non-security route update failed or lost protection")
+	}
+
 	row.Config.SecurityWrite = &yes
 	if _, err := a.store.saveMCPClient(row, false, false, a.store.Snapshot().Revision); err != nil {
 		t.Fatal("scope update failed")
 	}
-	args = map[string]any{"revision": a.store.Snapshot().Revision, "section": "firewalls", "value": []any{}}
+	args = map[string]any{"revision": a.store.Snapshot().Revision, "section": "firewalls", "value": []Firewall{{ID: "fw-1", Name: "Strict v2", DefaultAction: "allow"}}}
 	mcpTestCall(t, ctx, editor, "gatehome_update_config", args, false)
 
 	unboundToken, _ := create("Unbound panel", MCPConfig{Enabled: true, SunPanelWrite: &yes, SecurityWrite: &no})

@@ -1,6 +1,7 @@
 .PHONY: frontend build test linux release
 VERSION := $(shell cat VERSION)
 LDFLAGS := -s -w -X gatehouse/internal/gateway.Version=$(VERSION)
+UNAME_SM := $(shell uname -s)/$(shell uname -m)
 
 frontend:
 	sh sunpanel/build.sh
@@ -14,9 +15,16 @@ build: frontend
 test: frontend
 	npm --prefix frontend test
 	npm --prefix sunpanel run test:gatehome
+	npm --prefix sunpanel run test:network
+	npm --prefix sunpanel run test:icon
 	npm --prefix sunpanel run type-check
+ifeq ($(UNAME_SM),Darwin/arm64)
+	CGO_ENABLED=0 go test ./...
+	cd sunpanel/service && CGO_ENABLED=0 go test ./...
+else
 	go test -race ./...
-	go test -race sun-panel/api/api_v1/panel sun-panel/api/api_v1/system sun-panel/integration sun-panel/lib/imageasset sun-panel/router
+	cd sunpanel/service && go test -race ./...
+endif
 	go vet ./...
 
 linux: frontend

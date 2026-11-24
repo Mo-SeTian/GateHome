@@ -128,8 +128,15 @@ func routeRequestHTTPS(r *http.Request) bool {
 		return true
 	}
 	if r.Context().Value(trustedProxyKey{}) == true {
-		proto := strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-Proto"), ",")[0])
-		return strings.EqualFold(proto, "https")
+		var lastProto string
+		for _, headerVal := range r.Header.Values("X-Forwarded-Proto") {
+			for _, part := range strings.Split(headerVal, ",") {
+				if trimmed := strings.TrimSpace(part); trimmed != "" {
+					lastProto = trimmed
+				}
+			}
+		}
+		return strings.EqualFold(lastProto, "https")
 	}
 	return false
 }

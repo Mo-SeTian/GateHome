@@ -3,10 +3,15 @@ import { useRouter } from 'vue-router'
 import { usePasskey } from '@/api/passkeys'
 import { adminApi } from '@/api/admin'
 import { markSessionChanged } from '@/api/client'
+import { useAssistant } from './useAssistant'
 import { useToast } from './useToast'
 
-localStorage.removeItem('gh_auth')
-localStorage.removeItem('gh_user')
+try {
+  localStorage.removeItem('gh_auth')
+  localStorage.removeItem('gh_user')
+} catch {
+  // Ignore storage restrictions.
+}
 
 const username = ref('')
 const isAuthenticated = computed(() => Boolean(username.value))
@@ -71,6 +76,7 @@ export function useSession() {
 export function useLogout() {
   const router = useRouter()
   const toast = useToast()
+  const { resetAssistant } = useAssistant()
 
   return async () => {
     if (isLoggingOut.value) return
@@ -79,6 +85,7 @@ export function useLogout() {
       await adminApi.logout().catch(err => {
         if (err.status !== 401) throw err
       })
+      resetAssistant({ clearStorage: true })
       endSession()
       await router.replace({ name: 'Login' })
       toast.info('已退出管理会话')

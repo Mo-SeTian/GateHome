@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -206,5 +207,37 @@ func TestPanelHealthRequiresLoginAndSavedOwnedIDs(t *testing.T) {
 	lan := preflight["data"].([]any)[0].(map[string]any)["lan"].(map[string]any)
 	if lan["browser_probe_allowed"] != true || targetCalls.Load() != 1 {
 		t.Fatal("saved LAN preflight was not approved or reused from cache")
+	}
+
+	// Internal GateHome admin/bridge/mihomo ports must never be probed by SunPanel users.
+	var adminHits atomic.Int32
+	internalAdmin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		adminHits.Add(1)
+		w.WriteHeader(200)
+	}))
+	defer internalAdmin.Close()
+	var internalAdminPort int
+	if u, err := url.Parse(internalAdmin.URL); err == nil {
+		internalAdminPort = urlEffectivePort(u)
+	}
+	a.adminPort = internalAdminPort
+	var worker2URL string
+	worker2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/sunpanel/api/user/getInfo" {
+			jsonResponse(w, 200, map[string]any{"code": 0, "data": map[string]uint{"id": 7}})
+			return
+		}
+		jsonResponse(w, 200, map[string]any{"data": map[string]any{"items": []map[string]any{{"id": 22, "url": internalAdmin.URL, "lanUrl": worker2URL}}}})
+	}))
+	defer worker2.Close()
+	worker2URL = worker2.URL
+	a.sunPanel.bridgeURL = worker2.URL
+	blocked := call(`{"ids":[22]}`, "TEST_ONLY_PANEL_SESSION")
+	item := blocked["data"].([]any)[0].(map[string]any)
+	if item["default"].(map[string]any)["healthy"] != false || item["lan"].(map[string]any)["healthy"] != false {
+		t.Fatalf("expected internal admin/bridge ports to be rejected, got %+v", item)
+	}
+	if adminHits.Load() != 0 {
+		t.Fatalf("sunPanelSiteHealth dialed internal admin port %d times", adminHits.Load())
 	}
 }

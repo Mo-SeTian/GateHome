@@ -708,9 +708,12 @@ function routeLiveTitle(route) {
 async function refreshTraffic() {
   try {
     const report = await adminApi.traffic({ hours: 24 }, controller.signal)
+    if (controller.signal.aborted) return
     traffic24h.value = report.storage_error ? null : new Map(report.rules.map(item => [item.id, item]))
-  } catch {
-    traffic24h.value = null
+  } catch (err) {
+    if (!controller.signal.aborted && err?.name !== 'AbortError') {
+      traffic24h.value = null
+    }
   }
 }
 async function refreshHealth() {
@@ -1012,14 +1015,23 @@ watch(() => routes.value.map(({ id, upstream }) => id + ' ' + upstream).join('\n
 })
 let healthTimer
 useStatusPolling()
+const onRoutesVisibility = () => {
+  if (!document.hidden && !controller.signal.aborted) {
+    refreshHealth()
+    refreshTraffic()
+  }
+}
 onMounted(() => {
   reload()
+  document.addEventListener('visibilitychange', onRoutesVisibility)
   healthTimer = setInterval(() => {
+    if (document.hidden) return
     refreshHealth()
     refreshTraffic()
   }, 30000)
 })
 onUnmounted(() => {
+  document.removeEventListener('visibilitychange', onRoutesVisibility)
   clearInterval(healthTimer)
   controller.abort()
   routePassword.value = ''

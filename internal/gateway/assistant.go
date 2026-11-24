@@ -75,8 +75,41 @@ func (a *Admin) internalPorts() (adminPort int, bridgePort int, localAddrs map[n
 	adminPort = a.adminPort
 	if a.sunPanel != nil {
 		bridgePort = int(a.sunPanel.bridgePort.Load())
+		if bridgePort < 1 && a.sunPanel.bridgeURL != "" {
+			if u, err := url.Parse(a.sunPanel.bridgeURL); err == nil {
+				bridgePort = urlEffectivePort(u)
+			}
+		}
 	}
 	return adminPort, bridgePort, localAdminAddresses()
+}
+
+func (a *Admin) forbiddenInternalPorts() (map[int]bool, map[netip.Addr]bool) {
+	adminPort, bridgePort, localAddrs := a.internalPorts()
+	ports := map[int]bool{}
+	if adminPort > 0 {
+		ports[adminPort] = true
+	}
+	if bridgePort > 0 {
+		ports[bridgePort] = true
+	}
+	if a.mihomo != nil {
+		a.mihomo.mu.Lock()
+		ctrlPort := a.mihomo.cfg.ControllerPort
+		ctrlBaseURL := a.mihomo.ctrlBaseURL
+		a.mihomo.mu.Unlock()
+		if ctrlPort > 0 {
+			ports[ctrlPort] = true
+		}
+		if ctrlBaseURL != "" {
+			if u, err := url.Parse(ctrlBaseURL); err == nil {
+				if p := urlEffectivePort(u); p > 0 {
+					ports[p] = true
+				}
+			}
+		}
+	}
+	return ports, localAddrs
 }
 
 func isForbiddenAssistantTarget(u *url.URL, adminPort, bridgePort int, localAddrs map[netip.Addr]bool) bool {
@@ -110,6 +143,18 @@ func (a *Admin) validateAssistantEndpoint(e assistantEndpoint) error {
 	if isForbiddenAssistantTarget(u, adminPort, bridgePort, localAddrs) {
 		return errors.New("模型接口地址不能指向 GateHome 管理或内部服务端口")
 	}
+	ports, _ := a.forbiddenInternalPorts()
+	if p := urlEffectivePort(u); ports[p] {
+		if strings.EqualFold(u.Hostname(), "localhost") {
+			return errors.New("模型接口地址不能指向 GateHome 管理或内部服务端口")
+		}
+		if ip, ipErr := netip.ParseAddr(u.Hostname()); ipErr == nil {
+			ip = ip.Unmap()
+			if ip.IsLoopback() || ip.IsUnspecified() || localAddrs[ip] {
+				return errors.New("模型接口地址不能指向 GateHome 管理或内部服务端口")
+			}
+		}
+	}
 	return nil
 }
 
@@ -125,29 +170,59 @@ func (a *Admin) assistantHTTPClient(state State, streaming bool) *http.Client {
 	if streaming {
 		transport.ResponseHeaderTimeout = 45 * time.Second
 	}
-	baseDial := transport.DialContext
-	adminPort, bridgePort, localAddrs := a.internalPorts()
+	forbiddenPorts, localAddrs := a.forbiddenInternalPorts()
+	rawDial := (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext
+	// Single-lookup DialContext: validate allowedServiceIP and internal port blocks on the same resolved IPs.
 	transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
 		host, portStr, err := net.SplitHostPort(address)
-		if err == nil {
-			if port, portErr := strconv.Atoi(portStr); portErr == nil &&
-				((adminPort > 0 && port == adminPort) || (bridgePort > 0 && port == bridgePort)) {
-				if ip, ipErr := netip.ParseAddr(host); ipErr == nil {
-					ip = ip.Unmap()
-					if ip.IsLoopback() || ip.IsUnspecified() || localAddrs[ip] {
-						return nil, errors.New("模型接口地址不能指向 GateHome 管理或内部服务端口")
-					}
-				} else if ips, lookupErr := net.DefaultResolver.LookupNetIP(ctx, "ip", host); lookupErr == nil {
-					for _, resolved := range ips {
-						resolved = resolved.Unmap()
-						if resolved.IsLoopback() || resolved.IsUnspecified() || localAddrs[resolved] {
-							return nil, errors.New("模型接口地址不能指向 GateHome 管理或内部服务端口")
+		if err != nil {
+			return nil, err
+		}
+		port, portErr := strconv.Atoi(portStr)
+		ips, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+		if err != nil {
+			return nil, err
+		}
+		for _, ip := range ips {
+			ip = ip.Unmap()
+			if !allowedServiceIP(ip) {
+				return nil, errors.New("目标地址不允许访问")
+			}
+			if portErr == nil && forbiddenPorts[port] && (ip.IsLoopback() || ip.IsUnspecified() || localAddrs[ip]) {
+				return nil, errors.New("模型接口地址不能指向 GateHome 管理或内部服务端口")
+			}
+		}
+		var last error
+		for _, ip := range ips {
+			conn, dialErr := rawDial(ctx, network, net.JoinHostPort(ip.String(), portStr))
+			if dialErr == nil {
+				return conn, nil
+			}
+			last = dialErr
+		}
+		if last == nil {
+			last = errors.New("目标地址无法连接")
+		}
+		return nil, last
+	}
+	if transport.Proxy != nil {
+		baseProxy := transport.Proxy
+		transport.Proxy = func(r *http.Request) (*url.URL, error) {
+			if r.URL != nil {
+				port := urlEffectivePort(r.URL)
+				if forbiddenPorts[port] {
+					if ips, err := net.DefaultResolver.LookupNetIP(r.Context(), "ip", r.URL.Hostname()); err == nil {
+						for _, ip := range ips {
+							ip = ip.Unmap()
+							if ip.IsLoopback() || ip.IsUnspecified() || localAddrs[ip] {
+								return nil, errors.New("模型接口地址不能指向 GateHome 管理或内部服务端口")
+							}
 						}
 					}
 				}
 			}
+			return baseProxy(r)
 		}
-		return baseDial(ctx, network, address)
 	}
 	return client
 }

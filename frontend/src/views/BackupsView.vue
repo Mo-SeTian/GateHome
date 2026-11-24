@@ -393,7 +393,7 @@ async function readRemote(reset = false) {
   } catch (err) {
     if (!controller.signal.aborted && generation === remoteGeneration) pollError.value = err.message
   } finally {
-    if (!controller.signal.aborted && generation === remoteGeneration)
+    if (!controller.signal.aborted && generation === remoteGeneration && !document.hidden)
       timer = setTimeout(() => readRemote(), remote.value?.busy ? 1500 : 5000)
   }
 }
@@ -561,8 +561,15 @@ async function restore() {
     toast.info(result.message)
   })
 }
-onMounted(reload)
+const onBackupsVisibility = () => {
+  if (!document.hidden && !controller.signal.aborted) readRemote()
+}
+onMounted(() => {
+  document.addEventListener('visibilitychange', onBackupsVisibility)
+  reload()
+})
 onBeforeUnmount(() => {
+  document.removeEventListener('visibilitychange', onBackupsVisibility)
   controller.abort()
   directoryRequest?.abort()
   clearTimeout(timer)

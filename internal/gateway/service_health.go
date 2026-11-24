@@ -9,7 +9,10 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -90,6 +93,29 @@ func healthError(err error) (string, string) {
 }
 
 func probeServiceHealth(ctx context.Context, raw string) serviceHealthResult {
+	return probeServiceHealthWithBlockedPorts(ctx, raw, nil, nil)
+}
+
+func isBlockedInternalTargetURL(target *url.URL, blockedPorts map[int]bool, localAddrs map[netip.Addr]bool) bool {
+	if target == nil || len(blockedPorts) == 0 {
+		return false
+	}
+	port := urlEffectivePort(target)
+	if !blockedPorts[port] {
+		return false
+	}
+	host := target.Hostname()
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	if ip, err := netip.ParseAddr(host); err == nil {
+		ip = ip.Unmap()
+		return ip.IsLoopback() || ip.IsUnspecified() || localAddrs[ip]
+	}
+	return false
+}
+
+func probeServiceHealthWithBlockedPorts(ctx context.Context, raw string, blockedPorts map[int]bool, localAddrs map[netip.Addr]bool) serviceHealthResult {
 	started := time.Now()
 	result := serviceHealthResult{CheckedAt: started.UTC()}
 	finish := func() serviceHealthResult { result.DurationMS = time.Since(started).Milliseconds(); return result }
@@ -98,26 +124,34 @@ func probeServiceHealth(ctx context.Context, raw string) serviceHealthResult {
 		result.State, result.Label, result.Message = "invalid", "地址无效", "请配置不含账号密码的 HTTP(S) 地址"
 		return finish()
 	}
+	if isBlockedInternalTargetURL(target, blockedPorts, localAddrs) {
+		result.State, result.Label, result.Message = "invalid", "地址受限", "禁止探测 GateHome 管理或内部服务端口"
+		return finish()
+	}
 	ctx, cancel := context.WithTimeout(ctx, 2500*time.Millisecond)
 	defer cancel()
 	transport := &http.Transport{Proxy: nil, TLSHandshakeTimeout: 2 * time.Second, MaxResponseHeaderBytes: 32 << 10, DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
-		host, port, err := net.SplitHostPort(address)
+		host, portStr, err := net.SplitHostPort(address)
 		if err != nil {
 			return nil, err
 		}
+		port, portErr := strconv.Atoi(portStr)
 		ips, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
 		if err != nil {
 			return nil, err
 		}
 		for _, ip := range ips {
 			ip = ip.Unmap()
-			if !allowedServiceIP(ip) {
+			if ip.IsUnspecified() || !allowedServiceIP(ip) {
 				return nil, errors.New("restricted address")
+			}
+			if portErr == nil && blockedPorts[port] && (ip.IsLoopback() || ip.IsUnspecified() || localAddrs[ip]) {
+				return nil, errors.New("restricted internal port")
 			}
 		}
 		var last error
 		for _, ip := range ips {
-			conn, err := (&net.Dialer{Timeout: time.Second}).DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
+			conn, err := (&net.Dialer{Timeout: time.Second}).DialContext(ctx, network, net.JoinHostPort(ip.String(), portStr))
 			if err == nil {
 				return conn, nil
 			}
@@ -168,10 +202,14 @@ func probeServiceHealth(ctx context.Context, raw string) serviceHealthResult {
 // Verify every redirect before allowing a browser probe to follow it, without
 // changing ordinary health checks or exposing untrusted TLS to a WebView.
 func (a *Admin) browserProbeHealth(ctx context.Context, raw string) serviceHealthResult {
-	result := a.cachedServiceHealth(ctx, raw, time.Minute)
+	return a.browserProbeHealthWithPolicy(ctx, raw, "", nil, nil)
+}
+
+func (a *Admin) browserProbeHealthWithPolicy(ctx context.Context, raw, cachePrefix string, blockedPorts map[int]bool, localAddrs map[netip.Addr]bool) serviceHealthResult {
+	result := a.cachedServiceHealthWithPolicy(ctx, raw, time.Minute, cachePrefix, blockedPorts, localAddrs)
 	last := result
 	for hops := 0; last.State == "redirect" && last.redirectURL != "" && hops < 3; hops++ {
-		last = a.cachedServiceHealth(ctx, last.redirectURL, time.Minute)
+		last = a.cachedServiceHealthWithPolicy(ctx, last.redirectURL, time.Minute, cachePrefix, blockedPorts, localAddrs)
 	}
 	if last.Status == 0 || last.State == "redirect" {
 		return last
@@ -181,6 +219,14 @@ func (a *Admin) browserProbeHealth(ctx context.Context, raw string) serviceHealt
 }
 
 func (a *Admin) cachedServiceHealth(ctx context.Context, raw string, ttl time.Duration) serviceHealthResult {
+	return a.cachedServiceHealthWithPolicy(ctx, raw, ttl, "", nil, nil)
+}
+
+func (a *Admin) cachedServiceHealthWithPolicy(ctx context.Context, raw string, ttl time.Duration, cachePrefix string, blockedPorts map[int]bool, localAddrs map[netip.Addr]bool) serviceHealthResult {
+	if target, err := url.Parse(raw); err == nil && isBlockedInternalTargetURL(target, blockedPorts, localAddrs) {
+		return serviceHealthResult{State: "invalid", Label: "地址受限", Message: "禁止探测 GateHome 管理或内部服务端口", CheckedAt: time.Now().UTC()}
+	}
+	cacheKey := cachePrefix + raw
 	cache := &a.health
 	cache.mu.Lock()
 	if cache.results == nil {
@@ -188,11 +234,11 @@ func (a *Admin) cachedServiceHealth(ctx context.Context, raw string, ttl time.Du
 		cache.pending = map[string]*healthPending{}
 		cache.slots = make(chan struct{}, 6)
 	}
-	if result, ok := cache.results[raw]; ok && time.Since(result.CheckedAt) < ttl {
+	if result, ok := cache.results[cacheKey]; ok && time.Since(result.CheckedAt) < ttl {
 		cache.mu.Unlock()
 		return result
 	}
-	if pending := cache.pending[raw]; pending != nil {
+	if pending := cache.pending[cacheKey]; pending != nil {
 		cache.mu.Unlock()
 		select {
 		case <-pending.done:
@@ -202,7 +248,7 @@ func (a *Admin) cachedServiceHealth(ctx context.Context, raw string, ttl time.Du
 		}
 	}
 	pending := &healthPending{done: make(chan struct{})}
-	cache.pending[raw] = pending
+	cache.pending[cacheKey] = pending
 	slots := cache.slots
 	cache.mu.Unlock()
 	go func() {
@@ -211,7 +257,7 @@ func (a *Admin) cachedServiceHealth(ctx context.Context, raw string, ttl time.Du
 		var result serviceHealthResult
 		select {
 		case slots <- struct{}{}:
-			result = probeServiceHealth(probeCtx, raw)
+			result = probeServiceHealthWithBlockedPorts(probeCtx, raw, blockedPorts, localAddrs)
 			<-slots
 		case <-probeCtx.Done():
 			result = serviceHealthResult{State: "cancelled", Label: "已取消"}
@@ -219,14 +265,14 @@ func (a *Admin) cachedServiceHealth(ctx context.Context, raw string, ttl time.Du
 		cache.mu.Lock()
 		pending.result = result
 		if result.State != "cancelled" {
-			cache.results[raw] = result
+			cache.results[cacheKey] = result
 		}
 		for key, row := range cache.results {
 			if time.Since(row.CheckedAt) > 30*time.Minute {
 				delete(cache.results, key)
 			}
 		}
-		delete(cache.pending, raw)
+		delete(cache.pending, cacheKey)
 		close(pending.done)
 		cache.mu.Unlock()
 	}()
@@ -308,10 +354,11 @@ func (a *Admin) recordHealthTransition(route Route, result serviceHealthResult) 
 		}
 	}
 	// Record in observation order, including the first healthy sample after a restart.
-	if (result.Healthy || previous.down) && a.store != nil {
+	shouldAlert := (result.Healthy || previous.down) && a.store != nil
+	cache.mu.Unlock()
+	if shouldAlert {
 		a.observeAlert("route/"+route.ID, "upstream", route.Host, !result.Healthy, "反代上游连续检测失败 · "+result.Label, "反代上游已恢复", result.CheckedAt)
 	}
-	cache.mu.Unlock()
 	if message != "" && a.logs != nil {
 		a.logs.Add(LogEntry{Category: "admin", Action: "服务健康", Target: route.ID, OK: result.Healthy, DurationMS: result.DurationMS, Message: message + " · " + result.Label})
 	}
@@ -431,6 +478,7 @@ func (a *Admin) sunPanelSiteHealth(w http.ResponseWriter, r *http.Request) {
 			selected = append(selected, item)
 		}
 	}
+	blockedPorts, localAddrs := a.forbiddenInternalPorts()
 	results := make([]panelSiteHealth, len(selected))
 	var work sync.WaitGroup
 	for i, item := range selected {
@@ -439,13 +487,13 @@ func (a *Admin) sunPanelSiteHealth(w http.ResponseWriter, r *http.Request) {
 			defer work.Done()
 			row := panelSiteHealth{ID: itemID, URL: defaultURL, LanURL: lanURL}
 			if !input.TLSOnly {
-				row.Default = a.cachedServiceHealth(r.Context(), defaultURL, time.Minute)
+				row.Default = a.cachedServiceHealthWithPolicy(r.Context(), defaultURL, time.Minute, "panel|", blockedPorts, localAddrs)
 			}
 			if lanURL != "" {
 				if input.TLSOnly {
-					row.LAN = a.browserProbeHealth(r.Context(), lanURL)
+					row.LAN = a.browserProbeHealthWithPolicy(r.Context(), lanURL, "panel|", blockedPorts, localAddrs)
 				} else {
-					row.LAN = a.cachedServiceHealth(r.Context(), lanURL, time.Minute)
+					row.LAN = a.cachedServiceHealthWithPolicy(r.Context(), lanURL, time.Minute, "panel|", blockedPorts, localAddrs)
 				}
 			}
 			results[i] = row

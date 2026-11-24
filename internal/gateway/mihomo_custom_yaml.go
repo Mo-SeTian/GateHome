@@ -463,7 +463,7 @@ func parseCustomRuleProvidersNode(node *yaml.Node, existing []MihomoRuleSet, bas
 			Enabled:  raw.Enabled == nil || *raw.Enabled,
 			Comment:  comment,
 		}
-		if rs.Source == "manual" && rs.Content == "" && (rs.Format == "text" || rs.Format == "yaml") && baseDir != "" {
+		if hasPrev && rs.Source == "manual" && rs.Content == "" && (rs.Format == "text" || rs.Format == "yaml") && baseDir != "" {
 			normPath, pathErr := normalizeRuleSetRelativePath(rs.Path, rs.Name, rs.Format)
 			if pathErr == nil {
 				if diskPath, err := resolveRuleSetDiskPath(baseDir, normPath); err == nil {
@@ -580,7 +580,12 @@ func parseCustomAllYAML(raw []byte, existing MihomoConfig, baseDir string) (Miho
 		return next, errors.New("YAML 根节点必须为映射对象")
 	}
 
-	for _, forbidden := range []string{"external-controller", "secret", "authentication"} {
+	for _, forbidden := range []string{
+		"external-controller", "secret", "authentication", "skip-auth-prefixes",
+		"external-controller-tls", "external-controller-unix", "external-controller-pipe", "external-controller-cors",
+		"external-ui", "external-ui-url", "external-ui-name",
+		"mixed-port", "port", "socks-port", "allow-lan",
+	} {
 		if _, idx := yamlMapFind(root, forbidden); idx >= 0 {
 			return next, fmt.Errorf("%s 由 GateHome 安全托管，请勿在 custom.yaml 中修改", forbidden)
 		}

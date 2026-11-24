@@ -324,7 +324,7 @@ async function poll() {
   } catch (err) {
     if (!controller.signal.aborted && generation === pollGeneration) pollError.value = err.message
   } finally {
-    if (!controller.signal.aborted && generation === pollGeneration && !leaving)
+    if (!controller.signal.aborted && generation === pollGeneration && !leaving && !document.hidden)
       timer = setTimeout(poll, active.value ? 1200 : 5000)
   }
 }
@@ -446,8 +446,15 @@ watch(gatewayVersion, value => {
     channel.value = defaultUpdateChannel(value)
   }
 }, { immediate: true })
-onMounted(reload)
+const onUpdatesVisibility = () => {
+  if (!document.hidden && !controller.signal.aborted && !leaving) poll()
+}
+onMounted(() => {
+  document.addEventListener('visibilitychange', onUpdatesVisibility)
+  reload()
+})
 onBeforeUnmount(() => {
+  document.removeEventListener('visibilitychange', onUpdatesVisibility)
   controller.abort()
   clearTimeout(timer)
   pollGeneration++

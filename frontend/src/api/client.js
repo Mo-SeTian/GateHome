@@ -16,6 +16,22 @@ export function markSessionChanged() {
   sessionGeneration++
 }
 
+function safeSessionGet(key) {
+  try {
+    return window.sessionStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+
+function safeSessionSet(key, value) {
+  try {
+    window.sessionStorage.setItem(key, value)
+  } catch {
+    // Ignore storage errors in restricted browsing modes.
+  }
+}
+
 function synchronizeVersion(version) {
   const loadedVersion = typeof __GATEHOME_VERSION__ === 'string' ? __GATEHOME_VERSION__ : ''
   if (import.meta.env?.DEV || !loadedVersion || version === loadedVersion ||
@@ -24,9 +40,9 @@ function synchronizeVersion(version) {
   // Keep a stale/cached document from reloading indefinitely, including concurrent responses.
   const key = 'gh_console_reload_version'
   const transition = `${loadedVersion}/${version}`
-  if (window.sessionStorage.getItem(key) === transition)
+  if (safeSessionGet(key) === transition)
     throw new ApiError('控制台资源与服务版本不一致，请稍后重新打开页面', 409)
-  window.sessionStorage.setItem(key, transition)
+  safeSessionSet(key, transition)
   window.location.reload()
   throw new ApiError('GateHome 已更新，正在载入新界面', 409)
 }
@@ -35,9 +51,12 @@ export async function request(path, { method = 'GET', body, signal, notifyUnauth
   const generation = sessionGeneration
   const headers = { Accept: 'application/json' }
   const multipart = body instanceof FormData
-  if (body !== undefined) {
-    if (!multipart) headers['Content-Type'] = 'application/json'
+  const isSafeMethod = ['GET', 'HEAD'].includes(String(method).toUpperCase())
+  if (body !== undefined || !isSafeMethod) {
     headers['X-Gatehouse-Request'] = '1'
+  }
+  if (body !== undefined && !multipart) {
+    headers['Content-Type'] = 'application/json'
   }
 
   let response
@@ -72,9 +91,12 @@ export async function request(path, { method = 'GET', body, signal, notifyUnauth
 export async function requestStream(path, { method = 'POST', body, signal, notifyUnauthorized = true, onEvent } = {}) {
   const generation = sessionGeneration
   const headers = { Accept: 'text/event-stream, application/json' }
+  const isSafeMethod = ['GET', 'HEAD'].includes(String(method).toUpperCase())
+  if (body !== undefined || !isSafeMethod) {
+    headers['X-Gatehouse-Request'] = '1'
+  }
   if (body !== undefined) {
     headers['Content-Type'] = 'application/json'
-    headers['X-Gatehouse-Request'] = '1'
   }
 
   let response

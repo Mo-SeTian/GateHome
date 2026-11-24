@@ -170,3 +170,28 @@ func TestProxyValidationAndPasswordNotReturned(t *testing.T) {
 		t.Fatal("changed proxy reused old credentials")
 	}
 }
+
+func TestOutboundProxyBlocksMetadataAddresses(t *testing.T) {
+	var proxyCalls atomic.Int32
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		proxyCalls.Add(1)
+		w.WriteHeader(502)
+	}))
+	defer proxy.Close()
+
+	s := State{Config: DefaultConfig()}
+	s.Config.OutboundProxy = OutboundProxyConfig{Enabled: true, URL: proxy.URL}
+	c := outboundClient(s, time.Second)
+	defer closeClient(c)
+
+	for _, metaURL := range []string{"http://169.254.169.254/latest/meta-data/", "http://100.100.100.200/latest/meta-data/"} {
+		resp, err := c.Get(metaURL)
+		if err == nil {
+			resp.Body.Close()
+			t.Fatalf("expected outbound proxy request to %s to fail", metaURL)
+		}
+	}
+	if proxyCalls.Load() != 0 {
+		t.Fatalf("metadata target should be blocked before dialing proxy, got proxyCalls=%d", proxyCalls.Load())
+	}
+}

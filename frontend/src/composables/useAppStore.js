@@ -1,9 +1,17 @@
 import { computed, ref, watchEffect } from 'vue'
 
 // Global UI State
+function safeGetTheme() {
+  try {
+    return localStorage.getItem('gh_theme')
+  } catch {
+    return null
+  }
+}
+
 const media = window.matchMedia('(prefers-color-scheme: dark)')
 const systemDark = ref(media.matches)
-const savedTheme = localStorage.getItem('gh_theme')
+const savedTheme = safeGetTheme()
 const themePreference = ref(['dark', 'light'].includes(savedTheme) ? savedTheme : 'system')
 const theme = computed(() => themePreference.value === 'system'
   ? (systemDark.value ? 'dark' : 'light') : themePreference.value)
@@ -18,8 +26,12 @@ const isCmdkOpen = ref(false)
 export function useAppStore() {
   const setTheme = value => {
     themePreference.value = value
-    if (value === 'system') localStorage.removeItem('gh_theme')
-    else localStorage.setItem('gh_theme', value)
+    try {
+      if (value === 'system') localStorage.removeItem('gh_theme')
+      else localStorage.setItem('gh_theme', value)
+    } catch {
+      // Ignore storage failures in restricted browser environments.
+    }
   }
   const toggleTheme = () => setTheme(theme.value === 'dark' ? 'light' : 'dark')
 

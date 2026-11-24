@@ -149,17 +149,39 @@ func (p *Proxy) configurePrepared(c Config, hashes map[string]string, firewalls 
 		h := &httputil.ReverseProxy{
 			Rewrite: func(pr *httputil.ProxyRequest) {
 				pr.SetURL(upstream)
+				// Ensure upstream sees the same canonical path inspected by rate-limit / custom rules / WAF.
+				if clean := canonicalRequestPath(pr.In.URL.Path); clean != pr.In.URL.Path {
+					basePath := strings.TrimSuffix(upstream.Path, "/")
+					if basePath != "" && clean == "/" {
+						pr.Out.URL.Path = upstream.Path
+					} else {
+						pr.Out.URL.Path = basePath + clean
+					}
+					pr.Out.URL.RawPath = ""
+				}
 				// HTTPS upstreams use their own name for both Host and SNI.
 				if upstream.Scheme == "http" {
 					pr.Out.Host = pr.In.Host
 				}
 				pr.Out.Header.Del("X-Real-IP")
 				pr.Out.Header.Del("CF-Connecting-IP")
+				pr.Out.Header.Del("Forwarded")
 				stripRouteCookies(pr.Out)
 				if !adminUpstream {
 					stripAdminCookies(pr.Out)
 				}
+				trusted := pr.In.Context().Value(trustedProxyKey{}) == true
+				if !trusted {
+					pr.Out.Header.Del("X-Forwarded-For")
+				}
 				pr.SetXForwarded()
+				if !trusted {
+					if ip, ok := sourceIP(pr.In.RemoteAddr); ok {
+						pr.Out.Header.Set("X-Forwarded-For", ip)
+					} else {
+						pr.Out.Header.Del("X-Forwarded-For")
+					}
+				}
 			},
 			Transport: &http.Transport{Proxy: nil, DialContext: (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
 				ForceAttemptHTTP2: true, MaxIdleConns: 100, IdleConnTimeout: 90 * time.Second, TLSHandshakeTimeout: 10 * time.Second, ResponseHeaderTimeout: 60 * time.Second},
@@ -351,6 +373,13 @@ func (p *Proxy) serveGroup(groupID string, w http.ResponseWriter, r *http.Reques
 			return
 		}
 	}
+	if hasDotDotPathSegment(r.URL) {
+		outcome = "blocked"
+		message += "；拒绝包含上级目录跳转的路径"
+		p.Blocked.Add(1)
+		http.Error(w, "请求路径无效", http.StatusBadRequest)
+		return
+	}
 	outcome = "forwarded"
 	logged.authResult = ""
 	defer p.liveTraffic.begin(r.Context(), route.trafficID)()
@@ -385,3 +414,26 @@ func (r proxyRoute) firewallDecision(remote string) (bool, FirewallHit) {
 func (s *Proxy) SetLogs(logs *Logs) { s.logs = logs }
 
 func (p *Proxy) SetTraffic(traffic *Traffic) { p.traffic = traffic }
+
+func hasDotDotPathSegment(u *url.URL) bool {
+	if u == nil {
+		return false
+	}
+	for _, raw := range []string{u.Path, u.EscapedPath()} {
+		if raw == "" {
+			continue
+		}
+		for _, seg := range strings.Split(raw, "/") {
+			if seg == "" {
+				continue
+			}
+			if decoded, err := url.PathUnescape(seg); err == nil {
+				seg = decoded
+			}
+			if seg == ".." {
+				return true
+			}
+		}
+	}
+	return false
+}

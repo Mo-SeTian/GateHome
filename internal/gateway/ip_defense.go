@@ -67,7 +67,7 @@ type failedAccess struct {
 }
 
 type IPDefense struct {
-	mu         sync.Mutex
+	mu         sync.RWMutex
 	store      *Store
 	blocks     map[string]IPBlock
 	failures   map[string]failedAccess
@@ -112,12 +112,21 @@ func (d *IPDefense) prune() {
 }
 
 func (d *IPDefense) blocked(rule, ip string) (IPBlock, bool) {
+	key := blockKey(rule, ip)
+	d.mu.RLock()
+	b, ok := d.blocks[key]
+	if !ok || d.now().Before(b.Until) {
+		d.mu.RUnlock()
+		return b, ok
+	}
+	d.mu.RUnlock()
+
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	b, ok := d.blocks[blockKey(rule, ip)]
+	b, ok = d.blocks[key]
 	if ok && !d.now().Before(b.Until) {
-		delete(d.blocks, blockKey(rule, ip))
-		delete(d.failures, blockKey(rule, ip))
+		delete(d.blocks, key)
+		delete(d.failures, key)
 		d.persist()
 		return IPBlock{}, false
 	}

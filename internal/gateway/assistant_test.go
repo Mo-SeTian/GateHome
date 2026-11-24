@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -382,5 +383,38 @@ func TestAssistantSSRFProtectionAnthropicNormalizationAndBackupValidation(t *tes
 	}
 	if err := validateCredentials(badAssistant); err == nil {
 		t.Fatal("invalid assistant URL in backup state must be rejected")
+	}
+
+	// Verify assistantHTTPClient blocks dialing adminPort/bridgePort directly and even with an outbound proxy configured.
+	adminSink := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("assistant client dialed internal admin port")
+		w.WriteHeader(200)
+	}))
+	defer adminSink.Close()
+	adminU, _ := url.Parse(adminSink.URL)
+	a.adminPort = urlEffectivePort(adminU)
+
+	var proxyHit atomic.Int32
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		proxyHit.Add(1)
+		w.WriteHeader(502)
+	}))
+	defer proxy.Close()
+
+	for _, withProxy := range []bool{false, true} {
+		s := a.store.Snapshot()
+		if withProxy {
+			s.Config.OutboundProxy = OutboundProxyConfig{Enabled: true, URL: proxy.URL}
+		}
+		client := a.assistantHTTPClient(s, false)
+		resp, err := client.Get("http://localhost:" + adminU.Port() + "/v1/models")
+		closeClient(client)
+		if err == nil {
+			resp.Body.Close()
+			t.Fatalf("expected assistantHTTPClient (withProxy=%v) to reject internal admin port", withProxy)
+		}
+	}
+	if proxyHit.Load() != 0 {
+		t.Fatalf("internal admin target must be rejected before outbound proxy, got %d hits", proxyHit.Load())
 	}
 }

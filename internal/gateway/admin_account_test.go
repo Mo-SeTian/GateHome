@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestAdminAccountMigrationAndBackup(t *testing.T) {
@@ -153,5 +155,51 @@ func TestAdminUsernameOnlyChangeRetainsPassword(t *testing.T) {
 	}
 	if adminRequest(h, "POST", "/api/login", map[string]string{"username": "TEST_ONLY_CHANGED_NAME", "password": "TEST_ONLY_ADMIN_PASSWORD"}, nil, "").Code != 200 {
 		t.Fatal("username-only account could not log in with original password")
+	}
+}
+
+type blockingTestBody struct {
+	unblock chan struct{}
+}
+
+func (b blockingTestBody) Read(p []byte) (int, error) {
+	<-b.unblock
+	return 0, io.EOF
+}
+
+func (b blockingTestBody) Close() error { return nil }
+
+func TestAdminLoginDoesNotReserveAttemptSlotWhileReadingBody(t *testing.T) {
+	a, h := testAdmin(t)
+	unblock := make(chan struct{})
+	done := make(chan int, 2)
+	for range 2 {
+		go func() {
+			req := httptest.NewRequest("POST", "http://127.0.0.1/api/login", blockingTestBody{unblock: unblock})
+			req.RemoteAddr = "192.0.2.99:1234"
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("X-Gatehouse-Request", "1")
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, req)
+			done <- w.Code
+		}()
+	}
+	// Give the slow body readers time to start blocked inside decodeBody.
+	time.Sleep(40 * time.Millisecond)
+
+	a.mu.Lock()
+	active := a.activeLogins
+	a.mu.Unlock()
+	if active != 0 {
+		close(unblock)
+		t.Fatalf("expected activeLogins == 0 while bodies stall, got %d", active)
+	}
+	if w := adminRequest(h, "POST", "/api/login", map[string]string{"username": a.store.Snapshot().AdminUsername, "password": "TEST_ONLY_ADMIN_PASSWORD"}, nil, ""); w.Code != 200 {
+		close(unblock)
+		t.Fatalf("legitimate login blocked by stalled login bodies: got %d want 200", w.Code)
+	}
+	close(unblock)
+	for range 2 {
+		<-done
 	}
 }

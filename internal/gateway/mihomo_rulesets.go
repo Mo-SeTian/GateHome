@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -211,20 +211,29 @@ func normalizeRuleSetRelativePath(raw, fallbackName, format string) (string, err
 	if p == "" {
 		p = defaultRuleSetPath(fallbackName, format)
 	}
-	if strings.ContainsAny(p, "\r\n\x00") || strings.Contains(p, "\\") {
-		return "", errors.New("规则集路径不能包含反斜杠、空字节或换行")
+	if strings.ContainsAny(p, "\r\n\x00\\:*?\"<>|") {
+		return "", errors.New("规则集路径包含非法字符（如反斜杠、空字节、引号或换行）")
 	}
 	if strings.HasPrefix(p, "/") {
 		return "", errors.New("规则集路径须为工作目录下的相对路径（如 ./ruleset/demo.mrs）")
 	}
-	cleaned := filepath.ToSlash(filepath.Clean(p))
+	if strings.HasSuffix(p, "/") {
+		return "", errors.New("规则集路径须指向具体文件，不能为目录")
+	}
+	cleaned := path.Clean(p)
 	if cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, "../") || strings.Contains(cleaned, "/../") {
 		return "", errors.New("规则集路径不能包含上级目录跳转 (..)")
 	}
-	if !strings.HasPrefix(cleaned, "./") {
-		cleaned = "./" + cleaned
+	cleaned = strings.TrimPrefix(cleaned, "./")
+	if !strings.HasPrefix(cleaned, "ruleset/") || len(cleaned) <= len("ruleset/") {
+		return "", errors.New("规则集路径必须位于 ./ruleset/ 目录下（如 ./ruleset/demo.mrs）")
 	}
-	return cleaned, nil
+	switch strings.ToLower(path.Ext(cleaned)) {
+	case ".yaml", ".yml", ".txt", ".mrs":
+	default:
+		return "", errors.New("规则集文件扩展名须为 .yaml、.yml、.txt 或 .mrs")
+	}
+	return "./" + cleaned, nil
 }
 
 func normalizeAndValidateMihomoRuleSet(rs MihomoRuleSet) (MihomoRuleSet, error) {
@@ -312,9 +321,8 @@ func normalizeAndValidateMihomoRuleSet(rs MihomoRuleSet) (MihomoRuleSet, error) 
 		if rs.URL == "" || strings.ContainsAny(rs.URL, "\r\n") {
 			return rs, errors.New("远端/内置规则集须填写规则集订阅 URL")
 		}
-		u, err := url.Parse(rs.URL)
-		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" {
-			return rs, errors.New("规则集 URL 须为有效的 http/https 地址")
+		if err := validateMihomoSubscriptionURL(rs.URL); err != nil {
+			return rs, fmt.Errorf("规则集 URL 无效: %v", err)
 		}
 		if rs.Interval == 0 {
 			rs.Interval = 86400
@@ -380,20 +388,63 @@ func formatManualRuleSetFileBytes(rs MihomoRuleSet) ([]byte, error) {
 }
 
 func resolveRuleSetDiskPath(baseDir, relPath string) (string, error) {
-	cleanRel := strings.TrimPrefix(filepath.ToSlash(filepath.Clean(relPath)), "./")
-	if cleanRel == "" || cleanRel == "." || strings.HasPrefix(cleanRel, "..") {
+	if strings.ContainsAny(relPath, "\r\n\x00\\") || strings.HasPrefix(strings.TrimSpace(relPath), "/") {
 		return "", errors.New("规则集文件路径无效")
+	}
+	cleanRel := strings.TrimPrefix(path.Clean(strings.TrimSpace(relPath)), "./")
+	if !strings.HasPrefix(cleanRel, "ruleset/") || len(cleanRel) <= len("ruleset/") || strings.Contains(cleanRel, "/../") || strings.HasPrefix(cleanRel, "../") {
+		return "", errors.New("规则集文件路径必须位于 ./ruleset/ 目录下")
+	}
+	switch strings.ToLower(path.Ext(cleanRel)) {
+	case ".yaml", ".yml", ".txt", ".mrs":
+	default:
+		return "", errors.New("规则集文件扩展名须为 .yaml、.yml、.txt 或 .mrs")
 	}
 	baseAbs, err := filepath.Abs(baseDir)
 	if err != nil {
 		return "", err
 	}
+	rulesetRootAbs := filepath.Join(baseAbs, "ruleset")
 	targetAbs, err := filepath.Abs(filepath.Join(baseAbs, filepath.FromSlash(cleanRel)))
 	if err != nil {
 		return "", err
 	}
-	if targetAbs != baseAbs && !strings.HasPrefix(targetAbs, baseAbs+string(os.PathSeparator)) {
-		return "", errors.New("规则集文件路径超出 Mihomo 工作目录")
+	if !strings.HasPrefix(targetAbs, rulesetRootAbs+string(os.PathSeparator)) {
+		return "", errors.New("规则集文件路径超出 ruleset 目录")
+	}
+	if info, err := os.Lstat(rulesetRootAbs); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+			return "", errors.New("规则集根目录不能为符号链接或非目录")
+		}
+	}
+	subParts := strings.Split(strings.TrimPrefix(cleanRel, "ruleset/"), "/")
+	cur := rulesetRootAbs
+	for _, seg := range subParts {
+		cur = filepath.Join(cur, seg)
+		if info, err := os.Lstat(cur); err == nil {
+			if info.Mode()&os.ModeSymlink != 0 {
+				return "", errors.New("规则集路径不允许使用符号链接")
+			}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return "", err
+		}
+	}
+	if realRoot, err := filepath.EvalSymlinks(rulesetRootAbs); err == nil {
+		for anc := filepath.Dir(targetAbs); len(anc) >= len(rulesetRootAbs); anc = filepath.Dir(anc) {
+			if _, statErr := os.Lstat(anc); statErr == nil {
+				realAnc, evalErr := filepath.EvalSymlinks(anc)
+				if evalErr != nil {
+					return "", evalErr
+				}
+				if realAnc != realRoot && !strings.HasPrefix(realAnc, realRoot+string(os.PathSeparator)) {
+					return "", errors.New("规则集路径解析后超出 ruleset 目录")
+				}
+				break
+			}
+			if anc == rulesetRootAbs {
+				break
+			}
+		}
 	}
 	return targetAbs, nil
 }

@@ -5,17 +5,21 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"testing"
@@ -749,9 +753,31 @@ func TestMihomoSelectAssetAndGzipUpload(t *testing.T) {
 		mgr := &mihomoManager{dir: dir, cfg: defaultMihomoConfig()}
 		padding := strings.Repeat("# padding\n", 120)
 		script := "#!/bin/sh\nif [ \"$1\" = \"-v\" ]; then echo \"Mihomo Meta v1.19.0\"; exit 0; fi\n" + padding
+		if _, err := mgr.installBinaryData([]byte(script)); err == nil {
+			t.Fatalf("expected shebang script upload to be rejected by installBinaryData")
+		}
+
+		// Compile a real native executable binary to test gzipped binary installation end-to-end.
+		srcDir := t.TempDir()
+		srcFile := filepath.Join(srcDir, "main.go")
+		outBin := filepath.Join(srcDir, "mihomo-fake")
+		code := "package main\nimport \"fmt\"\nfunc main() { fmt.Println(\"Mihomo Meta v1.19.0\") }\n"
+		if err := os.WriteFile(srcFile, []byte(code), 0600); err != nil {
+			t.Fatalf("write fake binary source: %v", err)
+		}
+		goTool := filepath.Join(runtime.GOROOT(), "bin", "go")
+		buildCmd := exec.Command(goTool, "build", "-o", outBin, srcFile)
+		buildCmd.Env = append(os.Environ(), "CGO_ENABLED=0")
+		if out, err := buildCmd.CombinedOutput(); err != nil {
+			t.Fatalf("compile fake binary failed: %v\n%s", err, string(out))
+		}
+		binBytes, err := os.ReadFile(outBin)
+		if err != nil {
+			t.Fatalf("read compiled fake binary: %v", err)
+		}
 		var gzBuf bytes.Buffer
 		zw := gzip.NewWriter(&gzBuf)
-		_, _ = zw.Write([]byte(script))
+		_, _ = zw.Write(binBytes)
 		_ = zw.Close()
 
 		ver, err := mgr.installBinaryData(gzBuf.Bytes())
@@ -2088,5 +2114,199 @@ rules:
 	rt2 := string(rt2Bytes)
 	if !strings.Contains(rt2, "find-process-mode: strict") || strings.Contains(rt2, "find-process-mode: off") || !strings.Contains(rt2, "机场SG") || !strings.Contains(rt2, "https://custom.example.com/shared.txt") {
 		t.Fatalf("custom.yaml overlay lost or failed to override after subscription update:\n%s", rt2)
+	}
+}
+
+func TestMihomoRuleSetPathConfinement(t *testing.T) {
+	a, h := testAdmin(t)
+	cookie := loginForTest(t, h)
+
+	badPaths := []string{
+		"./config.json",
+		"runtime.yaml",
+		"./ui/zashboard/index.html",
+		"../secret.yaml",
+		"./ruleset",
+		"./ruleset/",
+		"./ruleset/evil.html",
+		`.\ruleset\evil.yaml`,
+	}
+	for _, p := range badPaths {
+		if _, err := normalizeRuleSetRelativePath(p, "demo", "yaml"); err == nil {
+			t.Fatalf("expected normalizeRuleSetRelativePath to reject %q", p)
+		}
+		if _, err := resolveRuleSetDiskPath(a.mihomo.dir, p); err == nil {
+			t.Fatalf("expected resolveRuleSetDiskPath to reject %q", p)
+		}
+	}
+
+	// Ensure symlinks inside ruleset/ cannot escape mihomo dir.
+	if runtime.GOOS != "windows" {
+		outside := t.TempDir()
+		rulesetDir := filepath.Join(a.mihomo.dir, "ruleset")
+		if err := os.MkdirAll(rulesetDir, 0700); err != nil {
+			t.Fatalf("mkdir ruleset: %v", err)
+		}
+		if err := os.Symlink(outside, filepath.Join(rulesetDir, "escape")); err == nil {
+			if _, err := resolveRuleSetDiskPath(a.mihomo.dir, "./ruleset/escape/leak.yaml"); err == nil {
+				t.Fatalf("expected resolveRuleSetDiskPath to reject symlink escape")
+			}
+		}
+	}
+
+	// Attempting to read ./config.json via custom.yaml file rule-provider without payload must fail.
+	leakYAML := `
+rule-providers:
+  leak:
+    type: file
+    behavior: domain
+    format: yaml
+    path: ./config.json
+rules:
+  - MATCH,DIRECT
+`
+	rec := adminRequest(h, "PUT", "/api/mihomo/custom/all/yaml", map[string]any{"content": leakYAML}, cookie, "")
+	if rec.Code == 200 {
+		t.Fatalf("expected PUT custom/all/yaml with ./config.json rule-provider to fail, got 200")
+	}
+}
+
+func TestMihomoHardeningOverlaySanitizationErrorRedactionAndLifecycle(t *testing.T) {
+	// 1. Subscription fetch errors must redact token/query URLs.
+	rawSubURL := "https://airport.example.test/api/v1/client/subscribe?token=SUPER_SECRET_TOKEN_123"
+	uErr := &url.Error{Op: "Get", URL: rawSubURL, Err: errors.New("dial tcp: connection refused for " + rawSubURL)}
+	safeMsg := sanitizeFetchError(uErr)
+	if strings.Contains(safeMsg, "SUPER_SECRET_TOKEN_123") {
+		t.Fatalf("sanitizeFetchError leaked subscription token: %q", safeMsg)
+	}
+
+	// 2. Managed security keys & provider paths cannot be bypassed in custom.yaml or injectManagedKeys.
+	a, h := testAdmin(t)
+	cookie := loginForTest(t, h)
+	for _, badKeyYAML := range []string{
+		"skip-auth-prefixes:\n  - 0.0.0.0/0\n",
+		"external-controller-tls: 0.0.0.0:9443\n",
+		"external-controller-unix: /tmp/mihomo.sock\n",
+		"external-ui-url: https://evil.example/ui.zip\n",
+		"mixed-port: 9999\n",
+	} {
+		rec := adminRequest(h, "PUT", "/api/mihomo/custom/all/yaml", map[string]any{"content": badKeyYAML + "rules:\n  - MATCH,DIRECT\n"}, cookie, "")
+		if rec.Code != 400 {
+			t.Fatalf("expected 400 for managed key in custom.yaml %q, got %d", badKeyYAML, rec.Code)
+		}
+	}
+
+	// Also verify reservedOverlayKeys blocks overlay bypass directly during synthesis.
+	cfg := defaultMihomoConfig()
+	cfg.CustomOverlayYAML = "skip-auth-prefixes: [0.0.0.0/0]\nexternal-controller-tls: 0.0.0.0:9999\nmixed-port: 12345\n"
+	outBytes, err := synthesizeMihomoYAML(nil, cfg)
+	if err != nil {
+		t.Fatalf("synthesizeMihomoYAML unexpected err: %v", err)
+	}
+	outStr := string(outBytes)
+	if strings.Contains(outStr, "0.0.0.0/0") || strings.Contains(outStr, "external-controller-tls") || strings.Contains(outStr, "12345") {
+		t.Fatalf("reserved overlay keys leaked into runtime.yaml:\n%s", outStr)
+	}
+
+	// Manual YAML injectManagedKeys must strip dangerous controller keys and reject escaping provider paths.
+	manualWithDanger := []byte("mixed-port: 7890\nskip-auth-prefixes: [0.0.0.0/0]\nexternal-controller-unix: /tmp/ctrl.sock\nexternal-ui: ./ui\n")
+	injected, err := injectManagedKeys(manualWithDanger, cfg)
+	if err != nil {
+		t.Fatalf("injectManagedKeys failed on strippable keys: %v", err)
+	}
+	if strings.Contains(string(injected), "external-controller-unix") || strings.Contains(string(injected), "external-ui") || strings.Contains(string(injected), "0.0.0.0/0") {
+		t.Fatalf("injectManagedKeys did not strip dangerous keys:\n%s", string(injected))
+	}
+	for _, badManual := range []string{
+		"mixed-port: 7890\nrule-providers:\n  evil:\n    type: file\n    path: ./config.json\n",
+		"mixed-port: 7890\nproxy-providers:\n  evil:\n    type: file\n    path: ../secret.yaml\n",
+	} {
+		if _, err := injectManagedKeys([]byte(badManual), cfg); err == nil {
+			t.Fatalf("expected injectManagedKeys to reject escaping provider path in %q", badManual)
+		}
+	}
+
+	// 3. /api/mihomo/ctrl mutating/WS requests must reject cross-site/same-site origins.
+	a.mihomo.mu.Lock()
+	a.mihomo.running = true
+	a.mihomo.ctrlBaseURL = "http://127.0.0.1:1"
+	a.mihomo.mu.Unlock()
+	req := httptest.NewRequest("PUT", "/api/mihomo/ctrl/configs", strings.NewReader(`{}`))
+	req.AddCookie(cookie)
+	req.Header.Set("Sec-Fetch-Site", "same-site")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != 403 {
+		t.Fatalf("expected same-site PUT /api/mihomo/ctrl/configs to be blocked with 403, got %d", w.Code)
+	}
+	a.mihomo.mu.Lock()
+	a.mihomo.running = false
+	a.mihomo.ctrlBaseURL = ""
+	a.mihomo.mu.Unlock()
+
+	// 4. Concurrent Start() calls must serialize cleanly without spawning orphan processes.
+	if runtime.GOOS != "windows" {
+		testBin, binErr := os.Executable()
+		if binErr != nil {
+			t.Fatal(binErr)
+		}
+		dir := t.TempDir()
+		binDir := filepath.Join(dir, "bin")
+		_ = os.MkdirAll(binDir, 0700)
+		wrapper := filepath.Join(binDir, "mihomo")
+		script := fmt.Sprintf("#!/bin/sh\nGATEHOME_MIHOMO_HELPER=1 exec %q -test.run=^TestMihomoHelperProcess$ -- \"$@\"\n", testBin)
+		if err := os.WriteFile(wrapper, []byte(script), 0755); err != nil {
+			t.Fatal(err)
+		}
+		freePort := func() int {
+			l, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			p := l.Addr().(*net.TCPAddr).Port
+			_ = l.Close()
+			return p
+		}
+		lcCfg := defaultMihomoConfig()
+		lcCfg.ControllerPort = freePort()
+		lcCfg.Settings.MixedPort = freePort()
+		mgr := &mihomoManager{dir: dir, cfg: lcCfg}
+		defer func() { _ = mgr.Stop() }()
+
+		var wg sync.WaitGroup
+		errs := make([]error, 3)
+		for i := range 3 {
+			wg.Add(1)
+			go func(idx int) {
+				defer wg.Done()
+				errs[idx] = mgr.Start()
+			}(i)
+		}
+		wg.Wait()
+		for i, e := range errs {
+			if e != nil {
+				t.Fatalf("concurrent Start #%d failed: %v", i, e)
+			}
+		}
+		if err := mgr.Stop(); err != nil {
+			t.Fatalf("Stop after concurrent Start failed: %v", err)
+		}
+	}
+
+	// 5. DNSListenPort == 0 must delete inherited dns.listen; maskYAMLSecret must not duplicate header comments.
+	dnsCfg := defaultMihomoConfig()
+	dnsCfg.Settings.DNSListenPort = 0
+	srcWithDNSListen := []byte("dns:\n  enable: true\n  listen: 0.0.0.0:5353\n  nameserver:\n    - 1.1.1.1\n")
+	mergedDNS, err := synthesizeMihomoYAML(srcWithDNSListen, dnsCfg)
+	if err != nil {
+		t.Fatalf("synthesizeMihomoYAML dns test failed: %v", err)
+	}
+	if strings.Contains(string(mergedDNS), "5353") {
+		t.Fatalf("expected dns.listen removed when DNSListenPort == 0:\n%s", string(mergedDNS))
+	}
+	masked1 := maskYAMLSecret(mergedDNS)
+	masked2 := maskYAMLSecret([]byte(masked1))
+	if strings.Count(masked2, mihomoHeaderComment) > 1 {
+		t.Fatalf("maskYAMLSecret duplicated header comment:\n%s", masked2)
 	}
 }

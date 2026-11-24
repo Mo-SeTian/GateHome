@@ -77,8 +77,9 @@ func (r *mihomoLogRing) snapshot() []string {
 }
 
 type mihomoManager struct {
-	mu        sync.Mutex
-	dir       string
+	lifecycleMu sync.Mutex
+	mu          sync.Mutex
+	dir         string
 	store     *Store
 	adminPort int
 
@@ -91,9 +92,11 @@ type mihomoManager struct {
 	lastError string
 	logs      mihomoLogRing
 
-	ctrlBaseURL  string        // optional override for tests
-	ctrlSecret   string        // optional override for tests
-	startTimeout time.Duration // optional override for tests
+	ctrlBaseURL   string          // optional override for tests
+	ctrlSecret    string          // optional override for tests
+	startTimeout  time.Duration   // optional override for tests
+	ctrlOnce      sync.Once
+	ctrlTransport *http.Transport
 }
 
 func newMihomoManager(paths StoragePaths, store *Store, adminPort int) *mihomoManager {
@@ -152,10 +155,31 @@ func (m *mihomoManager) controllerURLAndSecretLocked() (string, string) {
 	return fmt.Sprintf("http://127.0.0.1:%d", m.cfg.ControllerPort), m.cfg.ControllerSecret
 }
 
+var (
+	mihomoSharedTransportOnce sync.Once
+	mihomoSharedTransport     *http.Transport
+)
+
 func mihomoLocalClient(timeout time.Duration) *http.Client {
-	tr := http.DefaultTransport.(*http.Transport).Clone()
-	tr.Proxy = nil
-	return &http.Client{Transport: tr, Timeout: timeout}
+	mihomoSharedTransportOnce.Do(func() {
+		tr := http.DefaultTransport.(*http.Transport).Clone()
+		tr.Proxy = nil
+		tr.MaxIdleConns = 32
+		tr.MaxIdleConnsPerHost = 16
+		mihomoSharedTransport = tr
+	})
+	return &http.Client{Transport: mihomoSharedTransport, Timeout: timeout}
+}
+
+func (m *mihomoManager) localClient(timeout time.Duration) *http.Client {
+	m.ctrlOnce.Do(func() {
+		tr := http.DefaultTransport.(*http.Transport).Clone()
+		tr.Proxy = nil
+		tr.MaxIdleConns = 32
+		tr.MaxIdleConnsPerHost = 16
+		m.ctrlTransport = tr
+	})
+	return &http.Client{Transport: m.ctrlTransport, Timeout: timeout}
 }
 
 func (m *mihomoManager) readSourceYAML(cfg MihomoConfig) ([]byte, error) {
@@ -215,6 +239,12 @@ func (m *mihomoManager) StartIfEnabled() {
 }
 
 func (m *mihomoManager) Start() error {
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
+	return m.startWithLifecycleHeld()
+}
+
+func (m *mihomoManager) startWithLifecycleHeld() error {
 	m.mu.Lock()
 	if m.running && m.cmd != nil {
 		m.mu.Unlock()
@@ -299,9 +329,29 @@ func (m *mihomoManager) Start() error {
 		if r == nil {
 			return
 		}
-		scanner := bufio.NewScanner(r)
-		for scanner.Scan() {
-			m.logs.add(scanner.Text())
+		reader := bufio.NewReaderSize(r, 8<<10)
+		var buf strings.Builder
+		for {
+			part, isPrefix, err := reader.ReadLine()
+			if len(part) > 0 && buf.Len() < 8192 {
+				remain := 8192 - buf.Len()
+				if len(part) > remain {
+					buf.Write(part[:remain])
+					buf.WriteString("...[truncated]")
+				} else {
+					buf.Write(part)
+				}
+			}
+			if !isPrefix && buf.Len() > 0 {
+				m.logs.add(buf.String())
+				buf.Reset()
+			}
+			if err != nil {
+				if buf.Len() > 0 {
+					m.logs.add(buf.String())
+				}
+				break
+			}
 		}
 	}
 	go pipeReader(stdout)
@@ -325,7 +375,7 @@ func (m *mihomoManager) Start() error {
 
 	// Poll controller /version until ready or process exits early (allows initial MMDB/Geodata download).
 	deadline := time.Now().Add(startWait)
-	client := mihomoLocalClient(500 * time.Millisecond)
+	client := m.localClient(500 * time.Millisecond)
 	var readyErr error
 	for time.Now().Before(deadline) {
 		select {
@@ -361,7 +411,7 @@ func (m *mihomoManager) Start() error {
 		time.Sleep(150 * time.Millisecond)
 	}
 
-	_ = m.Stop()
+	_ = m.stopWithLifecycleHeld()
 	tail := ""
 	if lines := m.logs.snapshot(); len(lines) > 0 {
 		tail = "（最近日志: " + lines[len(lines)-1] + "）"
@@ -374,6 +424,12 @@ func (m *mihomoManager) Start() error {
 }
 
 func (m *mihomoManager) Stop() error {
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
+	return m.stopWithLifecycleHeld()
+}
+
+func (m *mihomoManager) stopWithLifecycleHeld() error {
 	m.mu.Lock()
 	cmd := m.cmd
 	waitDone := m.waitDone
@@ -409,10 +465,12 @@ func (m *mihomoManager) Stop() error {
 }
 
 func (m *mihomoManager) Restart() error {
-	if err := m.Stop(); err != nil {
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
+	if err := m.stopWithLifecycleHeld(); err != nil {
 		return err
 	}
-	return m.Start()
+	return m.startWithLifecycleHeld()
 }
 
 func (m *mihomoManager) Reload() error {
@@ -480,7 +538,7 @@ func (m *mihomoManager) doControllerJSONWithTimeout(method, targetURL, secret st
 	if timeout <= 0 {
 		timeout = 10 * time.Second
 	}
-	client := mihomoLocalClient(timeout)
+	client := m.localClient(timeout)
 	resp, err := client.Do(req)
 	if err != nil {
 		return err
@@ -874,20 +932,23 @@ func (m *mihomoManager) ValidateYAML(raw []byte) mihomoYAMLValidationResult {
 				tmpPath := tmp.Name()
 				_ = tmp.Close()
 				defer os.Remove(tmpPath)
-				if testBytes, err := injectManagedKeys(formattedBuf.Bytes(), cfgCopy); err == nil {
-					if os.WriteFile(tmpPath, testBytes, 0600) == nil {
-						ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
-						out, err := exec.CommandContext(ctx, bin, "-t", "-d", absDir, "-f", tmpPath).CombinedOutput()
-						cancel()
-						res.CoreTested = true
-						if err != nil {
-							msg := strings.TrimSpace(string(out))
-							if msg == "" {
-								msg = err.Error()
-							}
-							res.Error = "Mihomo 内核校验失败: " + msg
-							return res
+				testBytes, injErr := injectManagedKeys(formattedBuf.Bytes(), cfgCopy)
+				if injErr != nil {
+					res.Error = injErr.Error()
+					return res
+				}
+				if os.WriteFile(tmpPath, testBytes, 0600) == nil {
+					ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+					out, err := exec.CommandContext(ctx, bin, "-t", "-d", absDir, "-f", tmpPath).CombinedOutput()
+					cancel()
+					res.CoreTested = true
+					if err != nil {
+						msg := strings.TrimSpace(string(out))
+						if msg == "" {
+							msg = err.Error()
 						}
+						res.Error = "Mihomo 内核校验失败: " + msg
+						return res
 					}
 				}
 			}
@@ -983,6 +1044,29 @@ func (m *mihomoManager) probeBinaryVersion(path string) string {
 	return line
 }
 
+func isSupportedExecutableBinary(data []byte) bool {
+	if len(data) < 4 {
+		return false
+	}
+	if bytes.HasPrefix(data, []byte{0x7f, 'E', 'L', 'F'}) {
+		return true
+	}
+	if bytes.HasPrefix(data, []byte{0xfe, 0xed, 0xfa, 0xce}) ||
+		bytes.HasPrefix(data, []byte{0xce, 0xfa, 0xed, 0xfe}) ||
+		bytes.HasPrefix(data, []byte{0xfe, 0xed, 0xfa, 0xcf}) ||
+		bytes.HasPrefix(data, []byte{0xcf, 0xfa, 0xed, 0xfe}) ||
+		bytes.HasPrefix(data, []byte{0xbe, 0xba, 0xfe, 0xca}) {
+		return true
+	}
+	if bytes.HasPrefix(data, []byte{0xca, 0xfe, 0xba, 0xbe}) && len(data) >= 8 {
+		nfat := uint32(data[4])<<24 | uint32(data[5])<<16 | uint32(data[6])<<8 | uint32(data[7])
+		if nfat > 0 && nfat <= 20 {
+			return true
+		}
+	}
+	return len(data) >= 64 && data[0] == 'M' && data[1] == 'Z'
+}
+
 func (m *mihomoManager) installBinaryData(raw []byte) (string, error) {
 	if len(raw) == 0 {
 		return "", errors.New("上传的文件为空")
@@ -1006,6 +1090,9 @@ func (m *mihomoManager) installBinaryData(raw []byte) (string, error) {
 	}
 	if len(payload) < 1024 {
 		return "", errors.New("内核文件大小异常")
+	}
+	if !isSupportedExecutableBinary(payload) {
+		return "", errors.New("内核文件必须为有效的可执行二进制文件（ELF / Mach-O / PE），禁止上传脚本")
 	}
 
 	binDir := filepath.Join(m.dir, "bin")
@@ -1042,13 +1129,15 @@ func (m *mihomoManager) installBinaryData(raw []byte) (string, error) {
 		return "", fmt.Errorf("无效的 mihomo 内核输出: %s", verLine)
 	}
 
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
+
 	dest := m.managedBinaryPath()
-	wasRunning := false
 	m.mu.Lock()
-	wasRunning = m.running
+	wasRunning := m.running
 	m.mu.Unlock()
 	if wasRunning {
-		_ = m.Stop()
+		_ = m.stopWithLifecycleHeld()
 	}
 
 	if err := os.Rename(tmpPath, dest); err != nil {
@@ -1061,7 +1150,7 @@ func (m *mihomoManager) installBinaryData(raw []byte) (string, error) {
 	m.mu.Unlock()
 
 	if wasRunning {
-		_ = m.Start()
+		_ = m.startWithLifecycleHeld()
 	}
 	return verLine, nil
 }
@@ -1517,7 +1606,7 @@ func (m *mihomoManager) fetchSubscriptionYAML(ctx context.Context, subURL string
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, 0, 0, 0, 0, fmt.Errorf("订阅下载失败: %v", err)
+		return nil, 0, 0, 0, 0, fmt.Errorf("订阅下载失败: %s", sanitizeFetchError(err))
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
@@ -1535,6 +1624,35 @@ func (m *mihomoManager) fetchSubscriptionYAML(ctx context.Context, subURL string
 	}
 	up, down, total, exp := parseSubscriptionUserInfo(resp.Header.Get("subscription-userinfo"))
 	return body, up, down, total, exp, nil
+}
+
+func sanitizeFetchError(err error) string {
+	if err == nil {
+		return ""
+	}
+	cur := err
+	var rawURLs []string
+	for {
+		var ue *url.Error
+		if !errors.As(cur, &ue) || ue.Err == nil {
+			break
+		}
+		if ue.URL != "" {
+			rawURLs = append(rawURLs, ue.URL)
+		}
+		cur = ue.Err
+	}
+	msg := cur.Error()
+	for _, raw := range rawURLs {
+		if raw != "" && strings.Contains(msg, raw) {
+			_, masked, ok := maskSubscriptionURL(raw)
+			if !ok || masked == "" {
+				masked = "[redacted-url]"
+			}
+			msg = strings.ReplaceAll(msg, raw, masked)
+		}
+	}
+	return msg
 }
 
 // isPortListening returns whether TCP 127.0.0.1:port accepts connections right now (diagnostic helper).

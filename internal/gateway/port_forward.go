@@ -46,7 +46,11 @@ func localForwardTarget(address string, local map[netip.Addr]bool) (int, bool) {
 		return n, true
 	}
 	ip, err := netip.ParseAddr(host)
-	return n, err == nil && (ip.Unmap().IsLoopback() || local[ip.Unmap()])
+	if err != nil {
+		return n, false
+	}
+	u := ip.Unmap()
+	return n, u.IsLoopback() || u.IsUnspecified() || local[u]
 }
 
 func forwardUDPTimeout(rule PortForward) time.Duration {

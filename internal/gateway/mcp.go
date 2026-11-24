@@ -223,9 +223,10 @@ func (a *Admin) mcpRoutes(mux *http.ServeMux) http.Handler {
 		Value    any    `json:"value" jsonschema:"该配置分区的完整 JSON 值；修改前先读取配置，保留其他字段"`
 	}
 	addMCPTool(a, server, "gatehome_update_config", "替换一个配置分区，保留其他分区和已保存凭据。须先读取配置并提供最新 revision；沿用网页校验和热加载，监听或 TCP / UDP 转发变更需单独重启。不接受密码或令牌字段。", mcpWrite, func(ctx context.Context, args configArgs) (any, error) {
-		if args.Section == "firewalls" || args.Section == "admin_access" || args.Section == "trusted_proxies" {
-			grants, _ := ctx.Value(mcpGrantsKey{}).(MCPConfig)
-			if !grants.canWriteSecurity() {
+		grants, _ := ctx.Value(mcpGrantsKey{}).(MCPConfig)
+		if !grants.canWriteSecurity() {
+			switch args.Section {
+			case "firewalls", "admin_access", "trusted_proxies", "subscriptions", "outbound_proxy":
 				return nil, errors.New("此 MCP Token 未获安全策略修改权限")
 			}
 		}
@@ -253,11 +254,15 @@ func (a *Admin) mcpRoutes(mux *http.ServeMux) http.Handler {
 		if decoder.Decode(&config) != nil {
 			return nil, errors.New("配置包含未知字段或类型不正确")
 		}
+		if args.Section == "routes" && !grants.canWriteSecurity() {
+			if err := mcpCheckRouteSecurityUnchanged(state.Config.Routes, config.Routes); err != nil {
+				return nil, err
+			}
+		}
 		result, err := a.mcpAPI(ctx, mux, "PUT", "/api/config", map[string]any{"config": config, "revision": args.Revision})
 		if err != nil {
 			return nil, err
 		}
-		grants, _ := ctx.Value(mcpGrantsKey{}).(MCPConfig)
 		if grants.Read {
 			return result, nil
 		}
@@ -507,22 +512,48 @@ func mcpRestoreRedactions(value, previous any) (any, error) {
 	return value, nil
 }
 
+func mcpCheckRouteSecurityUnchanged(prevRoutes, nextRoutes []Route) error {
+	byID := make(map[string]Route, len(prevRoutes))
+	byKey := make(map[string]Route, len(prevRoutes))
+	matchedPrev := make(map[int]bool, len(prevRoutes))
+	idxByID := make(map[string]int, len(prevRoutes))
+	idxByKey := make(map[string]int, len(prevRoutes))
+	for i, prev := range prevRoutes {
+		if id := strings.TrimSpace(prev.ID); id != "" {
+			byID[id] = prev
+			idxByID[id] = i
+		}
+		key := routeKey(prev)
+		byKey[key] = prev
+		idxByKey[key] = i
+	}
+	for _, next := range nextRoutes {
+		if id := strings.TrimSpace(next.ID); id != "" {
+			if prev, ok := byID[id]; ok {
+				matchedPrev[idxByID[id]] = true
+				if strings.TrimSpace(next.FirewallID) != strings.TrimSpace(prev.FirewallID) || !reflect.DeepEqual(next.Auth, prev.Auth) || !reflect.DeepEqual(next.Access, prev.Access) {
+					return errors.New("此 MCP Token 未获安全策略修改权限")
+				}
+			}
+		}
+		key := routeKey(next)
+		if prev, ok := byKey[key]; ok {
+			matchedPrev[idxByKey[key]] = true
+			if strings.TrimSpace(next.FirewallID) != strings.TrimSpace(prev.FirewallID) || !reflect.DeepEqual(next.Auth, prev.Auth) || !reflect.DeepEqual(next.Access, prev.Access) {
+				return errors.New("此 MCP Token 未获安全策略修改权限")
+			}
+		}
+	}
+	for i, prev := range prevRoutes {
+		if !matchedPrev[i] && (strings.TrimSpace(prev.FirewallID) != "" || prev.Auth.Enabled || (prev.Access != nil && strings.TrimSpace(prev.Access.Mode) != "" && prev.Access.Mode != "off")) {
+			return errors.New("此 MCP Token 未获安全策略修改权限")
+		}
+	}
+	return nil
+}
+
 func (a *Admin) mcpSafeText(value string) string {
-	state := a.store.Snapshot()
-	secrets := []string{state.CloudflareToken, state.GitHubToken, state.Alerts.URL, state.WxPusher.AppToken, state.ProxyPassword, state.PasswordHash, state.MCPTokenHash, state.MCPToken, state.WebDAVBackup.Password, state.WebDAVBackup.BackupPassword}
-	for _, client := range state.MCPClients {
-		secrets = append(secrets, client.Hash, client.Token)
-	}
-	for _, credential := range state.DNSCredentials {
-		secrets = append(secrets, credential.Token)
-	}
-	for _, credential := range state.CertificateCredentials {
-		secrets = append(secrets, credential.Token)
-	}
-	for _, hash := range state.RoutePasswordHashes {
-		secrets = append(secrets, hash)
-	}
-	for _, secret := range secrets {
+	for _, secret := range stateSecrets(a.store.Snapshot()) {
 		if secret != "" {
 			value = strings.ReplaceAll(value, secret, "<REDACTED>")
 			encoded, _ := json.Marshal(secret)

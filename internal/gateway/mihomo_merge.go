@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"path"
 	"regexp"
 	"slices"
 	"strconv"
@@ -91,6 +92,7 @@ func synthesizeMihomoYAML(sourceYAML []byte, cfg MihomoConfig) ([]byte, error) {
 	yamlMapSet(root, "tcp-concurrent", yamlBoolNode(cfg.Settings.TCPConcurrent))
 	yamlMapSet(root, "external-controller", yamlStrNode(fmt.Sprintf("127.0.0.1:%d", cfg.ControllerPort)))
 	yamlMapSet(root, "secret", yamlStrNode(cfg.ControllerSecret))
+	sanitizeDangerousMihomoKeys(root)
 	if cfg.Settings.AuthEnabled && cfg.Settings.AuthUsername != "" && cfg.Settings.AuthPassword != "" {
 		authSeq := &yaml.Node{
 			Kind:    yaml.SequenceNode,
@@ -136,6 +138,8 @@ func synthesizeMihomoYAML(sourceYAML []byte, cfg MihomoConfig) ([]byte, error) {
 		}
 		yamlMapSet(dnsNode, "enable", yamlBoolNode(true))
 		yamlMapSet(dnsNode, "listen", yamlStrNode(fmt.Sprintf("%s:%d", listenHost, cfg.Settings.DNSListenPort)))
+	} else {
+		yamlMapDelete(dnsNode, "listen")
 	}
 	hasEnabledCustomDNS := false
 	for _, p := range cfg.CustomDNSPolicies {
@@ -666,12 +670,113 @@ func yamlBoolNode(v bool) *yaml.Node {
 }
 
 var reservedOverlayKeys = map[string]bool{
-	"external-controller": true,
-	"secret":              true,
-	"authentication":      true,
-	"proxy-groups":        true,
-	"rule-providers":      true,
-	"rules":               true,
+	"external-controller":      true,
+	"secret":                   true,
+	"authentication":           true,
+	"skip-auth-prefixes":       true,
+	"external-controller-tls":  true,
+	"external-controller-unix": true,
+	"external-controller-pipe": true,
+	"external-controller-cors": true,
+	"external-ui":              true,
+	"external-ui-url":          true,
+	"external-ui-name":         true,
+	"mixed-port":               true,
+	"port":                     true,
+	"socks-port":               true,
+	"allow-lan":                true,
+	"proxy-groups":             true,
+	"rule-providers":           true,
+	"rules":                    true,
+}
+
+var dangerousControllerKeys = []string{
+	"external-controller-tls",
+	"external-controller-unix",
+	"external-controller-pipe",
+	"external-controller-cors",
+	"external-ui",
+	"external-ui-url",
+	"external-ui-name",
+}
+
+func sanitizeDangerousMihomoKeys(root *yaml.Node) {
+	for _, k := range dangerousControllerKeys {
+		yamlMapDelete(root, k)
+	}
+}
+
+func validateProxyProviderRelativePath(raw string) (string, error) {
+	p := strings.TrimSpace(raw)
+	if strings.ContainsAny(p, "\r\n\x00\\:*?\"<>|") {
+		return "", errors.New("proxy-providers 路径包含非法字符")
+	}
+	if strings.HasPrefix(p, "/") {
+		return "", errors.New("proxy-providers 路径须为相对路径")
+	}
+	if strings.HasSuffix(p, "/") {
+		return "", errors.New("proxy-providers 路径须指向具体文件")
+	}
+	cleaned := path.Clean(p)
+	if cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, "../") || strings.Contains(cleaned, "/../") {
+		return "", errors.New("proxy-providers 路径不能包含上级目录跳转 (..)")
+	}
+	cleaned = strings.TrimPrefix(cleaned, "./")
+	if (!strings.HasPrefix(cleaned, "proxies/") || len(cleaned) <= len("proxies/")) &&
+		(!strings.HasPrefix(cleaned, "ruleset/") || len(cleaned) <= len("ruleset/")) {
+		return "", errors.New("proxy-providers 路径必须位于 ./proxies/ 或 ./ruleset/ 目录下")
+	}
+	return "./" + cleaned, nil
+}
+
+func validateManagedProviderPaths(root *yaml.Node) error {
+	if root == nil || root.Kind != yaml.MappingNode {
+		return nil
+	}
+	if rpNode, idx := yamlMapFind(root, "rule-providers"); idx >= 0 && rpNode.Kind == yaml.MappingNode {
+		for i := 0; i+1 < len(rpNode.Content); i += 2 {
+			name := strings.TrimSpace(rpNode.Content[i].Value)
+			entry := rpNode.Content[i+1]
+			if entry.Kind != yaml.MappingNode {
+				continue
+			}
+			pathNode, pidx := yamlMapFind(entry, "path")
+			if pidx < 0 || strings.TrimSpace(pathNode.Value) == "" {
+				continue
+			}
+			fmtVal := "yaml"
+			if fmtNode, fidx := yamlMapFind(entry, "format"); fidx >= 0 && strings.TrimSpace(fmtNode.Value) != "" {
+				fmtVal = strings.ToLower(strings.TrimSpace(fmtNode.Value))
+				if fmtVal == "txt" {
+					fmtVal = "text"
+				}
+			}
+			cleaned, err := normalizeRuleSetRelativePath(pathNode.Value, name, fmtVal)
+			if err != nil {
+				return fmt.Errorf("rule-providers.%s path 无效: %v", name, err)
+			}
+			pathNode.Value = cleaned
+		}
+	}
+	if ppNode, idx := yamlMapFind(root, "proxy-providers"); idx >= 0 && ppNode.Kind == yaml.MappingNode {
+		for i := 0; i+1 < len(ppNode.Content); i += 2 {
+			name := strings.TrimSpace(ppNode.Content[i].Value)
+			entry := ppNode.Content[i+1]
+			if entry.Kind != yaml.MappingNode {
+				continue
+			}
+			pathNode, pidx := yamlMapFind(entry, "path")
+			if pidx < 0 || strings.TrimSpace(pathNode.Value) == "" {
+				continue
+			}
+			cleaned, err := validateProxyProviderRelativePath(pathNode.Value)
+			if err != nil {
+				return fmt.Errorf("proxy-providers.%s: %v", name, err)
+			}
+			pathNode.Value = cleaned
+		}
+	}
+	return nil
 }
 
 func mergeYAMLMappingOverlay(dst, src *yaml.Node, topLevel bool) {

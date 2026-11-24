@@ -471,3 +471,66 @@ func TestProtectionReleaseKeepsOtherIPAndRouteLimits(t *testing.T) {
 		t.Fatal("release reset another visitor or route counter")
 	}
 }
+
+func TestPathNormalizationProtectionAndWAFExceptionScope(t *testing.T) {
+	// 1. Rate limiting & custom regex path rules must not be bypassed by /./ or // or /a/../.
+	policy := Protection{
+		Rate: RatePolicy{Enabled: true, Requests: 1, WindowSeconds: 60, Path: "/login"},
+		Rules: []HTTPRule{
+			{Name: "block admin", Target: "path", Pattern: `^/admin(?:/|$)`, Action: "block"},
+		},
+	}
+	p, _, calls := protectionProxy(t, policy)
+	if w := protectionRequest(p, "GET", "/./login", ""); w.Code != 200 {
+		t.Fatalf("first /./login status=%d want=200", w.Code)
+	}
+	if w := protectionRequest(p, "GET", "//login", ""); w.Code != 429 {
+		t.Fatalf("second //login bypassed rate limit: got=%d want=429", w.Code)
+	}
+	for _, bypassPath := range []string{"/./admin", "//admin", "/allowed/../admin"} {
+		if w := protectionRequest(p, "GET", bypassPath, ""); w.Code != 403 {
+			t.Fatalf("custom path rule bypassed by %q: got=%d want=403", bypassPath, w.Code)
+		}
+	}
+	if w := protectionRequest(p, "GET", "/public/../hidden", ""); w.Code != 400 {
+		t.Fatalf("expected .. path traversal to be rejected with 400, got %d", w.Code)
+	}
+	if *calls != 1 {
+		t.Fatalf("unexpected upstream calls: got=%d want=1", *calls)
+	}
+
+	// 2. WAF exception scoped to /editor must apply to /editor and /./editor,
+	//    and must NOT exempt /editor/../outside or /editorish.
+	p2, _, _ := protectionProxy(t, Protection{
+		WAF: WAFPolicy{
+			Mode:       "detect",
+			Exceptions: []WAFException{{RuleID: 941100, Host: "app.example.com", Path: "/editor", Parameter: "q"}},
+		},
+	})
+	hasRule941100 := func(idx int) bool {
+		for _, h := range p2.logs.entries[idx].Security {
+			if h.RuleID == 941100 {
+				return true
+			}
+		}
+		return false
+	}
+	_ = protectionRequest(p2, "GET", "/editor?q=%3Cscript%3Ealert(1)%3C%2Fscript%3E", "")
+	if hasRule941100(0) {
+		t.Fatal("exact /editor exception failed to suppress 941100")
+	}
+	_ = protectionRequest(p2, "GET", "/./editor?q=%3Cscript%3Ealert(1)%3C%2Fscript%3E", "")
+	if hasRule941100(1) {
+		t.Fatal("normalized /./editor exception failed to suppress 941100")
+	}
+	if w := protectionRequest(p2, "GET", "/editor/../outside?q=%3Cscript%3Ealert(1)%3C%2Fscript%3E", ""); w.Code != 400 {
+		t.Fatalf("expected /editor/../outside to be blocked with 400, got %d", w.Code)
+	}
+	if !hasRule941100(2) {
+		t.Fatal("WAF exception abused via traversal /editor/../outside (941100 did not fire)")
+	}
+	_ = protectionRequest(p2, "GET", "/editorish?q=%3Cscript%3Ealert(1)%3C%2Fscript%3E", "")
+	if !hasRule941100(3) {
+		t.Fatal("WAF exception leaked to /editorish (941100 did not fire)")
+	}
+}

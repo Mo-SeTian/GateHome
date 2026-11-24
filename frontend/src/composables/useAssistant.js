@@ -278,11 +278,20 @@ function clearConversation() {
   error.value = ''
 }
 
-function resetAssistant() {
+function clearAssistantHistory() {
+  try {
+    localStorage.removeItem(historyKey)
+  } catch {
+    // Ignore storage failures when unavailable.
+  }
+}
+
+function resetAssistant({ clearStorage = false } = {}) {
   turnController?.abort()
   session.abort()
   session = new AbortController()
   clearConversation()
+  if (clearStorage) clearAssistantHistory()
   panelOpen.value = false
   settings.value = null
   conversations.value = []
@@ -296,5 +305,5 @@ function resetAssistant() {
 export function useAssistant() {
   return { panelOpen, draft, messages, conversations, conversation, settings, providers, provider, model, effort,
     effortChoice, sending, applying, error, loadSettings, saveSettings, testSettings, listModels, send, stopGeneration, apply,
-    clearConversation, cancelChange, openConversation, removeConversation, selectModel, resetAssistant }
+    clearConversation, cancelChange, openConversation, removeConversation, selectModel, resetAssistant, clearAssistantHistory }
 }

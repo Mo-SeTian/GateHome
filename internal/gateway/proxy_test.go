@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"strings"
 	"testing"
 	"time"
@@ -317,4 +318,91 @@ func TestProxyGroupsIsolateSameHostOnDifferentListeners(t *testing.T) {
 	if w.Code != 404 {
 		t.Fatal("disabled group's route remained reachable")
 	}
+}
+
+func TestUntrustedForwardedHeadersRightmostProtoAssistantRedactionAndLoopGuard(t *testing.T) {
+	// 1. Untrusted X-Forwarded-For and Forwarded headers must not reach upstream intact.
+	var seenXFF, seenForwarded string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenXFF = r.Header.Get("X-Forwarded-For")
+		seenForwarded = r.Header.Get("Forwarded")
+		w.WriteHeader(200)
+	}))
+	defer upstream.Close()
+
+	cfg := DefaultConfig()
+	cfg.Routes = []Route{{GroupID: "default", Host: "app.example.test", Upstream: upstream.URL, Enabled: true}}
+	p := NewProxy(cfg, nil)
+
+	req := httptest.NewRequest("GET", "http://app.example.test/", nil)
+	req.RemoteAddr = "198.51.100.77:54321"
+	req.Header.Set("X-Forwarded-For", "127.0.0.1, 10.0.0.1")
+	req.Header.Set("Forwarded", "for=127.0.0.1;proto=https")
+	w := httptest.NewRecorder()
+	p.ServeHTTP(w, req)
+	if w.Code != 200 || seenXFF != "198.51.100.77" || seenForwarded != "" {
+		t.Fatalf("expected spoofed XFF/Forwarded stripped: code=%d xff=%q forwarded=%q", w.Code, seenXFF, seenForwarded)
+	}
+
+	// 2. routeRequestHTTPS must consult the rightmost X-Forwarded-Proto value.
+	rHTTPS := httptest.NewRequest("GET", "http://app.example.test/", nil)
+	rHTTPS = rHTTPS.Clone(req.Context())
+	rHTTPS.Header.Add("X-Forwarded-Proto", "http, https")
+	if routeRequestHTTPS(rHTTPS) {
+		t.Fatal("expected false without trustedProxyKey context")
+	}
+	trusted := parseTrustedProxiesOrEmpty(t, []string{"192.0.2.0/24"})
+	r1 := httptest.NewRequest("GET", "http://app.example.test/", nil)
+	r1.RemoteAddr = "192.0.2.10:1234"
+	r1.Header.Set("X-Forwarded-For", "198.51.100.1")
+	r1.Header.Add("X-Forwarded-Proto", "https")
+	r1.Header.Add("X-Forwarded-Proto", "http")
+	if routeRequestHTTPS(proxySourceRequest(r1, trusted)) {
+		t.Fatal("expected rightmost X-Forwarded-Proto=http to return false")
+	}
+	r2 := httptest.NewRequest("GET", "http://app.example.test/", nil)
+	r2.RemoteAddr = "192.0.2.10:1234"
+	r2.Header.Set("X-Forwarded-For", "198.51.100.1")
+	r2.Header.Set("X-Forwarded-Proto", "http, https")
+	if !routeRequestHTTPS(proxySourceRequest(r2, trusted)) {
+		t.Fatal("expected rightmost X-Forwarded-Proto=https to return true")
+	}
+
+	// 3. stateSecrets must include Assistant.Key and AssistantProviders[].Key across Logs and MCP redaction.
+	a, _ := testAdmin(t)
+	s := a.store.Snapshot()
+	s.Assistant.Key = "TEST_ONLY_PRIMARY_ASSIST_KEY"
+	s.AssistantProviders = []assistantEndpoint{{ID: "p1", Name: "extra", Key: "TEST_ONLY_SECOND_ASSIST_KEY"}}
+	if err := writeJSON(a.store.path, s); err != nil {
+		t.Fatal(err)
+	}
+	a.store.mu.Lock()
+	a.store.state = s
+	a.store.mu.Unlock()
+	logs := &Logs{store: a.store}
+	logs.Add(LogEntry{Category: "admin", Action: "测试", Message: "leaked " + s.Assistant.Key + " and " + s.AssistantProviders[0].Key})
+	entries := logs.Page(LogFilter{Scope: "admin"}, 1, 10, 0).Entries
+	if len(entries) == 0 || strings.Contains(entries[0].Message, "ASSIST_KEY") {
+		t.Fatalf("Logs.Add failed to redact assistant keys: %+v", entries)
+	}
+	scrubbed := a.mcpSafeText("err: " + s.Assistant.Key + " / " + s.AssistantProviders[0].Key)
+	if strings.Contains(scrubbed, "ASSIST_KEY") {
+		t.Fatalf("mcpSafeText failed to redact assistant keys: %q", scrubbed)
+	}
+
+	// 4. localForwardTarget must treat 0.0.0.0 and :: as local targets to prevent port forward loops.
+	for _, addr := range []string{"0.0.0.0:8080", "[::]:8080", "127.0.0.1:8080"} {
+		if port, isLocal := localForwardTarget(addr, map[netip.Addr]bool{}); !isLocal || port != 8080 {
+			t.Fatalf("expected %s to be detected as local loop target, got port=%d isLocal=%v", addr, port, isLocal)
+		}
+	}
+}
+
+func parseTrustedProxiesOrEmpty(t *testing.T, raw []string) []netip.Prefix {
+	t.Helper()
+	parsed, err := parseTrustedProxies(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return parsed
 }

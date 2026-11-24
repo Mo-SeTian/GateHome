@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -277,9 +278,15 @@ func run() error {
 	cancel()
 	shutdown, stop := context.WithTimeout(context.Background(), 10*time.Second)
 	defer stop()
+	var shutdownWG sync.WaitGroup
 	for _, server := range servers {
-		_ = server.Shutdown(shutdown)
+		shutdownWG.Add(1)
+		go func(srv *http.Server) {
+			defer shutdownWG.Done()
+			_ = srv.Shutdown(shutdown)
+		}(server)
 	}
+	shutdownWG.Wait()
 	if maintenance.Busy() {
 		log.Print("维护操作已安排，退出当前进程以应用更新或恢复")
 	}
