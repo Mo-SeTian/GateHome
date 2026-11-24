@@ -407,6 +407,9 @@ func (a *Admin) handleMihomoSaveGroup(w http.ResponseWriter, r *http.Request) {
 		input.ID = randomMihomoID("grp")
 		next.CustomGroups = append(next.CustomGroups, input)
 	} else {
+		if input.Extra == nil && len(next.CustomGroups[updatedIdx].Extra) > 0 {
+			input.Extra = next.CustomGroups[updatedIdx].Extra
+		}
 		next.CustomGroups[updatedIdx] = input
 	}
 	next.ManualOverride = false

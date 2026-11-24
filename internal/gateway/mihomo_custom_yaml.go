@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -16,13 +15,14 @@ import (
 // once in config.json. Both per-tab editors and the unified custom.yaml view read/write this same source.
 
 type customGroupYAML struct {
-	Name      string   `yaml:"name"`
-	Type      string   `yaml:"type"`
-	Proxies   []string `yaml:"proxies,omitempty"`
-	Filter    string   `yaml:"filter,omitempty"`
-	URL       string   `yaml:"url,omitempty"`
-	Interval  int      `yaml:"interval,omitempty"`
-	Tolerance int      `yaml:"tolerance,omitempty"`
+	Name      string         `yaml:"name"`
+	Type      string         `yaml:"type"`
+	Proxies   []string       `yaml:"proxies,omitempty"`
+	Filter    string         `yaml:"filter,omitempty"`
+	URL       string         `yaml:"url,omitempty"`
+	Interval  int            `yaml:"interval,omitempty"`
+	Tolerance int            `yaml:"tolerance,omitempty"`
+	Extra     map[string]any `yaml:",inline"`
 }
 
 type customGroupsDoc struct {
@@ -79,13 +79,19 @@ func encodeYAMLIndent2(v any) (string, error) {
 	return out.String(), nil
 }
 
+func toCustomGroupYAML(g MihomoCustomGroup) customGroupYAML {
+	extra, _ := normalizeMihomoExtra(g.Extra)
+	return customGroupYAML{
+		Name: g.Name, Type: g.Type, Proxies: g.Proxies, Filter: g.Filter,
+		URL: g.URL, Interval: g.Interval, Tolerance: g.Tolerance,
+		Extra: extra,
+	}
+}
+
 func customGroupsToYAML(groups []MihomoCustomGroup) string {
 	list := make([]customGroupYAML, 0, len(groups))
 	for _, g := range groups {
-		list = append(list, customGroupYAML{
-			Name: g.Name, Type: g.Type, Proxies: g.Proxies, Filter: g.Filter,
-			URL: g.URL, Interval: g.Interval, Tolerance: g.Tolerance,
-		})
+		list = append(list, toCustomGroupYAML(g))
 	}
 	header := strings.Join([]string{
 		"# GateHome 自定义策略组：与页面「策略组」同源，保存后合并进机场配置（同名则覆盖机场策略组）",
@@ -125,6 +131,10 @@ func validateAndBuildCustomGroups(items []customGroupYAML, existing []MihomoCust
 	seen := map[string]bool{}
 	out := make([]MihomoCustomGroup, 0, len(items))
 	for i, item := range items {
+		extra, extraErr := normalizeMihomoExtra(item.Extra)
+		if extraErr != nil {
+			return nil, fmt.Errorf("第 %d 个策略组「%s」: %v", i+1, strings.TrimSpace(item.Name), extraErr)
+		}
 		g := MihomoCustomGroup{
 			Name:      strings.TrimSpace(item.Name),
 			Type:      strings.TrimSpace(item.Type),
@@ -133,6 +143,7 @@ func validateAndBuildCustomGroups(items []customGroupYAML, existing []MihomoCust
 			URL:       strings.TrimSpace(item.URL),
 			Interval:  item.Interval,
 			Tolerance: item.Tolerance,
+			Extra:     extra,
 		}
 		if g.Type == "" {
 			g.Type = "select"
@@ -158,16 +169,39 @@ func parseCustomGroupsYAML(raw []byte, existing []MihomoCustomGroup) ([]MihomoCu
 	if len(bytes.TrimSpace(raw)) == 0 {
 		return []MihomoCustomGroup{}, nil
 	}
-	var doc customGroupsDoc
-	dec := yaml.NewDecoder(bytes.NewReader(raw))
-	dec.KnownFields(true)
-	if err := dec.Decode(&doc); err != nil {
-		if errors.Is(err, io.EOF) {
-			return []MihomoCustomGroup{}, nil
-		}
+	var docNode yaml.Node
+	if err := yaml.Unmarshal(raw, &docNode); err != nil {
 		return nil, fmt.Errorf("YAML 解析失败: %v", err)
 	}
-	return validateAndBuildCustomGroups(doc.ProxyGroups, existing)
+	if docNode.Kind == 0 || len(docNode.Content) == 0 {
+		return []MihomoCustomGroup{}, nil
+	}
+	root := docNode.Content[0]
+	if root.Kind == yaml.ScalarNode && (root.Value == "" || root.Tag == "!!null") {
+		return []MihomoCustomGroup{}, nil
+	}
+	if root.Kind != yaml.MappingNode {
+		return nil, errors.New("YAML 解析失败: 根节点必须为包含 proxy-groups 的映射对象")
+	}
+	var groupsNode *yaml.Node
+	for i := 0; i+1 < len(root.Content); i += 2 {
+		key := strings.TrimSpace(root.Content[i].Value)
+		if key != "proxy-groups" {
+			return nil, fmt.Errorf("YAML 解析失败: line %d: 仅支持 proxy-groups 字段，不支持顶层字段 %s", root.Content[i].Line, key)
+		}
+		groupsNode = root.Content[i+1]
+	}
+	if groupsNode == nil || (groupsNode.Kind == yaml.ScalarNode && (groupsNode.Value == "" || groupsNode.Tag == "!!null")) {
+		return []MihomoCustomGroup{}, nil
+	}
+	if groupsNode.Kind != yaml.SequenceNode {
+		return nil, fmt.Errorf("YAML 解析失败: line %d: proxy-groups 须为列表", groupsNode.Line)
+	}
+	var items []customGroupYAML
+	if err := groupsNode.Decode(&items); err != nil {
+		return nil, fmt.Errorf("YAML 解析失败: %v", err)
+	}
+	return validateAndBuildCustomGroups(items, existing)
 }
 
 func customRulesToYAML(rules []MihomoCustomRule) string {
@@ -326,10 +360,7 @@ func customAllToYAML(cfg MihomoConfig) string {
 
 	groupList := make([]customGroupYAML, 0, len(cfg.CustomGroups))
 	for _, g := range cfg.CustomGroups {
-		groupList = append(groupList, customGroupYAML{
-			Name: g.Name, Type: g.Type, Proxies: g.Proxies, Filter: g.Filter,
-			URL: g.URL, Interval: g.Interval, Tolerance: g.Tolerance,
-		})
+		groupList = append(groupList, toCustomGroupYAML(g))
 	}
 	if groupsNode, err := marshalYAMLNode(groupList); err == nil {
 		yamlMapSet(root, "proxy-groups", groupsNode)
@@ -598,19 +629,8 @@ func parseCustomAllYAML(raw []byte, existing MihomoConfig, baseDir string) (Miho
 			return next, errors.New("proxy-groups 须为列表")
 		} else {
 			var items []customGroupYAML
-			groupWrap := &yaml.Node{Kind: yaml.DocumentNode, Content: []*yaml.Node{
-				{Kind: yaml.MappingNode, Tag: "!!map", Content: []*yaml.Node{yamlStrNode("proxy-groups"), groupsNode}},
-			}}
-			if encoded, err := encodeYAMLIndent2(groupWrap); err != nil {
-				return next, err
-			} else {
-				var parsed customGroupsDoc
-				dec := yaml.NewDecoder(strings.NewReader(encoded))
-				dec.KnownFields(true)
-				if err := dec.Decode(&parsed); err != nil {
-					return next, fmt.Errorf("proxy-groups 解析失败: %v", err)
-				}
-				items = parsed.ProxyGroups
+			if err := groupsNode.Decode(&items); err != nil {
+				return next, fmt.Errorf("proxy-groups 解析失败: %v", err)
 			}
 			groups, err := validateAndBuildCustomGroups(items, existing.CustomGroups)
 			if err != nil {

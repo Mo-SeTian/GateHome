@@ -905,7 +905,17 @@
               · {{ yamlValidation.warnings.join('；') }}
             </span>
           </template>
-          <span v-else>{{ yamlValidation.error }}</span>
+          <template v-else>
+            <span class="yaml-error-banner-text">{{ yamlValidation.error }}</span>
+            <button
+              v-if="yamlErrorLine"
+              type="button"
+              class="yaml-locate-btn"
+              @click="yamlCodeEditorRef?.jumpToLine(yamlErrorLine)"
+            >
+              定位第 {{ yamlErrorLine }} 行
+            </button>
+          </template>
         </div>
         <div v-else-if="yamlKind === 'runtime' && yamlDirty" class="yaml-validation-banner pending">
           配置已修改，请先点击「校验配置」通过后再保存
@@ -924,15 +934,15 @@
         </div>
 
         <div v-else class="yaml-editor-shell">
-          <textarea
+          <YamlCodeEditor
+            ref="yamlCodeEditorRef"
             v-model="yamlContent"
-            class="form-input yaml-editor mono-text"
-            :class="{ wrap: yamlWrap }"
-            :wrap="yamlWrap ? 'soft' : 'off'"
+            editor-class="yaml-editor"
+            height-preset="tall"
             aria-label="Mihomo YAML 配置内容"
-            spellcheck="false"
+            :wrap="yamlWrap"
+            :error-message="yamlValidation && !yamlValidation.valid ? yamlValidation.error : ''"
             @input="onYamlInput"
-            @keydown.tab.prevent="insertYamlTab"
           />
         </div>
       </SpotlightCard>
@@ -1007,6 +1017,8 @@
               <option value="url-test">自动测速 (url-test)</option>
               <option value="fallback">故障转移 (fallback)</option>
               <option value="load-balance">负载均衡 (load-balance)</option>
+              <option value="smart">智能优选 (smart)</option>
+              <option value="relay">链式代理 (relay)</option>
             </select>
           </label>
           <label class="form-field">
@@ -1245,12 +1257,14 @@ import {
   Zap
 } from 'lucide-vue-next'
 import SpotlightCard from '@/components/SpotlightCard.vue'
+import YamlCodeEditor from '@/components/YamlCodeEditor.vue'
 import MihomoCustomYaml from '@/components/MihomoCustomYaml.vue'
 import MihomoConnections from '@/components/MihomoConnections.vue'
 import MihomoRuleSets from '@/components/MihomoRuleSets.vue'
 import { adminApi } from '@/api/admin'
 import { copyText as copyToClipboard } from '@/api/clipboard'
 import { formatBytes } from '@/api/reports'
+import { parseYamlErrorLocations, tokenizeYamlLine } from '@/api/yamlEditor'
 import { useToast } from '@/composables/useToast'
 import '@/styles/reports.css'
 
@@ -1304,6 +1318,7 @@ const expandedGroups = reactive({})
 const ruleSearch = ref('')
 const ruleTargetFilter = ref('')
 
+const yamlCodeEditorRef = ref(null)
 const yamlKind = ref('runtime')
 const yamlContent = ref('')
 const yamlManualOverride = ref(false)
@@ -1314,6 +1329,10 @@ const yamlValidation = ref(null)
 const yamlWrap = ref(false)
 const yamlFullscreen = ref(false)
 const yamlPreviewMode = ref(false)
+const yamlErrorLine = computed(() => {
+  if (!yamlValidation.value || yamlValidation.value.valid || !yamlValidation.value.error) return null
+  return parseYamlErrorLocations(yamlValidation.value.error, yamlContent.value)[0]?.line ?? null
+})
 
 const logLines = ref([])
 const logsRunning = ref(false)
@@ -2023,70 +2042,6 @@ function onYamlInput() {
   yamlDirty.value = true
   yamlValidated.value = false
   yamlValidation.value = null
-}
-
-function insertYamlTab(event) {
-  const el = event.target
-  const start = el.selectionStart
-  const end = el.selectionEnd
-  yamlContent.value = yamlContent.value.slice(0, start) + '  ' + yamlContent.value.slice(end)
-  onYamlInput()
-  requestAnimationFrame(() => {
-    el.selectionStart = el.selectionEnd = start + 2
-  })
-}
-
-function classifyYamlScalar(val) {
-  const trimmed = val.trim()
-  if (/^(true|false|null|~)$/i.test(trimmed)) return 'tok-bool'
-  if (/^-?\d+(\.\d+)?$/.test(trimmed)) return 'tok-num'
-  if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) return 'tok-str'
-  return 'tok-val'
-}
-
-function tokenizeYamlLine(line) {
-  if (!line) return []
-  const commentIdx = (() => {
-    let quote = ''
-    for (let i = 0; i < line.length; i++) {
-      const ch = line[i]
-      if (quote) {
-        if (ch === quote && line[i - 1] !== '\\') quote = ''
-      } else if (ch === '"' || ch === "'") {
-        quote = ch
-      } else if (ch === '#' && (i === 0 || /\s/.test(line[i - 1]))) {
-        return i
-      }
-    }
-    return -1
-  })()
-
-  const code = commentIdx >= 0 ? line.slice(0, commentIdx) : line
-  const comment = commentIdx >= 0 ? line.slice(commentIdx) : ''
-  const tokens = []
-
-  if (code) {
-    const listMatch = code.match(/^(\s*-\s+)(.*)$/)
-    let rest = code
-    if (listMatch) {
-      tokens.push({ cls: 'tok-punct', text: listMatch[1] })
-      rest = listMatch[2]
-    }
-    const kvMatch = rest.match(/^(\s*[^:\s][^:]*?)(:\s*)(.*)$/)
-    if (kvMatch) {
-      tokens.push({ cls: 'tok-key', text: kvMatch[1] })
-      tokens.push({ cls: 'tok-punct', text: kvMatch[2] })
-      if (kvMatch[3]) {
-        tokens.push({ cls: classifyYamlScalar(kvMatch[3]), text: kvMatch[3] })
-      }
-    } else if (rest) {
-      tokens.push({ cls: classifyYamlScalar(rest), text: rest })
-    }
-  }
-  if (comment) {
-    tokens.push({ cls: 'tok-comment', text: comment })
-  }
-  return tokens
 }
 
 const highlightedYamlRows = computed(() =>
@@ -2986,9 +2941,36 @@ onBeforeUnmount(() => {
 }
 
 .yaml-validation-banner.invalid {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
   background: rgba(244, 63, 94, 0.1);
   border-color: rgba(244, 63, 94, 0.35);
   color: var(--bad);
+}
+
+.yaml-error-banner-text {
+  flex: 1 1 200px;
+  min-width: 0;
+  white-space: pre-wrap;
+}
+
+.yaml-locate-btn {
+  padding: 2px 9px;
+  border-radius: var(--radius-pill);
+  border: 1px solid rgba(244, 63, 94, 0.45);
+  background: rgba(244, 63, 94, 0.14);
+  color: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.yaml-locate-btn:hover {
+  background: rgba(244, 63, 94, 0.24);
 }
 
 .yaml-validation-banner.pending {
@@ -3004,25 +2986,8 @@ onBeforeUnmount(() => {
 .yaml-editor-shell {
   width: 100%;
   min-width: 0;
-}
-
-.yaml-editor-shell textarea.form-input.yaml-editor,
-.yaml-editor {
-  width: 100%;
-  height: clamp(480px, 64dvh, 780px) !important;
-  min-height: 440px !important;
-  padding: 12px 14px;
-  font-size: 12.5px;
-  line-height: 1.6;
-  resize: vertical;
-  tab-size: 2;
-  white-space: pre;
-  overflow-x: auto;
-}
-
-.yaml-editor.wrap {
-  white-space: pre-wrap;
-  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .yaml-viewer {
@@ -3038,9 +3003,13 @@ onBeforeUnmount(() => {
 }
 
 .yaml-panel.fullscreen .yaml-editor-shell,
-.yaml-panel.fullscreen .yaml-editor-shell textarea.form-input.yaml-editor,
-.yaml-panel.fullscreen .yaml-editor,
 .yaml-panel.fullscreen .yaml-viewer {
+  flex: 1 1 auto;
+  height: 100% !important;
+  min-height: 0 !important;
+}
+
+.yaml-panel.fullscreen .yaml-editor-shell :deep(.yaml-code-shell) {
   flex: 1 1 auto;
   height: 100% !important;
   min-height: 0 !important;
@@ -3087,6 +3056,9 @@ onBeforeUnmount(() => {
 .tok-str { color: var(--ok); }
 .tok-num { color: var(--warn); }
 .tok-bool { color: var(--brand-cyan); font-weight: 600; }
+.tok-anchor { color: #c084fc; font-weight: 600; }
+.tok-rule { color: #38bdf8; font-weight: 600; }
+.tok-target { color: #f472b6; font-weight: 600; }
 .tok-val { color: var(--ink); }
 .tok-comment { color: var(--faint); font-style: italic; }
 
@@ -3213,8 +3185,6 @@ onBeforeUnmount(() => {
     padding: 10px;
   }
 
-  .yaml-editor-shell textarea.form-input.yaml-editor,
-  .yaml-editor,
   .yaml-viewer {
     height: clamp(400px, 60dvh, 640px) !important;
     min-height: 360px !important;

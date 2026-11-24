@@ -17,15 +17,25 @@
         </button>
       </div>
     </div>
-    <p v-if="message" class="custom-yaml-msg" :class="messageOk ? 'ok' : 'bad'" role="status">{{ message }}</p>
-    <textarea
+    <div v-if="message" class="custom-yaml-msg" :class="messageOk ? 'ok' : 'bad'" role="status">
+      <span class="custom-yaml-msg-text">{{ message }}</span>
+      <button
+        v-if="!messageOk && errorLine"
+        type="button"
+        class="yaml-locate-btn"
+        @click="editorRef?.jumpToLine(errorLine)"
+      >
+        定位第 {{ errorLine }} 行
+      </button>
+    </div>
+    <YamlCodeEditor
+      ref="editorRef"
       v-model="content"
-      class="form-input custom-yaml-editor mono-text"
+      editor-class="custom-yaml-editor"
+      height-preset="compact"
       :aria-label="`${title} YAML`"
-      spellcheck="false"
-      wrap="off"
+      :error-message="!messageOk ? message : ''"
       @input="onInput"
-      @keydown.tab.prevent="insertTab"
     />
   </SpotlightCard>
 </template>
@@ -34,7 +44,9 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { CheckCircle2, RefreshCw, Save } from 'lucide-vue-next'
 import SpotlightCard from '@/components/SpotlightCard.vue'
+import YamlCodeEditor from '@/components/YamlCodeEditor.vue'
 import { adminApi } from '@/api/admin'
+import { parseYamlErrorLocations } from '@/api/yamlEditor'
 import { useToast } from '@/composables/useToast'
 
 const props = defineProps({
@@ -43,6 +55,7 @@ const props = defineProps({
 const emit = defineEmits(['saved'])
 
 const toast = useToast()
+const editorRef = ref(null)
 const content = ref('')
 const original = ref('')
 const busy = ref(false)
@@ -51,20 +64,13 @@ const messageOk = ref(true)
 
 const title = computed(() => (props.kind === 'groups' ? '自定义策略组 (proxy-groups)' : '自定义分流规则 (rules)'))
 const dirty = computed(() => content.value !== original.value)
+const errorLine = computed(() => {
+  if (messageOk.value || !message.value) return null
+  return parseYamlErrorLocations(message.value, content.value)[0]?.line ?? null
+})
 
 function onInput() {
   message.value = ''
-}
-
-function insertTab(event) {
-  const el = event.target
-  const start = el.selectionStart
-  const end = el.selectionEnd
-  content.value = content.value.slice(0, start) + '  ' + content.value.slice(end)
-  onInput()
-  requestAnimationFrame(() => {
-    el.selectionStart = el.selectionEnd = start + 2
-  })
 }
 
 const controller = new AbortController()
@@ -160,6 +166,11 @@ onBeforeUnmount(() => controller.abort())
 }
 
 .custom-yaml-msg {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
   margin: 0 0 10px;
   padding: 8px 12px;
   border-radius: var(--radius-sm);
@@ -167,6 +178,12 @@ onBeforeUnmount(() => controller.abort())
   line-height: 1.5;
   border: 1px solid var(--line);
   overflow-wrap: anywhere;
+}
+
+.custom-yaml-msg-text {
+  flex: 1 1 200px;
+  min-width: 0;
+  white-space: pre-wrap;
 }
 
 .custom-yaml-msg.ok {
@@ -181,16 +198,19 @@ onBeforeUnmount(() => controller.abort())
   border-color: rgba(244, 63, 94, 0.35);
 }
 
-textarea.form-input.custom-yaml-editor {
-  width: 100%;
-  height: clamp(360px, 56dvh, 680px) !important;
-  min-height: 320px !important;
-  padding: 12px 14px;
-  font-size: 12.5px;
-  line-height: 1.6;
-  resize: vertical;
-  tab-size: 2;
-  white-space: pre;
-  overflow: auto;
+.yaml-locate-btn {
+  padding: 2px 9px;
+  border-radius: var(--radius-pill);
+  border: 1px solid rgba(244, 63, 94, 0.45);
+  background: rgba(244, 63, 94, 0.14);
+  color: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.yaml-locate-btn:hover {
+  background: rgba(244, 63, 94, 0.24);
 }
 </style>

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"path"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -299,16 +298,16 @@ func applySubscriptionNodeTransform(root *yaml.Node, sub MihomoSubscription) {
 	if incPat == "" && excPat == "" && suffix == "" {
 		return
 	}
-	var incRe, excRe *regexp.Regexp
+	var incRe, excRe *mihomoRegex
 	if incPat != "" {
 		var err error
-		if incRe, err = regexp.Compile(incPat); err != nil {
+		if incRe, err = compileMihomoRegex(incPat); err != nil {
 			return
 		}
 	}
 	if excPat != "" {
 		var err error
-		if excRe, err = regexp.Compile(excPat); err != nil {
+		if excRe, err = compileMihomoRegex(excPat); err != nil {
 			return
 		}
 	}
@@ -405,7 +404,36 @@ func formatCustomRule(r MihomoCustomRule) string {
 	return line
 }
 
+func mihomoExtraHasDynamicSource(extra map[string]any) bool {
+	if len(extra) == 0 {
+		return false
+	}
+	for _, k := range []string{"include-all", "include-all-proxies", "include-all-providers"} {
+		if b, ok := extra[k].(bool); ok && b {
+			return true
+		}
+	}
+	if useVal, ok := extra["use"]; ok && useVal != nil {
+		switch u := useVal.(type) {
+		case []any:
+			if len(u) > 0 {
+				return true
+			}
+		case []string:
+			if len(u) > 0 {
+				return true
+			}
+		case string:
+			if strings.TrimSpace(u) != "" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func buildCustomGroupNode(cg MihomoCustomGroup, allProxies []string) *yaml.Node {
+	hasDynamic := mihomoExtraHasDynamicSource(cg.Extra)
 	members := make([]string, 0, len(cg.Proxies)+8)
 	seen := map[string]bool{}
 	appendUnique := func(name string) {
@@ -418,8 +446,8 @@ func buildCustomGroupNode(cg MihomoCustomGroup, allProxies []string) *yaml.Node 
 	for _, p := range cg.Proxies {
 		appendUnique(p)
 	}
-	if strings.TrimSpace(cg.Filter) != "" {
-		if re, err := regexp.Compile(cg.Filter); err == nil {
+	if !hasDynamic && strings.TrimSpace(cg.Filter) != "" {
+		if re, err := compileMihomoRegex(cg.Filter); err == nil {
 			for _, candidate := range allProxies {
 				if re.MatchString(candidate) {
 					appendUnique(candidate)
@@ -427,21 +455,25 @@ func buildCustomGroupNode(cg MihomoCustomGroup, allProxies []string) *yaml.Node 
 			}
 		}
 	}
-	if len(members) == 0 {
+	if !hasDynamic && len(members) == 0 {
 		members = append(members, "DIRECT")
-	}
-
-	proxiesSeq := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
-	for _, m := range members {
-		proxiesSeq.Content = append(proxiesSeq.Content, yamlStrNode(m))
 	}
 
 	m := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
 	yamlMapSet(m, "name", yamlStrNode(cg.Name))
 	yamlMapSet(m, "type", yamlStrNode(cg.Type))
-	yamlMapSet(m, "proxies", proxiesSeq)
+	if len(members) > 0 {
+		proxiesSeq := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
+		for _, member := range members {
+			proxiesSeq.Content = append(proxiesSeq.Content, yamlStrNode(member))
+		}
+		yamlMapSet(m, "proxies", proxiesSeq)
+	}
+	if hasDynamic && strings.TrimSpace(cg.Filter) != "" {
+		yamlMapSet(m, "filter", yamlStrNode(cg.Filter))
+	}
 
-	if cg.Type != "select" {
+	if cg.Type != "select" && cg.Type != "relay" {
 		testURL := strings.TrimSpace(cg.URL)
 		if testURL == "" {
 			testURL = "https://www.gstatic.com/generate_204"
@@ -452,8 +484,23 @@ func buildCustomGroupNode(cg MihomoCustomGroup, allProxies []string) *yaml.Node 
 		}
 		yamlMapSet(m, "url", yamlStrNode(testURL))
 		yamlMapSet(m, "interval", yamlIntNode(interval))
-		if cg.Type == "url-test" && cg.Tolerance > 0 {
+		if cg.Tolerance > 0 {
 			yamlMapSet(m, "tolerance", yamlIntNode(cg.Tolerance))
+		}
+	}
+
+	if len(cg.Extra) > 0 {
+		keys := make([]string, 0, len(cg.Extra))
+		for k := range cg.Extra {
+			if !mihomoGroupCoreKeys[k] {
+				keys = append(keys, k)
+			}
+		}
+		slices.Sort(keys)
+		for _, k := range keys {
+			if node, err := marshalYAMLNode(normalizeMihomoValueForYAML(cg.Extra[k])); err == nil && node != nil {
+				yamlMapSet(m, k, node)
+			}
 		}
 	}
 	return m

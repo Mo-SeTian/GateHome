@@ -6,16 +6,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/dlclark/regexp2"
 )
 
 // MihomoCoreSettings defines GateHome-managed mihomo core runtime and port overrides.
@@ -74,14 +76,15 @@ type MihomoSubscriptionView struct {
 
 // MihomoCustomGroup represents a user-defined proxy group layered into runtime.yaml.
 type MihomoCustomGroup struct {
-	ID        string   `json:"id"`
-	Name      string   `json:"name"`
-	Type      string   `json:"type"`
-	Proxies   []string `json:"proxies"`
-	Filter    string   `json:"filter,omitempty"`
-	URL       string   `json:"url,omitempty"`
-	Interval  int      `json:"interval,omitempty"`
-	Tolerance int      `json:"tolerance,omitempty"`
+	ID        string         `json:"id"`
+	Name      string         `json:"name"`
+	Type      string         `json:"type"`
+	Proxies   []string       `json:"proxies"`
+	Filter    string         `json:"filter,omitempty"`
+	URL       string         `json:"url,omitempty"`
+	Interval  int            `json:"interval,omitempty"`
+	Tolerance int            `json:"tolerance,omitempty"`
+	Extra     map[string]any `json:"extra,omitempty"`
 }
 
 // MihomoCustomRule represents a high-priority custom routing rule prepended to rules.
@@ -181,6 +184,90 @@ var validMihomoGroupTypes = map[string]bool{
 	"url-test":     true,
 	"fallback":     true,
 	"load-balance": true,
+	"smart":        true,
+	"relay":        true,
+}
+
+var mihomoGroupCoreKeys = map[string]bool{
+	"name":      true,
+	"type":      true,
+	"proxies":   true,
+	"filter":    true,
+	"url":       true,
+	"interval":  true,
+	"tolerance": true,
+}
+
+type mihomoRegex struct {
+	re *regexp2.Regexp
+}
+
+func compileMihomoRegex(pattern string) (*mihomoRegex, error) {
+	re, err := regexp2.Compile(pattern, regexp2.None)
+	if err != nil {
+		return nil, err
+	}
+	re.MatchTimeout = 200 * time.Millisecond
+	return &mihomoRegex{re: re}, nil
+}
+
+func (r *mihomoRegex) MatchString(s string) bool {
+	if r == nil || r.re == nil {
+		return false
+	}
+	ok, err := r.re.MatchString(s)
+	return err == nil && ok
+}
+
+func normalizeMihomoValueForYAML(v any) any {
+	switch x := v.(type) {
+	case float64:
+		if !math.IsNaN(x) && !math.IsInf(x, 0) && x == math.Trunc(x) && x >= -9e15 && x <= 9e15 {
+			return int64(x)
+		}
+		return x
+	case []any:
+		out := make([]any, len(x))
+		for i, item := range x {
+			out[i] = normalizeMihomoValueForYAML(item)
+		}
+		return out
+	case map[string]any:
+		out := make(map[string]any, len(x))
+		for k, item := range x {
+			out[k] = normalizeMihomoValueForYAML(item)
+		}
+		return out
+	case map[any]any:
+		out := make(map[string]any, len(x))
+		for k, item := range x {
+			out[fmt.Sprint(k)] = normalizeMihomoValueForYAML(item)
+		}
+		return out
+	default:
+		return v
+	}
+}
+
+func normalizeMihomoExtra(extra map[string]any) (map[string]any, error) {
+	if len(extra) == 0 {
+		return nil, nil
+	}
+	out := make(map[string]any, len(extra))
+	for k, v := range extra {
+		key := strings.TrimSpace(k)
+		if key == "" || len(key) > 128 || strings.ContainsAny(key, "\r\n:") {
+			return nil, errors.New("策略组扩展字段名无效")
+		}
+		if mihomoGroupCoreKeys[key] {
+			continue
+		}
+		out[key] = normalizeMihomoValueForYAML(v)
+	}
+	if len(out) == 0 {
+		return nil, nil
+	}
+	return out, nil
 }
 
 var validMihomoRuleTypes = map[string]bool{
@@ -392,12 +479,15 @@ func validateMihomoCustomGroup(g MihomoCustomGroup) error {
 		return errors.New("策略组名称不能为空，不能包含逗号或换行，且不超过 128 字符")
 	}
 	if !validMihomoGroupTypes[g.Type] {
-		return errors.New("策略组类型须为 select、url-test、fallback 或 load-balance")
+		return errors.New("策略组类型须为 select、url-test、fallback、load-balance、smart 或 relay")
 	}
 	if strings.TrimSpace(g.Filter) != "" {
-		if _, err := regexp.Compile(g.Filter); err != nil {
+		if _, err := compileMihomoRegex(g.Filter); err != nil {
 			return fmt.Errorf("节点筛选正则无效: %v", err)
 		}
+	}
+	if _, err := normalizeMihomoExtra(g.Extra); err != nil {
+		return err
 	}
 	if g.Interval < 0 || g.Interval > 86400 {
 		return errors.New("测速间隔须为 0–86400 秒")
@@ -504,7 +594,7 @@ func validateMihomoSubscriptionFilters(includeFilter, excludeFilter, nodeSuffix 
 		if len(inc) > 512 {
 			return errors.New("保留节点正则不能超过 512 字符")
 		}
-		if _, err := regexp.Compile(inc); err != nil {
+		if _, err := compileMihomoRegex(inc); err != nil {
 			return fmt.Errorf("保留节点正则无效: %v", err)
 		}
 	}
@@ -512,7 +602,7 @@ func validateMihomoSubscriptionFilters(includeFilter, excludeFilter, nodeSuffix 
 		if len(exc) > 512 {
 			return errors.New("排除节点正则不能超过 512 字符")
 		}
-		if _, err := regexp.Compile(exc); err != nil {
+		if _, err := compileMihomoRegex(exc); err != nil {
 			return fmt.Errorf("排除节点正则无效: %v", err)
 		}
 	}

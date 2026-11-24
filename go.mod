@@ -3,6 +3,28 @@ module gatehouse
 go 1.27.1
 
 require (
+	github.com/corazawaf/coraza-coreruleset/v4 v4.25.0
+	github.com/corazawaf/coraza/v3 v3.8.1
+	github.com/dlclark/regexp2 v1.12.0
+	github.com/go-acme/lego/v4 v4.35.2
+	github.com/go-webauthn/webauthn v0.18.2
+	github.com/lionsoul2014/ip2region/binding/golang v0.0.0-20261008081544-02f04aa559ac
+	github.com/miekg/dns v1.1.72
+	github.com/modelcontextprotocol/go-sdk v1.8.0
+	github.com/mozillazg/go-pinyin v0.21.0
+	golang.org/x/crypto v0.57.0
+	golang.org/x/image v0.46.0
+	golang.org/x/net v0.58.0
+	golang.org/x/sync v0.23.0
+	golang.org/x/sys v0.48.0
+	golang.org/x/term v0.46.0
+	golang.zx2c4.com/wireguard v0.0.0-20261024220952-b3bc704ef0ee
+	gopkg.in/yaml.v3 v3.0.1
+	gvisor.dev/gvisor v0.0.0-20250503011706-39ed1f5ac29c
+	sun-panel v0.0.0
+)
+
+require (
 	github.com/PuerkitoBio/goquery v1.8.1 // indirect
 	github.com/andybalholm/cascadia v1.3.1 // indirect
 	github.com/bytedance/sonic v1.8.0 // indirect
@@ -48,8 +70,6 @@ require (
 	github.com/magefile/mage v1.17.0 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.21 // indirect
-	github.com/mattn/go-sqlite3 v1.14.18 // indirect
-	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.3-0.20250322232337-35a7c28c31ee // indirect
 	github.com/mojocn/base64Captcha v1.3.5 // indirect
@@ -87,34 +107,13 @@ require (
 	golang.zx2c4.com/wintun v0.0.0-20230126152724-0fa3db229ce2 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/ini.v1 v1.67.1 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 	gorm.io/driver/mysql v1.5.0 // indirect
-	gorm.io/driver/sqlite v1.5.4 // indirect
 	gorm.io/gorm v1.25.7 // indirect
 	modernc.org/libc v1.22.5 // indirect
 	modernc.org/mathutil v1.5.0 // indirect
 	modernc.org/memory v1.5.0 // indirect
 	modernc.org/sqlite v1.23.1 // indirect
 	rsc.io/binaryregexp v0.2.0 // indirect
-)
-
-require (
-	github.com/corazawaf/coraza-coreruleset/v4 v4.25.0
-	github.com/corazawaf/coraza/v3 v3.8.1
-	github.com/go-acme/lego/v4 v4.35.2
-	github.com/go-webauthn/webauthn v0.18.2
-	github.com/lionsoul2014/ip2region/binding/golang v0.0.0-20261008081544-02f04aa559ac
-	github.com/miekg/dns v1.1.72
-	github.com/mozillazg/go-pinyin v0.21.0
-	golang.org/x/crypto v0.57.0
-	golang.org/x/image v0.46.0
-	golang.org/x/net v0.58.0
-	golang.org/x/sync v0.23.0
-	golang.org/x/sys v0.48.0
-	golang.org/x/term v0.46.0
-	golang.zx2c4.com/wireguard v0.0.0-20261024220952-b3bc704ef0ee
-	gvisor.dev/gvisor v0.0.0-20250503011706-39ed1f5ac29c
-	sun-panel v0.0.0
 )
 
 replace sun-panel => ./sunpanel/service

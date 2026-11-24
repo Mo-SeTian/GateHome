@@ -2175,6 +2175,10 @@ try {
       val.includes('rule-providers:') && val.includes('lan-custom:')
   })
   assert.ok((await mihomoPage.locator('.yaml-editor').boundingBox()).height >= 400, 'runtime yaml editor must keep its expanded height')
+  const runtimeShell = mihomoPage.locator('.yaml-editor-shell .yaml-code-shell')
+  assert.ok((await runtimeShell.locator('.yaml-gutter-num').count()) >= 10, 'yaml editor must render line numbers')
+  assert.ok((await runtimeShell.locator('.yaml-indent-guide').count()) > 0, 'yaml editor must render indent guide lines')
+  assert.ok((await runtimeShell.locator('.tok-key').count()) > 0 && (await runtimeShell.locator('.tok-rule').count()) > 0, 'yaml editor must highlight keys and rules')
   const runtimeYamlText = await mihomoPage.locator('.yaml-editor').inputValue()
   assert.ok(runtimeYamlText.includes('mixed-port: 17890') && runtimeYamlText.includes('port: 17891') && runtimeYamlText.includes('socks-port: 17892'))
   assert.ok(runtimeYamlText.includes('listen: 0.0.0.0:17853') && runtimeYamlText.includes('cdn-hk.example.com') && runtimeYamlText.includes('+.corp.internal'))
@@ -2183,12 +2187,14 @@ try {
   assert.ok(runtimeYamlText.includes('DOMAIN-SUFFIX,anthropic.com,HK 专线'))
   assert.ok(runtimeYamlText.includes('rule-providers:') && runtimeYamlText.includes('RULE-SET,lan-custom,HK 专线'))
 
-  // Modify runtime.yaml and verify validate-before-save gate
+  // Modify runtime.yaml and verify validate-before-save gate + error positioning
   const saveYamlBtn = mihomoPage.getByRole('button', { name: '保存并热重载' })
   await mihomoPage.locator('.yaml-editor').fill('proxies:\n  - [broken')
   assert.equal(await saveYamlBtn.isDisabled(), true)
+  await runtimeShell.locator('.yaml-code-row.error').first().waitFor()
   await mihomoPage.getByRole('button', { name: '校验配置' }).click()
   await mihomoPage.locator('.yaml-validation-banner.invalid').waitFor()
+  await runtimeShell.locator('.yaml-error-jump').click()
   assert.equal(await saveYamlBtn.isDisabled(), true)
 
   // Restore valid YAML, validate, save, then resync

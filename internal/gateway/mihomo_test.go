@@ -2334,3 +2334,95 @@ func TestMihomoLogRingRedactsSensitivePatterns(t *testing.T) {
 		}
 	}
 }
+
+func TestMihomoExtendedGroupFieldsAndPCRERegex(t *testing.T) {
+	a, h := testAdmin(t)
+	cookie := loginForTest(t, h)
+
+	// 1. PCRE lookahead/lookbehind filter regex works directly.
+	re, err := compileMihomoRegex(`^(?=.*(?<!深)(港|HK|(?i)Hong))(?!(.*(台|本|坡|美))).*$`)
+	if err != nil {
+		t.Fatalf("compileMihomoRegex PCRE failed: %v", err)
+	}
+	if !re.MatchString("HK-01") || !re.MatchString("HongKong-IPLC") || re.MatchString("深港专线") || re.MatchString("香港转日本") {
+		t.Fatalf("unexpected PCRE match results on sample node names")
+	}
+
+	// 2. Full user-reported YAML (extra Mihomo group fields + PCRE regexes) passes PUT /api/mihomo/custom/groups/yaml and round-trips.
+	groupsYAML := `# GateHome 自定义策略组
+proxy-groups:
+  - name: OpenAI
+    type: fallback
+    filter: 日本|IEPL
+    url: https://www.gstatic.com/generate_204
+    interval: 300
+  - name: '香港专线'
+    type: fallback
+    icon: 'https://gitea.nn1nn.top:39919/mosetian/MySelfRules/raw/branch/main/icon/IconSet/Color/Hong_Kong.png'
+    include-all: true
+    filter: '^(?=.*(?<!深)(港|HK|(?i)Hong))(?!(.*(台|本|坡|美))).*$'
+    url: 'https://www.gstatic.com/generate_204'
+    interval: 30
+    tolerance: 20
+    lazy: true
+    timeout: 10000
+    max-failed-times: 2
+  - name: '日本专线'
+    type: fallback
+    icon: 'https://gitea.nn1nn.top:39919/mosetian/MySelfRules/raw/branch/main/icon/IconSet/Color/JP.png'
+    include-all: true
+    filter: '^(?=.*(?i:日|🇯🇵|JP|Japan|NRT|HND|KIX|CTS|FUK)).*$'
+    url: 'https://detectportal.firefox.com/success.txt'
+    interval: 45
+    tolerance: 0
+    lazy: false
+    timeout: 2000
+    uselightgbm: false
+    collectdata: false
+    sample-rate: 1
+    prefer-asn: false
+`
+	if rec := adminRequest(h, "PUT", "/api/mihomo/custom/groups/yaml", map[string]any{"content": groupsYAML, "validate_only": true}, cookie, ""); rec.Code != 200 {
+		t.Fatalf("validate extended groups yaml failed: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := adminRequest(h, "PUT", "/api/mihomo/custom/groups/yaml", map[string]any{"content": groupsYAML}, cookie, ""); rec.Code != 200 {
+		t.Fatalf("save extended groups yaml failed: %d %s", rec.Code, rec.Body.String())
+	}
+
+	rtBytes, err := os.ReadFile(a.mihomo.runtimePath())
+	if err != nil {
+		t.Fatalf("read runtime.yaml failed: %v", err)
+	}
+	rt := string(rtBytes)
+	for _, want := range []string{
+		"include-all: true",
+		"max-failed-times: 2",
+		"timeout: 10000",
+		"uselightgbm: false",
+		"collectdata: false",
+		"sample-rate: 1",
+		"prefer-asn: false",
+		"tolerance: 20",
+		"^(?=.*(?<!深)(港|HK|(?i)Hong))(?!(.*(台|本|坡|美))).*$",
+	} {
+		if !strings.Contains(rt, want) {
+			t.Fatalf("runtime.yaml missing %q:\n%s", want, rt)
+		}
+	}
+
+	// Editing a group via UI form without sending extra preserves its extended YAML fields.
+	rec := adminRequest(h, "GET", "/api/mihomo/custom/groups/yaml", nil, cookie, "")
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "uselightgbm: false") {
+		t.Fatalf("groups yaml GET lost extended fields: %d %s", rec.Code, rec.Body.String())
+	}
+	hk := a.mihomo.cfg.CustomGroups[1]
+	hk.Interval = 60
+	hk.Extra = nil
+	if rec := adminRequest(h, "POST", "/api/mihomo/groups", hk, cookie, ""); rec.Code != 200 {
+		t.Fatalf("UI group update failed: %d %s", rec.Code, rec.Body.String())
+	}
+	rec = adminRequest(h, "GET", "/api/mihomo/custom/groups/yaml", nil, cookie, "")
+	if !strings.Contains(rec.Body.String(), "max-failed-times: 2") || !strings.Contains(rec.Body.String(), "interval: 60") {
+		t.Fatalf("UI update stripped extra fields: %s", rec.Body.String())
+	}
+}
