@@ -570,6 +570,10 @@ func (a *Admin) handleMihomoAddRule(w http.ResponseWriter, r *http.Request) {
 	input.Value = strings.TrimSpace(input.Value)
 	input.Target = strings.TrimSpace(input.Target)
 	input.Comment = strings.TrimSpace(input.Comment)
+	if input.Type == "MATCH" {
+		input.Value = ""
+		input.NoResolve = false
+	}
 	if input.ID == "" {
 		input.ID = randomMihomoID("rule")
 	}
@@ -581,7 +585,11 @@ func (a *Admin) handleMihomoAddRule(w http.ResponseWriter, r *http.Request) {
 	m := a.mihomo
 	m.mu.Lock()
 	next := m.cfg
-	next.CustomRules = append([]MihomoCustomRule{input}, m.cfg.CustomRules...)
+	if input.Type == "MATCH" {
+		next.CustomRules = append(slices.Clone(m.cfg.CustomRules), input)
+	} else {
+		next.CustomRules = append([]MihomoCustomRule{input}, m.cfg.CustomRules...)
+	}
 	next.ManualOverride = false
 	if err := saveMihomoConfig(m.dir, next); err != nil {
 		m.mu.Unlock()
@@ -616,6 +624,10 @@ func (a *Admin) handleMihomoSaveRules(w http.ResponseWriter, r *http.Request) {
 		rule.Value = strings.TrimSpace(rule.Value)
 		rule.Target = strings.TrimSpace(rule.Target)
 		rule.Comment = strings.TrimSpace(rule.Comment)
+		if rule.Type == "MATCH" {
+			rule.Value = ""
+			rule.NoResolve = false
+		}
 		if rule.ID == "" {
 			rule.ID = randomMihomoID("rule")
 		}
@@ -777,12 +789,13 @@ func (a *Admin) handleMihomoDeleteDNSPolicy(w http.ResponseWriter, r *http.Reque
 }
 func (a *Admin) handleMihomoAddSubscription(w http.ResponseWriter, r *http.Request) {
 	var input struct {
-		Name          string `json:"name"`
-		URL           string `json:"url"`
-		YAMLContent   string `json:"yaml_content"`
-		IncludeFilter string `json:"include_filter"`
-		ExcludeFilter string `json:"exclude_filter"`
-		NodeSuffix    string `json:"node_suffix"`
+		Name                  string `json:"name"`
+		URL                   string `json:"url"`
+		YAMLContent           string `json:"yaml_content"`
+		IncludeFilter         string `json:"include_filter"`
+		ExcludeFilter         string `json:"exclude_filter"`
+		NodeSuffix            string `json:"node_suffix"`
+		ExcludeGroupsAndRules bool   `json:"exclude_groups_and_rules"`
 	}
 	if !decodeBody(w, r, &input) {
 		return
@@ -815,12 +828,13 @@ func (a *Admin) handleMihomoAddSubscription(w http.ResponseWriter, r *http.Reque
 	m := a.mihomo
 	id := randomMihomoID("sub")
 	sub := MihomoSubscription{
-		ID:            id,
-		Name:          name,
-		URL:           subURL,
-		IncludeFilter: incFilter,
-		ExcludeFilter: excFilter,
-		NodeSuffix:    nodeSuffix,
+		ID:                    id,
+		Name:                  name,
+		URL:                   subURL,
+		IncludeFilter:         incFilter,
+		ExcludeFilter:         excFilter,
+		NodeSuffix:            nodeSuffix,
+		ExcludeGroupsAndRules: input.ExcludeGroupsAndRules,
 	}
 
 	var data []byte
@@ -881,11 +895,12 @@ func (a *Admin) handleMihomoAddSubscription(w http.ResponseWriter, r *http.Reque
 func (a *Admin) handleMihomoUpdateSubscription(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	var input struct {
-		Name          string `json:"name"`
-		URL           string `json:"url"`
-		IncludeFilter string `json:"include_filter"`
-		ExcludeFilter string `json:"exclude_filter"`
-		NodeSuffix    string `json:"node_suffix"`
+		Name                  string `json:"name"`
+		URL                   string `json:"url"`
+		IncludeFilter         string `json:"include_filter"`
+		ExcludeFilter         string `json:"exclude_filter"`
+		NodeSuffix            string `json:"node_suffix"`
+		ExcludeGroupsAndRules bool   `json:"exclude_groups_and_rules"`
 	}
 	if !decodeBody(w, r, &input) {
 		return
@@ -927,6 +942,7 @@ func (a *Admin) handleMihomoUpdateSubscription(w http.ResponseWriter, r *http.Re
 	next.Subscriptions[idx].IncludeFilter = incFilter
 	next.Subscriptions[idx].ExcludeFilter = excFilter
 	next.Subscriptions[idx].NodeSuffix = nodeSuffix
+	next.Subscriptions[idx].ExcludeGroupsAndRules = input.ExcludeGroupsAndRules
 
 	isActive := next.ActiveSubscriptionID == id
 	if isActive {

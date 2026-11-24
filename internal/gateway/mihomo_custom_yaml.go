@@ -215,6 +215,7 @@ func customRulesToYAML(rules []MihomoCustomRule) string {
 		"#   - IP-CIDR,192.168.0.0/16,DIRECT,no-resolve",
 		"#   - DST-PORT,22,DIRECT",
 		"#   - RULE-SET,openai,OpenAI",
+		"#   - MATCH,节点选择",
 		"#   - rule: DOMAIN-SUFFIX,example.com,DIRECT",
 		"#     enabled: false",
 		"#     comment: 临时停用规则备注",
@@ -258,21 +259,44 @@ func validateAndBuildCustomRules(entries []customRuleEntry, existing []MihomoCus
 		for j := range parts {
 			parts[j] = strings.TrimSpace(parts[j])
 		}
-		if len(parts) < 3 {
-			return nil, fmt.Errorf("第 %d 条规则格式应为 类型,内容,目标[,no-resolve]: %q", i+1, e.Rule)
-		}
-		rule := MihomoCustomRule{
-			Type:    strings.ToUpper(parts[0]),
-			Value:   parts[1],
-			Target:  parts[2],
-			Enabled: e.Enabled,
-			Comment: e.Comment,
-		}
-		for _, extra := range parts[3:] {
-			if strings.EqualFold(extra, "no-resolve") {
-				rule.NoResolve = true
-			} else if extra != "" {
-				return nil, fmt.Errorf("第 %d 条规则含不支持的参数: %s", i+1, extra)
+		var rule MihomoCustomRule
+		if len(parts) > 0 && strings.EqualFold(parts[0], "MATCH") {
+			var target string
+			switch len(parts) {
+			case 2:
+				target = parts[1]
+			case 3:
+				if parts[1] != "" {
+					return nil, fmt.Errorf("第 %d 条 MATCH 规则格式应为 MATCH,目标: %q", i+1, e.Rule)
+				}
+				target = parts[2]
+			default:
+				return nil, fmt.Errorf("第 %d 条 MATCH 规则格式应为 MATCH,目标: %q", i+1, e.Rule)
+			}
+			rule = MihomoCustomRule{
+				Type:    "MATCH",
+				Value:   "",
+				Target:  target,
+				Enabled: e.Enabled,
+				Comment: e.Comment,
+			}
+		} else {
+			if len(parts) < 3 {
+				return nil, fmt.Errorf("第 %d 条规则格式应为 类型,内容,目标[,no-resolve]: %q", i+1, e.Rule)
+			}
+			rule = MihomoCustomRule{
+				Type:    strings.ToUpper(parts[0]),
+				Value:   parts[1],
+				Target:  parts[2],
+				Enabled: e.Enabled,
+				Comment: e.Comment,
+			}
+			for _, extra := range parts[3:] {
+				if strings.EqualFold(extra, "no-resolve") {
+					rule.NoResolve = true
+				} else if extra != "" {
+					return nil, fmt.Errorf("第 %d 条规则含不支持的参数: %s", i+1, extra)
+				}
 			}
 		}
 		if err := validateMihomoCustomRule(rule); err != nil {

@@ -40,38 +40,40 @@ type MihomoCoreSettings struct {
 
 // MihomoSubscription represents a managed proxy subscription source.
 type MihomoSubscription struct {
-	ID            string    `json:"id"`
-	Name          string    `json:"name"`
-	URL           string    `json:"url,omitempty"`
-	IncludeFilter string    `json:"include_filter,omitempty"`
-	ExcludeFilter string    `json:"exclude_filter,omitempty"`
-	NodeSuffix    string    `json:"node_suffix,omitempty"`
-	UpdatedAt     time.Time `json:"updated_at,omitempty"`
-	NodeCount     int       `json:"node_count"`
-	LastError     string    `json:"last_error,omitempty"`
-	Upload        int64     `json:"upload,omitempty"`
-	Download      int64     `json:"download,omitempty"`
-	Total         int64     `json:"total,omitempty"`
-	Expire        int64     `json:"expire,omitempty"`
+	ID                    string    `json:"id"`
+	Name                  string    `json:"name"`
+	URL                   string    `json:"url,omitempty"`
+	IncludeFilter         string    `json:"include_filter,omitempty"`
+	ExcludeFilter         string    `json:"exclude_filter,omitempty"`
+	NodeSuffix            string    `json:"node_suffix,omitempty"`
+	ExcludeGroupsAndRules bool      `json:"exclude_groups_and_rules"`
+	UpdatedAt             time.Time `json:"updated_at,omitempty"`
+	NodeCount             int       `json:"node_count"`
+	LastError             string    `json:"last_error,omitempty"`
+	Upload                int64     `json:"upload,omitempty"`
+	Download              int64     `json:"download,omitempty"`
+	Total                 int64     `json:"total,omitempty"`
+	Expire                int64     `json:"expire,omitempty"`
 }
 
 // MihomoSubscriptionView exposes subscription metadata without leaking credentials or query tokens.
 type MihomoSubscriptionView struct {
-	ID            string    `json:"id"`
-	Name          string    `json:"name"`
-	URLHost       string    `json:"url_host,omitempty"`
-	URLMasked     string    `json:"url_masked,omitempty"`
-	HasURL        bool      `json:"has_url"`
-	IncludeFilter string    `json:"include_filter,omitempty"`
-	ExcludeFilter string    `json:"exclude_filter,omitempty"`
-	NodeSuffix    string    `json:"node_suffix,omitempty"`
-	UpdatedAt     time.Time `json:"updated_at,omitempty"`
-	NodeCount     int       `json:"node_count"`
-	LastError     string    `json:"last_error,omitempty"`
-	Upload        int64     `json:"upload,omitempty"`
-	Download      int64     `json:"download,omitempty"`
-	Total         int64     `json:"total,omitempty"`
-	Expire        int64     `json:"expire,omitempty"`
+	ID                    string    `json:"id"`
+	Name                  string    `json:"name"`
+	URLHost               string    `json:"url_host,omitempty"`
+	URLMasked             string    `json:"url_masked,omitempty"`
+	HasURL                bool      `json:"has_url"`
+	IncludeFilter         string    `json:"include_filter,omitempty"`
+	ExcludeFilter         string    `json:"exclude_filter,omitempty"`
+	NodeSuffix            string    `json:"node_suffix,omitempty"`
+	ExcludeGroupsAndRules bool      `json:"exclude_groups_and_rules"`
+	UpdatedAt             time.Time `json:"updated_at,omitempty"`
+	NodeCount             int       `json:"node_count"`
+	LastError             string    `json:"last_error,omitempty"`
+	Upload                int64     `json:"upload,omitempty"`
+	Download              int64     `json:"download,omitempty"`
+	Total                 int64     `json:"total,omitempty"`
+	Expire                int64     `json:"expire,omitempty"`
 }
 
 // MihomoCustomGroup represents a user-defined proxy group layered into runtime.yaml.
@@ -282,6 +284,7 @@ var validMihomoRuleTypes = map[string]bool{
 	"GEOIP":          true,
 	"PROCESS-NAME":   true,
 	"RULE-SET":       true,
+	"MATCH":          true,
 }
 
 func randomMihomoSecret() string {
@@ -515,7 +518,7 @@ func validateMihomoCustomRule(r MihomoCustomRule) error {
 		return fmt.Errorf("不支持的规则类型: %s", r.Type)
 	}
 	value := strings.TrimSpace(r.Value)
-	if value == "" || len(value) > 512 || strings.ContainsAny(value, ",\r\n ") {
+	if ruleType != "MATCH" && (value == "" || len(value) > 512 || strings.ContainsAny(value, ",\r\n ")) {
 		return errors.New("匹配内容不能为空，且不能包含逗号、空格或换行")
 	}
 	target := strings.TrimSpace(r.Target)
@@ -646,21 +649,22 @@ func toSubscriptionViews(subs []MihomoSubscription) []MihomoSubscriptionView {
 	for _, s := range subs {
 		host, masked, hasURL := maskSubscriptionURL(s.URL)
 		out = append(out, MihomoSubscriptionView{
-			ID:            s.ID,
-			Name:          s.Name,
-			URLHost:       host,
-			URLMasked:     masked,
-			HasURL:        hasURL,
-			IncludeFilter: s.IncludeFilter,
-			ExcludeFilter: s.ExcludeFilter,
-			NodeSuffix:    s.NodeSuffix,
-			UpdatedAt:     s.UpdatedAt,
-			NodeCount:     s.NodeCount,
-			LastError:     s.LastError,
-			Upload:        s.Upload,
-			Download:      s.Download,
-			Total:         s.Total,
-			Expire:        s.Expire,
+			ID:                    s.ID,
+			Name:                  s.Name,
+			URLHost:               host,
+			URLMasked:             masked,
+			HasURL:                hasURL,
+			IncludeFilter:         s.IncludeFilter,
+			ExcludeFilter:         s.ExcludeFilter,
+			NodeSuffix:            s.NodeSuffix,
+			ExcludeGroupsAndRules: s.ExcludeGroupsAndRules,
+			UpdatedAt:             s.UpdatedAt,
+			NodeCount:             s.NodeCount,
+			LastError:             s.LastError,
+			Upload:                s.Upload,
+			Download:              s.Download,
+			Total:                 s.Total,
+			Expire:                s.Expire,
 		})
 	}
 	return out

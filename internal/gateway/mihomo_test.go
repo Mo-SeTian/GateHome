@@ -2571,3 +2571,220 @@ func TestMihomoRuleSetStatsAndBatchUpdate(t *testing.T) {
 		t.Fatalf("expected single update to call PUT again, got %d", putCalls["remote-ai"])
 	}
 }
+
+func TestMihomoSubscriptionExcludeGroupsAndRules(t *testing.T) {
+	sourceYAML := []byte(`
+proxies:
+  - { name: "公告: 到期", type: ss, server: 1.1.1.1, port: 443 }
+  - { name: "HK-01", type: ss, server: 1.1.1.2, port: 443 }
+  - { name: "JP-01", type: ss, server: 1.1.1.3, port: 443 }
+proxy-groups:
+  - name: "机场总览"
+    type: select
+    proxies: ["HK-01", "JP-01", "DIRECT"]
+  - name: "机场测速"
+    type: url-test
+    proxies: ["HK-01", "JP-01"]
+rule-providers:
+  airport-ad:
+    type: http
+    behavior: domain
+    format: yaml
+    url: https://example.com/ad.yaml
+    path: ./ruleset/airport-ad.yaml
+rules:
+  - "RULE-SET,airport-ad,REJECT"
+  - "DOMAIN-SUFFIX,airport.example,机场总览"
+  - "MATCH,机场总览"
+`)
+
+	cfg := defaultMihomoConfig()
+	cfg.ActiveSubscriptionID = "sub-1"
+	cfg.Subscriptions = []MihomoSubscription{{
+		ID:                    "sub-1",
+		Name:                  "纯节点机场",
+		IncludeFilter:         "HK|JP",
+		NodeSuffix:            " [自用]",
+		ExcludeGroupsAndRules: true,
+	}}
+	cfg.CustomGroups = []MihomoCustomGroup{{
+		ID:      "grp-custom",
+		Name:    "漏网之鱼",
+		Type:    "select",
+		Proxies: []string{"ALL_NODES", "DIRECT"},
+	}}
+	cfg.CustomRuleSets = []MihomoRuleSet{{
+		ID:       "rs-custom",
+		Name:     "my-ai",
+		Source:   "manual",
+		Behavior: "domain",
+		Format:   "yaml",
+		Path:     "./ruleset/manual/my-ai.yaml",
+		Content:  "payload:\n  - '+.openai.com'\n",
+		Enabled:  true,
+	}}
+	cfg.CustomRules = []MihomoCustomRule{
+		{ID: "r1", Type: "RULE-SET", Value: "my-ai", Target: "漏网之鱼", Enabled: true},
+		{ID: "r2", Type: "MATCH", Target: "漏网之鱼", Enabled: true},
+	}
+
+	out, err := synthesizeMihomoYAML(sourceYAML, cfg)
+	if err != nil {
+		t.Fatalf("synthesize with ExcludeGroupsAndRules failed: %v", err)
+	}
+	text := string(out)
+	groups, nodes := extractYAMLGroupsAndNodes(out, cfg.CustomGroups)
+	if len(nodes) != 2 || nodes[0] != "HK-01 [自用]" || nodes[1] != "JP-01 [自用]" {
+		t.Fatalf("expected transformed proxies kept, got %v", nodes)
+	}
+	if len(groups) != 1 || groups[0].Name != "漏网之鱼" {
+		t.Fatalf("expected only custom proxy-groups, got %+v", groups)
+	}
+	for _, unwanted := range []string{"机场总览", "机场测速", "airport-ad", "airport.example"} {
+		if strings.Contains(text, unwanted) {
+			t.Fatalf("expected airport group/provider/rule %q excluded from runtime.yaml:\n%s", unwanted, text)
+		}
+	}
+	for _, wanted := range []string{"my-ai", "RULE-SET,my-ai,漏网之鱼", "MATCH,漏网之鱼"} {
+		if !strings.Contains(text, wanted) {
+			t.Fatalf("expected custom entry %q in runtime.yaml:\n%s", wanted, text)
+		}
+	}
+
+	// API persistence & toggle round-trip
+	_, h := testAdmin(t)
+	cookie := loginForTest(t, h)
+
+	if rec := adminRequest(h, "POST", "/api/mihomo/groups", map[string]any{
+		"name":    "漏网之鱼",
+		"type":    "select",
+		"proxies": []string{"ALL_NODES", "DIRECT"},
+	}, cookie, ""); rec.Code != 200 {
+		t.Fatalf("add custom group failed: %d %s", rec.Code, rec.Body.String())
+	}
+
+	rec := adminRequest(h, "POST", "/api/mihomo/subscriptions", map[string]any{
+		"name":                     "机场B",
+		"yaml_content":             string(sourceYAML),
+		"exclude_groups_and_rules": true,
+	}, cookie, "")
+	if rec.Code != 200 {
+		t.Fatalf("POST subscription with exclude_groups_and_rules failed: %d %s", rec.Code, rec.Body.String())
+	}
+	var st mihomoStatusResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &st); err != nil {
+		t.Fatalf("decode status failed: %v", err)
+	}
+	if len(st.Subscriptions) != 1 || !st.Subscriptions[0].ExcludeGroupsAndRules {
+		t.Fatalf("expected exclude_groups_and_rules persisted in view, got %+v", st.Subscriptions)
+	}
+	subID := st.Subscriptions[0].ID
+
+	rtRes := adminRequest(h, "GET", "/api/mihomo/config/yaml?kind=runtime", nil, cookie, "")
+	if rtRes.Code != 200 {
+		t.Fatalf("GET runtime yaml failed: %d", rtRes.Code)
+	}
+	var rtBody struct {
+		Content string `json:"content"`
+	}
+	_ = json.Unmarshal(rtRes.Body.Bytes(), &rtBody)
+	if strings.Contains(rtBody.Content, "机场总览") || strings.Contains(rtBody.Content, "airport-ad") {
+		t.Fatalf("expected runtime yaml to exclude airport groups/rules:\n%s", rtBody.Content)
+	}
+
+	// Disable exclude_groups_and_rules via PUT and confirm airport groups/rules are restored
+	putRes := adminRequest(h, "PUT", "/api/mihomo/subscriptions/"+subID, map[string]any{
+		"name":                     "机场B",
+		"exclude_groups_and_rules": false,
+	}, cookie, "")
+	if putRes.Code != 200 {
+		t.Fatalf("PUT subscription failed: %d %s", putRes.Code, putRes.Body.String())
+	}
+	var putSt mihomoStatusResponse
+	_ = json.Unmarshal(putRes.Body.Bytes(), &putSt)
+	if putSt.Subscriptions[0].ExcludeGroupsAndRules {
+		t.Fatalf("expected exclude_groups_and_rules disabled after PUT: %+v", putSt.Subscriptions[0])
+	}
+	rtRes = adminRequest(h, "GET", "/api/mihomo/config/yaml?kind=runtime", nil, cookie, "")
+	_ = json.Unmarshal(rtRes.Body.Bytes(), &rtBody)
+	if !strings.Contains(rtBody.Content, "机场总览") || !strings.Contains(rtBody.Content, "airport-ad") {
+		t.Fatalf("expected airport groups/rules restored after disabling exclusion:\n%s", rtBody.Content)
+	}
+}
+
+func TestMihomoMatchCustomRuleYAMLAndAPI(t *testing.T) {
+	if _, err := parseCustomRulesYAML([]byte("rules:\n  - MATCH\n"), nil); err == nil {
+		t.Fatal("expected single-token MATCH rule to fail parsing")
+	}
+	if _, err := parseCustomRulesYAML([]byte("rules:\n  - MATCH,extra,漏网之鱼\n"), nil); err == nil {
+		t.Fatal("expected MATCH with non-empty middle value to fail parsing")
+	}
+
+	_, h := testAdmin(t)
+	cookie := loginForTest(t, h)
+
+	// Add a normal rule, then a MATCH rule (must append to bottom), then another normal rule (must prepend to top).
+	for _, body := range []map[string]any{
+		{"type": "DOMAIN-SUFFIX", "value": "example.com", "target": "DIRECT", "enabled": true},
+		{"type": "MATCH", "value": "ignored", "target": "漏网之鱼", "no_resolve": true, "enabled": true},
+		{"type": "DOMAIN-SUFFIX", "value": "first.example", "target": "REJECT", "enabled": true},
+	} {
+		rec := adminRequest(h, "POST", "/api/mihomo/rules", body, cookie, "")
+		if rec.Code != 200 {
+			t.Fatalf("POST /api/mihomo/rules failed: %d %s", rec.Code, rec.Body.String())
+		}
+	}
+
+	statusRes := adminRequest(h, "GET", "/api/mihomo/status", nil, cookie, "")
+	if statusRes.Code != 200 {
+		t.Fatalf("GET status failed: %d", statusRes.Code)
+	}
+	var st mihomoStatusResponse
+	_ = json.Unmarshal(statusRes.Body.Bytes(), &st)
+	if len(st.CustomRules) != 3 {
+		t.Fatalf("expected 3 custom rules, got %+v", st.CustomRules)
+	}
+	if st.CustomRules[0].Value != "first.example" || st.CustomRules[1].Value != "example.com" {
+		t.Fatalf("unexpected non-MATCH ordering: %+v", st.CustomRules)
+	}
+	matchRule := st.CustomRules[2]
+	if matchRule.Type != "MATCH" || matchRule.Value != "" || matchRule.Target != "漏网之鱼" || matchRule.NoResolve {
+		t.Fatalf("unexpected MATCH rule stored: %+v", matchRule)
+	}
+
+	// GET custom rules YAML should render "- MATCH,漏网之鱼" cleanly
+	rulesYAMLRes := adminRequest(h, "GET", "/api/mihomo/custom/rules/yaml", nil, cookie, "")
+	if rulesYAMLRes.Code != 200 {
+		t.Fatalf("GET custom rules yaml failed: %d", rulesYAMLRes.Code)
+	}
+	var yamlResp struct {
+		Content string `json:"content"`
+	}
+	_ = json.Unmarshal(rulesYAMLRes.Body.Bytes(), &yamlResp)
+	if !strings.Contains(yamlResp.Content, "- MATCH,漏网之鱼") {
+		t.Fatalf("expected '- MATCH,漏网之鱼' in custom rules YAML:\n%s", yamlResp.Content)
+	}
+
+	// PUT custom rules YAML round-trips "- MATCH,漏网之鱼"
+	putYAML := "rules:\n  - DOMAIN-SUFFIX,openai.com,DIRECT\n  - MATCH,漏网之鱼\n"
+	putRes := adminRequest(h, "PUT", "/api/mihomo/custom/rules/yaml", map[string]any{"content": putYAML}, cookie, "")
+	if putRes.Code != 200 {
+		t.Fatalf("PUT custom rules yaml with MATCH failed: %d %s", putRes.Code, putRes.Body.String())
+	}
+	var putBody struct {
+		OK      bool                 `json:"ok"`
+		Content string               `json:"content"`
+		Status  mihomoStatusResponse `json:"status"`
+	}
+	_ = json.Unmarshal(putRes.Body.Bytes(), &putBody)
+	if len(putBody.Status.CustomRules) != 2 || putBody.Status.CustomRules[1].Type != "MATCH" || putBody.Status.CustomRules[1].Target != "漏网之鱼" || putBody.Status.CustomRules[1].Value != "" {
+		t.Fatalf("unexpected parsed custom rules after YAML save: %+v", putBody.Status.CustomRules)
+	}
+
+	// Runtime YAML should include MATCH,漏网之鱼
+	rtRes := adminRequest(h, "GET", "/api/mihomo/config/yaml?kind=runtime", nil, cookie, "")
+	_ = json.Unmarshal(rtRes.Body.Bytes(), &yamlResp)
+	if !strings.Contains(yamlResp.Content, "MATCH,漏网之鱼") {
+		t.Fatalf("expected MATCH,漏网之鱼 in runtime.yaml:\n%s", yamlResp.Content)
+	}
+}

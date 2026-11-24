@@ -166,6 +166,13 @@ func synthesizeMihomoYAML(sourceYAML []byte, cfg MihomoConfig) ([]byte, error) {
 		}
 	}
 
+	activeSub, hasActiveSub := activeSubscription(cfg)
+	if hasActiveSub && activeSub.ExcludeGroupsAndRules {
+		yamlMapDelete(root, "proxy-groups")
+		yamlMapDelete(root, "rules")
+		yamlMapDelete(root, "rule-providers")
+	}
+
 	// Layer 2.5: Custom YAML overlay (arbitrary top-level/nested overrides from custom.yaml)
 	if strings.TrimSpace(cfg.CustomOverlayYAML) != "" {
 		var overlayDoc yaml.Node
@@ -178,7 +185,7 @@ func synthesizeMihomoYAML(sourceYAML []byte, cfg MihomoConfig) ([]byte, error) {
 	}
 
 	// Apply active subscription node filters (include/exclude regex) and suffix renaming before collecting proxies.
-	if activeSub, ok := activeSubscription(cfg); ok {
+	if hasActiveSub {
 		applySubscriptionNodeTransform(root, activeSub)
 	}
 
@@ -394,7 +401,13 @@ func formatCustomRule(r MihomoCustomRule) string {
 	ruleType := strings.ToUpper(strings.TrimSpace(r.Type))
 	value := strings.TrimSpace(r.Value)
 	target := strings.TrimSpace(r.Target)
-	if ruleType == "" || value == "" || target == "" {
+	if ruleType == "" || target == "" {
+		return ""
+	}
+	if ruleType == "MATCH" {
+		return "MATCH," + target
+	}
+	if value == "" {
 		return ""
 	}
 	line := ruleType + "," + value + "," + target

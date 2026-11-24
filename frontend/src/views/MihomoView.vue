@@ -290,7 +290,8 @@
           <div v-for="rule in filteredRules" :key="rule.id" class="rule-row" :class="{ disabled: !rule.enabled }">
             <div class="rule-main">
               <span class="badge badge-neutral mono-text">{{ rule.type }}</span>
-              <span class="rule-value mono-text">{{ rule.value }}</span>
+              <span v-if="rule.type !== 'MATCH'" class="rule-value mono-text">{{ rule.value }}</span>
+              <span v-else class="rule-value rule-value-muted">全部剩余流量（兜底）</span>
               <ArrowRight :size="14" class="rule-arrow" aria-hidden="true" />
               <span class="badge badge-brand">{{ rule.target }}</span>
               <span v-if="rule.no_resolve" class="badge badge-neutral">no-resolve</span>
@@ -302,7 +303,7 @@
                 class="btn btn-ghost btn-sm"
                 :disabled="savingRules || isFirstRule(rule.id)"
                 title="上移优先级"
-                :aria-label="`上移规则 ${rule.value}`"
+                :aria-label="`上移规则 ${rule.type === 'MATCH' ? `MATCH ${rule.target}` : rule.value}`"
                 @click="moveRule(rule.id, -1)"
               >
                 <ArrowUp :size="14" />
@@ -312,12 +313,12 @@
                 class="btn btn-ghost btn-sm"
                 :disabled="savingRules || isLastRule(rule.id)"
                 title="下移优先级"
-                :aria-label="`下移规则 ${rule.value}`"
+                :aria-label="`下移规则 ${rule.type === 'MATCH' ? `MATCH ${rule.target}` : rule.value}`"
                 @click="moveRule(rule.id, 1)"
               >
                 <ArrowDown :size="14" />
               </button>
-              <label class="switch" :aria-label="`启用规则 ${rule.value}`">
+              <label class="switch" :aria-label="`启用规则 ${rule.type === 'MATCH' ? `MATCH ${rule.target}` : rule.value}`">
                 <input
                   type="checkbox"
                   :checked="rule.enabled"
@@ -330,7 +331,7 @@
                 type="button"
                 class="btn btn-ghost btn-sm text-bad"
                 :disabled="savingRules"
-                :aria-label="`删除规则 ${rule.value}`"
+                :aria-label="`删除规则 ${rule.type === 'MATCH' ? `MATCH ${rule.target}` : rule.value}`"
                 @click="removeRule(rule.id)"
               >
                 <Trash2 :size="14" />
@@ -381,6 +382,7 @@
                 <strong>{{ sub.name }}</strong>
                 <span v-if="status.active_subscription_id === sub.id" class="badge badge-ok">当前启用</span>
                 <span class="badge badge-neutral">{{ sub.node_count }} 节点</span>
+                <span v-if="sub.exclude_groups_and_rules" class="badge badge-warn">仅导入节点</span>
                 <span v-if="sub.include_filter" class="badge badge-brand">仅保留: {{ sub.include_filter }}</span>
                 <span v-if="sub.exclude_filter" class="badge badge-warn">排除: {{ sub.exclude_filter }}</span>
                 <span v-if="sub.node_suffix" class="badge badge-neutral">后缀: {{ sub.node_suffix }}</span>
@@ -1095,6 +1097,7 @@
               <option value="GEOIP">GEOIP</option>
               <option value="PROCESS-NAME">PROCESS-NAME</option>
               <option value="RULE-SET">RULE-SET（规则集）</option>
+              <option value="MATCH">MATCH（兜底规则）</option>
             </select>
           </label>
           <label class="form-field">
@@ -1104,7 +1107,7 @@
             </select>
           </label>
         </div>
-        <label class="form-field">
+        <label v-if="ruleForm.type !== 'MATCH'" class="form-field">
           <span>{{ ruleForm.type === 'RULE-SET' ? '规则集名称' : '匹配值' }}</span>
           <input
             v-model.trim="ruleForm.value"
@@ -1118,6 +1121,7 @@
             <option v-for="rs in status?.custom_rule_sets || []" :key="rs.id" :value="rs.name" />
           </datalist>
         </label>
+        <p v-else class="form-hint">MATCH 规则将匹配所有未命中上方规则的剩余流量，并自动添加至自定义分流列表底部。</p>
         <label class="form-field">
           <span>备注 (可选)</span>
           <input v-model.trim="ruleForm.comment" name="rule_comment" class="form-input" maxlength="256" />
@@ -1129,7 +1133,9 @@
       </form>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" @click="ruleDialog?.close()">取消</button>
-        <button type="submit" form="mihomo-rule-form" class="btn btn-primary" :disabled="modalBusy">添加至顶部</button>
+        <button type="submit" form="mihomo-rule-form" class="btn btn-primary" :disabled="modalBusy">
+          {{ ruleForm.type === 'MATCH' ? '添加至底部' : '添加至顶部' }}
+        </button>
       </div>
     </dialog>
 
@@ -1190,6 +1196,13 @@
             maxlength="64"
             placeholder="例如： [主力]（注意可保留前导空格）"
           />
+        </label>
+        <label class="toggle-card">
+          <div class="toggle-card-copy">
+            <span>完全排除机场策略组与规则配置</span>
+            <small>开启后仅导入机场节点（proxies），忽略订阅自带的 proxy-groups、rules 与 rule-providers，完全使用自定义配置。</small>
+          </div>
+          <input v-model="subForm.exclude_groups_and_rules" name="sub_exclude_groups_and_rules" type="checkbox" />
         </label>
       </form>
       <div class="modal-footer">
@@ -1397,7 +1410,8 @@ const subForm = reactive({
   yaml_content: '',
   include_filter: '',
   exclude_filter: '',
-  node_suffix: ''
+  node_suffix: '',
+  exclude_groups_and_rules: false
 })
 
 const dnsForm = reactive({
@@ -1449,9 +1463,10 @@ const filteredRules = computed(() => {
     if (target && r.target !== target) return false
     if (!q) return true
     return (
-      r.value.toLowerCase().includes(q) ||
+      (r.value || '').toLowerCase().includes(q) ||
       r.type.toLowerCase().includes(q) ||
       r.target.toLowerCase().includes(q) ||
+      (r.type === 'MATCH' && '全部剩余流量（兜底）'.toLowerCase().includes(q)) ||
       (r.comment || '').toLowerCase().includes(q)
     )
   })
@@ -1704,9 +1719,9 @@ async function submitRule() {
   try {
     const data = await adminApi.addMihomoRule({
       type: ruleForm.type,
-      value: ruleForm.value,
+      value: ruleForm.type === 'MATCH' ? '' : ruleForm.value,
       target: ruleForm.target,
-      no_resolve: ruleForm.no_resolve,
+      no_resolve: ruleForm.type === 'MATCH' ? false : ruleForm.no_resolve,
       enabled: true,
       comment: ruleForm.comment
     })
@@ -1855,6 +1870,7 @@ function openSubModal(sub = null) {
   subForm.include_filter = sub?.include_filter || ''
   subForm.exclude_filter = sub?.exclude_filter || ''
   subForm.node_suffix = sub?.node_suffix || ''
+  subForm.exclude_groups_and_rules = !!sub?.exclude_groups_and_rules
   subDialog.value?.showModal()
 }
 
@@ -1869,7 +1885,8 @@ async function submitSubscription() {
           url: subForm.url,
           include_filter: subForm.include_filter,
           exclude_filter: subForm.exclude_filter,
-          node_suffix: subForm.node_suffix
+          node_suffix: subForm.node_suffix,
+          exclude_groups_and_rules: subForm.exclude_groups_and_rules
         })
       : await adminApi.addMihomoSubscription({
           name: subForm.name,
@@ -1877,7 +1894,8 @@ async function submitSubscription() {
           yaml_content: subForm.yaml_content,
           include_filter: subForm.include_filter,
           exclude_filter: subForm.exclude_filter,
-          node_suffix: subForm.node_suffix
+          node_suffix: subForm.node_suffix,
+          exclude_groups_and_rules: subForm.exclude_groups_and_rules
         })
     applyStatus(data)
     subDialog.value?.close()
@@ -2700,6 +2718,11 @@ onBeforeUnmount(() => {
   overflow-wrap: anywhere;
 }
 
+.rule-value-muted {
+  color: var(--muted);
+  font-style: italic;
+}
+
 .rule-arrow {
   color: var(--faint);
 }
@@ -2799,6 +2822,26 @@ onBeforeUnmount(() => {
   cursor: pointer;
   min-width: 0;
   max-width: 100%;
+}
+
+.toggle-card-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.toggle-card-copy small {
+  font-size: 11.5px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.form-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
 }
 
 .subs-list {
