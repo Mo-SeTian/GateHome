@@ -83,6 +83,9 @@ export const adminApi = {
   addMihomoRule: (body) => request('/api/mihomo/rules', { method: 'POST', body }),
   saveMihomoRules: (rules) => request('/api/mihomo/rules', { method: 'PUT', body: { rules } }),
   deleteMihomoRule: (id) => request(`/api/mihomo/rules/${encodeURIComponent(id)}`, { method: 'DELETE', body: {} }),
+  saveMihomoRuleSet: (body) => request('/api/mihomo/rule-sets', { method: 'POST', body }),
+  toggleMihomoRuleSet: (id) => request(`/api/mihomo/rule-sets/${encodeURIComponent(id)}/toggle`, { method: 'PUT', body: {} }),
+  deleteMihomoRuleSet: (id) => request(`/api/mihomo/rule-sets/${encodeURIComponent(id)}`, { method: 'DELETE', body: {} }),
   addMihomoDNSPolicy: (body) => request('/api/mihomo/dns-policies', { method: 'POST', body }),
   saveMihomoDNSPolicies: (policies) => request('/api/mihomo/dns-policies', { method: 'PUT', body: { policies } }),
   deleteMihomoDNSPolicy: (id) => request(`/api/mihomo/dns-policies/${encodeURIComponent(id)}`, { method: 'DELETE', body: {} }),
@@ -104,6 +107,9 @@ export const adminApi = {
     return request('/api/mihomo/geodata/upload', { method: 'POST', body })
   },
   mihomoLogs: (signal) => request('/api/mihomo/logs', { signal }),
+  mihomoConnections: (signal) => request('/api/mihomo/connections', { signal }),
+  closeMihomoConnection: (id) => request(`/api/mihomo/connections/${encodeURIComponent(id)}`, { method: 'DELETE', body: {} }),
+  closeAllMihomoConnections: () => request('/api/mihomo/connections', { method: 'DELETE', body: {} }),
   mihomoCustomYaml: (kind, signal) => request(`/api/mihomo/custom/${encodeURIComponent(kind)}/yaml`, { signal }),
   saveMihomoCustomYaml: (kind, content, validateOnly = false) => request(`/api/mihomo/custom/${encodeURIComponent(kind)}/yaml`, {
     method: 'PUT', body: { content, validate_only: validateOnly }

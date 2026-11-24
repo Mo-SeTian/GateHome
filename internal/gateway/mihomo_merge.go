@@ -163,6 +163,17 @@ func synthesizeMihomoYAML(sourceYAML []byte, cfg MihomoConfig) ([]byte, error) {
 		}
 	}
 
+	// Layer 2.5: Custom YAML overlay (arbitrary top-level/nested overrides from custom.yaml)
+	if strings.TrimSpace(cfg.CustomOverlayYAML) != "" {
+		var overlayDoc yaml.Node
+		if err := yaml.Unmarshal([]byte(cfg.CustomOverlayYAML), &overlayDoc); err != nil {
+			return nil, fmt.Errorf("自定义配置覆写层解析失败: %v", err)
+		}
+		if overlayDoc.Kind == yaml.DocumentNode && len(overlayDoc.Content) > 0 && overlayDoc.Content[0].Kind == yaml.MappingNode {
+			mergeYAMLMappingOverlay(root, overlayDoc.Content[0], true)
+		}
+	}
+
 	// Apply active subscription node filters (include/exclude regex) and suffix renaming before collecting proxies.
 	if activeSub, ok := activeSubscription(cfg); ok {
 		applySubscriptionNodeTransform(root, activeSub)
@@ -201,6 +212,37 @@ func synthesizeMihomoYAML(sourceYAML []byte, cfg MihomoConfig) ([]byte, error) {
 			Type:    "select",
 			Proxies: []string{"DIRECT"},
 		}, proxyNames))
+	}
+
+	// Layer 3.5: Custom rule-providers (remote / built-in / manual file)
+	if len(cfg.CustomRuleSets) > 0 {
+		var enabledSets []MihomoRuleSet
+		for _, rs := range cfg.CustomRuleSets {
+			if rs.Enabled {
+				enabledSets = append(enabledSets, rs)
+			}
+		}
+		if len(enabledSets) > 0 {
+			providersMap := yamlMapEnsureMapping(root, "rule-providers")
+			for _, rs := range enabledSets {
+				providerNode := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+				providerType := "http"
+				if rs.Source == "manual" {
+					providerType = "file"
+				}
+				yamlMapSet(providerNode, "type", yamlStrNode(providerType))
+				yamlMapSet(providerNode, "behavior", yamlStrNode(rs.Behavior))
+				yamlMapSet(providerNode, "format", yamlStrNode(rs.Format))
+				yamlMapSet(providerNode, "path", yamlStrNode(rs.Path))
+				if providerType == "http" {
+					yamlMapSet(providerNode, "url", yamlStrNode(rs.URL))
+					if rs.Interval > 0 {
+						yamlMapSet(providerNode, "interval", yamlIntNode(rs.Interval))
+					}
+				}
+				yamlMapSet(providersMap, rs.Name, providerNode)
+			}
+		}
 	}
 
 	// Layer 4: Prepend enabled custom routing rules
@@ -356,7 +398,7 @@ func formatCustomRule(r MihomoCustomRule) string {
 		return ""
 	}
 	line := ruleType + "," + value + "," + target
-	if r.NoResolve && (ruleType == "IP-CIDR" || ruleType == "IP-CIDR6" || ruleType == "SRC-IP-CIDR" || ruleType == "GEOIP") {
+	if r.NoResolve && (ruleType == "IP-CIDR" || ruleType == "IP-CIDR6" || ruleType == "SRC-IP-CIDR" || ruleType == "GEOIP" || ruleType == "RULE-SET") {
 		line += ",no-resolve"
 	}
 	return line
@@ -621,4 +663,31 @@ func yamlIntNode(v int) *yaml.Node {
 
 func yamlBoolNode(v bool) *yaml.Node {
 	return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!bool", Value: strconv.FormatBool(v)}
+}
+
+var reservedOverlayKeys = map[string]bool{
+	"external-controller": true,
+	"secret":              true,
+	"authentication":      true,
+	"proxy-groups":        true,
+	"rule-providers":      true,
+	"rules":               true,
+}
+
+func mergeYAMLMappingOverlay(dst, src *yaml.Node, topLevel bool) {
+	if dst == nil || dst.Kind != yaml.MappingNode || src == nil || src.Kind != yaml.MappingNode {
+		return
+	}
+	for i := 0; i+1 < len(src.Content); i += 2 {
+		key := src.Content[i].Value
+		if topLevel && reservedOverlayKeys[key] {
+			continue
+		}
+		val := src.Content[i+1]
+		if existing, idx := yamlMapFind(dst, key); idx >= 0 && existing.Kind == yaml.MappingNode && val.Kind == yaml.MappingNode {
+			mergeYAMLMappingOverlay(existing, val, false)
+			continue
+		}
+		yamlMapSet(dst, key, val)
+	}
 }

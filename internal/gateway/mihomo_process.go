@@ -174,6 +174,9 @@ func (m *mihomoManager) synthesizeAndWriteLocked() error {
 	if err := os.MkdirAll(m.dir, 0700); err != nil {
 		return err
 	}
+	if err := m.writeManualRuleSetFilesLocked(m.cfg); err != nil {
+		return err
+	}
 	source, err := m.readSourceYAML(m.cfg)
 	if err != nil {
 		return err

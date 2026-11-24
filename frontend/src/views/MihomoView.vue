@@ -234,7 +234,7 @@
     <!-- Tab 2: Custom Routing Rules -->
     <section v-show="activeTab === 'rules'" class="tab-section" role="tabpanel" aria-label="自定义分流">
       <div class="section-toolbar">
-        <div class="filter-inputs">
+        <div class="filter-inputs" v-show="rulesView === 'list'">
           <input
             v-model.trim="ruleSearch"
             type="search"
@@ -248,14 +248,22 @@
           </select>
         </div>
         <div class="report-actions">
-          <button
-            type="button"
-            class="btn btn-secondary btn-sm"
-            :aria-pressed="rulesView === 'yaml'"
-            @click="rulesView = rulesView === 'yaml' ? 'list' : 'yaml'"
-          >
-            <FileCode2 :size="14" /> {{ rulesView === 'yaml' ? '返回列表' : 'YAML 编辑' }}
-          </button>
+          <div class="mode-switch rules-view-switch" role="group" aria-label="分流视图切换">
+            <button type="button" class="mode-btn" :class="{ active: rulesView === 'list' }" @click="rulesView = 'list'">
+              分流规则
+            </button>
+            <button
+              type="button"
+              class="mode-btn"
+              :class="{ active: rulesView === 'rulesets' }"
+              @click="rulesView = 'rulesets'"
+            >
+              规则集 ({{ status?.custom_rule_sets?.length || 0 }})
+            </button>
+            <button type="button" class="mode-btn" :class="{ active: rulesView === 'yaml' }" @click="rulesView = 'yaml'">
+              YAML 编辑
+            </button>
+          </div>
           <button v-if="rulesView === 'list'" type="button" class="btn btn-primary btn-sm" @click="openRuleModal()">
             <Plus :size="14" /> 添加规则
           </button>
@@ -317,10 +325,22 @@
         </div>
         <p v-else class="report-empty">{{ status?.custom_rules?.length ? '无匹配规则' : '暂无自定义分流规则' }}</p>
       </SpotlightCard>
+      <MihomoRuleSets
+        v-else-if="rulesView === 'rulesets'"
+        :rule-sets="status?.custom_rule_sets || []"
+        :presets="status?.rule_set_presets || []"
+        :target-options="ruleTargetOptions"
+        @updated="applyStatus"
+      />
       <MihomoCustomYaml v-else kind="rules" @saved="onCustomYamlSaved" />
     </section>
 
-    <!-- Tab 3: Subscriptions & Special-Line DNS -->
+    <!-- Tab 3: Connections -->
+    <section v-show="activeTab === 'connections'" class="tab-section" role="tabpanel" aria-label="连接">
+      <MihomoConnections :active="activeTab === 'connections'" :running="!!status?.running" />
+    </section>
+
+    <!-- Tab 4: Subscriptions & Special-Line DNS -->
     <section v-show="activeTab === 'subscriptions'" class="tab-section settings-tab-grid" role="tabpanel" aria-label="订阅管理">
       <!-- Subscriptions Card -->
       <SpotlightCard class="report-panel">
@@ -753,6 +773,14 @@
               <button
                 type="button"
                 class="mode-btn"
+                :class="{ active: yamlKind === 'custom' }"
+                @click="loadYaml('custom')"
+              >
+                自定义配置 (custom.yaml)
+              </button>
+              <button
+                type="button"
+                class="mode-btn"
                 :class="{ active: yamlKind === 'source' }"
                 @click="loadYaml('source')"
               >
@@ -767,6 +795,9 @@
             >
               {{ yamlManualOverride ? '已手动编辑 · 刷新订阅将重合成' : '流水线自动合成' }}
             </span>
+            <span v-else-if="yamlKind === 'custom'" class="badge badge-brand">
+              合并前自定义总配置 · 订阅更新不覆盖
+            </span>
             <span v-else class="badge badge-neutral">只读原件</span>
           </div>
 
@@ -780,7 +811,7 @@
               <WrapText :size="13" /> {{ yamlWrap ? '不换行' : '自动换行' }}
             </button>
             <button
-              v-if="yamlKind === 'runtime'"
+              v-if="yamlKind !== 'source'"
               type="button"
               class="btn btn-ghost btn-sm"
               :aria-pressed="yamlPreviewMode"
@@ -827,22 +858,49 @@
                 <Save :size="13" /> {{ yamlBusy ? '保存中…' : '保存并热重载' }}
               </button>
             </template>
+            <template v-else-if="yamlKind === 'custom'">
+              <button
+                type="button"
+                class="btn btn-secondary btn-sm"
+                :disabled="yamlBusy"
+                @click="loadYaml('custom')"
+              >
+                <RefreshCw :size="13" /> 重新载入
+              </button>
+              <button
+                type="button"
+                class="btn btn-secondary btn-sm"
+                :disabled="yamlBusy"
+                @click="validateYaml"
+              >
+                <CheckCircle2 :size="13" /> 校验配置
+              </button>
+              <button
+                type="button"
+                class="btn btn-primary btn-sm"
+                :disabled="yamlBusy || !yamlDirty"
+                @click="saveYaml"
+              >
+                <Save :size="13" /> {{ yamlBusy ? '保存中…' : '保存并生效' }}
+              </button>
+            </template>
           </div>
         </div>
 
         <div
-          v-if="yamlKind === 'runtime' && yamlValidation"
+          v-if="yamlKind !== 'source' && yamlValidation"
           class="yaml-validation-banner"
           :class="yamlValidation.valid ? 'valid' : 'invalid'"
           role="status"
         >
           <template v-if="yamlValidation.valid">
-            <span>
+            <span v-if="yamlValidation.summary">
               校验通过{{ yamlValidation.core_tested ? '（已通过 mihomo -t 内核校验）' : '' }} ·
               {{ yamlValidation.summary?.proxies || 0 }} 节点 /
               {{ yamlValidation.summary?.groups || 0 }} 策略组 /
               {{ yamlValidation.summary?.rules || 0 }} 规则
             </span>
+            <span v-else>校验与预合并通过，点击「保存并生效」即可写入并同步到各管理标签页</span>
             <span v-if="yamlValidation.warnings?.length" class="yaml-warnings">
               · {{ yamlValidation.warnings.join('；') }}
             </span>
@@ -1006,6 +1064,7 @@
               <option value="GEOSITE">GEOSITE</option>
               <option value="GEOIP">GEOIP</option>
               <option value="PROCESS-NAME">PROCESS-NAME</option>
+              <option value="RULE-SET">RULE-SET（规则集）</option>
             </select>
           </label>
           <label class="form-field">
@@ -1016,14 +1075,24 @@
           </label>
         </div>
         <label class="form-field">
-          <span>匹配值</span>
-          <input v-model.trim="ruleForm.value" name="rule_value" class="form-input mono-text" required placeholder="例如：openai.com 或 192.168.1.0/24" />
+          <span>{{ ruleForm.type === 'RULE-SET' ? '规则集名称' : '匹配值' }}</span>
+          <input
+            v-model.trim="ruleForm.value"
+            name="rule_value"
+            class="form-input mono-text"
+            :list="ruleForm.type === 'RULE-SET' ? 'mihomo-ruleset-names' : undefined"
+            required
+            :placeholder="ruleForm.type === 'RULE-SET' ? '选择或输入已配置的规则集名称' : '例如：openai.com 或 192.168.1.0/24'"
+          />
+          <datalist id="mihomo-ruleset-names">
+            <option v-for="rs in status?.custom_rule_sets || []" :key="rs.id" :value="rs.name" />
+          </datalist>
         </label>
         <label class="form-field">
           <span>备注 (可选)</span>
           <input v-model.trim="ruleForm.comment" name="rule_comment" class="form-input" maxlength="256" />
         </label>
-        <label v-if="['IP-CIDR', 'IP-CIDR6', 'SRC-IP-CIDR', 'GEOIP'].includes(ruleForm.type)" class="toggle-card">
+        <label v-if="['IP-CIDR', 'IP-CIDR6', 'SRC-IP-CIDR', 'GEOIP', 'RULE-SET'].includes(ruleForm.type)" class="toggle-card">
           <span>跳过 DNS 解析 (no-resolve)</span>
           <input v-model="ruleForm.no_resolve" type="checkbox" />
         </label>
@@ -1144,6 +1213,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import {
+  Activity,
   ArrowDown,
   ArrowRight,
   ArrowUp,
@@ -1176,6 +1246,8 @@ import {
 } from 'lucide-vue-next'
 import SpotlightCard from '@/components/SpotlightCard.vue'
 import MihomoCustomYaml from '@/components/MihomoCustomYaml.vue'
+import MihomoConnections from '@/components/MihomoConnections.vue'
+import MihomoRuleSets from '@/components/MihomoRuleSets.vue'
 import { adminApi } from '@/api/admin'
 import { useToast } from '@/composables/useToast'
 import '@/styles/reports.css'
@@ -1192,6 +1264,7 @@ const modes = [
 const tabs = [
   { id: 'groups', label: '策略组与节点', icon: Layers },
   { id: 'rules', label: '自定义分流', icon: GitBranch },
+  { id: 'connections', label: '连接', icon: Activity },
   { id: 'subscriptions', label: '订阅管理', icon: Download },
   { id: 'settings', label: '端口与核心', icon: Sliders },
   { id: 'yaml', label: '配置文件', icon: FileCode2 },
@@ -1397,7 +1470,9 @@ async function loadYaml(kind = yamlKind.value) {
   }
   yamlBusy.value = true
   try {
-    const res = await adminApi.mihomoYaml(kind, controller.signal)
+    const res = kind === 'custom'
+      ? await adminApi.mihomoCustomYaml('all', controller.signal)
+      : await adminApi.mihomoYaml(kind, controller.signal)
     if (controller.signal.aborted) return
     yamlContent.value = res.content || ''
     yamlManualOverride.value = !!res.manual_override
@@ -2017,6 +2092,13 @@ const highlightedYamlRows = computed(() =>
 async function validateYaml() {
   yamlBusy.value = true
   try {
+    if (yamlKind.value === 'custom') {
+      await adminApi.saveMihomoCustomYaml('all', yamlContent.value, true)
+      yamlValidation.value = { valid: true }
+      yamlValidated.value = true
+      toast.success('自定义总配置校验与预合并通过')
+      return
+    }
     const res = await adminApi.validateMihomoYaml(yamlContent.value)
     yamlValidation.value = res
     yamlValidated.value = !!res.valid
@@ -2058,6 +2140,26 @@ async function formatYaml() {
 }
 
 async function saveYaml() {
+  if (yamlKind.value === 'custom') {
+    yamlBusy.value = true
+    try {
+      const res = await adminApi.saveMihomoCustomYaml('all', yamlContent.value, false)
+      yamlContent.value = res.content || yamlContent.value
+      yamlDirty.value = false
+      yamlValidated.value = true
+      yamlValidation.value = null
+      if (res.status) applyStatus(res.status)
+      await loadGroups()
+      toast.success('自定义配置已保存并合并到运行配置')
+    } catch (err) {
+      yamlValidated.value = false
+      yamlValidation.value = { valid: false, error: err.message }
+      toast.error(err.message)
+    } finally {
+      yamlBusy.value = false
+    }
+    return
+  }
   if (yamlDirty.value && !yamlValidated.value) {
     await validateYaml()
     if (!yamlValidated.value) return
@@ -2882,7 +2984,6 @@ onBeforeUnmount(() => {
   padding: 12px 14px;
   font-size: 12.5px;
   line-height: 1.6;
-  font-variant-emoji: emoji;
   resize: vertical;
   tab-size: 2;
   white-space: pre;
@@ -2904,7 +3005,6 @@ onBeforeUnmount(() => {
   background: var(--input-bg);
   font-size: 12.5px;
   line-height: 1.6;
-  font-variant-emoji: emoji;
 }
 
 .yaml-panel.fullscreen .yaml-editor-shell,
@@ -2986,7 +3086,6 @@ onBeforeUnmount(() => {
   padding: 10px 12px;
   font-size: 12px;
   line-height: 1.55;
-  font-variant-emoji: emoji;
   min-width: 0;
   max-width: 100%;
 }

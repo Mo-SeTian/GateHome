@@ -64,6 +64,8 @@ type mihomoStatusResponse struct {
 	Subscriptions          []MihomoSubscriptionView   `json:"subscriptions"`
 	CustomGroups           []MihomoCustomGroup        `json:"custom_groups"`
 	CustomRules            []MihomoCustomRule         `json:"custom_rules"`
+	CustomRuleSets         []MihomoRuleSet            `json:"custom_rule_sets"`
+	RuleSetPresets         []MihomoRuleSetPreset      `json:"rule_set_presets"`
 	CustomDNSPolicies      []MihomoDNSPolicy          `json:"custom_dns_policies"`
 	InheritedDNSPolicies   []MihomoInheritedDNSPolicy `json:"inherited_dns_policies"`
 }
@@ -117,6 +119,8 @@ func (m *mihomoManager) statusSnapshot() mihomoStatusResponse {
 		Subscriptions:          toSubscriptionViews(m.cfg.Subscriptions),
 		CustomGroups:           slices.Clone(m.cfg.CustomGroups),
 		CustomRules:            slices.Clone(m.cfg.CustomRules),
+		CustomRuleSets:         slices.Clone(m.cfg.CustomRuleSets),
+		RuleSetPresets:         mihomoBuiltInRuleSetPresets(),
 		CustomDNSPolicies:      slices.Clone(m.cfg.CustomDNSPolicies),
 		InheritedDNSPolicies:   inheritedDNS,
 	}
@@ -143,6 +147,9 @@ func (a *Admin) mihomoRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/mihomo/rules", a.requireAuth(a.handleMihomoAddRule))
 	mux.HandleFunc("PUT /api/mihomo/rules", a.requireAuth(a.handleMihomoSaveRules))
 	mux.HandleFunc("DELETE /api/mihomo/rules/{id}", a.requireAuth(a.handleMihomoDeleteRule))
+	mux.HandleFunc("POST /api/mihomo/rule-sets", a.requireAuth(a.handleMihomoSaveRuleSet))
+	mux.HandleFunc("PUT /api/mihomo/rule-sets/{id}/toggle", a.requireAuth(a.handleMihomoToggleRuleSet))
+	mux.HandleFunc("DELETE /api/mihomo/rule-sets/{id}", a.requireAuth(a.handleMihomoDeleteRuleSet))
 
 	mux.HandleFunc("POST /api/mihomo/dns-policies", a.requireAuth(a.handleMihomoAddDNSPolicy))
 	mux.HandleFunc("PUT /api/mihomo/dns-policies", a.requireAuth(a.handleMihomoSaveDNSPolicies))
@@ -165,6 +172,9 @@ func (a *Admin) mihomoRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/mihomo/geodata/upload", a.requireAuth(a.handleMihomoUploadMMDB))
 	mux.HandleFunc("POST /api/mihomo/zashboard/download", a.requireAuth(a.handleMihomoDownloadZashboard))
 	mux.HandleFunc("GET /api/mihomo/logs", a.requireAuth(a.handleMihomoLogs))
+	mux.HandleFunc("GET /api/mihomo/connections", a.requireAuth(a.handleMihomoConnections))
+	mux.HandleFunc("DELETE /api/mihomo/connections", a.requireAuth(a.handleMihomoCloseAllConnections))
+	mux.HandleFunc("DELETE /api/mihomo/connections/{id}", a.requireAuth(a.handleMihomoCloseConnection))
 	mux.HandleFunc("GET /api/mihomo/custom/{kind}/yaml", a.requireAuth(a.handleMihomoGetCustomYAML))
 	mux.HandleFunc("PUT /api/mihomo/custom/{kind}/yaml", a.requireAuth(a.handleMihomoPutCustomYAML))
 	mux.HandleFunc("DELETE /api/mihomo/logs", a.requireAuth(a.handleMihomoClearLogs))
@@ -1498,4 +1508,218 @@ func (a *Admin) handleMihomoUploadMMDB(w http.ResponseWriter, r *http.Request) {
 		"size":   size,
 		"status": a.mihomo.statusSnapshot(),
 	})
+}
+
+func (a *Admin) handleMihomoConnections(w http.ResponseWriter, r *http.Request) {
+	snap, err := a.mihomo.GetConnections()
+	if err != nil {
+		apiError(w, 502, err.Error())
+		return
+	}
+	jsonResponse(w, 200, snap)
+}
+
+func (a *Admin) handleMihomoCloseConnection(w http.ResponseWriter, r *http.Request) {
+	if err := a.mihomo.CloseConnection(r.PathValue("id")); err != nil {
+		apiError(w, 400, err.Error())
+		return
+	}
+	jsonResponse(w, 200, map[string]any{"ok": true})
+}
+
+func (a *Admin) handleMihomoCloseAllConnections(w http.ResponseWriter, r *http.Request) {
+	if err := a.mihomo.CloseAllConnections(); err != nil {
+		apiError(w, 400, err.Error())
+		return
+	}
+	jsonResponse(w, 200, map[string]any{"ok": true})
+}
+
+func (a *Admin) handleMihomoSaveRuleSet(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		ID            string `json:"id"`
+		Name          string `json:"name"`
+		Source        string `json:"source"`
+		Preset        string `json:"preset"`
+		Behavior      string `json:"behavior"`
+		Format        string `json:"format"`
+		URL           string `json:"url"`
+		Path          string `json:"path"`
+		Interval      int    `json:"interval"`
+		Content       string `json:"content"`
+		Enabled       *bool  `json:"enabled"`
+		Comment       string `json:"comment"`
+		CreateRule    bool   `json:"create_rule"`
+		RuleTarget    string `json:"rule_target"`
+		RuleNoResolve bool   `json:"rule_no_resolve"`
+	}
+	if !decodeBodyLarge(w, r, &input, 2<<20) {
+		return
+	}
+	enabled := true
+	if input.Enabled != nil {
+		enabled = *input.Enabled
+	}
+	rs, err := normalizeAndValidateMihomoRuleSet(MihomoRuleSet{
+		ID:       input.ID,
+		Name:     input.Name,
+		Source:   input.Source,
+		Preset:   input.Preset,
+		Behavior: input.Behavior,
+		Format:   input.Format,
+		URL:      input.URL,
+		Path:     input.Path,
+		Interval: input.Interval,
+		Content:  input.Content,
+		Enabled:  enabled,
+		Comment:  input.Comment,
+	})
+	if err != nil {
+		apiError(w, 400, err.Error())
+		return
+	}
+
+	var autoRule *MihomoCustomRule
+	if input.CreateRule {
+		target := strings.TrimSpace(input.RuleTarget)
+		if target == "" {
+			target = "节点选择"
+		}
+		rule := MihomoCustomRule{
+			ID:        randomMihomoID("rule"),
+			Type:      "RULE-SET",
+			Value:     rs.Name,
+			Target:    target,
+			NoResolve: input.RuleNoResolve,
+			Enabled:   true,
+			Comment:   rs.Comment,
+		}
+		if err := validateMihomoCustomRule(rule); err != nil {
+			apiError(w, 400, err.Error())
+			return
+		}
+		autoRule = &rule
+	}
+
+	m := a.mihomo
+	m.mu.Lock()
+	next := m.cfg
+	next.CustomRuleSets = slices.Clone(m.cfg.CustomRuleSets)
+	updatedIdx := -1
+	var oldManual MihomoRuleSet
+	for i, existing := range next.CustomRuleSets {
+		if rs.ID != "" && existing.ID == rs.ID {
+			updatedIdx = i
+			oldManual = existing
+		} else if existing.Name == rs.Name {
+			m.mu.Unlock()
+			apiError(w, 400, fmt.Sprintf("规则集名称「%s」已存在", rs.Name))
+			return
+		}
+	}
+	if rs.ID == "" || updatedIdx < 0 {
+		rs.ID = randomMihomoID("rset")
+		next.CustomRuleSets = append(next.CustomRuleSets, rs)
+	} else {
+		next.CustomRuleSets[updatedIdx] = rs
+	}
+	if autoRule != nil {
+		next.CustomRules = append([]MihomoCustomRule{*autoRule}, next.CustomRules...)
+	}
+	next.ManualOverride = false
+	if err := saveMihomoConfig(m.dir, next); err != nil {
+		m.mu.Unlock()
+		apiError(w, 500, err.Error())
+		return
+	}
+	m.cfg = next
+	if err := m.synthesizeAndWriteLocked(); err != nil {
+		m.mu.Unlock()
+		apiError(w, 500, err.Error())
+		return
+	}
+	if updatedIdx >= 0 && oldManual.Source == "manual" && (rs.Source != "manual" || oldManual.Path != rs.Path) {
+		removeManualRuleSetFile(m.dir, oldManual)
+	}
+	running := m.running
+	m.mu.Unlock()
+
+	if running {
+		_ = m.Reload()
+	}
+	jsonResponse(w, 200, m.statusSnapshot())
+}
+
+func (a *Admin) handleMihomoToggleRuleSet(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		apiError(w, 400, "缺少规则集 ID")
+		return
+	}
+	m := a.mihomo
+	m.mu.Lock()
+	next := m.cfg
+	next.CustomRuleSets = slices.Clone(m.cfg.CustomRuleSets)
+	idx := slices.IndexFunc(next.CustomRuleSets, func(item MihomoRuleSet) bool { return item.ID == id })
+	if idx < 0 {
+		m.mu.Unlock()
+		apiError(w, 404, "未找到该规则集")
+		return
+	}
+	next.CustomRuleSets[idx].Enabled = !next.CustomRuleSets[idx].Enabled
+	next.ManualOverride = false
+	if err := saveMihomoConfig(m.dir, next); err != nil {
+		m.mu.Unlock()
+		apiError(w, 500, err.Error())
+		return
+	}
+	m.cfg = next
+	if err := m.synthesizeAndWriteLocked(); err != nil {
+		m.mu.Unlock()
+		apiError(w, 500, err.Error())
+		return
+	}
+	running := m.running
+	m.mu.Unlock()
+
+	if running {
+		_ = m.Reload()
+	}
+	jsonResponse(w, 200, m.statusSnapshot())
+}
+
+func (a *Admin) handleMihomoDeleteRuleSet(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		apiError(w, 400, "缺少规则集 ID")
+		return
+	}
+	m := a.mihomo
+	m.mu.Lock()
+	next := m.cfg
+	next.CustomRuleSets = slices.Clone(m.cfg.CustomRuleSets)
+	idx := slices.IndexFunc(next.CustomRuleSets, func(item MihomoRuleSet) bool { return item.ID == id })
+	if idx < 0 {
+		m.mu.Unlock()
+		apiError(w, 404, "未找到该规则集")
+		return
+	}
+	removed := next.CustomRuleSets[idx]
+	next.CustomRuleSets = append(next.CustomRuleSets[:idx], next.CustomRuleSets[idx+1:]...)
+	next.ManualOverride = false
+	if err := saveMihomoConfig(m.dir, next); err != nil {
+		m.mu.Unlock()
+		apiError(w, 500, err.Error())
+		return
+	}
+	m.cfg = next
+	_ = m.synthesizeAndWriteLocked()
+	removeManualRuleSetFile(m.dir, removed)
+	running := m.running
+	m.mu.Unlock()
+
+	if running {
+		_ = m.Reload()
+	}
+	jsonResponse(w, 200, m.statusSnapshot())
 }

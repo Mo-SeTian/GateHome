@@ -176,7 +176,6 @@ textarea.form-input.custom-yaml-editor {
   padding: 12px 14px;
   font-size: 12.5px;
   line-height: 1.6;
-  font-variant-emoji: emoji;
   resize: vertical;
   tab-size: 2;
   white-space: pre;

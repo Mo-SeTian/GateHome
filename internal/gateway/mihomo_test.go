@@ -1696,3 +1696,397 @@ func TestMihomoCustomGroupsRulesYAMLRoundTrip(t *testing.T) {
 		t.Fatalf("runtime.yaml not merged from YAML edits:\n%s", rt)
 	}
 }
+
+func TestMihomoConnectionsAPIAndClose(t *testing.T) {
+	a, h := testAdmin(t)
+	cookie := loginForTest(t, h)
+
+	// When core is stopped, endpoint returns 200 with running=false and empty connections list.
+	rec := adminRequest(h, "GET", "/api/mihomo/connections", nil, cookie, "")
+	if rec.Code != 200 {
+		t.Fatalf("stopped connections expected 200, got %d %s", rec.Code, rec.Body.String())
+	}
+	var stoppedSnap MihomoConnectionsSnapshot
+	if err := json.Unmarshal(rec.Body.Bytes(), &stoppedSnap); err != nil {
+		t.Fatalf("decode stopped connections: %v", err)
+	}
+	if stoppedSnap.Running || len(stoppedSnap.Connections) != 0 {
+		t.Fatalf("expected stopped empty snapshot, got %+v", stoppedSnap)
+	}
+
+	const testSecret = "CONN_CTRL_SECRET"
+	var closedID string
+	var closedAll bool
+	mux := http.NewServeMux()
+	authCheck := func(r *http.Request) bool {
+		return r.Header.Get("Authorization") == "Bearer "+testSecret
+	}
+	mux.HandleFunc("GET /connections", func(w http.ResponseWriter, r *http.Request) {
+		if !authCheck(r) {
+			http.Error(w, "unauthorized", 401)
+			return
+		}
+		jsonResponse(w, 200, map[string]any{
+			"downloadTotal": 20480,
+			"uploadTotal":   4096,
+			"memory":        1048576,
+			"connections": []map[string]any{
+				{
+					"id":          "conn-1",
+					"upload":      1024,
+					"download":    8192,
+					"start":       "2026-11-24T08:00:00Z",
+					"chains":      []string{"JPN 日本 01|绿叶", "节点选择"},
+					"rule":        "RuleSet",
+					"rulePayload": "TelegramIP",
+					"metadata": map[string]any{
+						"network":         "tcp",
+						"type":            "Mixed",
+						"sourceIP":        "192.168.2.2",
+						"sourcePort":      "55645",
+						"destinationIP":   "149.154.166.110",
+						"destinationPort": "443",
+						"host":            "api.telegram.org",
+					},
+				},
+			},
+		})
+	})
+	mux.HandleFunc("DELETE /connections/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if !authCheck(r) {
+			http.Error(w, "unauthorized", 401)
+			return
+		}
+		closedID = r.PathValue("id")
+		w.WriteHeader(204)
+	})
+	mux.HandleFunc("DELETE /connections", func(w http.ResponseWriter, r *http.Request) {
+		if !authCheck(r) {
+			http.Error(w, "unauthorized", 401)
+			return
+		}
+		closedAll = true
+		w.WriteHeader(204)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	a.mihomo.mu.Lock()
+	a.mihomo.running = true
+	a.mihomo.ctrlBaseURL = srv.URL
+	a.mihomo.ctrlSecret = testSecret
+	a.mihomo.mu.Unlock()
+
+	liveRec := adminRequest(h, "GET", "/api/mihomo/connections", nil, cookie, "")
+	if liveRec.Code != 200 {
+		t.Fatalf("live connections expected 200, got %d %s", liveRec.Code, liveRec.Body.String())
+	}
+	var liveSnap MihomoConnectionsSnapshot
+	if err := json.Unmarshal(liveRec.Body.Bytes(), &liveSnap); err != nil {
+		t.Fatalf("decode live connections: %v", err)
+	}
+	if !liveSnap.Running || len(liveSnap.Connections) != 1 {
+		t.Fatalf("unexpected live snapshot: %+v", liveSnap)
+	}
+	c := liveSnap.Connections[0]
+	if c.Metadata.SourceIP != "192.168.2.2" || c.Metadata.Host != "api.telegram.org" || c.Rule != "RuleSet" || c.RulePayload != "TelegramIP" || len(c.Chains) != 2 {
+		t.Fatalf("unexpected connection item: %+v", c)
+	}
+
+	delOne := adminRequest(h, "DELETE", "/api/mihomo/connections/conn-1", map[string]any{}, cookie, "")
+	if delOne.Code != 200 || closedID != "conn-1" {
+		t.Fatalf("expected close conn-1 200, got code=%d closedID=%q body=%s", delOne.Code, closedID, delOne.Body.String())
+	}
+
+	delAll := adminRequest(h, "DELETE", "/api/mihomo/connections", map[string]any{}, cookie, "")
+	if delAll.Code != 200 || !closedAll {
+		t.Fatalf("expected close all 200, got code=%d closedAll=%v body=%s", delAll.Code, closedAll, delAll.Body.String())
+	}
+}
+
+func TestMihomoRuleSetsMergeAndAPI(t *testing.T) {
+	a, h := testAdmin(t)
+	cookie := loginForTest(t, h)
+
+	// Reject MRS + classical combination and path traversal.
+	badClassical := adminRequest(h, "POST", "/api/mihomo/rule-sets", map[string]any{
+		"name":     "bad-mrs",
+		"source":   "http",
+		"behavior": "classical",
+		"format":   "mrs",
+		"url":      "https://example.com/rules.mrs",
+	}, cookie, "")
+	if badClassical.Code != 400 {
+		t.Fatalf("expected 400 for mrs+classical, got %d", badClassical.Code)
+	}
+	badPath := adminRequest(h, "POST", "/api/mihomo/rule-sets", map[string]any{
+		"name":     "bad-path",
+		"source":   "manual",
+		"behavior": "domain",
+		"format":   "txt",
+		"path":     "../../etc/passwd",
+		"content":  ".example.com",
+	}, cookie, "")
+	if badPath.Code != 400 {
+		t.Fatalf("expected 400 for path traversal, got %d", badPath.Code)
+	}
+
+	// 1. Add built-in preset rule-set with auto RULE-SET creation.
+	builtinRec := adminRequest(h, "POST", "/api/mihomo/rule-sets", map[string]any{
+		"source":          "builtin",
+		"preset":          "cn-ip",
+		"name":            "cn-ip",
+		"behavior":        "ipcidr",
+		"format":          "mrs",
+		"path":            "ruleset/custom-cn-ip.mrs",
+		"interval":        43200,
+		"create_rule":     true,
+		"rule_target":     "DIRECT",
+		"rule_no_resolve": true,
+	}, cookie, "")
+	if builtinRec.Code != 200 {
+		t.Fatalf("builtin save failed: %d %s", builtinRec.Code, builtinRec.Body.String())
+	}
+
+	// 2. Add remote http rule-set (yaml).
+	httpRec := adminRequest(h, "POST", "/api/mihomo/rule-sets", map[string]any{
+		"name":     "my-remote",
+		"source":   "http",
+		"behavior": "classical",
+		"format":   "yaml",
+		"url":      "https://rules.example.com/custom.yaml",
+		"path":     "./ruleset/my-remote.yaml",
+		"interval": 3600,
+		"comment":  "远端混合规则集",
+	}, cookie, "")
+	if httpRec.Code != 200 {
+		t.Fatalf("http save failed: %d %s", httpRec.Code, httpRec.Body.String())
+	}
+
+	// 3. Add manual txt rule-set + manual yaml rule-set.
+	manualTxtRec := adminRequest(h, "POST", "/api/mihomo/rule-sets", map[string]any{
+		"name":            "local-domains",
+		"source":          "manual",
+		"behavior":        "domain",
+		"format":          "txt",
+		"path":            "./ruleset/local-domains.txt",
+		"content":         "# comment\n+.internal.lan\n.example.org",
+		"create_rule":     true,
+		"rule_target":     "DIRECT",
+		"rule_no_resolve": false,
+	}, cookie, "")
+	if manualTxtRec.Code != 200 {
+		t.Fatalf("manual txt save failed: %d %s", manualTxtRec.Code, manualTxtRec.Body.String())
+	}
+
+	manualYamlRec := adminRequest(h, "POST", "/api/mihomo/rule-sets", map[string]any{
+		"name":     "local-yaml",
+		"source":   "manual",
+		"behavior": "classical",
+		"format":   "yaml",
+		"content":  "DOMAIN-SUFFIX,corp.example,DIRECT\nIP-CIDR,10.20.0.0/16,DIRECT",
+	}, cookie, "")
+	if manualYamlRec.Code != 200 {
+		t.Fatalf("manual yaml save failed: %d %s", manualYamlRec.Code, manualYamlRec.Body.String())
+	}
+
+	// Verify local manual files were materialized cleanly inside m.dir.
+	txtBytes, err := os.ReadFile(filepath.Join(a.mihomo.dir, "ruleset", "local-domains.txt"))
+	if err != nil || string(txtBytes) != "+.internal.lan\n.example.org\n" {
+		t.Fatalf("unexpected local-domains.txt: err=%v content=%q", err, string(txtBytes))
+	}
+	yamlBytes, err := os.ReadFile(filepath.Join(a.mihomo.dir, "ruleset", "local-yaml.yaml"))
+	if err != nil || !strings.Contains(string(yamlBytes), "payload:") || !strings.Contains(string(yamlBytes), "DOMAIN-SUFFIX,corp.example,DIRECT") {
+		t.Fatalf("unexpected local-yaml.yaml: err=%v content=%q", err, string(yamlBytes))
+	}
+
+	// Verify runtime.yaml contains rule-providers + RULE-SET rules.
+	rtRaw, err := os.ReadFile(a.mihomo.runtimePath())
+	if err != nil {
+		t.Fatalf("read runtime.yaml: %v", err)
+	}
+	rt := string(rtRaw)
+	for _, want := range []string{
+		"rule-providers:",
+		"cn-ip:",
+		"path: ./ruleset/custom-cn-ip.mrs",
+		"interval: 43200",
+		"my-remote:",
+		"behavior: classical",
+		"local-domains:",
+		"type: file",
+		"format: text",
+		"RULE-SET,cn-ip,DIRECT,no-resolve",
+		"RULE-SET,local-domains,DIRECT",
+	} {
+		if !strings.Contains(rt, want) {
+			t.Fatalf("runtime.yaml missing %q:\n%s", want, rt)
+		}
+	}
+
+	// Verify status exposes presets and all 4 rule-sets, then toggle and delete one manual rule-set.
+	var st mihomoStatusResponse
+	_ = json.Unmarshal(manualYamlRec.Body.Bytes(), &st)
+	if len(st.RuleSetPresets) < 10 || len(st.CustomRuleSets) != 4 {
+		t.Fatalf("unexpected status rule_sets=%d presets=%d", len(st.CustomRuleSets), len(st.RuleSetPresets))
+	}
+	targetID := st.CustomRuleSets[2].ID // local-domains
+	togRec := adminRequest(h, "PUT", "/api/mihomo/rule-sets/"+targetID+"/toggle", map[string]any{}, cookie, "")
+	if togRec.Code != 200 {
+		t.Fatalf("toggle rule-set failed: %d %s", togRec.Code, togRec.Body.String())
+	}
+	rtAfterToggle, _ := os.ReadFile(a.mihomo.runtimePath())
+	if strings.Contains(string(rtAfterToggle), "local-domains:") {
+		t.Fatalf("disabled rule-set should be omitted from rule-providers:\n%s", rtAfterToggle)
+	}
+	delRec := adminRequest(h, "DELETE", "/api/mihomo/rule-sets/"+targetID, map[string]any{}, cookie, "")
+	if delRec.Code != 200 {
+		t.Fatalf("delete rule-set failed: %d %s", delRec.Code, delRec.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(a.mihomo.dir, "ruleset", "local-domains.txt")); !os.IsNotExist(err) {
+		t.Fatalf("expected manual file removed after delete, got err=%v", err)
+	}
+}
+
+func TestMihomoCustomAllYAMLSyncAndOverride(t *testing.T) {
+	a, h := testAdmin(t)
+	cookie := loginForTest(t, h)
+
+	// Add an airport subscription with conflicting keys, group, provider, and rules.
+	airportSub1 := `
+find-process-mode: off
+proxies:
+  - { name: "机场HK", type: ss, server: 1.2.3.4, port: 443 }
+proxy-groups:
+  - name: "节点选择"
+    type: select
+    proxies: ["DIRECT"]
+rule-providers:
+  shared-set:
+    type: http
+    behavior: domain
+    format: yaml
+    url: https://airport.invalid/old.yaml
+    path: ./ruleset/airport-old.yaml
+    interval: 600
+rules:
+  - "MATCH,节点选择"
+`
+	addSub := adminRequest(h, "POST", "/api/mihomo/subscriptions", map[string]any{
+		"name":         "测试机场",
+		"yaml_content": airportSub1,
+	}, cookie, "")
+	if addSub.Code != 200 {
+		t.Fatalf("add subscription failed: %d %s", addSub.Code, addSub.Body.String())
+	}
+
+	// Reject reserved keys in custom.yaml.
+	badRec := adminRequest(h, "PUT", "/api/mihomo/custom/all/yaml", map[string]any{
+		"content": "secret: hacked\nproxy-groups: []\nrules: []\n",
+	}, cookie, "")
+	if badRec.Code != 400 {
+		t.Fatalf("expected 400 for reserved secret key, got %d", badRec.Code)
+	}
+
+	// Edit unified custom.yaml with groups, rules, rule-providers, dns policy, and extra overrides.
+	customDoc := `
+find-process-mode: strict
+sniffer:
+  enable: true
+dns:
+  nameserver-policy:
+    "+.corp.internal":
+      - 10.0.0.53
+proxy-groups:
+  - name: 节点选择
+    type: select
+    proxies: [机场HK, DIRECT]
+rule-providers:
+  shared-set:
+    type: http
+    behavior: domain
+    format: text
+    url: https://custom.example.com/shared.txt
+    path: ./ruleset/shared.txt
+    interval: 7200
+  local-inline:
+    type: file
+    behavior: domain
+    format: text
+    path: ./ruleset/local-inline.txt
+    payload:
+      - "+.myhome.lan"
+rules:
+  - RULE-SET,shared-set,节点选择
+  - RULE-SET,local-inline,DIRECT
+`
+	putRec := adminRequest(h, "PUT", "/api/mihomo/custom/all/yaml", map[string]any{
+		"content": customDoc,
+	}, cookie, "")
+	if putRec.Code != 200 {
+		t.Fatalf("put custom all yaml failed: %d %s", putRec.Code, putRec.Body.String())
+	}
+	var putRes struct {
+		OK      bool                 `json:"ok"`
+		Content string               `json:"content"`
+		Status  mihomoStatusResponse `json:"status"`
+	}
+	_ = json.Unmarshal(putRec.Body.Bytes(), &putRes)
+	if !putRes.OK || len(putRes.Status.CustomGroups) != 1 || len(putRes.Status.CustomRuleSets) != 2 || len(putRes.Status.CustomRules) != 2 || len(putRes.Status.CustomDNSPolicies) != 1 {
+		t.Fatalf("structured state not synced from custom.yaml: %+v", putRes.Status)
+	}
+
+	// GET /api/mihomo/custom/all/yaml returns unified custom.yaml with all sections.
+	getRec := adminRequest(h, "GET", "/api/mihomo/custom/all/yaml", nil, cookie, "")
+	if getRec.Code != 200 || !strings.Contains(getRec.Body.String(), "find-process-mode: strict") || !strings.Contains(getRec.Body.String(), "shared-set") {
+		t.Fatalf("get custom all yaml unexpected: %d %s", getRec.Code, getRec.Body.String())
+	}
+
+	// Verify runtime.yaml overrides conflicting airport items.
+	rt1Bytes, _ := os.ReadFile(a.mihomo.runtimePath())
+	rt1 := string(rt1Bytes)
+	for _, want := range []string{
+		"find-process-mode: strict",
+		"enable: true",
+		"10.0.0.53",
+		"https://custom.example.com/shared.txt",
+		"RULE-SET,shared-set,节点选择",
+		"RULE-SET,local-inline,DIRECT",
+	} {
+		if !strings.Contains(rt1, want) {
+			t.Fatalf("runtime.yaml missing %q:\n%s", want, rt1)
+		}
+	}
+	if strings.Contains(rt1, "https://airport.invalid/old.yaml") || strings.Contains(rt1, "find-process-mode: off") {
+		t.Fatalf("airport conflicting values should be overridden by custom.yaml:\n%s", rt1)
+	}
+
+	// Simulate an airport subscription update overwriting source.yaml with new conflicting settings.
+	airportSub2 := `
+find-process-mode: off
+proxies:
+  - { name: "机场HK", type: ss, server: 1.2.3.4, port: 443 }
+  - { name: "机场SG", type: ss, server: 1.2.3.6, port: 443 }
+proxy-groups:
+  - name: "节点选择"
+    type: select
+    proxies: ["REJECT"]
+rules:
+  - "MATCH,节点选择"
+`
+	if err := atomicWrite(a.mihomo.subscriptionFile(a.mihomo.cfg.ActiveSubscriptionID), []byte(airportSub2)); err != nil {
+		t.Fatalf("write updated subscription source: %v", err)
+	}
+	a.mihomo.mu.Lock()
+	if err := a.mihomo.synthesizeAndWriteLocked(); err != nil {
+		a.mihomo.mu.Unlock()
+		t.Fatalf("resynthesize after subscription update: %v", err)
+	}
+	a.mihomo.mu.Unlock()
+
+	rt2Bytes, _ := os.ReadFile(a.mihomo.runtimePath())
+	rt2 := string(rt2Bytes)
+	if !strings.Contains(rt2, "find-process-mode: strict") || strings.Contains(rt2, "find-process-mode: off") || !strings.Contains(rt2, "机场SG") || !strings.Contains(rt2, "https://custom.example.com/shared.txt") {
+		t.Fatalf("custom.yaml overlay lost or failed to override after subscription update:\n%s", rt2)
+	}
+}

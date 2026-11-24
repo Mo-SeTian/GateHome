@@ -95,6 +95,35 @@ type MihomoCustomRule struct {
 	Comment   string `json:"comment,omitempty"`
 }
 
+// MihomoRuleSet represents a managed Mihomo rule-provider (remote HTTP, built-in preset, or manual file).
+type MihomoRuleSet struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Source   string `json:"source"`             // "http" | "builtin" | "manual"
+	Preset   string `json:"preset,omitempty"`   // preset id when source == "builtin"
+	Behavior string `json:"behavior"`           // "domain" | "ipcidr" | "classical"
+	Format   string `json:"format"`             // "yaml" | "text" | "mrs"
+	URL      string `json:"url,omitempty"`      // required for http / builtin
+	Path     string `json:"path"`               // relative path inside mihomo working directory
+	Interval int    `json:"interval,omitempty"` // refresh interval in seconds for http / builtin
+	Content  string `json:"content,omitempty"`  // inline rule lines for manual (yaml / text)
+	Enabled  bool   `json:"enabled"`
+	Comment  string `json:"comment,omitempty"`
+}
+
+// MihomoRuleSetPreset describes a curated built-in MetaCubeX rule-provider option.
+type MihomoRuleSetPreset struct {
+	ID          string `json:"id"`
+	Label       string `json:"label"`
+	Name        string `json:"name"`
+	Behavior    string `json:"behavior"`
+	Format      string `json:"format"`
+	URL         string `json:"url"`
+	Path        string `json:"path"`
+	Interval    int    `json:"interval"`
+	Description string `json:"description"`
+}
+
 // MihomoDNSPolicy represents an incremental custom dns.nameserver-policy entry merged into runtime.yaml.
 type MihomoDNSPolicy struct {
 	ID      string   `json:"id"`
@@ -121,7 +150,9 @@ type MihomoConfig struct {
 	Subscriptions        []MihomoSubscription `json:"subscriptions"`
 	CustomGroups         []MihomoCustomGroup  `json:"custom_groups"`
 	CustomRules          []MihomoCustomRule   `json:"custom_rules"`
+	CustomRuleSets       []MihomoRuleSet      `json:"custom_rule_sets"`
 	CustomDNSPolicies    []MihomoDNSPolicy    `json:"custom_dns_policies"`
+	CustomOverlayYAML    string               `json:"custom_overlay_yaml,omitempty"`
 	ManualOverride       bool                 `json:"manual_override"`
 }
 
@@ -163,6 +194,7 @@ var validMihomoRuleTypes = map[string]bool{
 	"GEOSITE":        true,
 	"GEOIP":          true,
 	"PROCESS-NAME":   true,
+	"RULE-SET":       true,
 }
 
 func randomMihomoSecret() string {
@@ -198,6 +230,7 @@ func defaultMihomoConfig() MihomoConfig {
 		Subscriptions:     []MihomoSubscription{},
 		CustomGroups:      []MihomoCustomGroup{},
 		CustomRules:       []MihomoCustomRule{},
+		CustomRuleSets:    []MihomoRuleSet{},
 		CustomDNSPolicies: []MihomoDNSPolicy{},
 	}
 }
@@ -236,6 +269,9 @@ func normalizeMihomoConfig(cfg *MihomoConfig) bool {
 	}
 	if cfg.CustomRules == nil {
 		cfg.CustomRules = []MihomoCustomRule{}
+	}
+	if cfg.CustomRuleSets == nil {
+		cfg.CustomRuleSets = []MihomoRuleSet{}
 	}
 	if cfg.CustomDNSPolicies == nil {
 		cfg.CustomDNSPolicies = []MihomoDNSPolicy{}

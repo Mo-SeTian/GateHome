@@ -2148,8 +2148,22 @@ try {
   await mihomoPage.getByRole('button', { name: '保存并生效' }).click()
   await page.locator('.toast-text', { hasText: '已保存并合并到运行配置' }).first().waitFor()
   await mihomoPage.locator('.custom-yaml-panel').getByText('与页面同步').waitFor()
-  await mihomoPage.getByRole('button', { name: '返回列表' }).click()
+  await mihomoPage.getByRole('button', { name: '分流规则', exact: true }).click()
   await mihomoPage.locator('.rule-row').filter({ hasText: 'yaml-added.example' }).waitFor()
+
+  // Configure a manual TXT rule-set and verify RULE-SET creation + runtime.yaml merge
+  await mihomoPage.getByRole('button', { name: /规则集 \(/ }).click()
+  await mihomoPage.getByRole('button', { name: /新建规则集/ }).first().click()
+  await mihomoDialog.getByRole('button', { name: '手动编写' }).click()
+  await mihomoDialog.locator('input[name="ruleset_name"]').fill('lan-custom')
+  await mihomoDialog.locator('select[name="ruleset_behavior"]').selectOption('domain')
+  await mihomoDialog.locator('select[name="ruleset_format"]').selectOption('text')
+  await mihomoDialog.locator('textarea[name="ruleset_content"]').fill('+.mycorp.lan')
+  await mihomoDialog.locator('select[name="ruleset_rule_target"]').selectOption('HK 专线')
+  await mihomoDialog.getByRole('button', { name: '保存规则集' }).click()
+  await mihomoPage.locator('.ruleset-card').filter({ hasText: 'lan-custom' }).waitFor()
+  await mihomoPage.getByRole('button', { name: '分流规则', exact: true }).click()
+  await mihomoPage.locator('.rule-row').filter({ hasText: 'lan-custom' }).getByText('RULE-SET').waitFor()
 
   // Verify synthesized runtime.yaml vs read-only source.yaml dual view
   await mihomoPage.getByRole('tab', { name: '配置文件' }).click()
@@ -2157,7 +2171,8 @@ try {
     const val = document.querySelector('.mihomo-page .yaml-editor')?.value || ''
     return val.includes('17890') && val.includes('17891') && val.includes('17892') &&
       val.includes('17853') && val.includes('cdn-hk.example.com') && val.includes('+.corp.internal') &&
-      val.includes('HK-01 [专线]') && val.includes('anthropic.com')
+      val.includes('HK-01 [专线]') && val.includes('anthropic.com') &&
+      val.includes('rule-providers:') && val.includes('lan-custom:')
   })
   assert.ok((await mihomoPage.locator('.yaml-editor').boundingBox()).height >= 400, 'runtime yaml editor must keep its expanded height')
   const runtimeYamlText = await mihomoPage.locator('.yaml-editor').inputValue()
@@ -2166,6 +2181,7 @@ try {
   assert.ok(runtimeYamlText.includes('lanuser:__GATEHOME_MANAGED_AUTH__') && !runtimeYamlText.includes('lanpass123') && runtimeYamlText.includes('skip-auth-prefixes:'))
   assert.ok(!runtimeYamlText.includes('剩余流量 10GB') && runtimeYamlText.includes('HK-01 [专线]'))
   assert.ok(runtimeYamlText.includes('DOMAIN-SUFFIX,anthropic.com,HK 专线'))
+  assert.ok(runtimeYamlText.includes('rule-providers:') && runtimeYamlText.includes('RULE-SET,lan-custom,HK 专线'))
 
   // Modify runtime.yaml and verify validate-before-save gate
   const saveYamlBtn = mihomoPage.getByRole('button', { name: '保存并热重载' })
@@ -2185,6 +2201,27 @@ try {
   await mihomoPage.getByRole('button', { name: '重新合成' }).click()
   await mihomoPage.getByText('流水线自动合成', { exact: true }).waitFor()
 
+  // Switch to unified pre-merge custom.yaml view, add an extra override key + rule, save and verify bidirectional sync
+  await mihomoPage.getByRole('button', { name: /自定义配置/ }).click()
+  await mihomoPage.getByText(/合并前自定义总配置/).waitFor()
+  await page.waitForFunction(() => {
+    const val = document.querySelector('.mihomo-page .yaml-editor')?.value || ''
+    return val.includes('HK 专线') && val.includes('lan-custom') && val.includes('anthropic.com')
+  })
+  const customAllText = await mihomoPage.locator('.yaml-editor').inputValue()
+  const editedCustomAll = 'find-process-mode: strict\n' + customAllText.trimEnd() + '\n  - DOMAIN-SUFFIX,custom-all.example,DIRECT\n'
+  await mihomoPage.locator('.yaml-editor').fill(editedCustomAll)
+  await mihomoPage.locator('.yaml-actions').getByRole('button', { name: '保存并生效' }).click()
+  await page.locator('.toast-text', { hasText: '自定义配置已保存并合并到运行配置' }).first().waitFor()
+  await mihomoPage.getByRole('button', { name: /运行配置/ }).click()
+  await page.waitForFunction(() => {
+    const val = document.querySelector('.mihomo-page .yaml-editor')?.value || ''
+    return val.includes('find-process-mode: strict') && val.includes('DOMAIN-SUFFIX,custom-all.example,DIRECT')
+  })
+  await mihomoPage.getByRole('tab', { name: '自定义分流', exact: true }).click()
+  await mihomoPage.locator('.rule-row').filter({ hasText: 'custom-all.example' }).waitFor()
+  await mihomoPage.getByRole('tab', { name: '配置文件', exact: true }).click()
+
   // Switch to syntax-highlighted read-only source.yaml viewer
   await mihomoPage.getByRole('button', { name: /订阅原件/ }).click()
   await mihomoPage.getByText('只读原件', { exact: true }).waitFor()
@@ -2199,10 +2236,18 @@ try {
 
   for (const width of [390, 320]) {
     await page.setViewportSize({ width, height: 844 })
-    for (const tabName of ['策略组与节点', '自定义分流', '订阅管理', '端口与核心', '配置文件', '运行日志']) {
-      await mihomoPage.getByRole('tab', { name: tabName }).click()
+    await page.waitForFunction(() => (document.querySelector('.mihomo-page')?.clientWidth || 0) >= 260)
+    for (const tabName of ['策略组与节点', '自定义分流', '连接', '订阅管理', '端口与核心', '配置文件', '运行日志']) {
+      await mihomoPage.getByRole('tab', { name: tabName, exact: true }).click()
       const dims = await mihomoPage.evaluate(el => ({ scrollWidth: el.scrollWidth, clientWidth: el.clientWidth }))
       assert.ok(dims.scrollWidth <= dims.clientWidth, `mihomo overflow at width=${width} tab=${tabName}: scrollWidth=${dims.scrollWidth} clientWidth=${dims.clientWidth}`)
+      if (tabName === '连接') {
+        const connSection = mihomoPage.locator('.tab-section[aria-label="连接"]')
+        await connSection.getByRole('tab', { name: /活跃 \(/ }).waitFor()
+        await connSection.getByRole('tab', { name: /已关闭 \(/ }).waitFor()
+        await connSection.getByRole('button', { name: '关闭所有活跃连接' }).waitFor()
+        await connSection.getByLabel('搜索连接').waitFor()
+      }
       if (tabName === '配置文件') {
         assert.ok((await sourceViewer.boundingBox()).height >= 350)
       }
