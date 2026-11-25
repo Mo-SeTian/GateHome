@@ -172,7 +172,7 @@ func selectMihomoAsset(assets []githubReleaseAsset, goos, goarch string) (github
 		if goarch == "amd64" && goos == "linux" && strings.Contains(name, "-compatible-") {
 			return assets[i], true
 		}
-		if regexp.MustCompile(`^`+regexp.QuoteMeta(prefix)+`-v[0-9]`).MatchString(name) {
+		if regexp.MustCompile(`^` + regexp.QuoteMeta(prefix) + `-v[0-9]`).MatchString(name) {
 			fallback = &assets[i]
 		} else if fallback == nil {
 			fallback = &assets[i]
@@ -190,17 +190,128 @@ type githubReleaseAsset struct {
 	Size int64  `json:"size"`
 }
 
-func (m *mihomoManager) DownloadCore(ctx context.Context, state State) (string, error) {
-	client := onlineUpdateClient(state)
-	defer closeClient(client)
+type mihomoCoreUpdateInfo struct {
+	CurrentVersion  string    `json:"current_version,omitempty"`
+	LatestVersion   string    `json:"latest_version,omitempty"`
+	UpdateAvailable bool      `json:"update_available"`
+	AssetName       string    `json:"asset_name,omitempty"`
+	AssetSize       int64     `json:"asset_size,omitempty"`
+	ReleaseURL      string    `json:"release_url,omitempty"`
+	PublishedAt     string    `json:"published_at,omitempty"`
+	CheckedAt       time.Time `json:"checked_at,omitempty"`
+}
 
-	metaBytes, err := fetchOnlineUpdate(ctx, client, mihomoReleaseLatestAPI, 2<<20, state.GitHubToken)
+var mihomoSemverPattern = regexp.MustCompile(`v?((?:0|[1-9][0-9]{0,5})\.(?:0|[1-9][0-9]{0,5})\.(?:0|[1-9][0-9]{0,5})(?:-beta\.[1-9][0-9]{0,5})?)`)
+
+func extractMihomoSemver(raw string) string {
+	m := mihomoSemverPattern.FindStringSubmatch(raw)
+	if m == nil {
+		return ""
+	}
+	return m[1]
+}
+
+func isMihomoUpdateNewer(currentRaw, latestRaw string) bool {
+	latestVer := extractMihomoSemver(latestRaw)
+	if latestVer == "" {
+		return false
+	}
+	currentVer := extractMihomoSemver(currentRaw)
+	if currentVer == "" {
+		// If current binary is missing or its version string is unparseable, allow installing when not empty/missing.
+		return strings.TrimSpace(currentRaw) == ""
+	}
+	cmp, err := compareVersions(latestVer, currentVer)
+	return err == nil && cmp > 0
+}
+
+func (m *mihomoManager) coreReleaseAPIURL() string {
+	m.mu.Lock()
+	override := m.coreReleaseAPI
+	m.mu.Unlock()
+	if override != "" {
+		return override
+	}
+	return mihomoReleaseLatestAPI
+}
+
+func (m *mihomoManager) CheckCoreUpdate(ctx context.Context, state State) (mihomoCoreUpdateInfo, error) {
+	m.mu.Lock()
+	customClient := m.coreHTTPClient
+	m.mu.Unlock()
+	client := customClient
+	if client == nil {
+		client = onlineUpdateClient(state)
+		defer closeClient(client)
+	}
+
+	metaBytes, err := fetchOnlineUpdate(ctx, client, m.coreReleaseAPIURL(), 2<<20, state.GitHubToken)
+	if err != nil {
+		return mihomoCoreUpdateInfo{}, fmt.Errorf("检查 mihomo 内核更新失败: %v", err)
+	}
+	var release struct {
+		TagName     string               `json:"tag_name"`
+		HTMLURL     string               `json:"html_url"`
+		PublishedAt string               `json:"published_at"`
+		Assets      []githubReleaseAsset `json:"assets"`
+	}
+	if err := json.Unmarshal(metaBytes, &release); err != nil {
+		return mihomoCoreUpdateInfo{}, errors.New("解析 mihomo 版本信息失败")
+	}
+
+	m.mu.Lock()
+	bin := m.resolveBinaryLocked()
+	curVer := m.version
+	m.mu.Unlock()
+	if curVer == "" && bin != "" {
+		if probed := m.probeBinaryVersion(bin); probed != "" {
+			curVer = probed
+			m.mu.Lock()
+			if m.version == "" {
+				m.version = probed
+			}
+			m.mu.Unlock()
+		}
+	}
+
+	asset, _ := selectMihomoAsset(release.Assets, runtime.GOOS, runtime.GOARCH)
+	info := mihomoCoreUpdateInfo{
+		CurrentVersion:  curVer,
+		LatestVersion:   strings.TrimSpace(release.TagName),
+		UpdateAvailable: bin == "" || isMihomoUpdateNewer(curVer, release.TagName),
+		AssetName:       asset.Name,
+		AssetSize:       asset.Size,
+		ReleaseURL:      release.HTMLURL,
+		PublishedAt:     release.PublishedAt,
+		CheckedAt:       time.Now(),
+	}
+
+	m.mu.Lock()
+	copied := info
+	m.coreUpdateInfo = &copied
+	m.mu.Unlock()
+	return info, nil
+}
+
+func (m *mihomoManager) DownloadCore(ctx context.Context, state State) (string, error) {
+	m.mu.Lock()
+	customClient := m.coreHTTPClient
+	m.mu.Unlock()
+	client := customClient
+	if client == nil {
+		client = onlineUpdateClient(state)
+		defer closeClient(client)
+	}
+
+	metaBytes, err := fetchOnlineUpdate(ctx, client, m.coreReleaseAPIURL(), 2<<20, state.GitHubToken)
 	if err != nil {
 		return "", fmt.Errorf("获取 mihomo 发布信息失败: %v", err)
 	}
 	var release struct {
-		TagName string               `json:"tag_name"`
-		Assets  []githubReleaseAsset `json:"assets"`
+		TagName     string               `json:"tag_name"`
+		HTMLURL     string               `json:"html_url"`
+		PublishedAt string               `json:"published_at"`
+		Assets      []githubReleaseAsset `json:"assets"`
 	}
 	if err := json.Unmarshal(metaBytes, &release); err != nil {
 		return "", errors.New("解析 mihomo 版本信息失败")
@@ -217,6 +328,18 @@ func (m *mihomoManager) DownloadCore(ctx context.Context, state State) (string, 
 	if err != nil {
 		return "", err
 	}
+	m.mu.Lock()
+	m.coreUpdateInfo = &mihomoCoreUpdateInfo{
+		CurrentVersion:  ver,
+		LatestVersion:   strings.TrimSpace(release.TagName),
+		UpdateAvailable: false,
+		AssetName:       asset.Name,
+		AssetSize:       asset.Size,
+		ReleaseURL:      release.HTMLURL,
+		PublishedAt:     release.PublishedAt,
+		CheckedAt:       time.Now(),
+	}
+	m.mu.Unlock()
 	return ver, nil
 }
 

@@ -17,6 +17,7 @@
         <span>配置 {{ formatBytes(capacity.config_bytes) }}</span
         ><span>日志 {{ formatBytes(capacity.log_bytes) }}（磁盘保留）</span
         ><span>首页 {{ formatBytes(capacity.sunpanel_bytes) }}</span
+        ><span>代理分流 {{ formatBytes(capacity.mihomo_bytes || 0) }}</span
         ><span>图片 {{ formatBytes(capacity.image_bytes) }}</span
         ><span>其他 {{ formatBytes(capacity.other_bytes) }}</span>
       </div>

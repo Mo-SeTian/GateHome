@@ -98,6 +98,11 @@ func snapshotBackupPaths(paths StoragePaths, state State) (backupPayload, error)
 		return b, err
 	}
 	names = append(names, panelNames...)
+	mihomoNames, err := mihomoBackupNames(paths)
+	if err != nil {
+		return b, err
+	}
+	names = append(names, mihomoNames...)
 	for _, name := range names {
 		var f *os.File
 		image := isBackupImage(name)
@@ -297,6 +302,20 @@ func restoreTargets(paths StoragePaths, full bool, incoming map[string][]byte) [
 				targets = append(targets, restoreTarget{"sunpanel/" + dir, filepath.Join(paths.sunPanelDir(), dir), true})
 			}
 		}
+		if mihomoFileCount(incoming) > 0 {
+			mihomoDir := paths.directory("mihomo")
+			targets = append(targets,
+				restoreTarget{"mihomo/subscriptions", filepath.Join(mihomoDir, "subscriptions"), true},
+				restoreTarget{"mihomo/ruleset/manual", filepath.Join(mihomoDir, "ruleset", "manual"), true},
+				restoreTarget{"mihomo/config.json", paths.file("mihomo/config.json"), false},
+				restoreTarget{"mihomo/runtime.yaml", paths.file("mihomo/runtime.yaml"), false},
+			)
+			for _, name := range slices.Sorted(maps.Keys(incoming)) {
+				if strings.HasPrefix(name, "mihomo/ruleset/") && !strings.HasPrefix(name, "mihomo/ruleset/manual/") && safeMihomoBackupFile(name) {
+					targets = append(targets, restoreTarget{name, paths.file(name), false})
+				}
+			}
+		}
 		for _, name := range []string{"route-images", "subscriptions"} {
 			targets = append(targets, restoreTarget{name, paths.directory(name), true})
 		}
@@ -375,6 +394,19 @@ func restoreFilesPaths(paths StoragePaths, state []byte, certificates, files map
 		defer os.RemoveAll(sunStage)
 	}
 	var iconStage string
+	if mihomoFileCount(files) > 0 {
+		mihomoDir := paths.directory("mihomo")
+		if info, err := os.Lstat(mihomoDir); err == nil && (!info.IsDir() || info.Mode()&os.ModeSymlink != 0) {
+			return errors.New("Mihomo 恢复目录无效")
+		}
+		rulesetDir := filepath.Join(mihomoDir, "ruleset")
+		if info, err := os.Lstat(rulesetDir); err == nil && (!info.IsDir() || info.Mode()&os.ModeSymlink != 0) {
+			return errors.New("Mihomo 规则集恢复目录无效")
+		}
+		if err := os.MkdirAll(rulesetDir, 0700); err != nil {
+			return err
+		}
+	}
 	for name := range files {
 		if strings.HasPrefix(name, "icons/") {
 			if err := prepareIconDirs(paths.Data); err != nil {
@@ -413,7 +445,7 @@ func restoreFilesPaths(paths StoragePaths, state []byte, certificates, files map
 			}
 		}
 		if target.directory {
-			if err := os.Mkdir(staged(target.name), 0700); err != nil {
+			if err := os.MkdirAll(staged(target.name), 0700); err != nil {
 				return errors.New("恢复目录准备失败")
 			}
 		}
@@ -433,7 +465,7 @@ func restoreFilesPaths(paths StoragePaths, state []byte, certificates, files map
 		if !safeBackupFile(name) {
 			return errors.New("无效的备份数据路径")
 		}
-		if strings.HasPrefix(name, "sunpanel/") || strings.HasPrefix(name, "icons/") {
+		if strings.HasPrefix(name, "sunpanel/") || strings.HasPrefix(name, "icons/") || strings.HasPrefix(name, "mihomo/") {
 			if err := os.MkdirAll(filepath.Dir(staged(name)), 0700); err != nil {
 				return err
 			}

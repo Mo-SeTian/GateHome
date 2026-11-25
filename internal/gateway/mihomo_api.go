@@ -41,8 +41,11 @@ const (
 type mihomoStatusResponse struct {
 	Running                bool                       `json:"running"`
 	PID                    int                        `json:"pid,omitempty"`
+	StartedAt              time.Time                  `json:"started_at,omitempty"`
+	UptimeSeconds          int64                      `json:"uptime_seconds"`
 	CoreInstalled          bool                       `json:"core_installed"`
 	CoreVersion            string                     `json:"core_version,omitempty"`
+	CoreUpdate             *mihomoCoreUpdateInfo      `json:"core_update,omitempty"`
 	BinaryPath             string                     `json:"binary_path,omitempty"`
 	MMDBInstalled          bool                       `json:"mmdb_installed"`
 	MMDBSize               int64                      `json:"mmdb_size,omitempty"`
@@ -76,7 +79,13 @@ func (m *mihomoManager) statusSnapshot() mihomoStatusResponse {
 	ver := m.version
 	running := m.running
 	pid := m.pid
+	startedAt := m.startedAt
 	lastError := m.lastError
+	var coreUpdateCopy *mihomoCoreUpdateInfo
+	if m.coreUpdateInfo != nil {
+		cp := *m.coreUpdateInfo
+		coreUpdateCopy = &cp
+	}
 	cfgCopy := m.cfg
 	cfgCopy.Subscriptions = slices.Clone(m.cfg.Subscriptions)
 	cfgCopy.CustomGroups = slices.Clone(m.cfg.CustomGroups)
@@ -108,11 +117,20 @@ func (m *mihomoManager) statusSnapshot() mihomoStatusResponse {
 	sanitizedSettings := cfgCopy.Settings
 	authPwdConfigured := sanitizedSettings.AuthPassword != ""
 	sanitizedSettings.AuthPassword = ""
+	var uptimeSec int64
+	if running && !startedAt.IsZero() {
+		if d := int64(time.Since(startedAt).Seconds()); d >= 0 {
+			uptimeSec = d
+		}
+	}
 	return mihomoStatusResponse{
 		Running:                running,
 		PID:                    pid,
+		StartedAt:              startedAt,
+		UptimeSeconds:          uptimeSec,
 		CoreInstalled:          bin != "",
 		CoreVersion:            ver,
+		CoreUpdate:             coreUpdateCopy,
 		BinaryPath:             bin,
 		MMDBInstalled:          mmdbInstalled,
 		MMDBSize:               mmdbSize,
@@ -143,6 +161,7 @@ func (m *mihomoManager) statusSnapshot() mihomoStatusResponse {
 
 func (a *Admin) mihomoRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/mihomo/status", a.requireAuth(a.handleMihomoStatus))
+	mux.HandleFunc("GET /api/mihomo/telemetry", a.requireAuth(a.handleMihomoTelemetry))
 	mux.HandleFunc("PUT /api/mihomo/settings", a.requireAuth(a.handleMihomoSettings))
 	mux.HandleFunc("POST /api/mihomo/start", a.requireAuth(a.handleMihomoStart))
 	mux.HandleFunc("POST /api/mihomo/stop", a.requireAuth(a.handleMihomoStop))
@@ -183,8 +202,11 @@ func (a *Admin) mihomoRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/mihomo/config/validate", a.requireAuth(a.handleMihomoValidateYAML))
 	mux.HandleFunc("POST /api/mihomo/config/resync", a.requireAuth(a.handleMihomoResyncYAML))
 
+	mux.HandleFunc("POST /api/mihomo/core/check-update", a.requireAuth(a.handleMihomoCheckCoreUpdate))
 	mux.HandleFunc("POST /api/mihomo/core/download", a.requireAuth(a.handleMihomoDownloadCore))
 	mux.HandleFunc("POST /api/mihomo/core/upload", a.requireAuth(a.handleMihomoUploadCore))
+	mux.HandleFunc("POST /api/mihomo/backup", a.requireAuth(a.handleMihomoExportBackup))
+	mux.HandleFunc("POST /api/mihomo/restore", a.requireAuth(a.handleMihomoRestoreBackup))
 	mux.HandleFunc("POST /api/mihomo/geodata/download", a.requireAuth(a.handleMihomoDownloadMMDB))
 	mux.HandleFunc("POST /api/mihomo/geodata/upload", a.requireAuth(a.handleMihomoUploadMMDB))
 	mux.HandleFunc("POST /api/mihomo/zashboard/download", a.requireAuth(a.handleMihomoDownloadZashboard))
@@ -1810,5 +1832,53 @@ func (a *Admin) handleMihomoUpdateRuleSets(w http.ResponseWriter, r *http.Reques
 		"failed":    failed,
 		"live":      live,
 		"providers": providers,
+	})
+}
+
+func (a *Admin) handleMihomoTelemetry(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	jsonResponse(w, 200, a.mihomo.Telemetry(ctx))
+}
+
+func (a *Admin) handleMihomoCheckCoreUpdate(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	info, err := a.mihomo.CheckCoreUpdate(ctx, a.store.Snapshot())
+	if err != nil {
+		apiError(w, 400, err.Error())
+		return
+	}
+	jsonResponse(w, 200, map[string]any{
+		"ok":          true,
+		"core_update": info,
+		"status":      a.mihomo.statusSnapshot(),
+	})
+}
+
+func (a *Admin) handleMihomoExportBackup(w http.ResponseWriter, r *http.Request) {
+	backup, err := a.mihomo.ExportStandaloneBackup()
+	if err != nil {
+		apiError(w, 500, err.Error())
+		return
+	}
+	jsonResponse(w, 200, backup)
+}
+
+func (a *Admin) handleMihomoRestoreBackup(w http.ResponseWriter, r *http.Request) {
+	var input mihomoStandaloneBackup
+	if !decodeBodyLarge(w, r, &input, 24<<20) {
+		return
+	}
+	gwCfg := a.store.Snapshot().Config
+	summary, err := a.mihomo.RestoreStandaloneBackup(input, gwCfg, a.adminPort)
+	if err != nil {
+		apiError(w, 400, err.Error())
+		return
+	}
+	jsonResponse(w, 200, map[string]any{
+		"ok":      true,
+		"summary": summary,
+		"status":  a.mihomo.statusSnapshot(),
 	})
 }

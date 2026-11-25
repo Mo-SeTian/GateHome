@@ -25,33 +25,33 @@ type Admin struct {
 	mihomoRestoreOutbound func()
 	webDAV                remoteBackupRuntime
 	sunPanel              *SunPanel
-	store         *Store
-	proxy         *Proxy
-	forwarder     *PortForwarder
-	certs         *Certificates
-	jobs          *Jobs
-	started       time.Time
-	ports         Config
-	adminPort     int
-	updateMu      sync.Mutex
-	mu            sync.Mutex
-	authMu        sync.RWMutex
-	sessions      map[[32]byte]adminSession
-	passkeyFlows  map[string]passkeyFlow
-	adminAddress  string
-	httpAddresses map[int]string
-	attempts      map[string]routeAttempts
-	activeLogins  int
-	logs          *Logs
-	maintenance   *Maintenance
-	onlineUpdate  onlineUpdateJob
-	releaseCache  onlineReleaseCache
-	dashboard     dashboardCache
-	telemetry     telemetryCollector
-	domainDNS     *domainDNS
-	discovery     serviceDiscovery
-	health        serviceHealthCache
-	icons         iconLibrary
+	store                 *Store
+	proxy                 *Proxy
+	forwarder             *PortForwarder
+	certs                 *Certificates
+	jobs                  *Jobs
+	started               time.Time
+	ports                 Config
+	adminPort             int
+	updateMu              sync.Mutex
+	mu                    sync.Mutex
+	authMu                sync.RWMutex
+	sessions              map[[32]byte]adminSession
+	passkeyFlows          map[string]passkeyFlow
+	adminAddress          string
+	httpAddresses         map[int]string
+	attempts              map[string]routeAttempts
+	activeLogins          int
+	logs                  *Logs
+	maintenance           *Maintenance
+	onlineUpdate          onlineUpdateJob
+	releaseCache          onlineReleaseCache
+	dashboard             dashboardCache
+	telemetry             telemetryCollector
+	domainDNS             *domainDNS
+	discovery             serviceDiscovery
+	health                serviceHealthCache
+	icons                 iconLibrary
 }
 
 func NewAdmin(store *Store, proxy *Proxy, certs *Certificates, jobs *Jobs, adminPort int) *Admin {

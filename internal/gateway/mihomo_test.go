@@ -2788,3 +2788,277 @@ func TestMihomoMatchCustomRuleYAMLAndAPI(t *testing.T) {
 		t.Fatalf("expected MATCH,漏网之鱼 in runtime.yaml:\n%s", yamlResp.Content)
 	}
 }
+
+func TestMihomoTelemetryEndpoint(t *testing.T) {
+	a, h := testAdmin(t)
+	cookie := loginForTest(t, h)
+
+	var connCalls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/connections":
+			connCalls++
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"downloadTotal": int64(connCalls * 1024 * 100),
+				"uploadTotal":   int64(connCalls * 1024 * 20),
+				"memory":        int64(42 * 1024 * 1024),
+				"connections": []map[string]any{
+					{"id": "c1", "upload": 100, "download": 200},
+					{"id": "c2", "upload": 300, "download": 400},
+				},
+			})
+		case "/proxies":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"proxies": map[string]any{
+					"节点选择":  map[string]any{"name": "节点选择", "type": "Selector", "now": "HK-01", "all": []string{"HK-01"}},
+					"HK-01": map[string]any{"name": "HK-01", "type": "Shadowsocks"},
+				},
+			})
+		case "/providers/rules":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"providers": map[string]any{
+					"ai": map[string]any{"name": "ai", "ruleCount": 120, "vehicleType": "HTTP"},
+				},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	a.mihomo.mu.Lock()
+	a.mihomo.ctrlBaseURL = srv.URL
+	a.mihomo.cfg.CustomRules = []MihomoCustomRule{{ID: "r1", Type: "MATCH", Target: "DIRECT", Enabled: true}}
+	a.mihomo.cfg.CustomRuleSets = []MihomoRuleSet{{ID: "rs1", Name: "ai", Source: "http", Behavior: "domain", Format: "yaml", URL: "https://example.com/ai.yaml", Path: "./ruleset/ai.yaml", Enabled: true}}
+	a.mihomo.mu.Unlock()
+
+	rec1 := adminRequest(h, "GET", "/api/mihomo/telemetry", nil, cookie, "")
+	if rec1.Code != 200 {
+		t.Fatalf("GET /api/mihomo/telemetry failed: %d %s", rec1.Code, rec1.Body.String())
+	}
+	var tel1 mihomoTelemetryResponse
+	if err := json.Unmarshal(rec1.Body.Bytes(), &tel1); err != nil {
+		t.Fatalf("decode telemetry failed: %v", err)
+	}
+	if tel1.ActiveConnections != 2 || tel1.DownloadTotal != 102400 || tel1.UploadTotal != 20480 || tel1.HeapInuseBytes != 42*1024*1024 {
+		t.Fatalf("unexpected telemetry payload #1: %+v", tel1)
+	}
+	if tel1.GroupCount != 1 || tel1.NodeCount != 1 || !tel1.RulesLive || tel1.TotalRulesCount != 121 {
+		t.Fatalf("unexpected scale counts: %+v", tel1)
+	}
+
+	time.Sleep(250 * time.Millisecond)
+	rec2 := adminRequest(h, "GET", "/api/mihomo/telemetry", nil, cookie, "")
+	var tel2 mihomoTelemetryResponse
+	_ = json.Unmarshal(rec2.Body.Bytes(), &tel2)
+	if tel2.DownRate <= 0 || tel2.UpRate <= 0 {
+		t.Fatalf("expected positive computed rates on second sample, got down=%d up=%d", tel2.DownRate, tel2.UpRate)
+	}
+}
+
+func TestMihomoCoreCheckUpdateAndDownload(t *testing.T) {
+	a, h := testAdmin(t)
+	cookie := loginForTest(t, h)
+
+	assetName := fmt.Sprintf("mihomo-%s-%s-compatible-v1.19.99.gz", runtime.GOOS, runtime.GOARCH)
+	payloadBytes, _ := json.Marshal(map[string]any{
+		"tag_name":     "v1.19.99",
+		"html_url":     "https://github.com/MetaCubeX/mihomo/releases/tag/v1.19.99",
+		"published_at": "2026-11-25T00:00:00Z",
+		"assets": []map[string]any{
+			{"name": assetName, "browser_download_url": "https://github.com/MetaCubeX/mihomo/releases/download/v1.19.99/" + assetName, "size": 12345678},
+		},
+	})
+
+	a.mihomo.mu.Lock()
+	a.mihomo.coreHTTPClient = onlineTestClient(payloadBytes)
+	a.mihomo.version = "Mihomo Meta v1.19.16 darwin arm64"
+	a.mihomo.mu.Unlock()
+
+	rec := adminRequest(h, "POST", "/api/mihomo/core/check-update", nil, cookie, "")
+	if rec.Code != 200 {
+		t.Fatalf("POST /api/mihomo/core/check-update failed: %d %s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		OK         bool                 `json:"ok"`
+		CoreUpdate mihomoCoreUpdateInfo `json:"core_update"`
+		Status     mihomoStatusResponse `json:"status"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode check-update failed: %v", err)
+	}
+	if !resp.OK || !resp.CoreUpdate.UpdateAvailable || resp.CoreUpdate.LatestVersion != "v1.19.99" || resp.CoreUpdate.AssetName != assetName {
+		t.Fatalf("unexpected core update response: %+v", resp.CoreUpdate)
+	}
+	if resp.Status.CoreUpdate == nil || resp.Status.CoreUpdate.LatestVersion != "v1.19.99" {
+		t.Fatalf("expected status snapshot to cache core_update: %+v", resp.Status.CoreUpdate)
+	}
+
+	if isMihomoUpdateNewer("Mihomo Meta v1.19.99", "v1.19.99") {
+		t.Fatal("same version must not report newer update")
+	}
+}
+
+func TestMihomoStandaloneBackupRestore(t *testing.T) {
+	a, h := testAdmin(t)
+	cookie := loginForTest(t, h)
+
+	// Populate subscription, custom group, rule-set, and MATCH rule.
+	subYAML := "proxies:\n  - { name: \"HK-01\", type: ss, server: 1.2.3.4, port: 443 }\n"
+	if rec := adminRequest(h, "POST", "/api/mihomo/subscriptions", map[string]any{
+		"name":                     "主订阅",
+		"yaml_content":             subYAML,
+		"exclude_groups_and_rules": true,
+	}, cookie, ""); rec.Code != 200 {
+		t.Fatalf("add subscription failed: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := adminRequest(h, "POST", "/api/mihomo/groups", map[string]any{
+		"name": "HK组", "type": "select", "proxies": []string{"ALL_NODES", "DIRECT"},
+	}, cookie, ""); rec.Code != 200 {
+		t.Fatalf("add group failed: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := adminRequest(h, "POST", "/api/mihomo/rule-sets", map[string]any{
+		"name": "manual-lan", "source": "manual", "behavior": "domain", "format": "text", "content": "+.lan.local",
+	}, cookie, ""); rec.Code != 200 {
+		t.Fatalf("add ruleset failed: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := adminRequest(h, "POST", "/api/mihomo/rules", map[string]any{
+		"type": "MATCH", "target": "HK组", "enabled": true,
+	}, cookie, ""); rec.Code != 200 {
+		t.Fatalf("add match rule failed: %d %s", rec.Code, rec.Body.String())
+	}
+
+	exportRec := adminRequest(h, "POST", "/api/mihomo/backup", nil, cookie, "")
+	if exportRec.Code != 200 {
+		t.Fatalf("POST /api/mihomo/backup failed: %d %s", exportRec.Code, exportRec.Body.String())
+	}
+	var exported mihomoStandaloneBackup
+	if err := json.Unmarshal(exportRec.Body.Bytes(), &exported); err != nil {
+		t.Fatalf("decode backup export failed: %v", err)
+	}
+	if exported.Format != mihomoBackupFormat || len(exported.Subscriptions) != 1 || len(exported.ManualRuleSetFiles) != 1 {
+		t.Fatalf("unexpected exported backup: format=%s subs=%d manuals=%d", exported.Format, len(exported.Subscriptions), len(exported.ManualRuleSetFiles))
+	}
+
+	// Clear Mihomo config & files to simulate clean host, then restore from backup.
+	a.mihomo.mu.Lock()
+	a.mihomo.cfg = defaultMihomoConfig()
+	_ = saveMihomoConfig(a.mihomo.dir, a.mihomo.cfg)
+	a.mihomo.mu.Unlock()
+	_ = os.RemoveAll(filepath.Join(a.mihomo.dir, "subscriptions"))
+	_ = os.RemoveAll(filepath.Join(a.mihomo.dir, "ruleset"))
+
+	restoreRec := adminRequest(h, "POST", "/api/mihomo/restore", exported, cookie, "")
+	if restoreRec.Code != 200 {
+		t.Fatalf("POST /api/mihomo/restore failed: %d %s", restoreRec.Code, restoreRec.Body.String())
+	}
+	var resBody struct {
+		OK     bool                 `json:"ok"`
+		Status mihomoStatusResponse `json:"status"`
+	}
+	_ = json.Unmarshal(restoreRec.Body.Bytes(), &resBody)
+	if !resBody.OK || len(resBody.Status.Subscriptions) != 1 || !resBody.Status.Subscriptions[0].ExcludeGroupsAndRules || len(resBody.Status.CustomGroups) != 1 || len(resBody.Status.CustomRules) != 1 || resBody.Status.CustomRuleSets[0].Name != "manual-lan" {
+		t.Fatalf("unexpected restored mihomo status: %+v", resBody.Status)
+	}
+	manualPath := filepath.Join(a.mihomo.dir, "ruleset", "manual-lan.txt")
+	if b, err := os.ReadFile(manualPath); err != nil || !strings.Contains(string(b), "+.lan.local") {
+		t.Fatalf("expected manual ruleset file restored at %s, err=%v", manualPath, err)
+	}
+
+	// Invalid backup format must be rejected
+	bad := exported
+	bad.Format = "invalid-format"
+	if rec := adminRequest(h, "POST", "/api/mihomo/restore", bad, cookie, ""); rec.Code != 400 {
+		t.Fatalf("expected 400 for invalid backup format, got %d", rec.Code)
+	}
+}
+
+func TestMihomoGlobalBackupAndRestoreIntegration(t *testing.T) {
+	dir, state := fullBackupFixture(t)
+	paths := legacyStorage(dir)
+	m := newMihomoManager(paths, nil, 9090)
+
+	subID := "sub-abc123"
+	m.cfg.ActiveSubscriptionID = subID
+	m.cfg.Subscriptions = []MihomoSubscription{{ID: subID, Name: "GlobalSub", ExcludeGroupsAndRules: true}}
+	m.cfg.CustomGroups = []MihomoCustomGroup{{ID: "grp-1", Name: "Custom", Type: "select", Proxies: []string{"DIRECT"}}}
+	m.cfg.CustomRules = []MihomoCustomRule{{ID: "rule-1", Type: "MATCH", Target: "Custom", Enabled: true}}
+	m.cfg.CustomRuleSets = []MihomoRuleSet{{
+		ID: "rs-1", Name: "lan-rules", Source: "manual", Behavior: "domain", Format: "text",
+		Path: "./ruleset/manual/lan-rules.txt", Content: "+.lan.test", Enabled: true,
+	}}
+	if err := os.MkdirAll(filepath.Join(m.dir, "subscriptions"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := atomicWrite(m.subscriptionFile(subID), []byte("proxies:\n  - { name: \"N1\", type: ss, server: 1.2.3.4, port: 443 }\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := saveMihomoConfig(m.dir, m.cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.synthesizeAndWriteLocked(); err != nil {
+		t.Fatal(err)
+	}
+	// Create runtime binary & mmdb that must NOT be bundled into global backup and MUST survive restore.
+	if err := os.MkdirAll(filepath.Join(m.dir, "bin"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	binFile := filepath.Join(m.dir, "bin", "mihomo")
+	if err := os.WriteFile(binFile, []byte("keep-local-binary"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	capInfo, err := inspectBackupCapacity(paths, state.State)
+	if err != nil || capInfo.MihomoBytes <= 0 {
+		t.Fatalf("expected positive mihomo backup capacity, err=%v cap=%+v", err, capInfo)
+	}
+
+	payload, err := snapshotBackupPaths(paths, state.State)
+	if err != nil {
+		t.Fatalf("snapshotBackupPaths failed: %v", err)
+	}
+	for _, required := range []string{
+		"mihomo/config.json",
+		"mihomo/runtime.yaml",
+		"mihomo/subscriptions/" + subID + ".yaml",
+		"mihomo/ruleset/manual/lan-rules.txt",
+	} {
+		if _, ok := payload.Files[required]; !ok {
+			t.Fatalf("missing %q in global backup payload", required)
+		}
+	}
+	for name := range payload.Files {
+		if strings.HasPrefix(name, "mihomo/bin/") {
+			t.Fatalf("runtime binary %q must not be bundled into backup", name)
+		}
+	}
+
+	zipBytes, err := encodeBackup(payload, "pw-mihomo-test")
+	if err != nil {
+		t.Fatalf("encodeBackup failed: %v", err)
+	}
+	decoded, _, err := decodeBackup(zipBytes, "pw-mihomo-test")
+	if err != nil {
+		t.Fatalf("decodeBackup failed: %v", err)
+	}
+
+	// Wipe mihomo config/subscriptions/manual rulesets before restore, keeping bin/mihomo
+	_ = os.Remove(filepath.Join(m.dir, "config.json"))
+	_ = os.Remove(filepath.Join(m.dir, "runtime.yaml"))
+	_ = os.RemoveAll(filepath.Join(m.dir, "subscriptions"))
+	_ = os.RemoveAll(filepath.Join(m.dir, "ruleset"))
+
+	if err := restorePayload(dir, decoded); err != nil {
+		t.Fatalf("restorePayload failed: %v", err)
+	}
+	if b, err := os.ReadFile(binFile); err != nil || string(b) != "keep-local-binary" {
+		t.Fatalf("expected local mihomo binary preserved across global restore, err=%v", err)
+	}
+	restoredCfg, err := loadMihomoConfig(m.dir)
+	if err != nil || restoredCfg.ActiveSubscriptionID != subID || len(restoredCfg.CustomRules) != 1 {
+		t.Fatalf("expected restored mihomo config, err=%v cfg=%+v", err, restoredCfg)
+	}
+	if _, err := os.Stat(filepath.Join(m.dir, "ruleset", "manual", "lan-rules.txt")); err != nil {
+		t.Fatalf("expected restored manual ruleset file, err=%v", err)
+	}
+}

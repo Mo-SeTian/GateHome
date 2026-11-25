@@ -21,7 +21,7 @@
       <SpotlightCard class="report-panel"
         ><h2>下载本地备份</h2>
         <p class="report-note">
-          包含配置与凭据、证书、图片、SunPanel 数据、日志和订阅缓存。登录会话及历史流量统计不在 ZIP
+          包含配置与凭据、证书、图片、SunPanel 数据、Mihomo 代理分流配置、日志和订阅缓存。登录会话及历史流量统计不在 ZIP
           内；完整迁机请另存四个持久化目录。
         </p>
         <form @submit.prevent="exportBackup">

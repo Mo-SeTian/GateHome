@@ -25,6 +25,9 @@ func safeBackupFile(name string) bool {
 	if strings.HasPrefix(name, "sunpanel/") {
 		return safeSunPanelBackupFile(name)
 	}
+	if strings.HasPrefix(name, "mihomo/") {
+		return safeMihomoBackupFile(name)
+	}
 	if strings.HasPrefix(name, "logs/") {
 		_, ok := logFileNumber(strings.TrimPrefix(name, "logs/"))
 		return ok
@@ -129,6 +132,10 @@ func validateBackupFiles(payload backupPayload) error {
 			}
 			if scanner.Err() != nil {
 				return errors.New("备份日志数据无效")
+			}
+		case strings.HasPrefix(name, "mihomo/"):
+			if err := validateMihomoBackupFile(name, data); err != nil {
+				return err
 			}
 		case strings.HasPrefix(name, "subscriptions/"):
 			var cache subscriptionCache

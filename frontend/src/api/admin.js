@@ -68,6 +68,7 @@ export const adminApi = {
 
   // Mihomo (代理分流)
   mihomoStatus: (signal) => request('/api/mihomo/status', { signal }),
+  mihomoTelemetry: (signal) => request('/api/mihomo/telemetry', { signal }),
   saveMihomoSettings: (body) => request('/api/mihomo/settings', { method: 'PUT', body }),
   startMihomo: () => request('/api/mihomo/start', { method: 'POST', body: {} }),
   stopMihomo: () => request('/api/mihomo/stop', { method: 'POST', body: {} }),
@@ -101,7 +102,10 @@ export const adminApi = {
   validateMihomoYaml: (content) => request('/api/mihomo/config/validate', { method: 'POST', body: { content } }),
   saveMihomoYaml: (content) => request('/api/mihomo/config/yaml', { method: 'PUT', body: { content } }),
   resyncMihomoYaml: () => request('/api/mihomo/config/resync', { method: 'POST', body: {} }),
+  checkMihomoCoreUpdate: () => request('/api/mihomo/core/check-update', { method: 'POST', body: {} }),
   downloadMihomoCore: () => request('/api/mihomo/core/download', { method: 'POST', body: {} }),
+  exportMihomoBackup: () => request('/api/mihomo/backup', { method: 'POST', body: {} }),
+  restoreMihomoBackup: (payload) => request('/api/mihomo/restore', { method: 'POST', body: payload }),
   downloadMihomoZashboard: () => request('/api/mihomo/zashboard/download', { method: 'POST', body: {} }),
   downloadMihomoMMDB: () => request('/api/mihomo/geodata/download', { method: 'POST', body: {} }),
   uploadMihomoMMDB: (file) => {

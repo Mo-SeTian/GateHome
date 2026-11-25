@@ -687,7 +687,7 @@ defineExpose({ openModal, updateAll })
   display: grid;
   gap: 4px;
   min-width: 0;
-  flex: 1;
+  flex: 1 1 260px;
 }
 
 .ruleset-title-line {
@@ -725,6 +725,7 @@ defineExpose({ openModal, updateAll })
   align-items: center;
   flex-wrap: wrap;
   gap: 6px;
+  flex-shrink: 0;
 }
 
 .rulesets-empty {
@@ -822,6 +823,39 @@ defineExpose({ openModal, updateAll })
 @keyframes ruleset-spin {
   to {
     transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 640px) {
+  .rulesets-panel {
+    padding: 12px;
+  }
+
+  .ruleset-card {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    padding: 12px;
+  }
+
+  .ruleset-info {
+    flex: none;
+    width: 100%;
+  }
+
+  .ruleset-url {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    word-break: break-all;
+  }
+
+  .rule-actions {
+    width: 100%;
+    justify-content: flex-end;
+    padding-top: 8px;
+    border-top: 1px solid var(--line);
   }
 }
 </style>

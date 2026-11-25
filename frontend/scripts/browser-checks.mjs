@@ -2052,6 +2052,12 @@ try {
   await page.setViewportSize({ width: 1440, height: 1000 })
   await route('mihomo')
   const mihomoPage = page.locator('.mihomo-page')
+  await mihomoPage.getByRole('tab', { name: '概览' }).waitFor()
+  assert.equal(await mihomoPage.getByRole('tab', { name: '概览' }).getAttribute('aria-selected'), 'true')
+  await mihomoPage.locator('.overview-wrap').getByRole('heading', { name: '实时流量统计' }).waitFor()
+  await mihomoPage.locator('.overview-wrap').getByRole('heading', { name: '监听端口与接入地址' }).waitFor()
+  await mihomoPage.locator('.overview-wrap').getByRole('heading', { name: 'Mihomo 内核更新' }).waitFor()
+  await mihomoPage.locator('.overview-wrap').getByRole('heading', { name: 'Mihomo 配置单独备份与恢复' }).waitFor()
   await mihomoPage.getByRole('tab', { name: '策略组与节点' }).waitFor()
   assert.equal(await page.evaluate(() => getComputedStyle(document.body).backgroundColor), 'rgb(241, 245, 249)', 'mihomo light theme body background must stay slate #f1f5f9')
   await mihomoPage.getByRole('button', { name: /Zashboard 面板/ }).waitFor()
@@ -2077,17 +2083,18 @@ try {
     '  - "MATCH,机场选择"'
   ].join('\n'))
   await mihomoDialog.getByRole('button', { name: '保存订阅' }).click()
-  await mihomoPage.getByText('浏览器测试机场', { exact: true }).waitFor()
+  const subsTab = mihomoPage.locator('.tab-section[aria-label="订阅管理"]')
+  await subsTab.getByText('浏览器测试机场', { exact: true }).waitFor()
   await mihomoPage.getByRole('button', { name: /已继承订阅 1 条/ }).click()
-  await mihomoPage.getByText('cdn-hk.example.com', { exact: true }).waitFor()
+  await subsTab.getByText('cdn-hk.example.com', { exact: true }).waitFor()
 
   // Edit subscription to exclude noise nodes and add uniform node suffix
-  await mihomoPage.getByRole('button', { name: '编辑订阅 浏览器测试机场' }).click()
+  await subsTab.getByRole('button', { name: '编辑订阅 浏览器测试机场' }).click()
   await mihomoDialog.locator('input[name="sub_exclude_filter"]').fill('剩余流量')
   await mihomoDialog.locator('input[name="sub_node_suffix"]').fill(' [专线]')
   await mihomoDialog.getByRole('button', { name: '保存修改' }).click()
-  await mihomoPage.getByText('排除: 剩余流量', { exact: true }).waitFor()
-  await mihomoPage.getByText(/后缀:\s*\[专线\]/).waitFor()
+  await subsTab.getByText('排除: 剩余流量', { exact: true }).waitFor()
+  await subsTab.getByText(/后缀:\s*\[专线\]/).waitFor()
 
   // Add incremental custom DNS policy on 订阅管理 tab
   await mihomoPage.getByRole('button', { name: /添加 DNS 策略/ }).click()
@@ -2111,11 +2118,12 @@ try {
   await mihomoPage.locator('input[name="auth_password"]').fill('lanpass123')
   await mihomoPage.locator('input[name="takeover_outbound"]').check()
   await mihomoPage.getByRole('button', { name: '保存并生效' }).click()
-  await mihomoPage.getByText(/^Mixed .*:17890$/).waitFor()
-  await mihomoPage.getByText(/^HTTP .*:17891$/).waitFor()
-  await mihomoPage.getByText(/^SOCKS5 .*:17892$/).waitFor()
-  await mihomoPage.getByText(/^DNS .*:17853$/).waitFor()
-  await mihomoPage.getByText('代理认证 lanuser', { exact: true }).waitFor()
+  const runtimeStrip = mihomoPage.locator('.runtime-strip')
+  await runtimeStrip.getByText(/^Mixed .*:17890$/).waitFor()
+  await runtimeStrip.getByText(/^HTTP .*:17891$/).waitFor()
+  await runtimeStrip.getByText(/^SOCKS5 .*:17892$/).waitFor()
+  await runtimeStrip.getByText(/^DNS .*:17853$/).waitFor()
+  await runtimeStrip.getByText('代理认证 lanuser', { exact: true }).waitFor()
 
   // Create & edit custom proxy group on Groups tab
   await mihomoPage.getByRole('tab', { name: '策略组与节点' }).click()
@@ -2210,14 +2218,15 @@ try {
   assert.equal(await saveYamlBtn.isDisabled(), true)
 
   // Restore valid YAML, validate, save, then resync
+  const yamlTab = mihomoPage.locator('.tab-section[aria-label="配置文件"]')
   await mihomoPage.locator('.yaml-editor').fill(runtimeYamlText + '\n# edited comment')
   await mihomoPage.getByRole('button', { name: '校验配置' }).click()
   await mihomoPage.locator('.yaml-validation-banner.valid').waitFor()
   assert.equal(await saveYamlBtn.isDisabled(), false)
   await saveYamlBtn.click()
-  await mihomoPage.getByText(/已手动编辑/).waitFor()
+  await yamlTab.getByText(/已手动编辑/).waitFor()
   await mihomoPage.getByRole('button', { name: '重新合成' }).click()
-  await mihomoPage.getByText('流水线自动合成', { exact: true }).waitFor()
+  await yamlTab.getByText('流水线自动合成', { exact: true }).waitFor()
 
   // Switch to unified pre-merge custom.yaml view, add an extra override key + rule, save and verify bidirectional sync
   await mihomoPage.getByRole('button', { name: /自定义配置/ }).click()
@@ -2255,7 +2264,27 @@ try {
   for (const width of [390, 320]) {
     await page.setViewportSize({ width, height: 844 })
     await page.waitForFunction(() => (document.querySelector('.mihomo-page')?.clientWidth || 0) >= 260)
-    for (const tabName of ['策略组与节点', '自定义分流', '连接', '订阅管理', '端口与核心', '配置文件', '运行日志']) {
+    if (width === 390) {
+      await mihomoPage.getByRole('tab', { name: '自定义分流', exact: true }).click()
+      await mihomoPage.getByRole('button', { name: '分流规则', exact: true }).click()
+      const ruleStacked = await mihomoPage.locator('.rule-row').first().evaluate((row) => {
+        const main = row.querySelector('.rule-main')?.getBoundingClientRect()
+        const actions = row.querySelector('.rule-actions')?.getBoundingClientRect()
+        const card = row.getBoundingClientRect()
+        return !!main && !!actions && main.width >= card.width - 32 && actions.y >= main.y + main.height - 2
+      })
+      assert.ok(ruleStacked, 'mobile rule-row must stack actions below full-width rule-main')
+
+      await mihomoPage.getByRole('button', { name: /规则集 \(/ }).click()
+      const rulesetStacked = await mihomoPage.locator('.ruleset-card').first().evaluate((card) => {
+        const info = card.querySelector('.ruleset-info')?.getBoundingClientRect()
+        const actions = card.querySelector('.rule-actions')?.getBoundingClientRect()
+        const box = card.getBoundingClientRect()
+        return !!info && !!actions && info.width >= box.width - 32 && actions.y >= info.y + info.height - 2
+      })
+      assert.ok(rulesetStacked, 'mobile ruleset-card must stack actions below full-width ruleset-info')
+    }
+    for (const tabName of ['概览', '策略组与节点', '自定义分流', '连接', '订阅管理', '端口与核心', '配置文件', '运行日志']) {
       await mihomoPage.getByRole('tab', { name: tabName, exact: true }).click()
       const dims = await mihomoPage.evaluate(el => ({ scrollWidth: el.scrollWidth, clientWidth: el.clientWidth }))
       assert.ok(dims.scrollWidth <= dims.clientWidth, `mihomo overflow at width=${width} tab=${tabName}: scrollWidth=${dims.scrollWidth} clientWidth=${dims.clientWidth}`)

@@ -63,8 +63,8 @@
 
     <p v-if="error" class="report-error" role="alert">{{ error }}</p>
 
-    <!-- Compact Runtime Strip -->
-    <SpotlightCard v-if="status" class="runtime-strip">
+    <!-- Compact Runtime Strip (shown on secondary tabs; Overview has full telemetry) -->
+    <SpotlightCard v-if="status && activeTab !== 'overview'" class="runtime-strip">
       <div class="strip-items">
         <span class="badge" :class="status.running ? 'badge-ok' : status.core_installed ? 'badge-neutral' : 'badge-warn'">
           <span class="status-dot" :class="status.running ? 'ok' : status.core_installed ? 'neutral' : 'warn'" />
@@ -121,6 +121,22 @@
         </button>
       </div>
     </div>
+
+    <!-- Tab 0: Overview Dashboard -->
+    <section v-show="activeTab === 'overview'" class="tab-section" role="tabpanel" aria-label="概览">
+      <MihomoOverview
+        v-if="status"
+        :status="status"
+        :active-port-entries="activePortEntries"
+        :active="activeTab === 'overview'"
+        :core-busy="coreBusy"
+        :checking-core-update="checkingCoreUpdate"
+        @navigate="handleOverviewNavigate"
+        @updated="onCustomYamlSaved"
+        @check-core-update="checkCoreUpdate"
+        @upgrade-core="downloadCore"
+      />
+    </section>
 
     <!-- Tab 1: Proxy Groups & Nodes -->
     <section v-show="activeTab === 'groups'" class="tab-section" role="tabpanel" aria-label="策略组与节点">
@@ -710,11 +726,21 @@
         <div class="panel-header-row">
           <h2>Mihomo 内核</h2>
           <div class="report-actions">
+            <button
+              type="button"
+              class="btn btn-secondary btn-sm"
+              :disabled="checkingCoreUpdate || coreBusy"
+              @click="checkCoreUpdate"
+            >
+              <RefreshCw :size="14" :class="{ spinning: checkingCoreUpdate }" />
+              {{ checkingCoreUpdate ? '检查中…' : '检查更新' }}
+            </button>
             <button type="button" class="btn btn-secondary btn-sm" :disabled="coreBusy" @click="triggerUpload">
               <Upload :size="14" /> 上传内核文件
             </button>
             <button type="button" class="btn btn-primary btn-sm" :disabled="coreBusy" @click="downloadCore">
-              <Download :size="14" /> {{ coreBusy ? '处理中…' : '在线下载内核' }}
+              <Download :size="14" />
+              {{ coreBusy ? '处理中…' : status.core_update?.update_available ? '立即更新内核' : '在线下载内核' }}
             </button>
             <input ref="coreFileInput" type="file" class="sr-only" @change="handleFileUpload" />
           </div>
@@ -727,6 +753,18 @@
           <div>
             <dt>当前版本</dt>
             <dd class="mono-text">{{ status.core_version || '—' }}</dd>
+          </div>
+          <div>
+            <dt>最新版本</dt>
+            <dd class="mono-text">
+              <template v-if="status.core_update?.latest_version">
+                {{ status.core_update.latest_version }}
+                <span class="badge" :class="status.core_update.update_available ? 'badge-warn' : 'badge-ok'">
+                  {{ status.core_update.update_available ? '有新版本' : '已是最新' }}
+                </span>
+              </template>
+              <span v-else>未检查</span>
+            </dd>
           </div>
           <div>
             <dt>执行路径</dt>
@@ -1269,6 +1307,7 @@ import {
   FileCode2,
   GitBranch,
   Layers,
+  LayoutDashboard,
   Maximize2,
   Minimize2,
   Pencil,
@@ -1292,6 +1331,7 @@ import YamlCodeEditor from '@/components/YamlCodeEditor.vue'
 import MihomoCustomYaml from '@/components/MihomoCustomYaml.vue'
 import MihomoConnections from '@/components/MihomoConnections.vue'
 import MihomoRuleSets from '@/components/MihomoRuleSets.vue'
+import MihomoOverview from '@/components/MihomoOverview.vue'
 import { adminApi } from '@/api/admin'
 import { copyText as copyToClipboard } from '@/api/clipboard'
 import { formatBytes } from '@/api/reports'
@@ -1311,6 +1351,7 @@ const modes = [
 ]
 
 const tabs = [
+  { id: 'overview', label: '概览', icon: LayoutDashboard },
   { id: 'groups', label: '策略组与节点', icon: Layers },
   { id: 'rules', label: '自定义分流', icon: GitBranch },
   { id: 'connections', label: '连接', icon: Activity },
@@ -1330,6 +1371,7 @@ const savingDNSPolicies = ref(false)
 const showInheritedDNS = ref(false)
 const busySub = ref('')
 const coreBusy = ref(false)
+const checkingCoreUpdate = ref(false)
 const mmdbBusy = ref(false)
 const zashboardBusy = ref(false)
 const testingGroup = ref('')
@@ -1337,7 +1379,7 @@ const testingNode = ref('')
 const error = ref('')
 const builtinNodeNames = new Set(['DIRECT', 'REJECT', 'PASS', 'COMPATIBLE'])
 
-const activeTab = ref('groups')
+const activeTab = ref('overview')
 const groupsView = ref('list')
 const rulesView = ref('list')
 const ruleSetsRef = ref(null)
@@ -1566,6 +1608,13 @@ async function switchTab(tabId) {
   } else {
     stopLogPolling()
   }
+}
+
+async function handleOverviewNavigate(targetTab) {
+  if (targetTab === 'yaml') {
+    yamlKind.value = 'runtime'
+  }
+  await switchTab(targetTab)
 }
 
 async function runCoreAction(fn, okMsg) {
@@ -2007,6 +2056,26 @@ async function removeDNSPolicy(id) {
     toast.error(err.message)
   } finally {
     savingDNSPolicies.value = false
+  }
+}
+
+async function checkCoreUpdate() {
+  checkingCoreUpdate.value = true
+  try {
+    const res = await adminApi.checkMihomoCoreUpdate()
+    if (res.status) applyStatus(res.status)
+    const info = res.core_update
+    if (info?.update_available) {
+      toast.info(`检测到新版本 ${info.latest_version}`)
+    } else if (info?.latest_version) {
+      toast.success(`当前内核已是最新版本 (${info.latest_version})`)
+    } else {
+      toast.info('已完成内核版本检查')
+    }
+  } catch (err) {
+    toast.error(err.message)
+  } finally {
+    checkingCoreUpdate.value = false
   }
 }
 
@@ -2709,7 +2778,7 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
   gap: 8px;
   min-width: 0;
-  flex: 1;
+  flex: 1 1 240px;
 }
 
 .rule-value {
@@ -2737,6 +2806,7 @@ onBeforeUnmount(() => {
   align-items: center;
   flex-wrap: wrap;
   gap: 4px;
+  flex-shrink: 0;
 }
 
 .settings-tab-grid {
@@ -2873,6 +2943,7 @@ onBeforeUnmount(() => {
   display: grid;
   gap: 4px;
   min-width: 0;
+  flex: 1 1 240px;
 }
 
 .sub-title-line {
@@ -2898,6 +2969,7 @@ onBeforeUnmount(() => {
   align-items: center;
   flex-wrap: wrap;
   gap: 6px;
+  flex-shrink: 0;
 }
 
 .dns-heading-group {
@@ -3264,6 +3336,16 @@ onBeforeUnmount(() => {
   font-family: var(--mono);
 }
 
+.spinning {
+  animation: mihomo-spin 0.85s linear infinite;
+}
+
+@keyframes mihomo-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 @media (max-width: 640px) {
   .report-panel {
     padding: 12px;
@@ -3364,6 +3446,28 @@ onBeforeUnmount(() => {
   .core-meta > div {
     grid-template-columns: minmax(0, 1fr);
     gap: 2px;
+  }
+
+  .rule-row,
+  .sub-card {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    padding: 12px;
+  }
+
+  .rule-main,
+  .sub-info {
+    flex: none;
+    width: 100%;
+  }
+
+  .rule-actions,
+  .sub-actions {
+    width: 100%;
+    justify-content: flex-end;
+    padding-top: 8px;
+    border-top: 1px solid var(--line);
   }
 }
 </style>

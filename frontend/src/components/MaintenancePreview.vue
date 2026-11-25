@@ -46,6 +46,7 @@ const counts = [
   ['certificates', '证书文件'],
   ['sunpanel_files', '首页文件'],
   ['sunpanel_images', '首页图片'],
+  ['mihomo_files', '代理分流文件'],
   ['images', '反代图片'],
   ['log_entries', '日志'],
   ['subscription_caches', '订阅缓存']

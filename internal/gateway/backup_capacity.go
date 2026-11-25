@@ -14,6 +14,7 @@ type backupCapacity struct {
 	ConfigBytes   int64     `json:"config_bytes"`
 	LogBytes      int64     `json:"log_bytes"`
 	SunPanelBytes int64     `json:"sunpanel_bytes"`
+	MihomoBytes   int64     `json:"mihomo_bytes"`
 	ImageBytes    int64     `json:"image_bytes"`
 	OtherBytes    int64     `json:"other_bytes"`
 	RawBytes      int64     `json:"raw_bytes"`
@@ -59,6 +60,11 @@ func inspectBackupCapacity(paths StoragePaths, state State) (backupCapacity, err
 	if err != nil {
 		return c, err
 	}
+	mihomoNames, err := mihomoBackupNames(paths)
+	if err != nil {
+		return c, err
+	}
+	names = append(names, mihomoNames...)
 	for _, subscription := range state.Config.Subscriptions {
 		names = append(names, "subscriptions/"+subscription.ID+".json")
 	}
@@ -113,6 +119,8 @@ func inspectBackupCapacity(paths StoragePaths, state State) (backupCapacity, err
 		switch {
 		case strings.HasPrefix(name, "sunpanel/"):
 			c.SunPanelBytes += size
+		case strings.HasPrefix(name, "mihomo/"):
+			c.MihomoBytes += size
 		case image:
 			c.ImageBytes += size
 		default:

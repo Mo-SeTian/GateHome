@@ -67,21 +67,30 @@ type mihomoManager struct {
 	lifecycleMu sync.Mutex
 	mu          sync.Mutex
 	dir         string
-	store     *Store
-	adminPort int
+	store       *Store
+	adminPort   int
 
 	cfg       MihomoConfig
 	cmd       *exec.Cmd
 	waitDone  chan error
 	running   bool
 	pid       int
+	startedAt time.Time
 	version   string
 	lastError string
 	logs      mihomoLogRing
 
-	ctrlBaseURL   string          // optional override for tests
-	ctrlSecret    string          // optional override for tests
-	startTimeout  time.Duration   // optional override for tests
+	coreReleaseAPI string       // optional override for tests
+	coreHTTPClient *http.Client // optional override for tests
+	coreUpdateInfo *mihomoCoreUpdateInfo
+
+	telemetryMu       sync.Mutex
+	lastTrafficSample mihomoTrafficSample
+	lastCPUSample     mihomoCPUSample
+
+	ctrlBaseURL   string        // optional override for tests
+	ctrlSecret    string        // optional override for tests
+	startTimeout  time.Duration // optional override for tests
 	ctrlOnce      sync.Once
 	ctrlTransport *http.Transport
 }
@@ -354,6 +363,8 @@ func (m *mihomoManager) startWithLifecycleHeld() error {
 			m.cmd = nil
 			m.running = false
 			m.pid = 0
+			m.startedAt = time.Time{}
+			m.resetTelemetrySamples()
 			if err != nil && m.lastError == "" {
 				m.lastError = "mihomo 进程退出: " + err.Error()
 			}
@@ -379,6 +390,8 @@ func (m *mihomoManager) startWithLifecycleHeld() error {
 			m.mu.Lock()
 			m.lastError = msg
 			m.running = false
+			m.startedAt = time.Time{}
+			m.resetTelemetrySamples()
 			m.mu.Unlock()
 			return errors.New(msg)
 		default:
@@ -388,6 +401,7 @@ func (m *mihomoManager) startWithLifecycleHeld() error {
 			m.mu.Lock()
 			if m.cmd == cmd {
 				m.running = true
+				m.startedAt = time.Now()
 				m.version = ver
 				m.lastError = ""
 			}
@@ -423,7 +437,9 @@ func (m *mihomoManager) stopWithLifecycleHeld() error {
 	if cmd == nil || cmd.Process == nil {
 		m.running = false
 		m.pid = 0
+		m.startedAt = time.Time{}
 		m.cmd = nil
+		m.resetTelemetrySamples()
 		m.mu.Unlock()
 		return nil
 	}
@@ -447,6 +463,8 @@ func (m *mihomoManager) stopWithLifecycleHeld() error {
 	}
 	m.running = false
 	m.pid = 0
+	m.startedAt = time.Time{}
+	m.resetTelemetrySamples()
 	m.mu.Unlock()
 	return nil
 }
