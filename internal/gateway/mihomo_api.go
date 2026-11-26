@@ -584,10 +584,14 @@ func (a *Admin) handleMihomoNodeDelayBody(w http.ResponseWriter, r *http.Request
 }
 
 func (a *Admin) handleMihomoAddRule(w http.ResponseWriter, r *http.Request) {
-	var input MihomoCustomRule
-	if !decodeBody(w, r, &input) {
+	var payload struct {
+		MihomoCustomRule
+		SkipReload bool `json:"skip_reload"`
+	}
+	if !decodeBody(w, r, &payload) {
 		return
 	}
+	input := payload.MihomoCustomRule
 	input.Type = strings.ToUpper(strings.TrimSpace(input.Type))
 	input.Value = strings.TrimSpace(input.Value)
 	input.Target = strings.TrimSpace(input.Target)
@@ -627,7 +631,7 @@ func (a *Admin) handleMihomoAddRule(w http.ResponseWriter, r *http.Request) {
 	running := m.running
 	m.mu.Unlock()
 
-	if running {
+	if running && !payload.SkipReload {
 		_ = m.Reload()
 	}
 	jsonResponse(w, 200, m.statusSnapshot())

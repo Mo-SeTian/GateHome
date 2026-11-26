@@ -3062,3 +3062,69 @@ func TestMihomoGlobalBackupAndRestoreIntegration(t *testing.T) {
 		t.Fatalf("expected restored manual ruleset file, err=%v", err)
 	}
 }
+
+func TestMihomoAddRuleSkipReload(t *testing.T) {
+	a, h := testAdmin(t)
+	cookie := loginForTest(t, h)
+
+	var reloadCalls int
+	testSecret := "skip-reload-secret"
+	mux := http.NewServeMux()
+	mux.HandleFunc("PUT /configs", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer "+testSecret {
+			http.Error(w, "unauthorized", 401)
+			return
+		}
+		reloadCalls++
+		w.WriteHeader(204)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	a.mihomo.mu.Lock()
+	a.mihomo.running = true
+	a.mihomo.ctrlBaseURL = srv.URL
+	a.mihomo.ctrlSecret = testSecret
+	a.mihomo.mu.Unlock()
+
+	rec := adminRequest(h, "POST", "/api/mihomo/rules", map[string]any{
+		"type":        "DOMAIN-SUFFIX",
+		"value":       "openai.com",
+		"target":      "DIRECT",
+		"enabled":     true,
+		"skip_reload": true,
+		"comment":     "from connection",
+	}, cookie, "")
+	if rec.Code != 200 {
+		t.Fatalf("expected 200 adding rule with skip_reload, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if reloadCalls != 0 {
+		t.Fatalf("expected 0 controller reloads when skip_reload=true, got %d", reloadCalls)
+	}
+
+	var status mihomoStatusResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &status); err != nil {
+		t.Fatalf("decode status failed: %v", err)
+	}
+	if len(status.CustomRules) != 1 || status.CustomRules[0].Value != "openai.com" {
+		t.Fatalf("expected rule added to status, got %+v", status.CustomRules)
+	}
+	runtimeBytes, err := os.ReadFile(filepath.Join(a.mihomo.dir, "runtime.yaml"))
+	if err != nil || !strings.Contains(string(runtimeBytes), "DOMAIN-SUFFIX,openai.com,DIRECT") {
+		t.Fatalf("expected runtime.yaml updated with new rule, err=%v", err)
+	}
+
+	// Default behavior without skip_reload still triggers controller reload when running.
+	rec2 := adminRequest(h, "POST", "/api/mihomo/rules", map[string]any{
+		"type":    "DOMAIN",
+		"value":   "api.example.com",
+		"target":  "DIRECT",
+		"enabled": true,
+	}, cookie, "")
+	if rec2.Code != 200 {
+		t.Fatalf("expected 200 adding default rule, got %d body=%s", rec2.Code, rec2.Body.String())
+	}
+	if reloadCalls != 1 {
+		t.Fatalf("expected 1 controller reload when skip_reload is omitted, got %d", reloadCalls)
+	}
+}

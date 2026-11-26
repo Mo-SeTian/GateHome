@@ -372,7 +372,13 @@
 
     <!-- Tab 3: Connections -->
     <section v-show="activeTab === 'connections'" class="tab-section" role="tabpanel" aria-label="连接">
-      <MihomoConnections :active="activeTab === 'connections'" :running="!!status?.running" />
+      <MihomoConnections
+        :active="activeTab === 'connections'"
+        :running="!!status?.running"
+        :target-options="ruleTargetOptions"
+        :custom-rules="status?.custom_rules || []"
+        @updated="applyStatus"
+      />
     </section>
 
     <!-- Tab 4: Subscriptions & Special-Line DNS -->
