@@ -77,6 +77,12 @@ func (a *Admin) credentialRoutes(mux *http.ServeMux) {
 					break
 				}
 			}
+		case "mihomo-controller":
+			if input.ID == "" && a.mihomo != nil {
+				a.mihomo.mu.Lock()
+				value = a.mihomo.cfg.ControllerSecret
+				a.mihomo.mu.Unlock()
+			}
 		default:
 			apiError(w, 400, "不支持的凭据类型")
 			return

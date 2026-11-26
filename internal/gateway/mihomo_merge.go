@@ -32,7 +32,7 @@ func buildColdStartYAML(cfg MihomoConfig) string {
 	fmt.Fprintf(&b, "ipv6: %t\n", cfg.Settings.IPv6)
 	fmt.Fprintf(&b, "unified-delay: %t\n", cfg.Settings.UnifiedDelay)
 	fmt.Fprintf(&b, "tcp-concurrent: %t\n", cfg.Settings.TCPConcurrent)
-	fmt.Fprintf(&b, "external-controller: 127.0.0.1:%d\n", cfg.ControllerPort)
+	fmt.Fprintf(&b, "external-controller: %s\n", mihomoControllerListenAddr(cfg))
 	fmt.Fprintf(&b, "secret: %q\n", cfg.ControllerSecret)
 	b.WriteString("dns:\n")
 	b.WriteString("  enable: true\n")
@@ -89,7 +89,7 @@ func synthesizeMihomoYAML(sourceYAML []byte, cfg MihomoConfig) ([]byte, error) {
 	yamlMapSet(root, "ipv6", yamlBoolNode(cfg.Settings.IPv6))
 	yamlMapSet(root, "unified-delay", yamlBoolNode(cfg.Settings.UnifiedDelay))
 	yamlMapSet(root, "tcp-concurrent", yamlBoolNode(cfg.Settings.TCPConcurrent))
-	yamlMapSet(root, "external-controller", yamlStrNode(fmt.Sprintf("127.0.0.1:%d", cfg.ControllerPort)))
+	yamlMapSet(root, "external-controller", yamlStrNode(mihomoControllerListenAddr(cfg)))
 	yamlMapSet(root, "secret", yamlStrNode(cfg.ControllerSecret))
 	sanitizeDangerousMihomoKeys(root)
 	if cfg.Settings.AuthEnabled && cfg.Settings.AuthUsername != "" && cfg.Settings.AuthPassword != "" {

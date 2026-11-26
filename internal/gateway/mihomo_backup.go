@@ -343,6 +343,7 @@ func (m *mihomoManager) RestoreStandaloneBackup(b mihomoStandaloneBackup, gwCfg 
 	prev := m.cfg
 	wasRunning := m.running
 	portsChanged := prev.ControllerPort != next.ControllerPort ||
+		prev.ControllerAllowLAN != next.ControllerAllowLAN ||
 		prev.ControllerSecret != next.ControllerSecret ||
 		prev.Settings.MixedPort != next.Settings.MixedPort ||
 		prev.Settings.HTTPPort != next.Settings.HTTPPort ||

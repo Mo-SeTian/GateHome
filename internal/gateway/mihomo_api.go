@@ -61,6 +61,8 @@ type mihomoStatusResponse struct {
 	Enabled                bool                       `json:"enabled"`
 	TakeoverOutbound       bool                       `json:"takeover_outbound"`
 	ControllerPort         int                        `json:"controller_port"`
+	ControllerAllowLAN     bool                       `json:"controller_allow_lan"`
+	ControllerHasSecret    bool                       `json:"controller_has_secret"`
 	Settings               MihomoCoreSettings         `json:"settings"`
 	AuthPasswordConfigured bool                       `json:"auth_password_configured"`
 	ActiveSubscriptionID   string                     `json:"active_subscription_id,omitempty"`
@@ -146,6 +148,8 @@ func (m *mihomoManager) statusSnapshot() mihomoStatusResponse {
 		Enabled:                cfgCopy.Enabled,
 		TakeoverOutbound:       cfgCopy.TakeoverOutbound,
 		ControllerPort:         cfgCopy.ControllerPort,
+		ControllerAllowLAN:     cfgCopy.ControllerAllowLAN,
+		ControllerHasSecret:    cfgCopy.ControllerSecret != "",
 		Settings:               sanitizedSettings,
 		AuthPasswordConfigured: authPwdConfigured,
 		ActiveSubscriptionID:   cfgCopy.ActiveSubscriptionID,
@@ -231,10 +235,12 @@ func (a *Admin) handleMihomoStatus(w http.ResponseWriter, r *http.Request) {
 
 func (a *Admin) handleMihomoSettings(w http.ResponseWriter, r *http.Request) {
 	var input struct {
-		Enabled          bool               `json:"enabled"`
-		TakeoverOutbound bool               `json:"takeover_outbound"`
-		ControllerPort   int                `json:"controller_port"`
-		Settings         MihomoCoreSettings `json:"settings"`
+		Enabled            bool               `json:"enabled"`
+		TakeoverOutbound   bool               `json:"takeover_outbound"`
+		ControllerPort     int                `json:"controller_port"`
+		ControllerAllowLAN bool               `json:"controller_allow_lan"`
+		ControllerSecret   string             `json:"controller_secret"`
+		Settings           MihomoCoreSettings `json:"settings"`
 	}
 	if !decodeBody(w, r, &input) {
 		return
@@ -248,6 +254,10 @@ func (a *Admin) handleMihomoSettings(w http.ResponseWriter, r *http.Request) {
 	next.TakeoverOutbound = input.TakeoverOutbound
 	if input.ControllerPort > 0 {
 		next.ControllerPort = input.ControllerPort
+	}
+	next.ControllerAllowLAN = input.ControllerAllowLAN
+	if trimmedSecret := strings.TrimSpace(input.ControllerSecret); trimmedSecret != "" {
+		next.ControllerSecret = trimmedSecret
 	}
 	input.Settings.AuthUsername = strings.TrimSpace(input.Settings.AuthUsername)
 	if input.Settings.AuthPassword == "" {
@@ -271,6 +281,8 @@ func (a *Admin) handleMihomoSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	portsOrCtrlChanged := next.ControllerPort != m.cfg.ControllerPort ||
+		next.ControllerAllowLAN != m.cfg.ControllerAllowLAN ||
+		next.ControllerSecret != m.cfg.ControllerSecret ||
 		next.Settings.MixedPort != m.cfg.Settings.MixedPort ||
 		next.Settings.HTTPPort != m.cfg.Settings.HTTPPort ||
 		next.Settings.SocksPort != m.cfg.Settings.SocksPort ||
@@ -1175,7 +1187,7 @@ func injectManagedKeys(raw []byte, cfg MihomoConfig) ([]byte, error) {
 		return nil, errors.New("YAML 根节点必须为映射对象")
 	}
 	root := doc.Content[0]
-	yamlMapSet(root, "external-controller", yamlStrNode(fmt.Sprintf("127.0.0.1:%d", cfg.ControllerPort)))
+	yamlMapSet(root, "external-controller", yamlStrNode(mihomoControllerListenAddr(cfg)))
 	yamlMapSet(root, "secret", yamlStrNode(cfg.ControllerSecret))
 	sanitizeDangerousMihomoKeys(root)
 	if err := validateManagedProviderPaths(root); err != nil {

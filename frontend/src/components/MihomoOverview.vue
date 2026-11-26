@@ -202,6 +202,9 @@
           <span class="badge" :class="status?.settings?.allow_lan ? 'badge-ok' : 'badge-neutral'">
             局域网访问: {{ status?.settings?.allow_lan ? '开启' : '仅本机' }}
           </span>
+          <span class="badge" :class="status?.controller_allow_lan ? 'badge-warn' : 'badge-neutral'">
+            管理 API: {{ status?.controller_allow_lan ? `0.0.0.0:${status?.controller_port || 19090}` : '仅本机' }}
+          </span>
           <span class="badge" :class="status?.settings?.auth_enabled ? 'badge-brand' : 'badge-neutral'">
             代理认证: {{ status?.settings?.auth_enabled ? (status.settings.auth_username || '已启用') : '未开启' }}
           </span>
@@ -497,12 +500,14 @@ const portItems = computed(() => {
     }
   })
   const ctrlPort = props.status?.controller_port || 19090
+  const ctrlAllowLAN = !!props.status?.controller_allow_lan
+  const ctrlHost = ctrlAllowLAN ? props.status?.lan_ip || '127.0.0.1' : '127.0.0.1'
   entries.push({
     key: 'Controller',
-    title: '控制 API (仅本机)',
-    address: `127.0.0.1:${ctrlPort}`,
-    badgeText: '127.0.0.1',
-    badgeClass: 'badge-neutral'
+    title: ctrlAllowLAN ? '管理 API (局域网)' : '管理 API (仅本机)',
+    address: `${ctrlHost}:${ctrlPort}`,
+    badgeText: ctrlAllowLAN ? '0.0.0.0' : '127.0.0.1',
+    badgeClass: ctrlAllowLAN ? 'badge-warn' : 'badge-neutral'
   })
   return entries
 })

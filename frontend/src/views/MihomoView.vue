@@ -590,7 +590,7 @@
               />
             </label>
             <label class="form-field">
-              <span>内部控制端口 (仅 127.0.0.1)</span>
+              <span>管理 API 端口 (external-controller)</span>
               <input
                 v-model.number="settingsDraft.controller_port"
                 name="controller_port"
@@ -601,6 +601,47 @@
                 required
               />
             </label>
+          </div>
+
+          <div class="auth-section ctrl-section">
+            <label class="toggle-card">
+              <div class="toggle-card-copy">
+                <span>允许局域网 / Docker 访问管理端口 (0.0.0.0)</span>
+                <small>开启后可在 Neko Master 等第三方服务中接入；请勿直接将管理端口暴露到公网</small>
+              </div>
+              <input v-model="settingsDraft.controller_allow_lan" name="controller_allow_lan" type="checkbox" />
+            </label>
+
+            <SecretInput
+              id="mihomo-controller-secret"
+              v-model="settingsDraft.controller_secret"
+              name="controller_secret"
+              label="管理密钥 (secret / Token，开启局域网至少 8 位)"
+              kind="mihomo-controller"
+              secret-name="管理密钥"
+              :configured="!!status?.controller_has_secret"
+              placeholder="已配置，留空保持不变；可点击右侧眼睛查看"
+            />
+
+            <div class="ctrl-actions-row">
+              <button type="button" class="btn btn-secondary btn-sm" @click="generateControllerSecret">
+                <RefreshCw :size="13" /> 随机生成密钥
+              </button>
+              <button type="button" class="btn btn-secondary btn-sm" @click="copyControllerEndpoint">
+                <Copy :size="13" /> 复制接入地址
+              </button>
+            </div>
+
+            <div class="ctrl-connect-tip mono-text">
+              <div>
+                监听地址：{{ settingsDraft.controller_allow_lan ? '0.0.0.0' : '127.0.0.1' }}:{{ settingsDraft.controller_port || 19090 }}
+                · Neko Master Host：<strong>{{ settingsDraft.controller_allow_lan ? (status?.lan_ip || '127.0.0.1') : '127.0.0.1' }}</strong>
+                · Port：<strong>{{ settingsDraft.controller_port || 19090 }}</strong>
+              </div>
+              <div v-if="settingsDraft.controller_secret" class="ctrl-pending-note">
+                已生成/输入新管理密钥，请点击底部「保存并生效」写入配置。
+              </div>
+            </div>
           </div>
 
           <div class="auth-section">
@@ -1333,6 +1374,7 @@ import {
   Zap
 } from 'lucide-vue-next'
 import SpotlightCard from '@/components/SpotlightCard.vue'
+import SecretInput from '@/components/SecretInput.vue'
 import YamlCodeEditor from '@/components/YamlCodeEditor.vue'
 import MihomoCustomYaml from '@/components/MihomoCustomYaml.vue'
 import MihomoConnections from '@/components/MihomoConnections.vue'
@@ -1526,6 +1568,8 @@ function applyStatus(data) {
     enabled: !!data.enabled,
     takeover_outbound: !!data.takeover_outbound,
     controller_port: data.controller_port || 19090,
+    controller_allow_lan: !!data.controller_allow_lan,
+    controller_secret: undefined,
     settings: {
       ...data.settings,
       auth_password: ''
@@ -1848,6 +1892,8 @@ async function saveCoreSettings() {
       enabled: settingsDraft.value.enabled,
       takeover_outbound: settingsDraft.value.takeover_outbound,
       controller_port: Number(settingsDraft.value.controller_port) || 19090,
+      controller_allow_lan: !!settingsDraft.value.controller_allow_lan,
+      controller_secret: (settingsDraft.value.controller_secret || '').trim(),
       settings: {
         ...settingsDraft.value.settings,
         mixed_port: Number(settingsDraft.value.settings.mixed_port) || 0,
@@ -1868,6 +1914,32 @@ async function saveCoreSettings() {
     toast.error(err.message)
   } finally {
     savingSettings.value = false
+  }
+}
+
+function generateControllerSecret() {
+  if (!settingsDraft.value) return
+  const alphabet = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+  const bytes = new Uint8Array(24)
+  if (globalThis.crypto?.getRandomValues) {
+    globalThis.crypto.getRandomValues(bytes)
+  } else {
+    for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256)
+  }
+  settingsDraft.value.controller_secret = Array.from(bytes, (b) => alphabet[b % alphabet.length]).join('')
+  toast.info('已生成新管理密钥，点击「保存并生效」后生效')
+}
+
+async function copyControllerEndpoint() {
+  if (!settingsDraft.value) return
+  const host = settingsDraft.value.controller_allow_lan ? status.value?.lan_ip || '127.0.0.1' : '127.0.0.1'
+  const port = Number(settingsDraft.value.controller_port) || 19090
+  const addr = `http://${host}:${port}`
+  const ok = await copyToClipboard(addr)
+  if (ok) {
+    toast.success(`已复制管理地址 ${addr}`)
+  } else {
+    toast.error('复制失败，请手动复制地址')
   }
 }
 
@@ -2862,6 +2934,35 @@ onBeforeUnmount(() => {
   margin: 0;
   font-size: 11.5px;
   color: var(--muted);
+}
+
+.ctrl-section {
+  padding-top: 6px;
+  border-top: 1px dashed var(--line);
+}
+
+.ctrl-actions-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ctrl-connect-tip {
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--strip-bg);
+  border: 1px solid var(--line);
+  font-size: 11.5px;
+  color: var(--ink-secondary);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.ctrl-pending-note {
+  margin-top: 4px;
+  color: var(--brand);
+  font-weight: 600;
 }
 
 .selects-grid {

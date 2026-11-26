@@ -859,11 +859,17 @@ func (m *mihomoManager) ActiveListeners() []runtimeListener {
 		}
 	}
 	if m.cfg.ControllerPort > 0 {
+		ctrlIP := "127.0.0.1"
+		ctrlPurpose := "内部控制 · HTTP"
+		if m.cfg.ControllerAllowLAN {
+			ctrlIP = "0.0.0.0"
+			ctrlPurpose = "管理 API · HTTP (局域网)"
+		}
 		out = append(out, runtimeListener{
 			Port:     m.cfg.ControllerPort,
-			IP:       "127.0.0.1",
+			IP:       ctrlIP,
 			Protocol: "TCP",
-			Purpose:  "内部控制 · HTTP",
+			Purpose:  ctrlPurpose,
 			Services: []string{"Mihomo Controller"},
 		})
 	}

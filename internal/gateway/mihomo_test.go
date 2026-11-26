@@ -3128,3 +3128,120 @@ func TestMihomoAddRuleSkipReload(t *testing.T) {
 		t.Fatalf("expected 1 controller reload when skip_reload is omitted, got %d", reloadCalls)
 	}
 }
+
+func TestMihomoControllerLANExposureAndSecret(t *testing.T) {
+	a, h := testAdmin(t)
+	cookie := loginForTest(t, h)
+
+	// 1. Default config binds controller to 127.0.0.1 only and reports controller_secret_configured=true.
+	statusRes := adminRequest(h, "GET", "/api/mihomo/status", nil, cookie, "")
+	if statusRes.Code != 200 {
+		t.Fatalf("GET status failed: %d", statusRes.Code)
+	}
+	var st mihomoStatusResponse
+	if err := json.Unmarshal(statusRes.Body.Bytes(), &st); err != nil {
+		t.Fatal(err)
+	}
+	if st.ControllerAllowLAN || !st.ControllerHasSecret {
+		t.Fatalf("unexpected default controller status: allow_lan=%v configured=%v", st.ControllerAllowLAN, st.ControllerHasSecret)
+	}
+	rawDisk, err := os.ReadFile(a.mihomo.runtimePath())
+	if err != nil || !strings.Contains(string(rawDisk), "127.0.0.1:19090") {
+		t.Fatalf("expected default runtime.yaml external-controller 127.0.0.1:19090, err=%v", err)
+	}
+
+	// 2. Reject short secret when LAN exposure is enabled.
+	badRes := adminRequest(h, "PUT", "/api/mihomo/settings", map[string]any{
+		"enabled":              false,
+		"takeover_outbound":    false,
+		"controller_port":      19095,
+		"controller_allow_lan": true,
+		"controller_secret":    "short",
+		"settings": map[string]any{
+			"mixed_port":        7890,
+			"mode":              "rule",
+			"log_level":         "info",
+			"dns_enhanced_mode": "keep",
+		},
+	}, cookie, "")
+	if badRes.Code != 400 {
+		t.Fatalf("expected 400 for short secret on LAN controller, got %d", badRes.Code)
+	}
+
+	// 3. Save custom port, LAN exposure, and custom management secret.
+	okRes := adminRequest(h, "PUT", "/api/mihomo/settings", map[string]any{
+		"enabled":              false,
+		"takeover_outbound":    false,
+		"controller_port":      19095,
+		"controller_allow_lan": true,
+		"controller_secret":    "neko-secret-12345",
+		"settings": map[string]any{
+			"mixed_port":        7890,
+			"mode":              "rule",
+			"log_level":         "info",
+			"dns_enhanced_mode": "keep",
+		},
+	}, cookie, "")
+	if okRes.Code != 200 {
+		t.Fatalf("expected 200 saving controller settings, got %d body=%s", okRes.Code, okRes.Body.String())
+	}
+	if strings.Contains(okRes.Body.String(), "neko-secret-12345") {
+		t.Fatal("status response must never leak plaintext controller_secret")
+	}
+
+	// runtime.yaml on disk has 0.0.0.0:19095 and secret, while YAML API masks it.
+	diskAfter, err := os.ReadFile(a.mihomo.runtimePath())
+	if err != nil || !strings.Contains(string(diskAfter), "external-controller: 0.0.0.0:19095") || !strings.Contains(string(diskAfter), "neko-secret-12345") {
+		t.Fatalf("unexpected runtime.yaml after LAN exposure update: err=%v body=%s", err, string(diskAfter))
+	}
+	yamlAPIRes := adminRequest(h, "GET", "/api/mihomo/config/yaml?kind=runtime", nil, cookie, "")
+	if yamlAPIRes.Code != 200 || strings.Contains(yamlAPIRes.Body.String(), "neko-secret-12345") {
+		t.Fatalf("runtime YAML API must mask controller secret, code=%d", yamlAPIRes.Code)
+	}
+
+	// 4. Reveal stored secret on demand via /api/credentials/reveal.
+	revealRes := adminRequest(h, "POST", "/api/credentials/reveal", map[string]string{"kind": "mihomo-controller"}, cookie, "")
+	if revealRes.Code != 200 {
+		t.Fatalf("expected 200 revealing mihomo-controller secret, got %d body=%s", revealRes.Code, revealRes.Body.String())
+	}
+	var revealed struct {
+		Value string `json:"value"`
+	}
+	if err := json.Unmarshal(revealRes.Body.Bytes(), &revealed); err != nil || revealed.Value != "neko-secret-12345" {
+		t.Fatalf("unexpected revealed secret: %+v err=%v", revealed, err)
+	}
+
+	// 5. Leaving controller_secret empty preserves existing secret.
+	preserveRes := adminRequest(h, "PUT", "/api/mihomo/settings", map[string]any{
+		"enabled":              false,
+		"takeover_outbound":    false,
+		"controller_port":      19095,
+		"controller_allow_lan": true,
+		"controller_secret":    "",
+		"settings": map[string]any{
+			"mixed_port":        7891,
+			"mode":              "rule",
+			"log_level":         "info",
+			"dns_enhanced_mode": "keep",
+		},
+	}, cookie, "")
+	if preserveRes.Code != 200 {
+		t.Fatalf("expected 200 preserving controller secret, got %d", preserveRes.Code)
+	}
+	a.mihomo.mu.Lock()
+	preservedSecret := a.mihomo.cfg.ControllerSecret
+	a.mihomo.running = true
+	a.mihomo.mu.Unlock()
+	if preservedSecret != "neko-secret-12345" {
+		t.Fatalf("expected controller secret preserved, got %q", preservedSecret)
+	}
+	foundLANListener := false
+	for _, l := range a.mihomo.ActiveListeners() {
+		if l.Port == 19095 && l.IP == "0.0.0.0" {
+			foundLANListener = true
+		}
+	}
+	if !foundLANListener {
+		t.Fatalf("expected 0.0.0.0:19095 in ActiveListeners, got %+v", a.mihomo.ActiveListeners())
+	}
+}

@@ -149,6 +149,7 @@ type MihomoConfig struct {
 	TakeoverOutbound     bool                 `json:"takeover_outbound"`
 	BinaryPath           string               `json:"binary_path,omitempty"`
 	ControllerPort       int                  `json:"controller_port"`
+	ControllerAllowLAN   bool                 `json:"controller_allow_lan"`
 	ControllerSecret     string               `json:"controller_secret,omitempty"`
 	Settings             MihomoCoreSettings   `json:"settings"`
 	ActiveSubscriptionID string               `json:"active_subscription_id,omitempty"`
@@ -369,6 +370,17 @@ func normalizeMihomoConfig(cfg *MihomoConfig) bool {
 	return changed
 }
 
+func mihomoControllerListenAddr(cfg MihomoConfig) string {
+	port := cfg.ControllerPort
+	if port <= 0 {
+		port = 19090
+	}
+	if cfg.ControllerAllowLAN {
+		return fmt.Sprintf("0.0.0.0:%d", port)
+	}
+	return fmt.Sprintf("127.0.0.1:%d", port)
+}
+
 func validateMihomoSettings(cfg MihomoConfig, gwConfig Config, adminPort int) error {
 	for _, p := range []struct {
 		name string
@@ -388,6 +400,15 @@ func validateMihomoSettings(cfg MihomoConfig, gwConfig Config, adminPort int) er
 	}
 	if cfg.ControllerPort < 1 || cfg.ControllerPort > 65535 {
 		return errors.New("内部控制端口须为 1–65535")
+	}
+	if strings.ContainsAny(cfg.ControllerSecret, " \t\r\n\x00") || len(cfg.ControllerSecret) > 128 {
+		return errors.New("管理密钥不能包含空白或换行，且长度不超过 128 个字符")
+	}
+	if cfg.ControllerAllowLAN && len(cfg.ControllerSecret) < 8 {
+		return errors.New("开启局域网管理端口时，管理密钥长度不能少于 8 个字符")
+	}
+	if cfg.ControllerSecret != "" && len(cfg.ControllerSecret) < 6 {
+		return errors.New("管理密钥长度不能少于 6 个字符")
 	}
 	seenPorts := map[int]string{}
 	addUniquePort := func(port int, label string) error {
