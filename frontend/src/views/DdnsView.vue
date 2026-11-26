@@ -119,10 +119,10 @@
               <tbody>
                 <tr v-for="host in group.hosts" :key="host">
                   <td class="mono-text col-host">{{ host }}</td>
-                  <td class="mono-text" :class="{ 'report-error': record(group.id, host)?.ipv4_error }">
+                  <td class="mono-text col-addr" :class="{ 'report-error': record(group.id, host)?.ipv4_error }">
                     {{ address(group.id, host, 'ipv4') }}
                   </td>
-                  <td class="mono-text" :class="{ 'report-error': record(group.id, host)?.ipv6_error }">
+                  <td class="mono-text col-addr" :class="{ 'report-error': record(group.id, host)?.ipv6_error }">
                     {{ address(group.id, host, 'ipv6') }}
                   </td>
                   <td class="col-time">{{ reportDate(record(group.id, host)?.checked_at) }}</td>
@@ -468,7 +468,7 @@ onUnmounted(() => {
   margin-left: auto;
 }
 .dns-records {
-  min-width: 640px;
+  min-width: 720px;
 }
 .dns-records td {
   max-width: none;
@@ -476,6 +476,7 @@ onUnmounted(() => {
   font-variant-numeric: tabular-nums;
 }
 .dns-records .col-host,
+.dns-records .col-addr:not(.report-error),
 .dns-records .col-time {
   white-space: nowrap;
 }

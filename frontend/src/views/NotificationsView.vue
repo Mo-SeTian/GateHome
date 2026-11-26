@@ -428,7 +428,7 @@ watch(push, async (open, _, cleanup) => {
   .kpi-card { padding: 12px; }
   .kpi-val { font-size: 20px; }
   .notice-toolbar { flex-direction: column; align-items: stretch; gap: 8px; }
-  .notice-filters { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 8px; }
+  .notice-filters { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 8px; flex: 0 0 auto; width: 100%; }
   .notice-segments { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; }
   .notice-segments button { text-align: center; padding: 7px 4px; }
   .notice-cat-select { width: 100% !important; }

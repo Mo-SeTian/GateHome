@@ -779,20 +779,30 @@ button:disabled {
   .province-row {
     grid-template-columns: 40px minmax(24px, 1fr) auto;
   }
-  .overview-page .report-actions {
+  .overview-page > .report-heading .report-actions {
     display: grid !important;
     grid-template-columns: 1fr 1fr !important;
     gap: 8px !important;
     width: 100% !important;
   }
-  .overview-page .report-actions .btn:last-child {
+  .overview-page > .report-heading .report-actions .btn:last-child {
     grid-column: 1 / -1 !important;
   }
-  .overview-page .report-actions .btn {
+  .overview-page > .report-heading .report-actions .btn {
     justify-content: center !important;
     width: 100% !important;
     padding-inline: 8px !important;
     font-size: 12px !important;
+  }
+  .overview-page [data-widget="trend"] .report-actions {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 8px !important;
+    width: 100% !important;
+  }
+  .overview-page [data-widget="trend"] .report-actions .btn {
+    justify-content: center !important;
+    width: 100% !important;
   }
 }
 </style>

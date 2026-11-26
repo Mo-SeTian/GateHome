@@ -45,8 +45,10 @@
             <strong class="rate-val-sub mono-text tabular-nums">{{ fmtRate(currentUpRate) }}</strong>
           </div>
         </div>
-        <div class="kpi-foot mono-text tabular-nums">
-          <span>累计 ↓ {{ isRunning ? formatBytes(telemetry?.download_total || 0) : '—' }} · ↑ {{ isRunning ? formatBytes(telemetry?.upload_total || 0) : '—' }}</span>
+        <div class="kpi-foot mono-text tabular-nums kpi-foot-totals">
+          <span class="nowrap-chunk">累计 ↓ {{ isRunning ? formatBytes(telemetry?.download_total || 0) : '—' }}</span>
+          <span class="foot-sep" aria-hidden="true">·</span>
+          <span class="nowrap-chunk">↑ {{ isRunning ? formatBytes(telemetry?.upload_total || 0) : '—' }}</span>
         </div>
       </SpotlightCard>
 
@@ -844,13 +846,27 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 8px;
+  row-gap: 4px;
 }
 
 .kpi-label {
   font-size: 12px;
   font-weight: 500;
   color: var(--muted);
+  white-space: nowrap;
+}
+
+.kpi-foot-totals {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 6px;
+}
+
+.nowrap-chunk {
+  white-space: nowrap;
 }
 
 .kpi-body {
@@ -925,9 +941,14 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 2px 6px;
   font-size: 12px;
   color: var(--ink-secondary);
+}
+
+.bar-label-row strong {
+  white-space: nowrap;
 }
 
 .progress-track {
@@ -958,6 +979,11 @@ onBeforeUnmount(() => {
   font-size: 11.5px;
   color: var(--muted);
   min-width: 0;
+}
+
+.kpi-foot.kpi-foot-totals {
+  justify-content: flex-start;
+  gap: 2px 6px;
 }
 
 .split-12-grid {
@@ -1328,6 +1354,15 @@ onBeforeUnmount(() => {
 
   .kpi-value {
     font-size: 17.5px;
+  }
+
+  .bar-label-row {
+    font-size: 11.5px;
+    gap: 2px 4px;
+  }
+
+  .bar-label-row span {
+    white-space: nowrap;
   }
 
   .rate-val {

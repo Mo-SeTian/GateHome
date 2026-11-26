@@ -1155,7 +1155,7 @@ onUnmounted(() => {
   border-radius: var(--radius-sm); width: 260px;
 }
 .search-box-icon { color: var(--faint); }
-.search-input { border: none; background: transparent; color: var(--ink); font-size: 12.5px; flex: 1; }
+.search-input { border: none; background: transparent; color: var(--ink); font-size: 12.5px; flex: 1; min-width: 0; padding: 0; }
 .clear-btn { color: var(--faint); padding: 2px; }
 
 /* Grid */
@@ -1205,7 +1205,7 @@ onUnmounted(() => {
 .domain-row { cursor: pointer; color: var(--ink); }
 .domain-row:hover .domain-text { color: var(--brand-light); }
 .domain-row:hover .copy-icon { opacity: 1; }
-.domain-text { font-weight: 500; flex: 1; overflow-wrap: anywhere; }
+.domain-text { font-weight: 500; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .copy-icon { opacity: 0; color: var(--faint); transition: opacity 0.2s ease; }
 .target-row { color: var(--muted); }
 .target-arrow { color: var(--brand-cyan); }

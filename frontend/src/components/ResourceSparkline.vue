@@ -139,17 +139,16 @@ const ariaSummary = computed(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 6px;
+  flex-wrap: wrap;
+  gap: 2px 6px;
   font-size: 10.5px;
   color: var(--faint);
-  line-height: 1.2;
-  white-space: nowrap;
-  overflow: hidden;
+  line-height: 1.3;
 }
 
-.sparkline-meta span:last-child {
-  overflow: hidden;
-  text-overflow: ellipsis;
+.sparkline-meta span {
+  white-space: nowrap;
+  max-width: 100%;
 }
 
 .mono {
