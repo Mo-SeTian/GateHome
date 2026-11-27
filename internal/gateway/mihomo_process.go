@@ -88,11 +88,16 @@ type mihomoManager struct {
 	lastTrafficSample mihomoTrafficSample
 	lastCPUSample     mihomoCPUSample
 
-	ctrlBaseURL   string        // optional override for tests
-	ctrlSecret    string        // optional override for tests
-	startTimeout  time.Duration // optional override for tests
-	ctrlOnce      sync.Once
-	ctrlTransport *http.Transport
+	ctrlBaseURL        string        // optional override for tests
+	ctrlSecret         string        // optional override for tests
+	startTimeout       time.Duration // optional override for tests
+	ctrlOnce           sync.Once
+	ctrlTransport      *http.Transport
+	onAlert            func(key, kind, resource string, failing bool, failure, recovery string, now time.Time)
+	onClearAlerts      func(keys ...string)
+	autoUpdateAttempts map[string]time.Time
+	adminLogs          *Logs
+	fetchSubFn         func(context.Context, string) ([]byte, int64, int64, int64, int64, error)
 }
 
 func newMihomoManager(paths StoragePaths, store *Store, adminPort int) *mihomoManager {
@@ -357,17 +362,22 @@ func (m *mihomoManager) startWithLifecycleHeld() error {
 		err := cmd.Wait()
 		waitDone <- err
 		close(waitDone)
+		unexpectedExit := false
 		m.mu.Lock()
-		defer m.mu.Unlock()
 		if m.cmd == cmd {
 			m.cmd = nil
 			m.running = false
 			m.pid = 0
 			m.startedAt = time.Time{}
 			m.resetTelemetrySamples()
+			unexpectedExit = m.cfg.Enabled
 			if err != nil && m.lastError == "" {
 				m.lastError = "mihomo 进程退出: " + err.Error()
 			}
+		}
+		m.mu.Unlock()
+		if unexpectedExit {
+			m.notifyAlert("mihomo-core", "mihomo", "Mihomo 核心", true, "Mihomo 核心进程异常退出", "Mihomo 核心已恢复运行", time.Now())
 		}
 	}()
 
@@ -406,6 +416,7 @@ func (m *mihomoManager) startWithLifecycleHeld() error {
 				m.lastError = ""
 			}
 			m.mu.Unlock()
+			m.notifyAlert("mihomo-core", "mihomo", "Mihomo 核心", false, "", "Mihomo 核心已恢复运行", time.Now())
 			return nil
 		}
 		readyErr = err
@@ -877,6 +888,9 @@ func (m *mihomoManager) ActiveListeners() []runtimeListener {
 }
 
 func (m *mihomoManager) fetchSubscriptionYAML(ctx context.Context, subURL string) ([]byte, int64, int64, int64, int64, error) {
+	if m.fetchSubFn != nil {
+		return m.fetchSubFn(ctx, subURL)
+	}
 	if err := validateMihomoSubscriptionURL(subURL); err != nil {
 		return nil, 0, 0, 0, 0, err
 	}
@@ -967,4 +981,215 @@ func isLoopbackTCPPortOpen(port int) bool {
 	}
 	conn.Close()
 	return true
+}
+
+func (m *mihomoManager) notifyAlert(key, kind, resource string, failing bool, failure, recovery string, now time.Time) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	cb := m.onAlert
+	m.mu.Unlock()
+	if cb != nil {
+		cb(key, kind, resource, failing, failure, recovery, now)
+	}
+}
+
+func (m *mihomoManager) clearSubAlerts(id string) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	cb := m.onClearAlerts
+	m.mu.Unlock()
+	if cb != nil {
+		cb("mihomo-sub/"+id, "mihomo-expire/"+id, "mihomo-quota/"+id)
+	}
+}
+
+type subRefreshError struct {
+	code int
+	err  error
+}
+
+func (e subRefreshError) Error() string { return e.err.Error() }
+func (e subRefreshError) Unwrap() error { return e.err }
+
+func (m *mihomoManager) RefreshSubscription(ctx context.Context, id string) error {
+	m.mu.Lock()
+	idx := indexMihomoSub(m.cfg.Subscriptions, id)
+	if idx < 0 {
+		m.mu.Unlock()
+		return subRefreshError{code: http.StatusNotFound, err: errors.New("未找到该订阅")}
+	}
+	sub := m.cfg.Subscriptions[idx]
+	m.mu.Unlock()
+
+	if sub.URL == "" {
+		return subRefreshError{code: http.StatusBadRequest, err: errors.New("本地导入配置无远程链接，无法刷新")}
+	}
+
+	data, up, down, total, exp, err := m.fetchSubscriptionYAML(ctx, sub.URL)
+	if err != nil {
+		m.mu.Lock()
+		subName := sub.Name
+		if curIdx := indexMihomoSub(m.cfg.Subscriptions, id); curIdx >= 0 {
+			subName = m.cfg.Subscriptions[curIdx].Name
+			m.cfg.Subscriptions[curIdx].LastError = err.Error()
+			_ = saveMihomoConfig(m.dir, m.cfg)
+		}
+		m.mu.Unlock()
+		m.notifyAlert("mihomo-sub/"+id, "mihomo", subName, true, "Mihomo 订阅更新失败 · "+err.Error(), "Mihomo 订阅更新已恢复", time.Now())
+		return subRefreshError{code: http.StatusBadRequest, err: err}
+	}
+
+	m.mu.Lock()
+	curIdx := indexMihomoSub(m.cfg.Subscriptions, id)
+	if curIdx < 0 {
+		m.mu.Unlock()
+		return subRefreshError{code: http.StatusNotFound, err: errors.New("订阅已被删除")}
+	}
+	subName := m.cfg.Subscriptions[curIdx].Name
+	subDir := filepath.Join(m.dir, "subscriptions")
+	_ = os.MkdirAll(subDir, 0700)
+	subPath := m.subscriptionFile(id)
+	prevData, prevReadErr := os.ReadFile(subPath)
+	if err := atomicWrite(subPath, data); err != nil {
+		m.mu.Unlock()
+		return subRefreshError{code: http.StatusInternalServerError, err: err}
+	}
+	isActive := m.cfg.ActiveSubscriptionID == id
+	if isActive {
+		prevManual := m.cfg.ManualOverride
+		m.cfg.ManualOverride = false
+		if err := m.synthesizeAndWriteLocked(); err != nil {
+			if prevReadErr == nil {
+				_ = atomicWrite(subPath, prevData)
+			} else {
+				_ = os.Remove(subPath)
+			}
+			m.cfg.ManualOverride = prevManual
+			m.cfg.Subscriptions[curIdx].LastError = "配置合成失败，已保留原订阅: " + err.Error()
+			_ = saveMihomoConfig(m.dir, m.cfg)
+			m.mu.Unlock()
+			m.notifyAlert("mihomo-sub/"+id, "mihomo", subName, true, "Mihomo 订阅合成失败，已保留原配置", "Mihomo 订阅更新已恢复", time.Now())
+			return subRefreshError{code: http.StatusBadRequest, err: errors.New("订阅内容与当前配置合成失败，已保留原配置: " + err.Error())}
+		}
+	}
+	m.cfg.Subscriptions[curIdx].UpdatedAt = time.Now()
+	m.cfg.Subscriptions[curIdx].NodeCount = countYAMLProxies(data)
+	m.cfg.Subscriptions[curIdx].LastError = ""
+	m.cfg.Subscriptions[curIdx].Upload = up
+	m.cfg.Subscriptions[curIdx].Download = down
+	m.cfg.Subscriptions[curIdx].Total = total
+	m.cfg.Subscriptions[curIdx].Expire = exp
+	if err := saveMihomoConfig(m.dir, m.cfg); err != nil {
+		m.mu.Unlock()
+		return subRefreshError{code: http.StatusInternalServerError, err: err}
+	}
+	running := m.running && isActive
+	m.mu.Unlock()
+
+	if running {
+		_ = m.Reload()
+	}
+	m.notifyAlert("mihomo-sub/"+id, "mihomo", subName, false, "", "Mihomo 订阅更新已恢复", time.Now())
+	m.EvaluateSubscriptionAlerts(time.Now())
+	return nil
+}
+
+func indexMihomoSub(subs []MihomoSubscription, id string) int {
+	for i := range subs {
+		if subs[i].ID == id {
+			return i
+		}
+	}
+	return -1
+}
+
+func (m *mihomoManager) RunAutoUpdateTick(ctx context.Context, now time.Time) {
+	if m == nil {
+		return
+	}
+	const failureCooldown = 15 * time.Minute
+	var dueIDs []string
+	m.mu.Lock()
+	if m.autoUpdateAttempts == nil {
+		m.autoUpdateAttempts = map[string]time.Time{}
+	}
+	for _, sub := range m.cfg.Subscriptions {
+		if sub.URL == "" || sub.AutoUpdateInterval < 60 {
+			continue
+		}
+		if lastAttempt, ok := m.autoUpdateAttempts[sub.ID]; ok && now.Sub(lastAttempt) < failureCooldown {
+			continue
+		}
+		interval := time.Duration(sub.AutoUpdateInterval) * time.Minute
+		if sub.UpdatedAt.IsZero() || !now.Before(sub.UpdatedAt.Add(interval)) {
+			dueIDs = append(dueIDs, sub.ID)
+			m.autoUpdateAttempts[sub.ID] = now
+		}
+	}
+	adminLogs := m.adminLogs
+	m.mu.Unlock()
+
+	for _, id := range dueIDs {
+		if ctx.Err() != nil {
+			return
+		}
+		started := time.Now()
+		reqCtx, cancel := context.WithTimeout(ctx, 35*time.Second)
+		err := m.RefreshSubscription(reqCtx, id)
+		cancel()
+		msg := "Mihomo 订阅定时自动更新成功"
+		if err != nil {
+			msg = "Mihomo 订阅定时自动更新失败: " + err.Error()
+		}
+		m.logs.add(msg)
+		if adminLogs != nil {
+			adminLogs.Add(LogEntry{
+				Category:   "subscriptions",
+				Action:     "Mihomo 订阅自动更新",
+				Target:     id,
+				OK:         err == nil,
+				DurationMS: time.Since(started).Milliseconds(),
+				Message:    msg,
+			})
+		}
+	}
+}
+
+func (m *mihomoManager) EvaluateSubscriptionAlerts(now time.Time) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	subs := append([]MihomoSubscription(nil), m.cfg.Subscriptions...)
+	m.mu.Unlock()
+
+	for _, sub := range subs {
+		if sub.Expire > 0 {
+			exp := time.Unix(sub.Expire, 0)
+			failing := !exp.After(now.Add(3 * 24 * time.Hour))
+			msg := fmt.Sprintf("订阅将于 %s 到期", exp.Local().Format("2006-01-02 15:04"))
+			if !exp.After(now) {
+				msg = "订阅已过期"
+			}
+			m.notifyAlert("mihomo-expire/"+sub.ID, "mihomo", sub.Name, failing, msg, "订阅有效期已恢复", now)
+		}
+		if sub.Total > 0 {
+			remaining := sub.Total - (sub.Upload + sub.Download)
+			if remaining < 0 {
+				remaining = 0
+			}
+			ratio := float64(remaining) / float64(sub.Total)
+			failing := remaining == 0 || ratio <= 0.10
+			pct := int(ratio * 100)
+			msg := fmt.Sprintf("订阅剩余流量不足 10%%（剩余 %d%%）", pct)
+			if remaining == 0 {
+				msg = "订阅流量已耗尽"
+			}
+			m.notifyAlert("mihomo-quota/"+sub.ID, "mihomo", sub.Name, failing, msg, "订阅流量余量已恢复", now)
+		}
+	}
 }

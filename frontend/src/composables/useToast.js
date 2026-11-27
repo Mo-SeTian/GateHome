@@ -14,16 +14,28 @@ const CURSOR_KEY = 'gatehome_notification_cursor'
 let cursor
 try { cursor = localStorage.getItem(CURSOR_KEY) } catch { /* storage disabled */ }
 
+const faultEventMeta = {
+  upstream: { category: 'upstream', path: '/runtime' },
+  backup: { category: 'backup', path: '/backups' },
+  certificate: { category: 'cert', path: '/certificates', warnType: 'warning' },
+  ddns: { category: 'ddns', path: '/ddns' },
+  mihomo: { category: 'mihomo', path: '/mihomo' },
+  security: { category: 'waf', path: '/ip-blocks', warnType: 'warning' }
+}
+
 function mergeFaultHistory(events) {
   if (!events.length || events.at(-1).id === cursor) return
   const start = events.findIndex(event => event.id === cursor) + 1
-  const incoming = events.slice(start).map(event => ({
-    id: event.id, message: event.message, resource: event.resource,
-    type: event.status === 'resolved' ? 'success' : event.type === 'certificate' ? 'warning' : 'error',
-    category: event.type === 'certificate' ? 'cert' : event.type,
-    path: { upstream: '/runtime', backup: '/backups', certificate: '/certificates' }[event.type],
-    createdAt: event.time, unread: true
-  }))
+  const incoming = events.slice(start).map(event => {
+    const meta = faultEventMeta[event.type] || { category: 'system', path: null }
+    return {
+      id: event.id, message: event.message, resource: event.resource,
+      type: event.status === 'resolved' ? 'success' : (meta.warnType || 'error'),
+      category: meta.category,
+      path: meta.path,
+      createdAt: event.time, unread: true
+    }
+  })
   const known = new Set(notifications.value.map(item => item.id))
   notifications.value = [...notifications.value, ...incoming.filter(item => !known.has(item.id))]
     .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)).slice(0, MAX_NOTIFICATIONS)
@@ -57,6 +69,7 @@ function detectCategory(message) {
   if (/DDNS|动态域名|DNS|解析/i.test(message)) return 'ddns'
   if (/备份|WebDAV|快照|恢复/i.test(message)) return 'backup'
   if (/证书|SSL|TLS|续期|续签/i.test(message)) return 'cert'
+  if (/Mihomo|策略组|规则集/i.test(message)) return 'mihomo'
   if (/反代|上游|代理|端口转发/i.test(message)) return 'upstream'
   if (/MCP|AI/i.test(message)) return 'mcp'
   return 'system'
@@ -68,6 +81,7 @@ function detectPath(category) {
     case 'ddns': return '/ddns'
     case 'backup': return '/backups'
     case 'cert': return '/certificates'
+    case 'mihomo': return '/mihomo'
     case 'upstream': return '/runtime'
     case 'mcp': return '/mcp'
     default: return null

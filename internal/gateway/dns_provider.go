@@ -4,12 +4,90 @@ import (
 	"context"
 	"encoding/hex"
 	"errors"
+	"net/http"
 	"net/netip"
+	"strings"
+	"sync"
 	"time"
+
+	"github.com/go-acme/lego/v4/challenge"
+	"github.com/go-acme/lego/v4/challenge/dns01"
 )
 
 type DNSCredential struct {
+	KeyID string `json:"key_id,omitempty"`
 	Token string `json:"token"`
+}
+
+type DNSCredentialPatch struct {
+	KeyID *string `json:"key_id,omitempty"`
+	Token *string `json:"token,omitempty"`
+}
+
+type DNSProviderMeta struct {
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	RequiresKeyID bool   `json:"requires_key_id"`
+	KeyIDLabel    string `json:"key_id_label,omitempty"`
+	TokenLabel    string `json:"token_label"`
+}
+
+var dnsProvidersCatalogList = []DNSProviderMeta{
+	{ID: "cloudflare", Name: "Cloudflare", RequiresKeyID: false, TokenLabel: "API Token"},
+	{ID: "alidns", Name: "阿里云 DNS", RequiresKeyID: true, KeyIDLabel: "AccessKey ID", TokenLabel: "AccessKey Secret"},
+	{ID: "tencentcloud", Name: "腾讯云 DNS (DNSPod)", RequiresKeyID: true, KeyIDLabel: "SecretId", TokenLabel: "SecretKey"},
+	{ID: "huaweicloud", Name: "华为云 DNS", RequiresKeyID: true, KeyIDLabel: "Access Key ID", TokenLabel: "Secret Access Key"},
+	{ID: "porkbun", Name: "Porkbun", RequiresKeyID: true, KeyIDLabel: "API Key", TokenLabel: "Secret API Key"},
+}
+
+func dnsProvidersCatalog() []DNSProviderMeta {
+	out := make([]DNSProviderMeta, len(dnsProvidersCatalogList))
+	copy(out, dnsProvidersCatalogList)
+	return out
+}
+
+func findDNSProviderMeta(id string) (DNSProviderMeta, bool) {
+	for _, meta := range dnsProvidersCatalogList {
+		if meta.ID == id {
+			return meta, true
+		}
+	}
+	return DNSProviderMeta{}, false
+}
+
+func supportedDNSProvider(id string) bool {
+	_, ok := findDNSProviderMeta(id)
+	return ok
+}
+
+func dnsProviderRequiresKeyID(id string) bool {
+	meta, ok := findDNSProviderMeta(id)
+	return ok && meta.RequiresKeyID
+}
+
+func dnsProviderName(id string) string {
+	if meta, ok := findDNSProviderMeta(id); ok {
+		return meta.Name
+	}
+	return id
+}
+
+func (c DNSCredential) HasAny() bool {
+	return c.KeyID != "" || c.Token != ""
+}
+
+func (c DNSCredential) ConfiguredFor(provider string) bool {
+	if c.Token == "" {
+		return false
+	}
+	if dnsProviderRequiresKeyID(provider) {
+		return c.KeyID != ""
+	}
+	return true
+}
+
+func validateDNSCredentialValue(v string) bool {
+	return len(v) <= 512 && !containsCredentialNewline(v)
 }
 
 func (s State) HasDNSToken() bool {
@@ -17,12 +95,12 @@ func (s State) HasDNSToken() bool {
 		return true
 	}
 	for _, c := range s.DNSCredentials {
-		if c.Token != "" {
+		if c.HasAny() {
 			return true
 		}
 	}
 	for _, c := range s.CertificateCredentials {
-		if c.Token != "" {
+		if c.HasAny() {
 			return true
 		}
 	}
@@ -35,24 +113,215 @@ type dnsProvider interface {
 	Close()
 }
 
+type acmeTXTProvider interface {
+	ZoneID(context.Context, string) (string, error)
+	PresentTXT(ctx context.Context, zoneID, zone, fqdn, value string) (string, error)
+	CleanUpTXT(ctx context.Context, zoneID, zone, fqdn, recordID, value string) error
+}
+
 type cloudflareProvider struct{ *Cloudflare }
 
 func (p cloudflareProvider) Close() { closeClient(p.Client) }
 
 func newDNSProvider(s State, g DDNSGroup, logs *Logs) (dnsProvider, error) {
+	cred := s.DNSCredentials[g.ID]
 	switch g.Provider {
 	case "cloudflare":
-		token := s.DNSCredentials[g.ID].Token
-		if token == "" {
+		if !cred.ConfiguredFor(g.Provider) {
 			return nil, errors.New("此 DNS 组尚未配置 Cloudflare API Token")
 		}
-		cf := NewCloudflare(token)
+		cf := NewCloudflare(cred.Token)
 		cf.Client = outboundClient(s, 20*time.Second)
 		cf.logs = logs
 		return cloudflareProvider{cf}, nil
+	case "alidns":
+		if !cred.ConfiguredFor(g.Provider) {
+			return nil, errors.New("此 DNS 组尚未配置完整的阿里云 AccessKey 凭据")
+		}
+		p := NewAliDNS(cred.KeyID, cred.Token)
+		p.Client = outboundClient(s, 20*time.Second)
+		p.logs = logs
+		p.logCategory = "ddns"
+		return p, nil
+	case "tencentcloud":
+		if !cred.ConfiguredFor(g.Provider) {
+			return nil, errors.New("此 DNS 组尚未配置完整的腾讯云 SecretId / SecretKey")
+		}
+		p := NewTencentCloudDNS(cred.KeyID, cred.Token)
+		p.Client = outboundClient(s, 20*time.Second)
+		p.logs = logs
+		p.logCategory = "ddns"
+		return p, nil
+	case "huaweicloud":
+		if !cred.ConfiguredFor(g.Provider) {
+			return nil, errors.New("此 DNS 组尚未配置完整的华为云 Access Key 凭据")
+		}
+		p := NewHuaweiCloudDNS(cred.KeyID, cred.Token)
+		p.Client = outboundClient(s, 20*time.Second)
+		p.logs = logs
+		p.logCategory = "ddns"
+		return p, nil
+	case "porkbun":
+		if !cred.ConfiguredFor(g.Provider) {
+			return nil, errors.New("此 DNS 组尚未配置完整的 Porkbun API Key 凭据")
+		}
+		p := NewPorkbunDNS(cred.KeyID, cred.Token)
+		p.Client = outboundClient(s, 20*time.Second)
+		p.logs = logs
+		p.logCategory = "ddns"
+		return p, nil
 	default:
 		return nil, errors.New("此 DNS 服务商尚未支持")
 	}
+}
+
+func newACMETXTProvider(provider string, cred DNSCredential, client *http.Client, logs *Logs) (acmeTXTProvider, func(), error) {
+	switch provider {
+	case "alidns":
+		p := NewAliDNS(cred.KeyID, cred.Token)
+		p.Client = client
+		p.logs = logs
+		p.logCategory = "certificates"
+		return p, p.Close, nil
+	case "tencentcloud":
+		p := NewTencentCloudDNS(cred.KeyID, cred.Token)
+		p.Client = client
+		p.logs = logs
+		p.logCategory = "certificates"
+		return p, p.Close, nil
+	case "huaweicloud":
+		p := NewHuaweiCloudDNS(cred.KeyID, cred.Token)
+		p.Client = client
+		p.logs = logs
+		p.logCategory = "certificates"
+		return p, p.Close, nil
+	case "porkbun":
+		p := NewPorkbunDNS(cred.KeyID, cred.Token)
+		p.Client = client
+		p.logs = logs
+		p.logCategory = "certificates"
+		return p, p.Close, nil
+	default:
+		return nil, nil, errors.New("证书 DNS 服务商不支持")
+	}
+}
+
+type acmeTXTRecord struct {
+	zoneID   string
+	zone     string
+	recordID string
+}
+
+type dns01ChallengeAdapter struct {
+	provider acmeTXTProvider
+	mu       sync.Mutex
+	records  map[string]acmeTXTRecord
+	findZone func(fqdn string) (string, error)
+}
+
+var _ challenge.ProviderTimeout = (*dns01ChallengeAdapter)(nil)
+
+func newDNS01ChallengeAdapter(provider acmeTXTProvider) *dns01ChallengeAdapter {
+	return &dns01ChallengeAdapter{
+		provider: provider,
+		records:  map[string]acmeTXTRecord{},
+	}
+}
+
+func (a *dns01ChallengeAdapter) Timeout() (time.Duration, time.Duration) {
+	return 3 * time.Minute, 5 * time.Second
+}
+
+func (a *dns01ChallengeAdapter) resolveZone(ctx context.Context, fqdn string) (zone, zoneID string, err error) {
+	if a.findZone != nil {
+		raw, err := a.findZone(fqdn)
+		if err != nil {
+			return "", "", err
+		}
+		zone = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(raw)), ".")
+		if zone == "" {
+			return "", "", errors.New("无法识别 DNS 根域名")
+		}
+		zoneID, err = a.provider.ZoneID(ctx, zone)
+		if err != nil {
+			return "", "", err
+		}
+		return zone, zoneID, nil
+	}
+	if authZone, findErr := dns01.FindZoneByFqdn(fqdn); findErr == nil {
+		candidate := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(authZone)), ".")
+		if candidate != "" {
+			if id, idErr := a.provider.ZoneID(ctx, candidate); idErr == nil {
+				return candidate, id, nil
+			}
+		}
+	}
+	trimmed := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(fqdn)), ".")
+	labels := strings.Split(trimmed, ".")
+	var lastErr error
+	for i := 0; i <= len(labels)-2; i++ {
+		if strings.HasPrefix(labels[i], "_") {
+			continue
+		}
+		candidate := strings.Join(labels[i:], ".")
+		id, err := a.provider.ZoneID(ctx, candidate)
+		if err == nil {
+			return candidate, id, nil
+		}
+		lastErr = err
+	}
+	if lastErr != nil {
+		return "", "", lastErr
+	}
+	return "", "", errors.New("无法匹配 DNS 根域名")
+}
+
+func (a *dns01ChallengeAdapter) Present(domain, token, keyAuth string) error {
+	domain = strings.TrimPrefix(strings.TrimSpace(domain), "*.")
+	info := dns01.GetChallengeInfo(domain, keyAuth)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	zone, zoneID, err := a.resolveZone(ctx, info.EffectiveFQDN)
+	if err != nil {
+		return err
+	}
+	recordID, err := a.provider.PresentTXT(ctx, zoneID, zone, info.EffectiveFQDN, info.Value)
+	if err != nil {
+		return err
+	}
+	a.mu.Lock()
+	if a.records == nil {
+		a.records = map[string]acmeTXTRecord{}
+	}
+	a.records[info.EffectiveFQDN+"\x00"+info.Value] = acmeTXTRecord{
+		zoneID:   zoneID,
+		zone:     zone,
+		recordID: recordID,
+	}
+	a.mu.Unlock()
+	return nil
+}
+
+func (a *dns01ChallengeAdapter) CleanUp(domain, token, keyAuth string) error {
+	domain = strings.TrimPrefix(strings.TrimSpace(domain), "*.")
+	info := dns01.GetChallengeInfo(domain, keyAuth)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	key := info.EffectiveFQDN + "\x00" + info.Value
+	a.mu.Lock()
+	rec, ok := a.records[key]
+	if ok {
+		delete(a.records, key)
+	}
+	a.mu.Unlock()
+	if !ok {
+		zone, zoneID, err := a.resolveZone(ctx, info.EffectiveFQDN)
+		if err != nil {
+			return err
+		}
+		rec = acmeTXTRecord{zoneID: zoneID, zone: zone}
+	}
+	return a.provider.CleanUpTXT(ctx, rec.zoneID, rec.zone, info.EffectiveFQDN, rec.recordID, info.Value)
 }
 
 func (c Config) DNSGroup(id string) (DDNSGroup, bool) {
@@ -98,10 +367,7 @@ func validateCredentials(s State) error {
 	if err := s.WxPusher.validate(); err != nil {
 		return err
 	}
-	if err := s.Alerts.validateSelection(); err != nil {
-		return err
-	}
-	if err := validateWebhook(s.Alerts.URL, s.Alerts.Enabled); err != nil {
+	if err := s.Alerts.validate(); err != nil {
 		return err
 	}
 	if !validStoredMCPToken(s.MCPToken, s.MCPTokenHash) {
@@ -131,24 +397,24 @@ func validateCredentials(s State) error {
 		return err
 	}
 	for _, credential := range s.DNSCredentials {
-		if len(credential.Token) > 512 || containsCredentialNewline(credential.Token) {
+		if !validateDNSCredentialValue(credential.KeyID) || !validateDNSCredentialValue(credential.Token) {
 			return errors.New("DNS 凭据格式无效")
 		}
 	}
 	for _, credential := range s.CertificateCredentials {
-		if len(credential.Token) > 512 || containsCredentialNewline(credential.Token) {
+		if !validateDNSCredentialValue(credential.KeyID) || !validateDNSCredentialValue(credential.Token) {
 			return errors.New("证书 DNS 凭据格式无效")
 		}
 	}
 	for _, g := range s.Config.DDNS.Groups {
-		if g.Enabled && s.DNSCredentials[g.ID].Token == "" {
-			return errors.New("请在启用的 DDNS 组中填写 API Token")
+		if g.Enabled && !s.DNSCredentials[g.ID].ConfiguredFor(g.Provider) {
+			return errors.New("请在启用的 DDNS 组中填写完整的 DNS 凭据")
 		}
 	}
 	if s.Config.ACME.Enabled {
 		for _, request := range s.Config.ACME.Requests {
-			if request.Enabled && s.CertificateCredentials[request.ID].Token == "" {
-				return errors.New("启用的证书任务尚未配置独立 API Token")
+			if request.Enabled && !s.CertificateCredentials[request.ID].ConfiguredFor(request.Provider) {
+				return errors.New("启用的证书任务尚未配置完整的独立 DNS 凭据")
 			}
 		}
 	}

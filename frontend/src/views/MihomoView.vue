@@ -404,6 +404,11 @@
                 <strong>{{ sub.name }}</strong>
                 <span v-if="status.active_subscription_id === sub.id" class="badge badge-ok">当前启用</span>
                 <span class="badge badge-neutral">{{ sub.node_count }} 节点</span>
+                <span v-if="sub.auto_update_interval > 0" class="badge badge-brand">
+                  每 {{ formatAutoInterval(sub.auto_update_interval) }} 自动更新
+                </span>
+                <span v-if="subQuotaLow(sub)" class="badge badge-warn">余量不足 10%</span>
+                <span v-if="subExpiringText(sub)" class="badge badge-warn">{{ subExpiringText(sub) }}</span>
                 <span v-if="sub.exclude_groups_and_rules" class="badge badge-warn">仅导入节点</span>
                 <span v-if="sub.include_filter" class="badge badge-brand">仅保留: {{ sub.include_filter }}</span>
                 <span v-if="sub.exclude_filter" class="badge badge-warn">排除: {{ sub.exclude_filter }}</span>
@@ -412,6 +417,7 @@
               <div class="sub-meta mono-text">
                 <span>{{ sub.url_masked || '本地 YAML 导入' }}</span>
                 <span v-if="sub.updated_at"> · {{ formatTime(sub.updated_at) }}</span>
+                <span v-if="sub.auto_update_interval > 0 && sub.next_update_at"> · 下次 {{ formatTime(sub.next_update_at) }}</span>
                 <span v-if="sub.total"> · {{ formatQuota(sub) }}</span>
               </div>
               <p v-if="sub.last_error" class="report-error">{{ sub.last_error }}</p>
@@ -1282,6 +1288,22 @@
             placeholder="例如： [主力]（注意可保留前导空格）"
           />
         </label>
+        <label class="form-field">
+          <span>定时自动更新周期</span>
+          <select
+            v-model.number="subForm.auto_update_interval"
+            name="sub_auto_update_interval"
+            class="form-select"
+            :disabled="!canAutoUpdateSub"
+          >
+            <option :value="0">关闭自动更新</option>
+            <option :value="360">每 6 小时</option>
+            <option :value="720">每 12 小时</option>
+            <option :value="1440">每 24 小时</option>
+            <option :value="4320">每 3 天</option>
+            <option :value="10080">每 7 天</option>
+          </select>
+        </label>
         <label class="toggle-card">
           <div class="toggle-card-copy">
             <span>完全排除机场策略组与规则配置</span>
@@ -1501,7 +1523,9 @@ const subForm = reactive({
   include_filter: '',
   exclude_filter: '',
   node_suffix: '',
-  exclude_groups_and_rules: false
+  exclude_groups_and_rules: false,
+  auto_update_interval: 0,
+  has_url: false
 })
 
 const dnsForm = reactive({
@@ -1998,14 +2022,19 @@ function openSubModal(sub = null) {
   subForm.exclude_filter = sub?.exclude_filter || ''
   subForm.node_suffix = sub?.node_suffix || ''
   subForm.exclude_groups_and_rules = !!sub?.exclude_groups_and_rules
+  subForm.has_url = !!sub?.has_url
+  subForm.auto_update_interval = sub?.auto_update_interval || 0
   subDialog.value?.showModal()
 }
+
+const canAutoUpdateSub = computed(() => Boolean(subForm.url || subForm.has_url))
 
 async function submitSubscription() {
   modalError.value = ''
   modalBusy.value = true
   try {
     const isEdit = !!subForm.id
+    const autoInterval = canAutoUpdateSub.value ? (Number(subForm.auto_update_interval) || 0) : 0
     const data = isEdit
       ? await adminApi.updateMihomoSubscription(subForm.id, {
           name: subForm.name,
@@ -2013,7 +2042,8 @@ async function submitSubscription() {
           include_filter: subForm.include_filter,
           exclude_filter: subForm.exclude_filter,
           node_suffix: subForm.node_suffix,
-          exclude_groups_and_rules: subForm.exclude_groups_and_rules
+          exclude_groups_and_rules: subForm.exclude_groups_and_rules,
+          auto_update_interval: autoInterval
         })
       : await adminApi.addMihomoSubscription({
           name: subForm.name,
@@ -2022,7 +2052,8 @@ async function submitSubscription() {
           include_filter: subForm.include_filter,
           exclude_filter: subForm.exclude_filter,
           node_suffix: subForm.node_suffix,
-          exclude_groups_and_rules: subForm.exclude_groups_and_rules
+          exclude_groups_and_rules: subForm.exclude_groups_and_rules,
+          auto_update_interval: autoInterval
         })
     applyStatus(data)
     subDialog.value?.close()
@@ -2374,6 +2405,27 @@ function formatQuota(sub) {
   const used = (sub.upload || 0) + (sub.download || 0)
   const gb = (n) => `${(n / 1024 / 1024 / 1024).toFixed(1)}G`
   return `${gb(used)} / ${gb(sub.total)}`
+}
+
+function formatAutoInterval(mins) {
+  if (mins >= 1440 && mins % 1440 === 0) return `${mins / 1440} 天`
+  if (mins >= 60 && mins % 60 === 0) return `${mins / 60} 小时`
+  return `${mins} 分钟`
+}
+
+function subQuotaLow(sub) {
+  if (!sub?.total) return false
+  const used = (sub.upload || 0) + (sub.download || 0)
+  const remaining = Math.max(0, sub.total - used)
+  return remaining === 0 || remaining / sub.total <= 0.1
+}
+
+function subExpiringText(sub) {
+  if (!sub?.expire) return ''
+  const diff = sub.expire * 1000 - Date.now()
+  if (diff <= 0) return '订阅已过期'
+  if (diff <= 3 * 86400000) return `剩余 ${Math.max(1, Math.ceil(diff / 86400000))} 天到期`
+  return ''
 }
 
 async function copyText(text, msg) {

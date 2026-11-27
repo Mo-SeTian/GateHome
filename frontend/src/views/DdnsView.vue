@@ -69,7 +69,7 @@
                 </span>
               </template>
               <span v-if="!gatewayConfigSnapshot.dns_credentials_configured?.[group.id]" class="context-chip warn">
-                未配置 Token
+                未配置凭据
               </span>
               <span v-for="name in references(group.id)" :key="name" class="context-chip">{{ name }}</span>
               <span
@@ -157,7 +157,7 @@ import DdnsEditor from '@/components/DdnsEditor.vue'
 import PublicIPMonitor from '@/components/PublicIPMonitor.vue'
 import { adminApi } from '@/api/admin'
 import { startPolling } from '@/api/polling'
-import { jobState, replaceDDNS } from '@/api/dns'
+import { dnsProviderLabel, jobState, replaceDDNS } from '@/api/dns'
 import { reportDate } from '@/api/reports'
 import { useGatewayStatus, useStatusPolling } from '@/composables/useGatewayStatus'
 import { useToast } from '@/composables/useToast'
@@ -241,7 +241,7 @@ function modeLabel(mode) {
   return { ipv4: 'IPv4 · A', ipv6: 'IPv6 · AAAA', dual: 'IPv4 + IPv6' }[mode]
 }
 function providerLabel(provider) {
-  return { cloudflare: 'Cloudflare' }[provider] || provider || 'Cloudflare'
+  return dnsProviderLabel(provider)
 }
 function lastSuccess(id) {
   const ts = job(id)?.last_success

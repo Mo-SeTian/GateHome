@@ -222,7 +222,7 @@ func (l *Logs) Add(e LogEntry) {
 func stateSecrets(s State) []string {
 	secrets := []string{
 		s.CloudflareToken, s.ProxyPassword, s.PasswordHash, s.GitHubToken,
-		s.Alerts.URL, s.WxPusher.AppToken, s.WebDAVBackup.Password,
+		s.Alerts.URL, s.Alerts.Secret, s.WxPusher.AppToken, s.WebDAVBackup.Password,
 		s.WebDAVBackup.BackupPassword, s.MCPToken, s.MCPTokenHash, s.Assistant.Key,
 	}
 	for _, client := range s.MCPClients {
@@ -235,10 +235,10 @@ func stateSecrets(s State) []string {
 		secrets = append(secrets, hash)
 	}
 	for _, credential := range s.DNSCredentials {
-		secrets = append(secrets, credential.Token)
+		secrets = append(secrets, credential.KeyID, credential.Token)
 	}
 	for _, credential := range s.CertificateCredentials {
-		secrets = append(secrets, credential.Token)
+		secrets = append(secrets, credential.KeyID, credential.Token)
 	}
 	return secrets
 }

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"regexp"
 	"slices"
@@ -18,7 +19,17 @@ import (
 const wxPusherEndpoint = "https://wxpusher.zjiecode.com/api/send/message"
 
 var wxPushIdentifier = regexp.MustCompile(`^[A-Za-z0-9_-]{1,256}$`)
-var alertKinds = map[string]string{"route": "upstream", "webdav": "backup", "cert": "certificate"}
+var alertKinds = map[string]string{
+	"route":         "upstream",
+	"webdav":        "backup",
+	"cert":          "certificate",
+	"ddns":          "ddns",
+	"mihomo-core":   "mihomo",
+	"mihomo-sub":    "mihomo",
+	"mihomo-expire": "mihomo",
+	"mihomo-quota":  "mihomo",
+	"security":      "security",
+}
 
 type wxPusherState struct {
 	alertQueue
@@ -46,7 +57,12 @@ func (s wxPusherState) validate() error {
 func validateEventSelection(events []string) error {
 	seen := map[string]bool{}
 	for _, kind := range events {
-		if seen[kind] || (kind != "upstream" && kind != "backup" && kind != "certificate") {
+		switch kind {
+		case "upstream", "backup", "certificate", "ddns", "mihomo", "security":
+		default:
+			return errors.New("通知事件无效")
+		}
+		if seen[kind] {
 			return errors.New("通知事件无效")
 		}
 		seen[kind] = true
@@ -93,6 +109,47 @@ func (s *State) observeNotification(key, kind, resource string, failing bool, fa
 		changedWx := s.WxPusher.observe(key, kind, resource, failing, failure, recovery, now)
 		return changed || changedWx
 	}
+	return changed
+}
+
+func (s *State) recordIncidentNotification(event webhookEvent) bool {
+	const historyLimit = 60
+	s.NoticeHistory.Events = append(slices.Clip(s.NoticeHistory.Events), event)
+	if len(s.NoticeHistory.Events) > historyLimit {
+		s.NoticeHistory.Events = s.NoticeHistory.Events[len(s.NoticeHistory.Events)-historyLimit:]
+	}
+	if s.Alerts.accepts(event.Type) {
+		s.Alerts.enqueueEvent(event)
+	}
+	if s.WxPusher.accepts(event.Type) {
+		s.WxPusher.enqueueEvent(event)
+	}
+	return true
+}
+
+func (s *State) clearAlertKeys(keys ...string) bool {
+	changed := false
+	prune := func(active *activeAlerts) {
+		if len(*active) == 0 {
+			return
+		}
+		var next activeAlerts
+		for _, k := range keys {
+			if (*active)[k] {
+				if next == nil {
+					next = maps.Clone(*active)
+				}
+				delete(next, k)
+				changed = true
+			}
+		}
+		if next != nil {
+			*active = next
+		}
+	}
+	prune(&s.NoticeHistory.Active)
+	prune(&s.Alerts.Active)
+	prune(&s.WxPusher.Active)
 	return changed
 }
 

@@ -1,6 +1,18 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { ddnsHosts, ddnsPrefixes, domainList, jobState, replaceCertificate, replaceDDNS, tokenChange } from './dns.js'
+import {
+  DNS_PROVIDERS,
+  credentialChange,
+  ddnsHosts,
+  ddnsPrefixes,
+  dnsProviderLabel,
+  dnsProviderMeta,
+  domainList,
+  jobState,
+  replaceCertificate,
+  replaceDDNS,
+  tokenChange
+} from './dns.js'
 
 test('DDNS domains expand prefixes and preserve root, nested and full host names', () => {
   const hosts = ddnsHosts('Example.TEST', '@, NAS\napp.home\nfull.example.test')
@@ -32,4 +44,36 @@ test('queued jobs never appear successful until the server records completion', 
   assert.equal(jobState(true, job).label, '执行失败')
   assert.equal(jobState(true, { ...job, running: true }).label, '执行中')
   assert.equal(jobState(true, { ...job, last_success: '2026-11-09T10:00:01Z' }).label, '执行成功')
+})
+test('multi-DNS provider metadata and dual-key credential changes behave as expected', () => {
+  assert.equal(DNS_PROVIDERS.length, 5)
+  assert.deepEqual(DNS_PROVIDERS.map(item => item.id), ['cloudflare', 'alidns', 'tencentcloud', 'huaweicloud', 'porkbun'])
+  assert.equal(dnsProviderLabel('alidns'), '阿里云 DNS')
+  assert.equal(dnsProviderLabel('tencentcloud'), '腾讯云 DNS (DNSPod)')
+  assert.equal(dnsProviderLabel('huaweicloud'), '华为云 DNS')
+  assert.equal(dnsProviderLabel('porkbun'), 'Porkbun')
+  assert.equal(dnsProviderLabel(undefined), 'Cloudflare')
+  assert.equal(dnsProviderMeta('cloudflare').requiresKeyId, false)
+  assert.equal(dnsProviderMeta('alidns').requiresKeyId, true)
+  assert.equal(dnsProviderMeta('alidns').keyIdLabel, 'AccessKey ID')
+  assert.deepEqual(
+    credentialChange('dns_tokens', 'dns_credentials', 'g1', { keyId: undefined, token: ' tok ' }, false),
+    { dns_tokens: { g1: 'tok' } }
+  )
+  assert.deepEqual(
+    credentialChange('dns_tokens', 'dns_credentials', 'g1', { keyId: undefined, token: undefined }, true),
+    {}
+  )
+  assert.deepEqual(
+    credentialChange('dns_tokens', 'dns_credentials', 'g1', { keyId: ' ak ', token: ' sk ' }, true),
+    { dns_credentials: { g1: { key_id: 'ak', token: 'sk' } } }
+  )
+  assert.deepEqual(
+    credentialChange('certificate_tokens', 'certificate_credentials', 'c1', { keyId: undefined, token: ' only-sk ' }, true),
+    { certificate_credentials: { c1: { token: 'only-sk' } } }
+  )
+  assert.deepEqual(
+    credentialChange('dns_tokens', 'dns_credentials', 'g1', { keyId: '', token: undefined }, true),
+    { dns_credentials: { g1: { key_id: '' } } }
+  )
 })

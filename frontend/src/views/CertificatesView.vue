@@ -67,7 +67,7 @@
               v-if="!gatewayConfigSnapshot.certificate_credentials_configured?.[request.id]"
               class="cert-chip warn"
             >
-              未配置 Token
+              未配置凭据
             </span>
           </div>
           <div class="report-actions cert-actions">
@@ -81,7 +81,7 @@
           </div>
         </div>
         <div class="cert-meta">
-          <span>Cloudflare · DNS-01 · ECDSA P-256</span
+          <span>{{ dnsProviderLabel(request.provider) }} · DNS-01 · ECDSA P-256</span
           ><span v-if="certificate(request.id)?.not_after && !certificate(request.id).not_after.startsWith('0001')">
             · 到期 {{ reportDate(certificate(request.id).not_after) }}</span
           >
@@ -107,7 +107,7 @@ import { Lock, Plus } from 'lucide-vue-next'
 import SpotlightCard from '@/components/SpotlightCard.vue'
 import CertificateEditor from '@/components/CertificateEditor.vue'
 import { adminApi } from '@/api/admin'
-import { jobState, replaceCertificate } from '@/api/dns'
+import { dnsProviderLabel, jobState, replaceCertificate } from '@/api/dns'
 import { reportDate } from '@/api/reports'
 import { useGatewayStatus, useStatusPolling } from '@/composables/useGatewayStatus'
 import { useToast } from '@/composables/useToast'

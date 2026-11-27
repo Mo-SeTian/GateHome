@@ -3,7 +3,7 @@
     <div class="push-header">
       <div>
         <h3>{{ wx ? 'WxPusher 故障推送' : 'Webhook 故障推送' }}</h3>
-        <p class="form-note">{{ wx ? '微信实时告警卡片推送' : '通用 JSON POST 回调（支持企业微信 / 飞书 / 自建脚本）' }}</p>
+        <p class="form-note">{{ wx ? '微信实时告警卡片推送' : currentFormat.desc }}</p>
       </div>
     </div>
 
@@ -49,20 +49,59 @@
         </div>
       </div>
 
-      <SecretInput
-        v-else
-        :key="saved.revision"
-        id="alert-webhook-url"
-        v-model.trim="secret"
-        name="webhook_url"
-        label="Webhook 地址"
-        kind="alert-webhook"
-        secret-name="Webhook 地址"
-        :configured="saved.configured"
-        :placeholder="saved.configured ? '已保存，可直接输入新地址' : 'https://…'"
-        :maxlength="2048"
-        :disabled="busy"
-      />
+      <template v-else>
+        <div class="uid-field">
+          <label for="alert-webhook-format">推送渠道模板</label>
+          <select id="alert-webhook-format" v-model="format" name="webhook_format" class="form-select" :disabled="busy">
+            <option v-for="item in webhookFormats" :key="item.id" :value="item.id">{{ item.label }}</option>
+          </select>
+        </div>
+
+        <SecretInput
+          :key="saved.revision"
+          id="alert-webhook-url"
+          v-model.trim="secret"
+          name="webhook_url"
+          label="Webhook 地址"
+          kind="alert-webhook"
+          secret-name="Webhook 地址"
+          :configured="saved.configured"
+          :placeholder="saved.configured ? '已保存，可直接输入新地址' : currentFormat.placeholder"
+          :maxlength="2048"
+          :disabled="busy"
+        />
+
+        <div v-if="format === 'telegram'" class="uid-field">
+          <label for="alert-webhook-chat-id">Telegram Chat ID</label>
+          <input
+            id="alert-webhook-chat-id"
+            v-model.trim="chatId"
+            name="webhook_chat_id"
+            class="form-input mono"
+            placeholder="例如：-1001234567890 或用户数字 ID"
+            maxlength="128"
+            :disabled="busy"
+            :required="enabled && format === 'telegram'"
+            autocomplete="off"
+            spellcheck="false"
+          />
+        </div>
+
+        <SecretInput
+          v-if="currentFormat.supportsSecret"
+          :key="saved.revision + '-' + format"
+          id="alert-webhook-secret"
+          v-model.trim="secretToken"
+          name="webhook_secret"
+          :label="currentFormat.secretLabel"
+          kind="alert-webhook-secret"
+          :secret-name="currentFormat.secretLabel"
+          :configured="saved.secret_configured"
+          :placeholder="saved.secret_configured ? '已保存，留空保留原密钥；输入新值可覆盖' : currentFormat.secretPlaceholder"
+          :maxlength="512"
+          :disabled="busy"
+        />
+      </template>
 
       <fieldset class="events">
         <legend>通知事件</legend>
@@ -87,12 +126,12 @@
         </div>
       </fieldset>
 
-      <p class="form-note">同一故障首次触发时推送一次，恢复后再通知。</p>
+      <p class="form-note">同一状态类故障首次触发时推送一次，恢复后再通知；安全冻结/限流告警带 5 分钟合并去重。</p>
       <p v-if="saved.pending" class="form-note">
-        待发送 {{ saved.pending }} 条。{{ wx ? '停用推送或更换接收配置会清空待发通知。' : '关闭推送或更换地址会清空待发通知。' }}
+        待发送 {{ saved.pending }} 条。{{ wx ? '停用推送或更换接收配置会清空待发通知。' : '关闭推送或更换地址/模板会清空待发通知。' }}
       </p>
 
-      <details v-if="!wx" class="payload-details">
+      <details v-if="!wx && format === 'generic'" class="payload-details">
         <summary>Webhook 请求体参考（支持 Idempotency-Key 去重）</summary>
         <pre class="payload-code">{{ webhookSample }}</pre>
       </details>
@@ -119,10 +158,73 @@ const props = defineProps({ channel: { type: String, default: 'webhook' } })
 const emit = defineEmits(['loaded'])
 const wx = props.channel === 'wxpusher'
 
+const webhookFormats = [
+  {
+    id: 'generic',
+    label: '通用 JSON POST',
+    desc: '发送标准 JSON 结构并附带 Idempotency-Key，支持可选 HMAC-SHA256 签名请求头',
+    placeholder: 'https://…',
+    supportsSecret: true,
+    secretLabel: 'HMAC 签名密钥（可选）',
+    secretPlaceholder: '留空则不附加 X-GateHome-Signature 请求头'
+  },
+  {
+    id: 'wecom',
+    label: '企业微信群机器人',
+    desc: '直接推送企业微信 Markdown 卡片消息（填写群机器人 Webhook 地址）',
+    placeholder: 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=…',
+    supportsSecret: false
+  },
+  {
+    id: 'feishu',
+    label: '飞书 / Lark 群机器人',
+    desc: '推送飞书富文本消息；如机器人开启了签名校验可填写签名密钥',
+    placeholder: 'https://open.feishu.cn/open-apis/bot/v2/hook/…',
+    supportsSecret: true,
+    secretLabel: '签名校验密钥（可选）',
+    secretPlaceholder: '填写飞书机器人安全设置中的签名校验密钥'
+  },
+  {
+    id: 'dingtalk',
+    label: '钉钉群机器人',
+    desc: '推送钉钉 Markdown 消息（消息标题含 GateHome 关键字；支持加签 SEC 密钥）',
+    placeholder: 'https://oapi.dingtalk.com/robot/send?access_token=…',
+    supportsSecret: true,
+    secretLabel: '加签密钥 Secret（可选）',
+    secretPlaceholder: 'SEC 开头的钉钉机器人加签密钥'
+  },
+  {
+    id: 'telegram',
+    label: 'Telegram Bot',
+    desc: '通过 Bot API sendMessage 推送到指定群组或个人会话',
+    placeholder: 'https://api.telegram.org/bot<TOKEN>/sendMessage',
+    supportsSecret: false
+  },
+  {
+    id: 'bark',
+    label: 'Bark (iOS 推送)',
+    desc: '推送分组通知到 Bark 服务端或自建 Bark 实例',
+    placeholder: 'https://api.day.app/<YOUR_KEY>',
+    supportsSecret: false
+  },
+  {
+    id: 'gotify',
+    label: 'Gotify',
+    desc: '推送分级消息到自建 Gotify Server（URL 填写 /message，令牌填于下方或 URL token 参数）',
+    placeholder: 'https://gotify.example.com/message',
+    supportsSecret: true,
+    secretLabel: 'App Token（可选，X-Gotify-Key）',
+    secretPlaceholder: '如 URL 已带 ?token=... 可留空'
+  }
+]
+
 const eventOptions = [
   { id: 'upstream', label: '反代上游连续失败', desc: '连续 2 次健康探测超时或失败时推送一次，恢复后再通知' },
   { id: 'backup', label: 'WebDAV 备份失败', desc: '定时或手动上传加密备份至远程目录失败时立即告警' },
-  { id: 'certificate', label: '证书即将到期', desc: '正式签发证书剩余有效期不足 7 天时推送续期提醒' }
+  { id: 'certificate', label: '证书即将到期', desc: '正式签发证书剩余有效期不足 7 天时推送续期提醒' },
+  { id: 'ddns', label: 'DDNS 同步失败', desc: '动态域名解析检查或更新失败时推送告警，恢复后通知' },
+  { id: 'mihomo', label: 'Mihomo 订阅与核心异常', desc: '代理核心异常退出、订阅自动更新失败、距到期 ≤ 3 天或剩余流量 ≤ 10% 时提醒' },
+  { id: 'security', label: '安全防护与登录冻结', desc: '反代独立账号连续验证失败触发自动冻结或管理登录触发限流时实时提醒' }
 ]
 
 const webhookSample = `{
@@ -138,6 +240,9 @@ const saved = ref(null)
 const enabled = ref(false)
 const secret = ref()
 const uid = ref('')
+const format = ref('generic')
+const chatId = ref('')
+const secretToken = ref()
 const events = ref([])
 const busy = ref(false)
 const retryLoad = ref(false)
@@ -145,13 +250,23 @@ const notice = ref('')
 const error = ref('')
 const controller = new AbortController()
 
+const currentFormat = computed(() => webhookFormats.find(item => item.id === format.value) || webhookFormats[0])
+
 const changed = computed(() => saved.value && (
   saved.value.enabled !== enabled.value ||
   secret.value !== undefined ||
-  (wx && uid.value !== saved.value.uid) ||
+  (wx ? uid.value !== saved.value.uid : (
+    format.value !== (saved.value.format || 'generic') ||
+    (format.value === 'telegram' && chatId.value !== (saved.value.chat_id || '')) ||
+    secretToken.value !== undefined
+  )) ||
   (events.value.length !== saved.value.events.length || events.value.some(event => !saved.value.events.includes(event)))
 ))
-const canTest = computed(() => wx ? saved.value?.token_configured && saved.value?.uid : saved.value?.configured)
+const canTest = computed(() => {
+  if (wx) return !!(saved.value?.token_configured && saved.value?.uid)
+  if (!saved.value?.configured) return false
+  return (saved.value?.format || 'generic') !== 'telegram' || !!saved.value?.chat_id
+})
 
 function onCardClick(id, event) {
   if (busy.value || event.target.closest('input, label')) return
@@ -171,6 +286,9 @@ function populate(data) {
   enabled.value = data.enabled
   secret.value = undefined
   uid.value = data.uid ?? ''
+  format.value = data.format || 'generic'
+  chatId.value = data.chat_id ?? ''
+  secretToken.value = undefined
   events.value = data.events ?? []
   retryLoad.value = false
 }
@@ -192,9 +310,17 @@ function load() { return run(async () => populate(await (wx ? adminApi.wxPusher 
 function save() {
   return run(async () => {
     const shared = { enabled: enabled.value, revision: saved.value.revision, events: events.value }
-    const result = wx
-      ? await adminApi.saveWxPusher({ ...shared, app_token: secret.value, uid: uid.value }, controller.signal)
-      : await adminApi.saveWebhook({ ...shared, url: secret.value }, controller.signal)
+    let result
+    if (wx) {
+      result = await adminApi.saveWxPusher({ ...shared, app_token: secret.value, uid: uid.value }, controller.signal)
+    } else {
+      const payload = { ...shared, url: secret.value, format: format.value }
+      if (format.value === 'telegram') payload.chat_id = chatId.value
+      else if (saved.value.chat_id) payload.chat_id = ''
+      if (currentFormat.value.supportsSecret && secretToken.value !== undefined) payload.secret = secretToken.value
+      else if (!currentFormat.value.supportsSecret && saved.value.secret_configured) payload.secret = ''
+      result = await adminApi.saveWebhook(payload, controller.signal)
+    }
     populate(result)
     notice.value = '推送设置已保存'
   })
@@ -218,7 +344,7 @@ onBeforeUnmount(() => controller.abort())
 .push-target { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 14px; min-width: 0; }
 .uid-field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
 .uid-field label, .events legend { font-size: 12px; font-weight: 600; color: var(--muted); }
-.uid-field .form-input { height: 44px !important; min-height: 44px !important; }
+.uid-field .form-input, .uid-field .form-select { height: 44px !important; min-height: 44px !important; }
 .mono { font-family: var(--mono); }
 
 .push-error-banner {

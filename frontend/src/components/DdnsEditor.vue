@@ -18,7 +18,7 @@
         <template v-if="!hostsOnly">
           <label class="form-field"
             >DNS 服务商<select v-model="draft.provider" name="provider" class="form-select">
-              <option value="cloudflare">Cloudflare</option>
+              <option v-for="item in DNS_PROVIDERS" :key="item.id" :value="item.id">{{ item.name }}</option>
             </select></label
           >
           <label class="form-field"
@@ -37,10 +37,30 @@
               placeholder="example.com"
               required
           /></label>
-          <SecretInput id="ddns-token" v-model="token" label="独立 API Token" kind="ddns"
-            :credential-id="group?.id || ''" :configured="!!snapshot.dns_credentials_configured?.[group?.id]"
-            :placeholder="snapshot.dns_credentials_configured?.[group?.id] ? '已保存，点击小眼睛查看' : '填写本组的 Token'" />
-          <p class="report-note">需要此 Zone 的 Zone:Read / DNS:Edit 权限。已保存 Token 可点击小眼睛查看，不与证书任务共用。</p>
+          <SecretInput
+            v-if="providerMeta.requiresKeyId"
+            id="ddns-key-id"
+            v-model="keyId"
+            name="key_id"
+            :label="providerMeta.keyIdLabel"
+            :secret-name="providerMeta.keyIdSecretName"
+            kind="ddns-key"
+            :credential-id="group?.id || ''"
+            :configured="keyConfigured"
+            :placeholder="keyConfigured ? '已保存，点击小眼睛查看' : `填写 ${providerMeta.keyIdLabel}`"
+          />
+          <SecretInput
+            id="ddns-token"
+            v-model="token"
+            name="token"
+            :label="providerMeta.tokenLabel"
+            :secret-name="providerMeta.tokenSecretName"
+            kind="ddns"
+            :credential-id="group?.id || ''"
+            :configured="tokenConfigured"
+            :placeholder="tokenConfigured ? '已保存，点击小眼睛查看' : providerMeta.requiresKeyId ? `填写 ${providerMeta.tokenLabel}` : '填写本组的 Token'"
+          />
+          <p class="report-note">{{ providerMeta.ddnsHint }}</p>
           <label class="form-field"
             >同步类型<select v-model="draft.mode" name="mode" class="form-select">
               <option value="ipv4">IPv4 · A</option>
@@ -94,11 +114,11 @@
 </template>
 <script setup>
 import { newID } from '@/api/ids'
-import { computed, nextTick, onMounted, onUnmounted, ref, toRaw } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, toRaw, watch } from 'vue'
 import { X } from 'lucide-vue-next'
 import IPSourceFields from '@/components/IPSourceFields.vue'
 import SecretInput from '@/components/SecretInput.vue'
-import { ddnsHosts, ddnsPrefixes, replaceDDNS, tokenChange } from '@/api/dns'
+import { DNS_PROVIDERS, credentialChange, ddnsHosts, ddnsPrefixes, dnsProviderMeta, replaceDDNS } from '@/api/dns'
 import { useGatewayStatus } from '@/composables/useGatewayStatus'
 const props = defineProps({
   snapshot: Object,
@@ -132,10 +152,21 @@ for (const family of ['ipv4', 'ipv6']) {
 }
 draft.value.interface ||= ''
 const hostsText = ref(props.group ? ddnsPrefixes(props.group) : ''),
+  keyId = ref(),
   token = ref()
 const dialog = ref(null),
   error = ref(''),
   errorElement = ref(null)
+const providerMeta = computed(() => dnsProviderMeta(draft.value.provider))
+const sameProvider = computed(() => !!props.group && props.group.provider === draft.value.provider)
+const keyConfigured = computed(() => sameProvider.value && !!props.snapshot.dns_key_configured?.[props.group?.id])
+const tokenConfigured = computed(() =>
+  sameProvider.value && !!(props.snapshot.dns_token_configured?.[props.group?.id] ?? props.snapshot.dns_credentials_configured?.[props.group?.id])
+)
+watch(() => draft.value.provider, () => {
+  keyId.value = undefined
+  token.value = undefined
+})
 const preview = computed(() => {
   try {
     return ddnsHosts(draft.value.zone, hostsText.value).join('\n')
@@ -144,6 +175,7 @@ const preview = computed(() => {
   }
 })
 function close() {
+  keyId.value = undefined
   token.value = undefined
   emit('close')
 }
@@ -170,8 +202,11 @@ async function save() {
     await saveConfig(
       props.snapshot,
       replaceDDNS(props.snapshot, record, props.group?.id ?? null),
-      props.hostsOnly ? {} : tokenChange('dns_tokens', record.id, token.value)
+      props.hostsOnly
+        ? {}
+        : credentialChange('dns_tokens', 'dns_credentials', record.id, { keyId: keyId.value, token: token.value }, providerMeta.value.requiresKeyId)
     )
+    keyId.value = undefined
     token.value = undefined
     emit('saved')
   } catch (err) {
@@ -182,6 +217,7 @@ async function save() {
 }
 onMounted(() => dialog.value.showModal())
 onUnmounted(() => {
+  keyId.value = undefined
   token.value = undefined
 })
 </script>

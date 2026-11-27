@@ -52,26 +52,43 @@ type Admin struct {
 	discovery             serviceDiscovery
 	health                serviceHealthCache
 	icons                 iconLibrary
+	incidentCooldown      map[string]time.Time
 }
 
 func NewAdmin(store *Store, proxy *Proxy, certs *Certificates, jobs *Jobs, adminPort int) *Admin {
 	proxy.adminPort = adminPort
 	proxy.defense = newIPDefense(store)
 	proxy.ConfigureState(store.Snapshot())
-	return &Admin{
-		store:        store,
-		proxy:        proxy,
-		certs:        certs,
-		jobs:         jobs,
-		mihomo:       newMihomoManager(store.paths, store, adminPort),
-		started:      time.Now(),
-		ports:        store.Snapshot().Config,
-		adminPort:    adminPort,
-		sessions:     map[[32]byte]adminSession{},
-		passkeyFlows: map[string]passkeyFlow{},
-		attempts:     map[string]routeAttempts{},
-		domainDNS:    newDomainDNS(store),
+	a := &Admin{
+		store:            store,
+		proxy:            proxy,
+		certs:            certs,
+		jobs:             jobs,
+		mihomo:           newMihomoManager(store.paths, store, adminPort),
+		started:          time.Now(),
+		ports:            store.Snapshot().Config,
+		adminPort:        adminPort,
+		sessions:         map[[32]byte]adminSession{},
+		passkeyFlows:     map[string]passkeyFlow{},
+		attempts:         map[string]routeAttempts{},
+		domainDNS:        newDomainDNS(store),
+		incidentCooldown: map[string]time.Time{},
 	}
+	proxy.defense.onFreeze = func(b IPBlock) {
+		a.emitIncidentAlert("ip-freeze:"+b.Rule+"|"+b.IP, "security", b.IP, "反代「"+b.RuleName+"」触发自动冻结："+b.Reason, b.StartedAt)
+	}
+	if jobs != nil {
+		jobs.onDDNSResult = func(g DDNSGroup, ok bool, message string, now time.Time) {
+			a.observeAlert("ddns/"+g.ID, "ddns", g.Name, !ok, "DDNS 同步失败 · "+message, "DDNS 同步已恢复", now)
+		}
+	}
+	if a.mihomo != nil {
+		a.mihomo.mu.Lock()
+		a.mihomo.onAlert = a.observeAlert
+		a.mihomo.onClearAlerts = a.clearAlerts
+		a.mihomo.mu.Unlock()
+	}
+	return a
 }
 
 func (a *Admin) StartMihomo() {
@@ -466,6 +483,11 @@ func (a *Admin) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !a.beginCredentialAttempt(r) {
+		ip, ok := sourceIP(r.RemoteAddr)
+		if !ok {
+			ip = r.RemoteAddr
+		}
+		a.emitIncidentAlert("login-rate:"+ip, "security", ip, "管理员登录尝试过于频繁，已触发来源限流", time.Now())
 		w.Header().Set("Retry-After", "60")
 		apiError(w, 429, "登录尝试过于频繁，请一分钟后再试")
 		return
@@ -494,12 +516,22 @@ func (a *Admin) logout(w http.ResponseWriter, r *http.Request) {
 func (a *Admin) getConfig(w http.ResponseWriter, r *http.Request) {
 	s := a.store.Snapshot()
 	configured := map[string]bool{}
+	dnsKeyConfigured := map[string]bool{}
+	dnsTokenConfigured := map[string]bool{}
 	for _, g := range s.Config.DDNS.Groups {
-		configured[g.ID] = s.DNSCredentials[g.ID].Token != ""
+		cred := s.DNSCredentials[g.ID]
+		configured[g.ID] = cred.ConfiguredFor(g.Provider)
+		dnsKeyConfigured[g.ID] = cred.KeyID != ""
+		dnsTokenConfigured[g.ID] = cred.Token != ""
 	}
 	certConfigured := map[string]bool{}
+	certKeyConfigured := map[string]bool{}
+	certTokenConfigured := map[string]bool{}
 	for _, request := range s.Config.ACME.Requests {
-		certConfigured[request.ID] = s.CertificateCredentials[request.ID].Token != ""
+		cred := s.CertificateCredentials[request.ID]
+		certConfigured[request.ID] = cred.ConfiguredFor(request.Provider)
+		certKeyConfigured[request.ID] = cred.KeyID != ""
+		certTokenConfigured[request.ID] = cred.Token != ""
 	}
 	routeConfigured := map[string]bool{}
 	for _, route := range s.Config.Routes {
@@ -513,19 +545,25 @@ func (a *Admin) getConfig(w http.ResponseWriter, r *http.Request) {
 		ProxyPasswordConfigured          bool            `json:"proxy_password_configured"`
 		GitHubTokenConfigured            bool            `json:"github_token_configured"`
 		DNSCredentialsConfigured         map[string]bool `json:"dns_credentials_configured"`
+		DNSKeyConfigured                 map[string]bool `json:"dns_key_configured"`
+		DNSTokenConfigured               map[string]bool `json:"dns_token_configured"`
 		CertificateCredentialsConfigured map[string]bool `json:"certificate_credentials_configured"`
-	}{routeConfigured, s.Config, s.CloudflareToken != "", s.Revision, s.ProxyPassword != "", s.GitHubToken != "", configured, certConfigured})
+		CertificateKeyConfigured         map[string]bool `json:"certificate_key_configured"`
+		CertificateTokenConfigured       map[string]bool `json:"certificate_token_configured"`
+	}{routeConfigured, s.Config, s.CloudflareToken != "", s.Revision, s.ProxyPassword != "", s.GitHubToken != "", configured, dnsKeyConfigured, dnsTokenConfigured, certConfigured, certKeyConfigured, certTokenConfigured})
 }
 
 func (a *Admin) putConfig(w http.ResponseWriter, r *http.Request) {
 	var input struct {
-		Config            Config             `json:"config"`
-		Revision          int                `json:"revision"`
-		ProxyPassword     *string            `json:"proxy_password"`
-		GitHubToken       *string            `json:"github_token"`
-		DNSTokens         map[string]*string `json:"dns_tokens"`
-		CertificateTokens map[string]*string `json:"certificate_tokens"`
-		RoutePasswords    map[string]*string `json:"route_passwords"`
+		Config                 Config                         `json:"config"`
+		Revision               int                            `json:"revision"`
+		ProxyPassword          *string                        `json:"proxy_password"`
+		GitHubToken            *string                        `json:"github_token"`
+		DNSTokens              map[string]*string             `json:"dns_tokens"`
+		CertificateTokens      map[string]*string             `json:"certificate_tokens"`
+		DNSCredentials         map[string]*DNSCredentialPatch `json:"dns_credentials"`
+		CertificateCredentials map[string]*DNSCredentialPatch `json:"certificate_credentials"`
+		RoutePasswords         map[string]*string             `json:"route_passwords"`
 	}
 	if !decodeBody(w, r, &input) {
 		return
@@ -539,14 +577,26 @@ func (a *Admin) putConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, token := range input.DNSTokens {
-		if token != nil && (len(*token) > 512 || containsCredentialNewline(*token)) {
+		if token != nil && !validateDNSCredentialValue(*token) {
 			apiError(w, 400, "DNS Token 格式无效")
 			return
 		}
 	}
 	for _, token := range input.CertificateTokens {
-		if token != nil && (len(*token) > 512 || containsCredentialNewline(*token)) {
+		if token != nil && !validateDNSCredentialValue(*token) {
 			apiError(w, 400, "证书 Token 格式无效")
+			return
+		}
+	}
+	for _, patch := range input.DNSCredentials {
+		if patch != nil && ((patch.KeyID != nil && !validateDNSCredentialValue(*patch.KeyID)) || (patch.Token != nil && !validateDNSCredentialValue(*patch.Token))) {
+			apiError(w, 400, "DNS 凭据格式无效")
+			return
+		}
+	}
+	for _, patch := range input.CertificateCredentials {
+		if patch != nil && ((patch.KeyID != nil && !validateDNSCredentialValue(*patch.KeyID)) || (patch.Token != nil && !validateDNSCredentialValue(*patch.Token))) {
+			apiError(w, 400, "证书 DNS 凭据格式无效")
 			return
 		}
 	}
@@ -599,7 +649,7 @@ func (a *Admin) putConfig(w http.ResponseWriter, r *http.Request) {
 		apiError(w, 400, err.Error())
 		return
 	}
-	if err := a.store.UpdateRouteCredentials(input.Config, input.DNSTokens, input.CertificateTokens, nil, input.ProxyPassword, input.RoutePasswords, input.GitHubToken, input.Revision); err != nil {
+	if err := a.store.UpdateAllCredentials(input.Config, input.DNSTokens, input.CertificateTokens, input.DNSCredentials, input.CertificateCredentials, nil, input.ProxyPassword, input.RoutePasswords, input.GitHubToken, input.Revision); err != nil {
 		apiError(w, 400, err.Error())
 		return
 	}
@@ -626,7 +676,7 @@ func (a *Admin) status(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, 200, map[string]any{
 		"version": Version, "maintenance_available": a.maintenance != nil && a.maintenance.Available(), "maintenance_busy": a.maintenance.Busy(), "sunpanel_storage_supported": a.maintenance != nil && a.maintenance.SunPanelFilesSupported(),
 		"update_history_available": a.maintenance.UpdateHistoryAvailable(),
-		"dns_providers":            []map[string]string{{"id": "cloudflare", "name": "Cloudflare"}},
+		"dns_providers":            dnsProvidersCatalog(),
 		"ip_query_defaults":        map[string][]string{"ipv4": defaultIPEndpoints("A"), "ipv6": defaultIPEndpoints("AAAA")},
 		"uptime_seconds":           int(time.Since(a.started).Seconds()), "requests": a.proxy.Requests.Load(), "blocked": a.proxy.Blocked.Load(), "failures": a.proxy.Failures.Load(),
 		"listeners":         a.ports.Groups,
@@ -648,6 +698,13 @@ func HashPassword(password []byte) (string, error) {
 	return string(hash), err
 }
 
-func (s *Admin) SetLogs(logs *Logs) { s.logs = logs }
+func (s *Admin) SetLogs(logs *Logs) {
+	s.logs = logs
+	if s.mihomo != nil {
+		s.mihomo.mu.Lock()
+		s.mihomo.adminLogs = logs
+		s.mihomo.mu.Unlock()
+	}
+}
 
 func (a *Admin) SetSunPanel(panel *SunPanel) { a.sunPanel = panel }

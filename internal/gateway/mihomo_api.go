@@ -834,6 +834,7 @@ func (a *Admin) handleMihomoAddSubscription(w http.ResponseWriter, r *http.Reque
 		ExcludeFilter         string `json:"exclude_filter"`
 		NodeSuffix            string `json:"node_suffix"`
 		ExcludeGroupsAndRules bool   `json:"exclude_groups_and_rules"`
+		AutoUpdateInterval    int    `json:"auto_update_interval"`
 	}
 	if !decodeBody(w, r, &input) {
 		return
@@ -849,6 +850,10 @@ func (a *Admin) handleMihomoAddSubscription(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if err := validateMihomoSubscriptionFilters(incFilter, excFilter, nodeSuffix); err != nil {
+		apiError(w, 400, err.Error())
+		return
+	}
+	if err := validateMihomoAutoUpdateInterval(input.AutoUpdateInterval, subURL != ""); err != nil {
 		apiError(w, 400, err.Error())
 		return
 	}
@@ -873,6 +878,7 @@ func (a *Admin) handleMihomoAddSubscription(w http.ResponseWriter, r *http.Reque
 		ExcludeFilter:         excFilter,
 		NodeSuffix:            nodeSuffix,
 		ExcludeGroupsAndRules: input.ExcludeGroupsAndRules,
+		AutoUpdateInterval:    input.AutoUpdateInterval,
 	}
 
 	var data []byte
@@ -939,6 +945,7 @@ func (a *Admin) handleMihomoUpdateSubscription(w http.ResponseWriter, r *http.Re
 		ExcludeFilter         string `json:"exclude_filter"`
 		NodeSuffix            string `json:"node_suffix"`
 		ExcludeGroupsAndRules bool   `json:"exclude_groups_and_rules"`
+		AutoUpdateInterval    *int   `json:"auto_update_interval"`
 	}
 	if !decodeBody(w, r, &input) {
 		return
@@ -976,6 +983,14 @@ func (a *Admin) handleMihomoUpdateSubscription(w http.ResponseWriter, r *http.Re
 	next.Subscriptions[idx].Name = name
 	if subURL != "" {
 		next.Subscriptions[idx].URL = subURL
+	}
+	if input.AutoUpdateInterval != nil {
+		if err := validateMihomoAutoUpdateInterval(*input.AutoUpdateInterval, next.Subscriptions[idx].URL != ""); err != nil {
+			m.mu.Unlock()
+			apiError(w, 400, err.Error())
+			return
+		}
+		next.Subscriptions[idx].AutoUpdateInterval = *input.AutoUpdateInterval
 	}
 	next.Subscriptions[idx].IncludeFilter = incFilter
 	next.Subscriptions[idx].ExcludeFilter = excFilter
@@ -1047,67 +1062,16 @@ func (a *Admin) handleMihomoActivateSubscription(w http.ResponseWriter, r *http.
 func (a *Admin) handleMihomoRefreshSubscription(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	m := a.mihomo
-	m.mu.Lock()
-	idx := slices.IndexFunc(m.cfg.Subscriptions, func(s MihomoSubscription) bool { return s.ID == id })
-	if idx < 0 {
-		m.mu.Unlock()
-		apiError(w, 404, "未找到该订阅")
-		return
-	}
-	sub := m.cfg.Subscriptions[idx]
-	m.mu.Unlock()
-
-	if sub.URL == "" {
-		apiError(w, 400, "本地导入配置无远程链接，无法刷新")
-		return
-	}
-
 	ctx, cancel := context.WithTimeout(r.Context(), 35*time.Second)
 	defer cancel()
-	data, up, down, total, exp, err := m.fetchSubscriptionYAML(ctx, sub.URL)
-	if err != nil {
-		m.mu.Lock()
-		if curIdx := slices.IndexFunc(m.cfg.Subscriptions, func(s MihomoSubscription) bool { return s.ID == id }); curIdx >= 0 {
-			m.cfg.Subscriptions[curIdx].LastError = err.Error()
-			_ = saveMihomoConfig(m.dir, m.cfg)
+	if err := m.RefreshSubscription(ctx, id); err != nil {
+		code := http.StatusInternalServerError
+		var se subRefreshError
+		if errors.As(err, &se) && se.code != 0 {
+			code = se.code
 		}
-		m.mu.Unlock()
-		apiError(w, 400, err.Error())
+		apiError(w, code, err.Error())
 		return
-	}
-
-	m.mu.Lock()
-	curIdx := slices.IndexFunc(m.cfg.Subscriptions, func(s MihomoSubscription) bool { return s.ID == id })
-	if curIdx < 0 {
-		m.mu.Unlock()
-		apiError(w, 404, "订阅已被删除")
-		return
-	}
-	subDir := filepath.Join(m.dir, "subscriptions")
-	_ = os.MkdirAll(subDir, 0700)
-	if err := atomicWrite(m.subscriptionFile(id), data); err != nil {
-		m.mu.Unlock()
-		apiError(w, 500, err.Error())
-		return
-	}
-	m.cfg.Subscriptions[curIdx].UpdatedAt = time.Now()
-	m.cfg.Subscriptions[curIdx].NodeCount = countYAMLProxies(data)
-	m.cfg.Subscriptions[curIdx].LastError = ""
-	m.cfg.Subscriptions[curIdx].Upload = up
-	m.cfg.Subscriptions[curIdx].Download = down
-	m.cfg.Subscriptions[curIdx].Total = total
-	m.cfg.Subscriptions[curIdx].Expire = exp
-	isActive := m.cfg.ActiveSubscriptionID == id
-	if isActive {
-		m.cfg.ManualOverride = false
-		_ = m.synthesizeAndWriteLocked()
-	}
-	_ = saveMihomoConfig(m.dir, m.cfg)
-	running := m.running && isActive
-	m.mu.Unlock()
-
-	if running {
-		_ = m.Reload()
 	}
 	jsonResponse(w, 200, m.statusSnapshot())
 }
@@ -1140,6 +1104,7 @@ func (a *Admin) handleMihomoDeleteSubscription(w http.ResponseWriter, r *http.Re
 	if running {
 		_ = m.Reload()
 	}
+	m.clearSubAlerts(id)
 	jsonResponse(w, 200, m.statusSnapshot())
 }
 

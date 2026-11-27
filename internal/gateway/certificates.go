@@ -23,6 +23,7 @@ import (
 
 	"github.com/go-acme/lego/v4/certcrypto"
 	"github.com/go-acme/lego/v4/certificate"
+	"github.com/go-acme/lego/v4/challenge"
 	"github.com/go-acme/lego/v4/lego"
 	legolog "github.com/go-acme/lego/v4/log"
 	"github.com/go-acme/lego/v4/providers/dns/cloudflare"
@@ -253,8 +254,8 @@ func (m *Certificates) Issue(state State, request CertificateRequest) error {
 
 func (m *Certificates) obtainACME(state State, request CertificateRequest) (savedCertificate, error) {
 	credential := state.CertificateCredentials[request.ID]
-	if request.Provider != "cloudflare" || credential.Token == "" {
-		return savedCertificate{}, errors.New("证书 DNS 服务商不支持或此任务未配置独立 API Token")
+	if !supportedDNSProvider(request.Provider) || !credential.ConfiguredFor(request.Provider) {
+		return savedCertificate{}, errors.New("证书 DNS 服务商不支持或此任务未配置完整的独立 DNS 凭据")
 	}
 	a, accountPath, err := m.loadAccount(state.Config.ACME)
 	if err != nil {
@@ -272,12 +273,24 @@ func (m *Certificates) obtainACME(state State, request CertificateRequest) (save
 	if err != nil {
 		return savedCertificate{}, errors.New("无法连接 Let's Encrypt，请检查网络和系统时间")
 	}
-	dnsHTTP := instrumentClient(outboundClient(state, 20*time.Second), m.logs, "certificates", "Cloudflare DNS 验证 API")
+	dnsHTTP := instrumentClient(outboundClient(state, 20*time.Second), m.logs, "certificates", dnsProviderName(request.Provider)+" DNS 验证 API")
 	defer closeClient(dnsHTTP)
-	dnsCfg := &cloudflare.Config{AuthToken: credential.Token, TTL: 120, PropagationTimeout: 3 * time.Minute, PollingInterval: 5 * time.Second, HTTPClient: dnsHTTP}
-	provider, err := cloudflare.NewDNSProviderConfig(dnsCfg)
-	if err != nil {
-		return savedCertificate{}, errors.New("Cloudflare DNS 验证配置失败")
+	var provider challenge.Provider
+	if request.Provider == "cloudflare" {
+		dnsCfg := &cloudflare.Config{AuthToken: credential.Token, TTL: 120, PropagationTimeout: 3 * time.Minute, PollingInterval: 5 * time.Second, HTTPClient: dnsHTTP}
+		provider, err = cloudflare.NewDNSProviderConfig(dnsCfg)
+		if err != nil {
+			return savedCertificate{}, errors.New("Cloudflare DNS 验证配置失败")
+		}
+	} else {
+		txtProvider, closeProvider, pErr := newACMETXTProvider(request.Provider, credential, dnsHTTP, m.logs)
+		if pErr != nil {
+			return savedCertificate{}, pErr
+		}
+		if closeProvider != nil {
+			defer closeProvider()
+		}
+		provider = newDNS01ChallengeAdapter(txtProvider)
 	}
 	if err := client.Challenge.SetDNS01Provider(provider); err != nil {
 		return savedCertificate{}, errors.New("DNS-01 验证初始化失败")
@@ -300,7 +313,7 @@ func (m *Certificates) obtainACME(state State, request CertificateRequest) (save
 		resource, err = client.Certificate.Obtain(certificate.ObtainRequest{Domains: request.Domains, Bundle: true})
 	}
 	if err != nil {
-		return savedCertificate{}, errors.New("证书签发失败，请检查独立 Token 的 Zone:Read / DNS:Edit 权限、权威 DNS 可达性及 CA 限流；可重试时间以任务状态为准")
+		return savedCertificate{}, errors.New("证书签发失败，请检查独立 DNS 凭据权限、权威 DNS 可达性及 CA 限流；可重试时间以任务状态为准")
 	}
 	return savedCertificate{Certificate: resource.Certificate, PrivateKey: resource.PrivateKey}, nil
 }

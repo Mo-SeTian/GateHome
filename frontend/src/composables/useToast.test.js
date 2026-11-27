@@ -37,3 +37,30 @@ test('routine success and info toasts do not clutter Notification Center while w
   for (const id of [successId, infoId, warnId, errorId, explicitId]) toast.removeToast(id)
   toast.clearAllNotifications()
 })
+
+test('mergeFaultHistory maps extended event types (ddns, mihomo, security) to correct categories and routes', () => {
+  const toast = useToast()
+  toast.clearAllNotifications()
+
+  const now = new Date().toISOString()
+  toast.mergeFaultHistory([
+    { id: 'ext-ddns', type: 'ddns', status: 'firing', resource: '家庭 DDNS', message: 'DDNS 同步失败', time: now },
+    { id: 'ext-mihomo', type: 'mihomo', status: 'firing', resource: '主力机场', message: '订阅剩余流量不足 10%', time: now },
+    { id: 'ext-security', type: 'security', status: 'firing', resource: '203.0.113.5', message: '反代触发自动冻结', time: now }
+  ])
+
+  const byId = Object.fromEntries(toast.notifications.value.map(item => [item.id, item]))
+  assert.equal(byId['ext-ddns'].category, 'ddns')
+  assert.equal(byId['ext-ddns'].path, '/ddns')
+  assert.equal(byId['ext-ddns'].type, 'error')
+
+  assert.equal(byId['ext-mihomo'].category, 'mihomo')
+  assert.equal(byId['ext-mihomo'].path, '/mihomo')
+  assert.equal(byId['ext-mihomo'].type, 'error')
+
+  assert.equal(byId['ext-security'].category, 'waf')
+  assert.equal(byId['ext-security'].path, '/ip-blocks')
+  assert.equal(byId['ext-security'].type, 'warning')
+
+  toast.clearAllNotifications()
+})

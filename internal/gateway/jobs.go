@@ -25,19 +25,20 @@ type Event struct {
 }
 
 type Jobs struct {
-	mu          sync.Mutex
-	store       *Store
-	certs       *Certificates
-	ddnsKick    chan string
-	ddnsPending map[string]bool
-	logs        *Logs
-	provider    func(State, DDNSGroup, *Logs) (dnsProvider, error)
-	discover    func(context.Context, DDNSGroup, string) (DetectedIP, error)
-	ipContext   context.Context
-	ips         map[string]*ipCheck
-	certKick    chan struct{}
-	status      map[string]JobStatus
-	events      []Event
+	mu           sync.Mutex
+	store        *Store
+	certs        *Certificates
+	ddnsKick     chan string
+	ddnsPending  map[string]bool
+	logs         *Logs
+	provider     func(State, DDNSGroup, *Logs) (dnsProvider, error)
+	discover     func(context.Context, DDNSGroup, string) (DetectedIP, error)
+	onDDNSResult func(DDNSGroup, bool, string, time.Time)
+	ipContext    context.Context
+	ips          map[string]*ipCheck
+	certKick     chan struct{}
+	status       map[string]JobStatus
+	events       []Event
 }
 
 func NewJobs(store *Store, certs *Certificates) *Jobs {
@@ -171,6 +172,9 @@ func (j *Jobs) runDDNS(ctx context.Context, s State, g DDNSGroup) {
 		message = err.Error()
 	}
 	j.record(key, false, err == nil, message)
+	if j.onDDNSResult != nil {
+		j.onDDNSResult(g, err == nil, message, time.Now())
+	}
 	j.logs.Add(LogEntry{Category: "ddns", Action: "同步任务", Target: g.Name, OK: err == nil, DurationMS: time.Since(started).Milliseconds(), Message: message})
 }
 

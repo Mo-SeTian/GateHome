@@ -72,6 +72,7 @@ type IPDefense struct {
 	blocks     map[string]IPBlock
 	failures   map[string]failedAccess
 	now        func() time.Time
+	onFreeze   func(IPBlock)
 	writeError bool
 }
 
@@ -147,16 +148,24 @@ func authPolicy(a RouteAuthConfig) (int, time.Duration) {
 // Only a checked password attempt affects consecutive failures. Headers never select the IP.
 // The same lock serializes success with failures that may create a freeze in flight.
 func (d *IPDefense) record(route Route, ip string, valid bool) (IPBlock, bool, bool) {
+	b, blocked, created, cb := d.recordLocked(route, ip, valid)
+	if created && cb != nil {
+		cb(b)
+	}
+	return b, blocked, created
+}
+
+func (d *IPDefense) recordLocked(route Route, ip string, valid bool) (IPBlock, bool, bool, func(IPBlock)) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.prune()
 	key := blockKey(routeKey(route), ip)
 	if b, ok := d.blocks[key]; ok {
-		return b, true, false
+		return b, true, false, nil
 	}
 	if valid {
 		delete(d.failures, key)
-		return IPBlock{}, false, false
+		return IPBlock{}, false, false, nil
 	}
 	f := d.failures[key]
 	f.count++
@@ -164,13 +173,13 @@ func (d *IPDefense) record(route Route, ip string, valid bool) (IPBlock, bool, b
 	limit, duration := authPolicy(route.Auth)
 	if f.count < limit {
 		d.failures[key] = f
-		return IPBlock{}, false, false
+		return IPBlock{}, false, false, nil
 	}
 	b := IPBlock{IP: ip, Rule: routeKey(route), RuleName: route.Name, Reason: fmt.Sprintf("独立访问账号连续验证失败 %d 次，触发 %d 次冻结规则", f.count, limit), Source: "automatic", Failures: f.count, StartedAt: f.last, Until: f.last.Add(duration)}
 	d.blocks[key] = b
 	delete(d.failures, key)
 	d.persist()
-	return b, true, true
+	return b, true, true, d.onFreeze
 }
 
 func (d *IPDefense) capacity(rule, ip string) bool {

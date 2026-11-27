@@ -40,8 +40,12 @@ func (a *Admin) credentialRoutes(mux *http.ServeMux) {
 		switch input.Kind {
 		case "ddns":
 			value = s.DNSCredentials[input.ID].Token
+		case "ddns-key":
+			value = s.DNSCredentials[input.ID].KeyID
 		case "certificate":
 			value = s.CertificateCredentials[input.ID].Token
+		case "certificate-key":
+			value = s.CertificateCredentials[input.ID].KeyID
 		case "github":
 			if input.ID == "" {
 				value = s.GitHubToken
@@ -57,6 +61,10 @@ func (a *Admin) credentialRoutes(mux *http.ServeMux) {
 		case "alert-webhook":
 			if input.ID == "" {
 				value = s.Alerts.URL
+			}
+		case "alert-webhook-secret":
+			if input.ID == "" {
+				value = s.Alerts.Secret
 			}
 		case "webdav":
 			if input.ID == "" {

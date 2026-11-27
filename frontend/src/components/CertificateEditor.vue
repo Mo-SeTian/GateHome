@@ -68,15 +68,33 @@
           </p>
           <label class="form-field"
             >DNS 验证服务商<select v-model="draft.provider" name="provider" class="form-select">
-              <option value="cloudflare">Cloudflare · DNS-01</option>
+              <option v-for="item in DNS_PROVIDERS" :key="item.id" :value="item.id">{{ item.name }} · DNS-01</option>
             </select></label
           >
-          <p class="report-note">
-            使用 ECDSA P-256。独立 Token 需要相应 Zone 的 Zone:Read / DNS:Edit 权限，与 DDNS 组的凭据分开。
-          </p>
-          <SecretInput id="certificate-token" v-model="token" label="独立 API Token" kind="certificate"
-            :credential-id="request?.id || ''" :configured="!!snapshot.certificate_credentials_configured?.[request?.id]"
-            :placeholder="snapshot.certificate_credentials_configured?.[request?.id] ? '已保存，点击小眼睛查看' : '填写此证书任务的 Token'" />
+          <p class="report-note">{{ providerMeta.certHint }}</p>
+          <SecretInput
+            v-if="providerMeta.requiresKeyId"
+            id="certificate-key-id"
+            v-model="keyId"
+            name="key_id"
+            :label="providerMeta.keyIdLabel"
+            :secret-name="providerMeta.keyIdSecretName"
+            kind="certificate-key"
+            :credential-id="request?.id || ''"
+            :configured="keyConfigured"
+            :placeholder="keyConfigured ? '已保存，点击小眼睛查看' : `填写 ${providerMeta.keyIdLabel}`"
+          />
+          <SecretInput
+            id="certificate-token"
+            v-model="token"
+            name="token"
+            :label="providerMeta.tokenLabel"
+            :secret-name="providerMeta.tokenSecretName"
+            kind="certificate"
+            :credential-id="request?.id || ''"
+            :configured="tokenConfigured"
+            :placeholder="tokenConfigured ? '已保存，点击小眼睛查看' : providerMeta.requiresKeyId ? `填写 ${providerMeta.tokenLabel}` : '填写此证书任务的 Token'"
+          />
           <label class="toggle-row">
             <span>启用此任务自动申请与续期</span>
             <input
@@ -98,10 +116,10 @@
 </template>
 <script setup>
 import { newID } from '@/api/ids'
-import { nextTick, onMounted, onUnmounted, ref, toRaw } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, toRaw, watch } from 'vue'
 import { X } from 'lucide-vue-next'
 import SecretInput from '@/components/SecretInput.vue'
-import { domainList, replaceCertificate, tokenChange } from '@/api/dns'
+import { DNS_PROVIDERS, credentialChange, dnsProviderMeta, domainList, replaceCertificate } from '@/api/dns'
 import { useGatewayStatus } from '@/composables/useGatewayStatus'
 const props = defineProps({ snapshot: Object, request: Object, settings: Boolean })
 const emit = defineEmits(['close', 'saved'])
@@ -114,14 +132,26 @@ const draft = ref(
   )
 )
 const domainsText = ref(props.request?.domains.join('\n') || ''),
+  keyId = ref(),
   token = ref(),
   error = ref(''),
   errorElement = ref(null),
   dialog = ref(null)
+const providerMeta = computed(() => dnsProviderMeta(draft.value.provider))
+const sameProvider = computed(() => !!props.request && props.request.provider === draft.value.provider)
+const keyConfigured = computed(() => sameProvider.value && !!props.snapshot.certificate_key_configured?.[props.request?.id])
+const tokenConfigured = computed(() =>
+  sameProvider.value && !!(props.snapshot.certificate_token_configured?.[props.request?.id] ?? props.snapshot.certificate_credentials_configured?.[props.request?.id])
+)
+watch(() => draft.value.provider, () => {
+  keyId.value = undefined
+  token.value = undefined
+})
 function blockBusyClose(event) {
   if (isSavingConfig.value) event.preventDefault()
 }
 function close() {
+  keyId.value = undefined
   token.value = undefined
   emit('close')
 }
@@ -138,9 +168,10 @@ async function save() {
     } else {
       record.domains = domainList(domainsText.value)
       config = replaceCertificate(props.snapshot, record, props.request?.id ?? null)
-      credentials = tokenChange('certificate_tokens', record.id, token.value)
+      credentials = credentialChange('certificate_tokens', 'certificate_credentials', record.id, { keyId: keyId.value, token: token.value }, providerMeta.value.requiresKeyId)
     }
     await saveConfig(props.snapshot, config, credentials)
+    keyId.value = undefined
     token.value = undefined
     emit('saved')
   } catch (err) {
@@ -151,6 +182,7 @@ async function save() {
 }
 onMounted(() => dialog.value.showModal())
 onUnmounted(() => {
+  keyId.value = undefined
   token.value = undefined
 })
 </script>

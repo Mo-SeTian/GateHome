@@ -207,6 +207,7 @@ const categories = {
   cert: 'SSL 证书',
   waf: '安全防护',
   ddns: '动态域名',
+  mihomo: '代理分流',
   mcp: 'AI 管理',
   system: '系统通知'
 }
@@ -286,7 +287,7 @@ const visible = computed(() =>
 
 const channels = [
   { id: 'wxpusher', name: 'WxPusher', desc: '微信实时告警卡片推送' },
-  { id: 'webhook', name: 'Webhook', desc: '通用 JSON POST 回调（支持企业微信 / 飞书 / 自建脚本）' }
+  { id: 'webhook', name: 'Webhook', desc: '支持通用 JSON / 企业微信 / 飞书 / 钉钉 / Telegram / Bark / Gotify' }
 ]
 const selected = ref('wxpusher')
 const channelMeta = ref({})

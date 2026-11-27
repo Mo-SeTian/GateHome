@@ -47,6 +47,7 @@ type MihomoSubscription struct {
 	ExcludeFilter         string    `json:"exclude_filter,omitempty"`
 	NodeSuffix            string    `json:"node_suffix,omitempty"`
 	ExcludeGroupsAndRules bool      `json:"exclude_groups_and_rules"`
+	AutoUpdateInterval    int       `json:"auto_update_interval,omitempty"` // Minutes; 0 disables auto update.
 	UpdatedAt             time.Time `json:"updated_at,omitempty"`
 	NodeCount             int       `json:"node_count"`
 	LastError             string    `json:"last_error,omitempty"`
@@ -67,6 +68,8 @@ type MihomoSubscriptionView struct {
 	ExcludeFilter         string    `json:"exclude_filter,omitempty"`
 	NodeSuffix            string    `json:"node_suffix,omitempty"`
 	ExcludeGroupsAndRules bool      `json:"exclude_groups_and_rules"`
+	AutoUpdateInterval    int       `json:"auto_update_interval,omitempty"`
+	NextUpdateAt          time.Time `json:"next_update_at,omitempty"`
 	UpdatedAt             time.Time `json:"updated_at,omitempty"`
 	NodeCount             int       `json:"node_count"`
 	LastError             string    `json:"last_error,omitempty"`
@@ -665,10 +668,31 @@ func maskSubscriptionURL(raw string) (host string, masked string, hasURL bool) {
 	return host, masked, true
 }
 
+func validateMihomoAutoUpdateInterval(interval int, hasURL bool) error {
+	if interval == 0 {
+		return nil
+	}
+	if !hasURL {
+		return errors.New("仅远程订阅链接支持定时自动更新")
+	}
+	if interval < 60 || interval > 43200 {
+		return errors.New("自动更新间隔须为 60–43200 分钟（1 小时至 30 天）")
+	}
+	return nil
+}
+
 func toSubscriptionViews(subs []MihomoSubscription) []MihomoSubscriptionView {
 	out := make([]MihomoSubscriptionView, 0, len(subs))
 	for _, s := range subs {
 		host, masked, hasURL := maskSubscriptionURL(s.URL)
+		var nextUpdateAt time.Time
+		if hasURL && s.AutoUpdateInterval > 0 {
+			if s.UpdatedAt.IsZero() {
+				nextUpdateAt = time.Now()
+			} else {
+				nextUpdateAt = s.UpdatedAt.Add(time.Duration(s.AutoUpdateInterval) * time.Minute)
+			}
+		}
 		out = append(out, MihomoSubscriptionView{
 			ID:                    s.ID,
 			Name:                  s.Name,
@@ -679,6 +703,8 @@ func toSubscriptionViews(subs []MihomoSubscription) []MihomoSubscriptionView {
 			ExcludeFilter:         s.ExcludeFilter,
 			NodeSuffix:            s.NodeSuffix,
 			ExcludeGroupsAndRules: s.ExcludeGroupsAndRules,
+			AutoUpdateInterval:    s.AutoUpdateInterval,
+			NextUpdateAt:          nextUpdateAt,
 			UpdatedAt:             s.UpdatedAt,
 			NodeCount:             s.NodeCount,
 			LastError:             s.LastError,

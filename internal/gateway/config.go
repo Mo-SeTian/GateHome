@@ -591,6 +591,10 @@ func (s *Store) UpdateCredentials(c Config, tokens, certificateTokens map[string
 }
 
 func (s *Store) UpdateRouteCredentials(c Config, tokens, certificateTokens map[string]*string, legacyToken, proxyPassword *string, routePasswords map[string]*string, githubToken *string, revision int) error {
+	return s.UpdateAllCredentials(c, tokens, certificateTokens, nil, nil, legacyToken, proxyPassword, routePasswords, githubToken, revision)
+}
+
+func (s *Store) UpdateAllCredentials(c Config, tokens, certificateTokens map[string]*string, dnsPatches, certPatches map[string]*DNSCredentialPatch, legacyToken, proxyPassword *string, routePasswords map[string]*string, githubToken *string, revision int) error {
 	c = includeProxyDNSHosts(c)
 	if err := Validate(c); err != nil {
 		return err
@@ -658,10 +662,27 @@ func (s *Store) UpdateRouteCredentials(c Config, tokens, certificateTokens map[s
 			next.DNSCredentials[g.ID] = s.state.DNSCredentials[g.ID]
 		}
 		if value, ok := tokens[g.ID]; ok && value != nil {
-			next.DNSCredentials[g.ID] = DNSCredential{Token: strings.TrimSpace(*value)}
+			cred := next.DNSCredentials[g.ID]
+			cred.Token = strings.TrimSpace(*value)
+			next.DNSCredentials[g.ID] = cred
+		}
+		if patch, ok := dnsPatches[g.ID]; ok && patch != nil {
+			cred := next.DNSCredentials[g.ID]
+			if patch.KeyID != nil {
+				cred.KeyID = strings.TrimSpace(*patch.KeyID)
+			}
+			if patch.Token != nil {
+				cred.Token = strings.TrimSpace(*patch.Token)
+			}
+			next.DNSCredentials[g.ID] = cred
 		}
 	}
 	for id := range tokens {
+		if _, exists := c.DNSGroup(id); !exists {
+			return errors.New("凭据引用了不存在的 DNS 组")
+		}
+	}
+	for id := range dnsPatches {
 		if _, exists := c.DNSGroup(id); !exists {
 			return errors.New("凭据引用了不存在的 DNS 组")
 		}
@@ -672,10 +693,27 @@ func (s *Store) UpdateRouteCredentials(c Config, tokens, certificateTokens map[s
 			next.CertificateCredentials[request.ID] = s.state.CertificateCredentials[request.ID]
 		}
 		if value, ok := certificateTokens[request.ID]; ok && value != nil {
-			next.CertificateCredentials[request.ID] = DNSCredential{Token: strings.TrimSpace(*value)}
+			cred := next.CertificateCredentials[request.ID]
+			cred.Token = strings.TrimSpace(*value)
+			next.CertificateCredentials[request.ID] = cred
+		}
+		if patch, ok := certPatches[request.ID]; ok && patch != nil {
+			cred := next.CertificateCredentials[request.ID]
+			if patch.KeyID != nil {
+				cred.KeyID = strings.TrimSpace(*patch.KeyID)
+			}
+			if patch.Token != nil {
+				cred.Token = strings.TrimSpace(*patch.Token)
+			}
+			next.CertificateCredentials[request.ID] = cred
 		}
 	}
 	for id := range certificateTokens {
+		if _, exists := c.CertificateRequest(id); !exists {
+			return errors.New("凭据引用了不存在的证书任务")
+		}
+	}
+	for id := range certPatches {
 		if _, exists := c.CertificateRequest(id); !exists {
 			return errors.New("凭据引用了不存在的证书任务")
 		}
@@ -951,8 +989,8 @@ func Validate(c Config) error {
 			return errors.New("DDNS 组名称或 ID 无效，ID 不能重复")
 		}
 		ids[g.ID] = true
-		if g.Provider != "cloudflare" {
-			return errors.New("请选择已支持的 DNS 服务商，当前支持 Cloudflare")
+		if !supportedDNSProvider(g.Provider) {
+			return errors.New("请选择已支持的 DNS 服务商")
 		}
 		if !validDomain(g.Zone) {
 			return errors.New("请在 DNS 组中填写有效的根域名")
@@ -1001,7 +1039,7 @@ func Validate(c Config) error {
 	}
 	requestIDs, requestedDomains := map[string]bool{}, map[string]bool{}
 	for _, request := range c.ACME.Requests {
-		if !idPattern.MatchString(request.ID) || requestIDs[request.ID] || request.Provider != "cloudflare" {
+		if !idPattern.MatchString(request.ID) || requestIDs[request.ID] || !supportedDNSProvider(request.Provider) {
 			return errors.New("证书任务 ID 重复、无效或 DNS 服务商不支持")
 		}
 		requestIDs[request.ID] = true
