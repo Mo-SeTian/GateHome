@@ -97,7 +97,7 @@
           kind="alert-webhook-secret"
           :secret-name="currentFormat.secretLabel"
           :configured="saved.secret_configured"
-          :placeholder="saved.secret_configured ? '已保存，留空保留原密钥；输入新值可覆盖' : currentFormat.secretPlaceholder"
+          :placeholder="saved.secret_configured ? '已保存，留空保留；输入新值覆盖' : currentFormat.secretPlaceholder"
           :maxlength="512"
           :disabled="busy"
         />

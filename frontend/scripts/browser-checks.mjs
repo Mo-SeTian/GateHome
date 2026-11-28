@@ -2061,7 +2061,11 @@ try {
   await mihomoPage.getByRole('tab', { name: '策略组与节点' }).waitFor()
   assert.equal(await page.evaluate(() => getComputedStyle(document.body).backgroundColor), 'rgb(241, 245, 249)', 'mihomo light theme body background must stay slate #f1f5f9')
   await mihomoPage.getByRole('button', { name: /Zashboard 面板/ }).waitFor()
+  await mihomoPage.evaluate(el => Promise.all(el.getAnimations().map(a => a.finished)))
+  const tabsTopOverview = (await mihomoPage.locator('.mihomo-tabs-wrap').boundingBox()).y
   await mihomoPage.getByRole('tab', { name: '订阅管理' }).click()
+  const tabsTopSecondary = (await mihomoPage.locator('.mihomo-tabs-wrap').boundingBox()).y
+  assert.ok(Math.abs(tabsTopSecondary - tabsTopOverview) <= 1, `Mihomo tab bar jumped vertically across tabs: ${tabsTopOverview} -> ${tabsTopSecondary}`)
   await mihomoPage.getByRole('button', { name: /添加订阅/ }).click()
   const mihomoDialog = dialog()
   await mihomoDialog.locator('input[name="sub_name"]').fill('浏览器测试机场')

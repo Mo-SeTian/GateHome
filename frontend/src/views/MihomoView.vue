@@ -62,6 +62,26 @@
     </header>
 
     <p v-if="error" class="report-error" role="alert">{{ error }}</p>
+    <p v-if="status?.last_error" class="report-warning" role="status">{{ status.last_error }}</p>
+
+    <!-- Main 5-Tab Bar -->
+    <div class="mihomo-tabs-wrap">
+      <div class="mihomo-tabs" role="tablist" aria-label="代理分流功能标签">
+        <button
+          v-for="tab in tabs"
+          :key="tab.id"
+          type="button"
+          role="tab"
+          :aria-selected="activeTab === tab.id"
+          class="tab-btn"
+          :class="{ active: activeTab === tab.id }"
+          @click="switchTab(tab.id)"
+        >
+          <component :is="tab.icon" :size="15" aria-hidden="true" />
+          <span>{{ tab.label }}</span>
+        </button>
+      </div>
+    </div>
 
     <!-- Compact Runtime Strip (shown on secondary tabs; Overview has full telemetry) -->
     <SpotlightCard v-if="status && activeTab !== 'overview'" class="runtime-strip">
@@ -100,27 +120,6 @@
         </span>
       </div>
     </SpotlightCard>
-
-    <p v-if="status?.last_error" class="report-warning" role="status">{{ status.last_error }}</p>
-
-    <!-- Main 5-Tab Bar -->
-    <div class="mihomo-tabs-wrap">
-      <div class="mihomo-tabs" role="tablist" aria-label="代理分流功能标签">
-        <button
-          v-for="tab in tabs"
-          :key="tab.id"
-          type="button"
-          role="tab"
-          :aria-selected="activeTab === tab.id"
-          class="tab-btn"
-          :class="{ active: activeTab === tab.id }"
-          @click="switchTab(tab.id)"
-        >
-          <component :is="tab.icon" :size="15" aria-hidden="true" />
-          <span>{{ tab.label }}</span>
-        </button>
-      </div>
-    </div>
 
     <!-- Tab 0: Overview Dashboard -->
     <section v-show="activeTab === 'overview'" class="tab-section" role="tabpanel" aria-label="概览">
@@ -3502,6 +3501,29 @@ onBeforeUnmount(() => {
 @keyframes mihomo-spin {
   to {
     transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 768px) {
+  .runtime-strip {
+    padding: 8px 12px;
+  }
+
+  .strip-items {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding-bottom: 2px;
+  }
+
+  .strip-items::-webkit-scrollbar {
+    display: none;
+  }
+
+  .strip-items > * {
+    flex-shrink: 0;
+    white-space: nowrap;
   }
 }
 

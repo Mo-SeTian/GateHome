@@ -144,7 +144,7 @@
             {{ hoverInfo }}
           </div>
           <div v-if="!isRunning" class="chart-offline-overlay">
-            Mihomo 内核未运行，启动后自动开始采集实时流量速率
+            <span class="chart-offline-pill">Mihomo 内核未运行，启动后自动开始采集实时流量速率</span>
           </div>
         </div>
 
@@ -1103,12 +1103,23 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 12px;
+  padding: 12px 14px 12px 64px;
   text-align: center;
-  font-size: 12.5px;
-  color: var(--muted);
   background: rgba(15, 23, 42, 0.08);
   border-radius: var(--radius-md);
+}
+
+.chart-offline-pill {
+  display: inline-block;
+  max-width: 100%;
+  padding: 6px 12px;
+  border-radius: var(--radius-md);
+  background: var(--card-bg);
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+  box-shadow: var(--shadow-card);
 }
 
 .chart-summary-grid {

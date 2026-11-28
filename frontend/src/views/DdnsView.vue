@@ -49,7 +49,10 @@
             <strong>{{ group.name }}</strong>
             <span v-if="group.zone && group.zone !== group.name" class="mono-text zone-pill">{{ group.zone }}</span>
             <span class="count-badge">{{ group.hosts?.length || 0 }} 个域名</span>
-            <span class="header-meta">{{ providerLabel(group.provider) }} · {{ modeLabel(group.mode) }} · {{ group.interval.toLocaleString() }}s</span>
+            <span class="header-meta">
+              <span class="provider-name">{{ providerLabel(group.provider) }}</span>
+              <span class="header-meta-extra"> · {{ modeLabel(group.mode) }} · {{ group.interval.toLocaleString() }}s</span>
+            </span>
           </span>
           <span class="header-right-badges">
             <span v-if="lastSuccess(group.id)" class="header-time">{{ lastSuccess(group.id) }}</span>
@@ -490,10 +493,26 @@ onUnmounted(() => {
 }
 @media (max-width: 768px) {
   .header-meta {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 8px;
+    border-radius: 10px;
+    background: var(--strip-bg);
+    border: 1px solid var(--line);
+    color: var(--ink-secondary);
+    white-space: nowrap;
+  }
+  .header-meta-extra {
     display: none;
   }
   .card-actions {
     margin-left: 0;
+    width: 100%;
+    gap: 6px;
+  }
+  .card-actions .btn-sm {
+    padding: 5px 8px;
+    font-size: 12px;
   }
 }
 @media (max-width: 640px) {
