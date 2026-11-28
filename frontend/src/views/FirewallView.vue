@@ -4,7 +4,7 @@
       <h1>防火墙与 WAF</h1>
       <div class="header-actions">
         <button class="btn btn-secondary" :disabled="loading || isSavingConfig" @click="reload">刷新</button>
-        <button class="btn btn-secondary" @click="$router.push('/firewall-logs')">
+        <button class="btn btn-secondary" @click="$router.push('/logs/firewall')">
           <FileSearch :size="14" /> 拦截审计记录
         </button>
         <button class="btn btn-primary" :disabled="!gatewayConfig || isSavingConfig" @click="edit()">
@@ -161,7 +161,7 @@
             }}</strong>
           </div>
           <p v-if="activeFw.protection.freeze.enabled" class="note">
-            冻结 {{ activeFw.protection.freeze.seconds / 60 }} 分钟；<router-link to="/ip-blocks"
+            冻结 {{ activeFw.protection.freeze.seconds / 60 }} 分钟；<router-link to="/logs/ip-blocks"
               >管理 IP 拦截名单</router-link
             >
           </p>

@@ -137,7 +137,7 @@
         <template v-else-if="id === 'blocked'"
           ><div class="metric-value">{{ count(gatewayStatus?.blocked) }}</div>
           <p class="report-note">本次启动后的拦截数量</p>
-          <RouterLink class="report-note" to="/firewall-logs"
+          <RouterLink class="report-note" to="/logs/firewall"
             >保留记录：防火墙 {{ count(access?.firewall_blocked) }} · 冻结
             {{ count(access?.frozen_blocked) }} · 账号失败 {{ count(access?.auth_failed) }}</RouterLink
           ></template
@@ -268,7 +268,7 @@
             </div>
           </div>
           <p v-if="!gatewayStatus?.events?.length" class="report-empty">暂无近期任务活动</p>
-          <RouterLink class="btn btn-secondary btn-sm" to="/logs">查看项目日志</RouterLink></template
+          <RouterLink class="btn btn-secondary btn-sm" to="/logs/system">查看项目日志</RouterLink></template
         >
       </SpotlightCard>
     </div>

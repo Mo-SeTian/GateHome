@@ -364,7 +364,7 @@
           >
             按此 IP 筛选
           </button>
-          <router-link to="/ip-blocks" class="btn btn-secondary btn-sm">IP 拦截名单</router-link>
+          <router-link to="/logs/ip-blocks" class="btn btn-secondary btn-sm">IP 拦截名单</router-link>
         </div>
         <div
           v-if="scope !== 'project' && canManageLogIP(selected, gatewayConfig)"

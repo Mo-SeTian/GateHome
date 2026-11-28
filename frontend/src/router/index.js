@@ -82,34 +82,52 @@ const routes = [
     meta: { title: '运行状态', icon: 'Activity' }
   },
   {
-    path: '/firewall-logs',
-    name: 'FirewallLogs',
-    component: () => import('@/views/FirewallLogsView.vue'),
-    meta: { title: '防火墙拦截记录', icon: 'FileSearch' }
-  },
-  {
     path: '/logs',
     name: 'Logs',
     component: () => import('@/views/LogsView.vue'),
-    meta: { title: '日志', icon: 'ScrollText' }
+    meta: { title: '日志与拦截', icon: 'ScrollText', logTab: 'access' }
+  },
+  {
+    path: '/logs/firewall',
+    name: 'FirewallLogs',
+    component: () => import('@/views/LogsView.vue'),
+    meta: { title: '防火墙拦截记录', icon: 'FileSearch', logTab: 'firewall' }
+  },
+  {
+    path: '/logs/ip-blocks',
+    name: 'IpBlocks',
+    component: () => import('@/views/LogsView.vue'),
+    meta: { title: 'IP 拦截名单', icon: 'Ban', logTab: 'ip-blocks' }
+  },
+  {
+    path: '/logs/system',
+    name: 'SystemLogs',
+    component: () => import('@/views/LogsView.vue'),
+    meta: { title: '系统日志', icon: 'ScrollText', logTab: 'system' }
+  },
+  {
+    path: '/firewall-logs',
+    redirect: to => ({ path: '/logs/firewall', query: to.query })
   },
   {
     path: '/ip-blocks',
-    name: 'IpBlocks',
-    component: () => import('@/views/IpBlocksView.vue'),
-    meta: { title: 'IP 拦截名单', icon: 'Ban' }
+    redirect: to => ({ path: '/logs/ip-blocks', query: to.query })
   },
   {
     path: '/statistics',
     name: 'Statistics',
-    component: () => import('@/views/StatisticsView.vue'),
-    meta: { title: '统计', icon: 'BarChart3' }
+    component: () => import('@/views/StatisticsHubView.vue'),
+    meta: { title: '数据统计', icon: 'BarChart3', statTab: 'access' }
+  },
+  {
+    path: '/statistics/traffic',
+    name: 'Traffic',
+    component: () => import('@/views/StatisticsHubView.vue'),
+    meta: { title: '流量统计', icon: 'Activity', statTab: 'traffic' }
   },
   {
     path: '/traffic',
-    name: 'Traffic',
-    component: () => import('@/views/TrafficView.vue'),
-    meta: { title: '流量统计', icon: 'Activity' }
+    redirect: to => ({ path: '/statistics/traffic', query: to.query })
   },
   {
     path: '/assistant', name: 'Assistant', component: () => import('@/components/AssistantChat.vue'),

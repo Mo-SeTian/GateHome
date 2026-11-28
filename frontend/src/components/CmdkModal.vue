@@ -290,37 +290,44 @@ const pages = [
   {
     title: '防火墙拦截记录 (Firewall Logs)',
     subtitle: 'WAF 规则命中、来源拦截与限流审计日志',
-    path: '/firewall-logs',
+    path: '/logs/firewall',
     icon: FileSearch,
-    keywords: ['拦截记录', 'waf日志', '攻击记录', '安全日志']
+    keywords: ['拦截记录', 'waf日志', '攻击记录', '安全日志', '日志与拦截']
   },
   {
-    title: '日志 (Logs)',
+    title: '日志与拦截 · 反代访问 (Logs)',
     subtitle: '反向代理访问日志检索与多维筛选',
     path: '/logs',
     icon: ScrollText,
-    keywords: ['访问日志', '请求日志', 'access log', '排查']
+    keywords: ['访问日志', '请求日志', 'access log', '排查', '日志与拦截']
   },
   {
     title: 'IP 拦截名单 (IP Blocks)',
     subtitle: '查看与解除自动冻结 IP 或手动添加封禁',
-    path: '/ip-blocks',
+    path: '/logs/ip-blocks',
     icon: Ban,
-    keywords: ['封禁', '拉黑', '解封', '冻结', 'ip block', 'ban']
+    keywords: ['封禁', '拉黑', '解封', '冻结', 'ip block', 'ban', '日志与拦截']
   },
   {
-    title: '统计 (Statistics)',
+    title: '系统日志 (System Logs)',
+    subtitle: '系统任务、健康巡检、证书与 Geo 规则库更新日志',
+    path: '/logs/system',
+    icon: ScrollText,
+    keywords: ['系统日志', '任务日志', 'system log', '日志与拦截']
+  },
+  {
+    title: '数据统计 · 访问统计 (Statistics)',
     subtitle: '请求量趋势、状态码分布与热门反代服务排行',
     path: '/statistics',
     icon: BarChart3,
-    keywords: ['统计', '报表', '请求数', '排行', 'analytics']
+    keywords: ['统计', '数据统计', '访问统计', '报表', '请求数', '排行', 'analytics']
   },
   {
-    title: '流量统计 (Traffic)',
+    title: '数据统计 · 流量统计 (Traffic)',
     subtitle: '反代与端口转发上传下载速率及历史流量明细',
-    path: '/traffic',
+    path: '/statistics/traffic',
     icon: Activity,
-    keywords: ['流量', '带宽', '网速', '上传', '下载', 'traffic']
+    keywords: ['流量', '数据统计', '流量统计', '带宽', '网速', '上传', '下载', 'traffic']
   },
   {
     title: '网关助手',

@@ -1,6 +1,6 @@
 <template>
-  <div class="report-page animate-fade-in">
-    <header class="report-heading">
+  <div class="report-page" :class="{ 'animate-fade-in': !embedded }">
+    <header v-if="!embedded" class="report-heading">
       <h1>流量统计</h1>
     </header>
     <form class="report-form" @submit.prevent="load">
@@ -50,6 +50,9 @@
       <button type="submit" class="btn btn-primary" :disabled="loading">
         {{ loading ? '查询中…' : '查询流量' }}
       </button>
+      <router-link v-if="form.source === 'http'" class="btn btn-secondary" :to="statsLinkTo">
+        查看访问统计
+      </router-link>
     </form>
     <p class="report-note">
       自选时间按浏览器时区输入，统计覆盖涉及的整小时。
@@ -95,6 +98,7 @@
               <th>上传量</th>
               <th>下载量</th>
               <th>总传输量</th>
+              <th v-if="applied.source === 'http'">关联统计</th>
             </tr>
           </thead>
           <tbody>
@@ -118,6 +122,16 @@
                 }}<small>{{ row.download_bytes.toLocaleString() }} 字节</small>
               </td>
               <td class="mono-text">{{ formatBytes(row.upload_bytes + row.download_bytes) }}</td>
+              <td v-if="applied.source === 'http'">
+                <router-link
+                  v-if="route(row.id)"
+                  class="btn btn-ghost btn-sm"
+                  :to="{ path: '/statistics', query: { rule: routeKey(route(row.id)) } }"
+                >
+                  访问统计
+                </router-link>
+                <span v-else class="muted-text">—</span>
+              </td>
             </tr>
           </tbody>
         </table>
@@ -133,9 +147,14 @@ import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, watch } fr
 import { useRoute } from 'vue-router'
 import SpotlightCard from '@/components/SpotlightCard.vue'
 import { adminApi } from '@/api/admin'
+import { routeKey } from '@/api/configuration'
 import { formatBytes, reportDate, trafficQuery } from '@/api/reports'
 import { useGatewayStatus } from '@/composables/useGatewayStatus'
 import '@/styles/reports.css'
+
+defineProps({
+  embedded: { type: Boolean, default: false }
+})
 
 const { gatewayConfig, refreshConfig } = useGatewayStatus()
 const currentRoute = useRoute()
@@ -143,6 +162,10 @@ const requestedRule = () => typeof currentRoute.query.rule === 'string' ? curren
 const requestedSource = () => currentRoute.query.source === 'forward' ? 'forward' : 'http'
 const form = ref({ source: requestedSource(), protocol: '', rule: requestedRule(), range: '24', from: '', to: '' }),
   applied = shallowRef({ ...form.value })
+const statsLinkTo = computed(() => {
+  const matched = route(form.value.rule)
+  return matched ? { path: '/statistics', query: { rule: routeKey(matched) } } : { path: '/statistics' }
+})
 const data = shallowRef(null),
   loading = ref(false),
   error = ref(''),

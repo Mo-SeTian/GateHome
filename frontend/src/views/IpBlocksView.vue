@@ -1,6 +1,6 @@
 <template>
-  <div class="ip-blocks-page animate-fade-in">
-    <header class="report-heading">
+  <div class="ip-blocks-page" :class="{ 'animate-fade-in': !embedded }">
+    <header v-if="!embedded" class="report-heading">
       <h1>IP 拦截名单</h1>
       <div class="header-actions">
         <button
@@ -15,6 +15,18 @@
         </button>
       </div>
     </header>
+    <div v-else class="embedded-actions">
+      <button
+        class="btn btn-secondary"
+        :disabled="loading || mutating || isSavingConfig"
+        @click="refresh(true)"
+      >
+        刷新名单
+      </button>
+      <button class="btn btn-primary" :disabled="!routes.length || mutating" @click="openCreate">
+        <ShieldAlert :size="15" /> 手动冻结 IP
+      </button>
+    </div>
     <p v-if="loading && !view" role="status">正在读取冻结记录…</p>
     <p v-if="loadError" class="error" role="alert">
       {{ loadError }}{{ view ? '。当前显示上次获取的记录。' : '' }}
@@ -171,6 +183,11 @@ import { routeKey } from '@/api/configuration'
 import { useGatewayStatus } from '@/composables/useGatewayStatus'
 import { useToast } from '@/composables/useToast'
 
+const props = defineProps({
+  embedded: { type: Boolean, default: false }
+})
+const emit = defineEmits(['count-change'])
+
 const { gatewayConfig, isSavingConfig, refreshConfig } = useGatewayStatus()
 const toast = useToast()
 const routes = computed(() => gatewayConfig.value?.routes ?? [])
@@ -220,6 +237,9 @@ const totalPages = computed(() => Math.max(1, Math.ceil(filteredList.value.lengt
 const paginatedList = computed(() => filteredList.value.slice((page.value - 1) * 20, page.value * 20))
 watch([selectedRule, searchQuery], () => {
   page.value = 1
+})
+watch(() => activeEntries.value.length, (count) => {
+  if (view.value) emit('count-change', count)
 })
 watch(totalPages, (count) => {
   page.value = Math.min(page.value, count)
@@ -366,10 +386,14 @@ onUnmounted(() => {
   flex-wrap: wrap;
   gap: 12px;
 }
-.header-actions {
+.header-actions,
+.embedded-actions {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+}
+.embedded-actions {
+  justify-content: flex-end;
 }
 .rule-select-wrap {
   display: grid;
@@ -532,6 +556,13 @@ form,
   }
 }
 @media (max-width: 600px) {
+  .embedded-actions {
+    justify-content: stretch;
+  }
+  .embedded-actions .btn {
+    flex: 1;
+    justify-content: center;
+  }
   .filter-bar {
     align-items: stretch;
     flex-direction: column;

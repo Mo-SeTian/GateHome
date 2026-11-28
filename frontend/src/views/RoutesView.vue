@@ -205,7 +205,7 @@
             <div class="card-actions">
               <span class="service-protocol">{{ route.tls ? 'HTTPS' : 'HTTP' }}</span>
               <div class="action-btn-group">
-                <RouterLink class="btn btn-ghost btn-sm" :to="{ path: '/traffic', query: { rule: route.id } }">查看流量</RouterLink>
+                <RouterLink class="btn btn-ghost btn-sm" :to="{ path: '/statistics/traffic', query: { rule: route.id } }">查看流量</RouterLink>
                 <button
                   v-if="route.enabled"
                   type="button"

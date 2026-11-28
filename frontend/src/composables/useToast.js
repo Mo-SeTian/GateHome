@@ -20,7 +20,7 @@ const faultEventMeta = {
   certificate: { category: 'cert', path: '/certificates', warnType: 'warning' },
   ddns: { category: 'ddns', path: '/ddns' },
   mihomo: { category: 'mihomo', path: '/mihomo' },
-  security: { category: 'waf', path: '/ip-blocks', warnType: 'warning' }
+  security: { category: 'waf', path: '/logs/ip-blocks', warnType: 'warning' }
 }
 
 function mergeFaultHistory(events) {

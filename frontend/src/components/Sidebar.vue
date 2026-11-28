@@ -59,7 +59,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { 
   House, GitFork, X, ChevronDown, Sparkles, Cable, LayoutDashboard, Network, ArrowLeftRight, Compass, Images,
-  Globe, Lock, Download, ShieldAlert, FileSearch, ScrollText, Ban,
+  Globe, Lock, Download, ShieldAlert, ScrollText,
   Bell, BarChart3, Activity, Bot, RefreshCw, HardDriveDownload, Settings
 } from 'lucide-vue-next'
 import { useAppStore } from '@/composables/useAppStore'
@@ -75,12 +75,11 @@ const groups = [
     ['/remote-home', '远程回家', House], ['/mihomo', '代理分流', GitFork], ['/ddns', '动态域名', Globe], ['/certificates', 'SSL 证书', Lock]
   ] },
   { label: '访问安全', icon: ShieldAlert, items: [
-    ['/access', '防火墙管理', ShieldAlert], ['/subscriptions', '订阅管理', Download],
-    ['/ip-blocks', 'IP 拦截名单', Ban], ['/firewall-logs', '防火墙拦截记录', FileSearch]
+    ['/access', '防火墙管理', ShieldAlert], ['/subscriptions', '订阅管理', Download]
   ] },
   { label: '监控与日志', icon: Activity, items: [
-    ['/runtime', '运行状态', Activity], ['/notifications', '通知中心', Bell], ['/logs', '日志', ScrollText],
-    ['/statistics', '统计', BarChart3], ['/traffic', '流量统计', Activity]
+    ['/runtime', '运行状态', Activity], ['/notifications', '通知中心', Bell],
+    ['/logs', '日志与拦截', ScrollText], ['/statistics', '数据统计', BarChart3]
   ] },
   { label: 'AI 与集成', icon: Sparkles, items: [
     ['/assistant', '网关助手', Sparkles], ['/assistant/settings', '模型接入点', Cable], ['/mcp', 'MCP 授权', Bot]

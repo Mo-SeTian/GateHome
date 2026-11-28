@@ -59,7 +59,7 @@ test('mergeFaultHistory maps extended event types (ddns, mihomo, security) to co
   assert.equal(byId['ext-mihomo'].type, 'error')
 
   assert.equal(byId['ext-security'].category, 'waf')
-  assert.equal(byId['ext-security'].path, '/ip-blocks')
+  assert.equal(byId['ext-security'].path, '/logs/ip-blocks')
   assert.equal(byId['ext-security'].type, 'warning')
 
   toast.clearAllNotifications()

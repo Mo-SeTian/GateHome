@@ -1,8 +1,8 @@
 <template>
-  <div class="report-page animate-fade-in">
-    <header class="report-heading">
+  <div class="report-page" :class="{ 'animate-fade-in': !embedded }">
+    <header v-if="!embedded" class="report-heading">
       <h1>访问统计</h1>
-      <button class="btn btn-secondary" :disabled="!data || loading || !!error" @click="exportSVG">
+      <button type="button" class="btn btn-secondary" :disabled="!data || loading || !!error" @click="exportSVG">
         导出图表 SVG
       </button>
     </header>
@@ -23,6 +23,9 @@
       <button type="submit" class="btn btn-primary" :disabled="loading">
         {{ loading ? '查询中…' : '查询统计' }}
       </button>
+      <router-link class="btn btn-secondary" :to="trafficLinkTo">
+        查看对应流量
+      </router-link>
     </form>
     <p v-if="error" ref="errorElement" class="report-error" role="alert" tabindex="-1">
       {{ error }}{{ data ? '。当前显示上次成功查询的统计。' : '' }}
@@ -52,8 +55,19 @@
         握手失败不产生 HTTP 记录。
       </p>
       <div ref="charts" class="report-page">
-        <SpotlightCard class="report-panel"
-          ><h2>访问趋势 · {{ formDescription }}</h2>
+        <SpotlightCard class="report-panel">
+          <div class="panel-head-row">
+            <h2>访问趋势 · {{ formDescription }}</h2>
+            <button
+              v-if="embedded"
+              type="button"
+              class="btn btn-secondary btn-sm"
+              :disabled="!data || loading || !!error"
+              @click="exportSVG"
+            >
+              导出图表 SVG
+            </button>
+          </div>
           <div class="chart-legend">
             <span v-for="series in seriesList" :key="series.key"
               ><i :style="{ background: series.color }" />{{ series.label }}</span
@@ -268,7 +282,8 @@
 
 <script setup>
 import ReportTableScroll from '@/components/ReportTableScroll.vue'
-import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import SpotlightCard from '@/components/SpotlightCard.vue'
 import LogExplorer from '@/components/LogExplorer.vue'
 import { adminApi } from '@/api/admin'
@@ -278,10 +293,20 @@ import { useGatewayStatus } from '@/composables/useGatewayStatus'
 import { useToast } from '@/composables/useToast'
 import '@/styles/reports.css'
 
+defineProps({
+  embedded: { type: Boolean, default: false }
+})
+
+const currentRoute = useRoute()
 const { gatewayConfig, refreshConfig } = useGatewayStatus()
 const toast = useToast()
-const form = ref({ hours: '24', rule: '' }),
-  applied = shallowRef({ hours: '24', rule: '' })
+const requestedRule = () => typeof currentRoute.query.rule === 'string' ? currentRoute.query.rule : ''
+const form = ref({ hours: '24', rule: requestedRule() }),
+  applied = shallowRef({ ...form.value })
+const trafficLinkTo = computed(() => {
+  const matched = gatewayConfig.value?.routes?.find(item => routeKey(item) === form.value.rule)
+  return matched ? { path: '/statistics/traffic', query: { rule: matched.id } } : { path: '/statistics/traffic' }
+})
 const data = shallowRef(null),
   loading = ref(false),
   error = ref(''),
@@ -466,6 +491,10 @@ function exportSVG() {
 function mediaChanged(event) {
   narrow.value = event.matches
 }
+watch(() => currentRoute.query.rule, () => {
+  form.value.rule = requestedRule()
+  load()
+})
 onMounted(() => {
   load()
   media.addEventListener('change', mediaChanged)

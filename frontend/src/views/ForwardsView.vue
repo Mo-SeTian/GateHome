@@ -97,7 +97,7 @@
         <div v-if="liveTraffic.get(forward.id)" class="forward-traffic" :data-forward-id="forward.id">
           <div class="forward-traffic-head">
             <span>当前监听 · 近 5 秒平均</span>
-            <RouterLink :to="{ path: '/traffic', query: { source: 'forward', rule: forward.id } }">流量明细</RouterLink>
+            <RouterLink :to="{ path: '/statistics/traffic', query: { source: 'forward', rule: forward.id } }">流量明细</RouterLink>
           </div>
           <p v-if="statusError" class="report-note">实时数据暂不可用</p>
           <template v-else>

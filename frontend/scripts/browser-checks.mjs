@@ -316,13 +316,17 @@ try {
     access: ['防火墙管理 · GateHome', ['防火墙与 WAF']],
     firewall: ['防火墙管理 · GateHome', ['防火墙与 WAF']],
     subscriptions: ['订阅管理 · GateHome', ['IP 规则订阅']],
-    'ip-blocks': ['IP 拦截名单 · GateHome', ['IP 拦截名单']],
-    'firewall-logs': ['防火墙拦截记录 · GateHome', ['防火墙拦截记录']],
+    'ip-blocks': ['IP 拦截名单 · GateHome', ['日志与拦截', 'IP 拦截名单']],
+    'firewall-logs': ['防火墙拦截记录 · GateHome', ['日志与拦截', '防火墙拦截']],
     runtime: ['运行状态 · GateHome', ['运行状态']],
     notifications: ['通知中心 · GateHome', ['通知中心']],
-    logs: ['日志 · GateHome', ['日志']],
-    statistics: ['统计 · GateHome', ['访问统计']],
-    traffic: ['流量统计 · GateHome', ['流量统计']],
+    logs: ['日志与拦截 · GateHome', ['日志与拦截']],
+    'logs/firewall': ['防火墙拦截记录 · GateHome', ['日志与拦截', '防火墙拦截']],
+    'logs/ip-blocks': ['IP 拦截名单 · GateHome', ['日志与拦截', 'IP 拦截名单']],
+    'logs/system': ['系统日志 · GateHome', ['日志与拦截', '系统日志']],
+    statistics: ['数据统计 · GateHome', ['数据统计', '访问统计']],
+    'statistics/traffic': ['流量统计 · GateHome', ['数据统计', '流量统计']],
+    traffic: ['流量统计 · GateHome', ['数据统计', '流量统计']],
     assistant: ['网关助手 · GateHome', ['网关助手']],
     'assistant/settings': ['模型接入点 · GateHome', ['模型接入点']],
     mcp: ['MCP 授权 · GateHome', ['MCP 授权']],
@@ -332,10 +336,16 @@ try {
     'settings/exposure': ['入口暴露总览 · GateHome', ['入口暴露总览']],
     'settings/security': ['账号安全 · GateHome', ['账号安全']]
   }
+  const redirectTargets = {
+    'firewall-logs': 'logs/firewall',
+    'ip-blocks': 'logs/ip-blocks',
+    traffic: 'statistics/traffic'
+  }
   async function route(name) {
-    const expectedHash = '#/' + name
-    const [expectedTitle, expectedHeadings] = routeMeta[name] ?? []
-    await page.goto(origin + '/console/' + expectedHash)
+    const targetName = redirectTargets[name] || name
+    const expectedHash = '#/' + targetName
+    const [expectedTitle, expectedHeadings] = routeMeta[name] ?? routeMeta[targetName] ?? []
+    await page.goto(origin + '/console/#/' + name)
     await page.waitForFunction(({ expectedHash, expectedTitle, expectedHeadings }) => {
       if (window.location.hash !== expectedHash) return false
       if (expectedTitle && document.title !== expectedTitle) return false
@@ -1233,14 +1243,26 @@ try {
   console.log('PASS administrator account save: original password retained, session revoked and new username can log in')
 
   await page.setViewportSize({ width: 1440, height: 1000 })
+  const canonicalSidebar = {
+    'firewall-logs': 'logs',
+    'logs/firewall': 'logs',
+    'logs/ip-blocks': 'logs',
+    'logs/system': 'logs',
+    'ip-blocks': 'logs',
+    traffic: 'statistics',
+    'statistics/traffic': 'statistics'
+  }
   for (const view of [
     'overview', 'routes', 'forwards', 'sunpanel', 'ddns', 'certificates', 'subscriptions', 'access',
-    'firewall-logs', 'logs', 'ip-blocks', 'statistics', 'traffic', 'assistant', 'assistant/settings', 'mcp', 'updates', 'backups', 'settings'
+    'firewall-logs', 'logs', 'logs/firewall', 'logs/ip-blocks', 'logs/system', 'ip-blocks',
+    'statistics', 'statistics/traffic', 'traffic',
+    'assistant', 'assistant/settings', 'mcp', 'updates', 'backups', 'settings'
   ]) {
     await route(view)
-    await page.waitForFunction(view => document.querySelector('.sidebar-nav a.active')?.hash === '#/' + view, view)
+    const expectedSidebar = canonicalSidebar[view] || view
+    await page.waitForFunction(target => document.querySelector('.sidebar-nav a.active')?.hash === '#/' + target, expectedSidebar)
   }
-  for (const [view, field] of [['logs', '请求方法'], ['firewall-logs', '检测引擎']]) {
+  for (const [view, field] of [['logs', '请求方法'], ['logs/firewall', '检测引擎'], ['firewall-logs', '检测引擎']]) {
     await route(view)
     const explorer = page.locator('.log-explorer')
     await explorer.getByRole('combobox', { name: '反代规则' }).waitFor()
@@ -1262,6 +1284,7 @@ try {
     assert.ok(drawerLayout.drawerWidth >= drawerLayout.barWidth - 48, `advanced filter drawer collapsed: ${JSON.stringify(drawerLayout)}`)
     assert.ok(drawerLayout.drawerLeftGap < 40, `advanced filter drawer shifted right: ${JSON.stringify(drawerLayout)}`)
     assert.ok(drawerLayout.distinctRows < drawerLayout.colCount, `advanced filter fields stacked vertically: ${JSON.stringify(drawerLayout)}`)
+    await explorer.getByRole('button', { name: '收起', expanded: true }).click()
   }
   await page.route('**/api/logs?*', async reqRoute => {
     const url = reqRoute.request().url()
@@ -1301,6 +1324,50 @@ try {
   await quickBanBtn.waitFor()
   await page.unroute('**/api/logs?*')
   console.log('PASS log explorer quick IP ban/unblock loop on access logs')
+
+  // Verify zero-jitter sub-page tab switching and responsive mobile layout across both fused hubs
+  const settleAnimations = () => page.evaluate(() => Promise.all(
+    [...document.querySelectorAll('.animate-fade-in, .main-wrapper')]
+      .flatMap(el => el.getAnimations())
+      .map(a => a.finished.catch(() => {}))
+  ))
+  for (const width of [1440, 390, 320]) {
+    await page.setViewportSize({ width, height: 900 })
+    await route('statistics')
+    await settleAnimations()
+    const statTabs = page.locator('.statistics-hub .hub-tabs')
+    const statBefore = await statTabs.boundingBox()
+    await statTabs.getByRole('tab', { name: '流量统计', exact: true }).click()
+    await page.waitForURL('**/#/statistics/traffic')
+    await settleAnimations()
+    const statAfter = await statTabs.boundingBox()
+    for (const k of ['x', 'y', 'width', 'height']) {
+      assert.ok(Math.abs(statBefore[k] - statAfter[k]) <= 1, `statistics .hub-tabs ${k} shifted at width=${width}: ${statBefore[k]} vs ${statAfter[k]}`)
+    }
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true, `statistics/traffic overflow at width=${width}`)
+
+    await route('logs')
+    await settleAnimations()
+    const logTabs = page.locator('.logs-hub .hub-tabs')
+    const logBefore = await logTabs.boundingBox()
+    for (const [tabName, expectedHash] of [
+      ['防火墙拦截', '#/logs/firewall'],
+      ['IP 拦截名单', '#/logs/ip-blocks'],
+      ['系统日志', '#/logs/system'],
+      ['反代访问', '#/logs']
+    ]) {
+      await logTabs.getByRole('tab', { name: tabName }).click()
+      await page.waitForFunction(hash => window.location.hash === hash, expectedHash)
+      await settleAnimations()
+      const logAfter = await logTabs.boundingBox()
+      for (const k of ['x', 'y', 'width', 'height']) {
+        assert.ok(Math.abs(logBefore[k] - logAfter[k]) <= 1, `logs .hub-tabs ${k} shifted at width=${width} (${tabName}): ${logBefore[k]} vs ${logAfter[k]}`)
+      }
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true, `${expectedHash} overflow at width=${width}`)
+    }
+  }
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  console.log('PASS fused hubs: Statistics+Traffic and Logs+Firewall+IP-Blocks keep 0px tab jitter and fit 320px/390px/1440px')
   await page.getByRole('button', { name: '关闭此通知' }).evaluateAll(buttons => buttons.forEach(button => button.click()))
   await route('icons')
   await page.locator('.icons-page h1').waitFor()
@@ -1728,7 +1795,7 @@ try {
         const toggle = group.getByRole('button')
         if (await toggle.getAttribute('aria-expanded') === 'false') await toggle.click()
       }
-      assert.equal(await navigation.getByRole('link').count(), 24)
+      assert.equal(await navigation.getByRole('link').count(), 21)
       if (width < 1024)
         assert.ok(await navigation.locator('.nav-link, .nav-section-title').evaluateAll(controls => controls.every(control => control.getBoundingClientRect().height >= 44)))
       if (theme === 'light') await page.waitForFunction(() => {
@@ -1755,7 +1822,7 @@ try {
       }
     }
   }
-  console.log('PASS sidebar: both themes, 24 links in six collapsible groups and 44px mobile targets from 320px to 1440px')
+  console.log('PASS sidebar: both themes, 21 links in six collapsible groups and 44px mobile targets from 320px to 1440px')
 
   await page.setViewportSize({ width: 1440, height: 1000 })
   const wireGuardSocket = createSocket('udp4')
