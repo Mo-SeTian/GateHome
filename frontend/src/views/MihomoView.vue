@@ -406,7 +406,7 @@
                 <span v-if="sub.auto_update_interval > 0" class="badge badge-brand">
                   每 {{ formatAutoInterval(sub.auto_update_interval) }} 自动更新
                 </span>
-                <span v-if="subQuotaLow(sub)" class="badge badge-warn">余量不足 10%</span>
+                <span v-if="subQuotaLow(sub)" class="badge badge-warn">余量不足 {{ subWarnPct }}%</span>
                 <span v-if="subExpiringText(sub)" class="badge badge-warn">{{ subExpiringText(sub) }}</span>
                 <span v-if="sub.exclude_groups_and_rules" class="badge badge-warn">仅导入节点</span>
                 <span v-if="sub.include_filter" class="badge badge-brand">仅保留: {{ sub.include_filter }}</span>
@@ -731,6 +731,37 @@
               <input v-model="settingsDraft.settings.tcp_concurrent" name="tcp_concurrent" type="checkbox" />
             </label>
           </div>
+
+          <div class="ctrl-section">
+            <div class="ctrl-section-head">
+              <strong>订阅预警阈值</strong>
+              <span class="badge badge-neutral">填 0 可关闭对应提醒</span>
+            </div>
+            <div class="ports-grid">
+              <label class="form-field">
+                <span>流量余量预警阈值（%）</span>
+                <input
+                  v-model.number="settingsDraft.settings.sub_warn_remaining_pct"
+                  name="sub_warn_remaining_pct"
+                  type="number"
+                  min="0"
+                  max="99"
+                  class="form-input mono-text"
+                />
+              </label>
+              <label class="form-field">
+                <span>到期提前预警（天）</span>
+                <input
+                  v-model.number="settingsDraft.settings.sub_warn_expire_days"
+                  name="sub_warn_expire_days"
+                  type="number"
+                  min="0"
+                  max="365"
+                  class="form-input mono-text"
+                />
+              </label>
+            </div>
+          </div>
         </form>
       </SpotlightCard>
 
@@ -825,16 +856,16 @@
         </dl>
       </SpotlightCard>
 
-      <!-- GeoIP (country.mmdb) Card -->
+      <!-- GeoIP / GeoSite Rules Database Card -->
       <SpotlightCard v-if="status" class="report-panel">
         <div class="panel-header-row">
-          <h2>GeoIP 数据库 (country.mmdb)</h2>
+          <h2>GeoIP / GeoSite 规则库</h2>
           <div class="report-actions">
-            <button type="button" class="btn btn-secondary btn-sm" :disabled="mmdbBusy" @click="triggerMMDBUpload">
+            <button type="button" class="btn btn-secondary btn-sm" :disabled="mmdbBusy || geoBusy" @click="triggerMMDBUpload">
               <Upload :size="14" /> 上传 country.mmdb
             </button>
-            <button type="button" class="btn btn-primary btn-sm" :disabled="mmdbBusy" @click="downloadMMDB">
-              <Download :size="14" /> {{ mmdbBusy ? '下载中…' : '镜像在线下载' }}
+            <button type="button" class="btn btn-primary btn-sm" :disabled="mmdbBusy || geoBusy" @click="updateAllGeoData">
+              <Download :size="14" /> {{ geoBusy ? '更新中…' : '一键更新全部 Geo 库' }}
             </button>
             <input
               ref="mmdbFileInput"
@@ -845,20 +876,67 @@
             />
           </div>
         </div>
-        <dl class="core-meta">
-          <div>
-            <dt>安装状态</dt>
-            <dd>{{ status.mmdb_installed ? '已就绪' : '未安装（首次启动将自动从镜像下载）' }}</dd>
+
+        <div v-if="settingsDraft" class="geo-auto-bar">
+          <label class="geo-auto-toggle">
+            <input
+              v-model="settingsDraft.settings.geo_auto_update_enabled"
+              name="geo_auto_update_enabled"
+              type="checkbox"
+              :disabled="savingSettings || geoBusy"
+              @change="saveGeoSchedule"
+            />
+            <span>定时自动更新 GeoIP / GeoSite</span>
+          </label>
+          <label class="geo-auto-interval">
+            <span>周期</span>
+            <select
+              v-model.number="settingsDraft.settings.geo_update_interval_hours"
+              name="geo_update_interval_hours"
+              class="form-input geo-auto-select"
+              :disabled="savingSettings || geoBusy"
+              @change="saveGeoSchedule"
+            >
+              <option :value="24">每 24 小时</option>
+              <option :value="72">每 3 天</option>
+              <option :value="168">每 7 天</option>
+              <option :value="336">每 14 天</option>
+              <option :value="720">每 30 天</option>
+            </select>
+          </label>
+          <span v-if="formatTime(status.geodata?.next_update_at)" class="geo-next-tip mono-text">
+            下次 {{ formatTime(status.geodata.next_update_at) }}
+          </span>
+        </div>
+
+        <div class="geo-files-list">
+          <div
+            v-for="row in geoRows"
+            :key="row.key"
+            class="geo-file-row"
+          >
+            <div class="geo-file-main">
+              <strong class="mono-text">{{ row.label }}</strong>
+              <span class="badge" :class="row.info?.installed ? 'badge-ok' : 'badge-neutral'">
+                {{ row.info?.installed ? '已就绪' : '未安装' }}
+              </span>
+              <span v-if="row.info?.version" class="badge badge-brand mono-text">
+                v{{ row.info.version }}
+              </span>
+            </div>
+            <div class="geo-file-meta mono-text">
+              <span>{{ row.info?.size ? formatBytes(row.info.size) : '—' }}</span>
+              <span> · {{ formatTime(row.info?.updated_at) || (row.info?.installed ? '已就绪' : '未下载') }}</span>
+            </div>
           </div>
-          <div>
-            <dt>文件大小</dt>
-            <dd class="mono-text">{{ status.mmdb_size ? formatBytes(status.mmdb_size) : '—' }}</dd>
-          </div>
-          <div>
-            <dt>更新时间</dt>
-            <dd class="mono-text">{{ status.mmdb_updated_at ? formatTime(status.mmdb_updated_at) : '—' }}</dd>
-          </div>
-        </dl>
+        </div>
+
+        <p v-if="status.geodata?.last_error" class="report-error">
+          最近 Geo 更新异常：{{ status.geodata.last_error }}
+        </p>
+        <p v-else class="form-hint">
+          来源：MetaCubeX/meta-rules-dat{{ status.geodata?.source ? `（${status.geodata.source}）` : '' }} · 支持 GeoIP / GeoSite 规则与 country.mmdb 分流查询。
+        </p>
       </SpotlightCard>
     </section>
 
@@ -1442,6 +1520,7 @@ const busySub = ref('')
 const coreBusy = ref(false)
 const checkingCoreUpdate = ref(false)
 const mmdbBusy = ref(false)
+const geoBusy = ref(false)
 const zashboardBusy = ref(false)
 const testingGroup = ref('')
 const testingNode = ref('')
@@ -1595,11 +1674,26 @@ function applyStatus(data) {
     controller_secret: undefined,
     settings: {
       ...data.settings,
-      auth_password: ''
+      auth_password: '',
+      sub_warn_remaining_pct: data.settings?.sub_warn_remaining_pct ?? 10,
+      sub_warn_expire_days: data.settings?.sub_warn_expire_days ?? 3,
+      geo_auto_update_enabled: !!data.settings?.geo_auto_update_enabled,
+      geo_update_interval_hours: data.settings?.geo_update_interval_hours || 168
     }
   }
   yamlManualOverride.value = !!data.manual_override
 }
+
+const subWarnPct = computed(() => status.value?.settings?.sub_warn_remaining_pct ?? 10)
+const subWarnDays = computed(() => status.value?.settings?.sub_warn_expire_days ?? 3)
+const geoRows = computed(() => {
+  const geo = status.value?.geodata
+  return [
+    { key: 'country_mmdb', label: 'country.mmdb', info: geo?.country_mmdb ?? (status.value?.mmdb_installed ? { installed: true, size: status.value.mmdb_size, updated_at: status.value.mmdb_updated_at } : { installed: false }) },
+    { key: 'geoip', label: 'geoip.dat', info: geo?.geoip ?? { installed: false } },
+    { key: 'geosite', label: 'geosite.dat', info: geo?.geosite ?? { installed: false } }
+  ]
+})
 
 async function loadStatus() {
   loading.value = true
@@ -1925,7 +2019,11 @@ async function saveCoreSettings() {
         dns_listen_port: Number(settingsDraft.value.settings.dns_listen_port) || 0,
         auth_enabled: !!settingsDraft.value.settings.auth_enabled,
         auth_username: (settingsDraft.value.settings.auth_username || '').trim(),
-        auth_password: settingsDraft.value.settings.auth_password || ''
+        auth_password: settingsDraft.value.settings.auth_password || '',
+        sub_warn_remaining_pct: Math.max(0, Math.min(99, Math.trunc(Number(settingsDraft.value.settings.sub_warn_remaining_pct ?? 10)))),
+        sub_warn_expire_days: Math.max(0, Math.min(365, Math.trunc(Number(settingsDraft.value.settings.sub_warn_expire_days ?? 3)))),
+        geo_auto_update_enabled: !!settingsDraft.value.settings.geo_auto_update_enabled,
+        geo_update_interval_hours: Number(settingsDraft.value.settings.geo_update_interval_hours) || 168
       }
     }
     const data = await adminApi.saveMihomoSettings(payload)
@@ -1934,6 +2032,41 @@ async function saveCoreSettings() {
     toast.success('代理端口与核心设置已保存并合成 runtime.yaml')
   } catch (err) {
     error.value = err.message
+    toast.error(err.message)
+  } finally {
+    savingSettings.value = false
+  }
+}
+
+async function saveGeoSchedule() {
+  if (!settingsDraft.value || savingSettings.value) return
+  savingSettings.value = true
+  try {
+    const payload = {
+      enabled: settingsDraft.value.enabled,
+      takeover_outbound: settingsDraft.value.takeover_outbound,
+      controller_port: Number(settingsDraft.value.controller_port) || 19090,
+      controller_allow_lan: !!settingsDraft.value.controller_allow_lan,
+      controller_secret: (settingsDraft.value.controller_secret || '').trim(),
+      settings: {
+        ...settingsDraft.value.settings,
+        mixed_port: Number(settingsDraft.value.settings.mixed_port) || 0,
+        http_port: Number(settingsDraft.value.settings.http_port) || 0,
+        socks_port: Number(settingsDraft.value.settings.socks_port) || 0,
+        dns_listen_port: Number(settingsDraft.value.settings.dns_listen_port) || 0,
+        auth_enabled: !!settingsDraft.value.settings.auth_enabled,
+        auth_username: (settingsDraft.value.settings.auth_username || '').trim(),
+        auth_password: '',
+        sub_warn_remaining_pct: Math.max(0, Math.min(99, Math.trunc(Number(settingsDraft.value.settings.sub_warn_remaining_pct ?? 10)))),
+        sub_warn_expire_days: Math.max(0, Math.min(365, Math.trunc(Number(settingsDraft.value.settings.sub_warn_expire_days ?? 3)))),
+        geo_auto_update_enabled: !!settingsDraft.value.settings.geo_auto_update_enabled,
+        geo_update_interval_hours: Number(settingsDraft.value.settings.geo_update_interval_hours) || 168
+      }
+    }
+    const data = await adminApi.saveMihomoSettings(payload)
+    applyStatus(data)
+    toast.success('Geo 规则库自动更新计划已保存')
+  } catch (err) {
     toast.error(err.message)
   } finally {
     savingSettings.value = false
@@ -2220,16 +2353,17 @@ async function handleFileUpload(event) {
   }
 }
 
-async function downloadMMDB() {
-  mmdbBusy.value = true
+async function updateAllGeoData() {
+  geoBusy.value = true
   try {
-    const res = await adminApi.downloadMihomoMMDB()
+    const res = await adminApi.updateMihomoGeoData(controller.signal)
     if (res.status) applyStatus(res.status)
-    toast.success(`country.mmdb 已从 ${res.source || '镜像源'} 下载就绪`)
+    const ver = res.geodata?.country_mmdb?.version
+    toast.success(`GeoIP / GeoSite 规则库已更新${ver ? ` (v${ver})` : ''}`)
   } catch (err) {
-    toast.error(err.message)
+    if (!controller.signal.aborted) toast.error(err.message)
   } finally {
-    mmdbBusy.value = false
+    geoBusy.value = false
   }
 }
 
@@ -2396,8 +2530,9 @@ function delayClass(ms) {
 }
 
 function formatTime(iso) {
+  if (!iso || String(iso).startsWith('0001-')) return ''
   const d = new Date(iso)
-  return Number.isNaN(d.getTime()) ? '' : d.toLocaleString()
+  return Number.isNaN(d.getTime()) || d.getFullYear() < 2000 ? '' : d.toLocaleString()
 }
 
 function formatQuota(sub) {
@@ -2413,17 +2548,17 @@ function formatAutoInterval(mins) {
 }
 
 function subQuotaLow(sub) {
-  if (!sub?.total) return false
+  if (!sub?.total || subWarnPct.value <= 0) return false
   const used = (sub.upload || 0) + (sub.download || 0)
   const remaining = Math.max(0, sub.total - used)
-  return remaining === 0 || remaining / sub.total <= 0.1
+  return remaining === 0 || (remaining / sub.total) * 100 <= subWarnPct.value
 }
 
 function subExpiringText(sub) {
-  if (!sub?.expire) return ''
+  if (!sub?.expire || subWarnDays.value <= 0) return ''
   const diff = sub.expire * 1000 - Date.now()
   if (diff <= 0) return '订阅已过期'
-  if (diff <= 3 * 86400000) return `剩余 ${Math.max(1, Math.ceil(diff / 86400000))} 天到期`
+  if (diff <= subWarnDays.value * 86400000) return `剩余 ${Math.max(1, Math.ceil(diff / 86400000))} 天到期`
   return ''
 }
 
@@ -3095,6 +3230,69 @@ onBeforeUnmount(() => {
 
 .sub-card.active {
   border-color: var(--brand);
+}
+
+.geo-auto-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--strip-bg);
+  border: 1px solid var(--line);
+}
+
+.geo-auto-toggle,
+.geo-auto-interval {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--ink-secondary);
+}
+
+.geo-auto-select {
+  width: auto !important;
+  min-width: 112px;
+  height: 34px !important;
+  min-height: 34px !important;
+  padding: 4px 10px !important;
+}
+
+.geo-next-tip {
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.geo-files-list {
+  display: grid;
+  gap: 8px;
+}
+
+.geo-file-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  padding: 9px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--strip-bg);
+  border: 1px solid var(--line);
+}
+
+.geo-file-main {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 12.5px;
+}
+
+.geo-file-meta {
+  font-size: 11.5px;
+  color: var(--muted);
 }
 
 .sub-info {

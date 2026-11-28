@@ -33,9 +33,34 @@ type MihomoCoreSettings struct {
 	UnifiedDelay    bool   `json:"unified_delay"`
 	TCPConcurrent   bool   `json:"tcp_concurrent"`
 	DNSEnhancedMode string `json:"dns_enhanced_mode"`
-	AuthEnabled     bool   `json:"auth_enabled"`
-	AuthUsername    string `json:"auth_username,omitempty"`
-	AuthPassword    string `json:"auth_password,omitempty"`
+	AuthEnabled          bool   `json:"auth_enabled"`
+	AuthUsername         string `json:"auth_username,omitempty"`
+	AuthPassword         string `json:"auth_password,omitempty"`
+	SubWarnRemainingPct  *int   `json:"sub_warn_remaining_pct,omitempty"`
+	SubWarnExpireDays    *int   `json:"sub_warn_expire_days,omitempty"`
+	GeoAutoUpdateEnabled bool   `json:"geo_auto_update_enabled,omitempty"`
+	GeoUpdateIntervalH   int    `json:"geo_update_interval_hours,omitempty"`
+}
+
+func effectiveSubWarnRemainingPct(s MihomoCoreSettings) int {
+	if s.SubWarnRemainingPct == nil {
+		return 10
+	}
+	return *s.SubWarnRemainingPct
+}
+
+func effectiveSubWarnExpireDays(s MihomoCoreSettings) int {
+	if s.SubWarnExpireDays == nil {
+		return 3
+	}
+	return *s.SubWarnExpireDays
+}
+
+func effectiveGeoUpdateIntervalHours(s MihomoCoreSettings) int {
+	if s.GeoUpdateIntervalH <= 0 {
+		return 168
+	}
+	return s.GeoUpdateIntervalH
 }
 
 // MihomoSubscription represents a managed proxy subscription source.
@@ -486,6 +511,15 @@ func validateMihomoSettings(cfg MihomoConfig, gwConfig Config, adminPort int) er
 	}
 	if !validMihomoDNSModes[cfg.Settings.DNSEnhancedMode] {
 		return errors.New("DNS 增强模式须为 fake-ip、redir-host 或 keep")
+	}
+	if cfg.Settings.SubWarnRemainingPct != nil && (*cfg.Settings.SubWarnRemainingPct < 0 || *cfg.Settings.SubWarnRemainingPct > 99) {
+		return errors.New("订阅流量预警阈值须为 0（关闭）或 1–99%")
+	}
+	if cfg.Settings.SubWarnExpireDays != nil && (*cfg.Settings.SubWarnExpireDays < 0 || *cfg.Settings.SubWarnExpireDays > 365) {
+		return errors.New("订阅到期预警天数须为 0（关闭）或 1–365 天")
+	}
+	if cfg.Settings.GeoUpdateIntervalH != 0 && (cfg.Settings.GeoUpdateIntervalH < 12 || cfg.Settings.GeoUpdateIntervalH > 720) {
+		return errors.New("Geo 规则库自动更新周期须为 12–720 小时")
 	}
 	if cfg.Settings.AuthEnabled {
 		user := strings.TrimSpace(cfg.Settings.AuthUsername)

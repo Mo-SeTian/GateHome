@@ -191,6 +191,12 @@ func (active *activeAlerts) pruneRemoved(c Config) {
 			retained[key] = true
 		}
 	}
+	for _, f := range c.Forwards {
+		key := "forward/" + f.ID
+		if (*active)[key] {
+			retained[key] = true
+		}
+	}
 	for _, cert := range c.ACME.Requests {
 		key := "cert/" + cert.ID
 		if (*active)[key] {

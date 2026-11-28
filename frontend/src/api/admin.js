@@ -108,6 +108,7 @@ export const adminApi = {
   restoreMihomoBackup: (payload) => request('/api/mihomo/restore', { method: 'POST', body: payload }),
   downloadMihomoZashboard: () => request('/api/mihomo/zashboard/download', { method: 'POST', body: {} }),
   downloadMihomoMMDB: () => request('/api/mihomo/geodata/download', { method: 'POST', body: {} }),
+  updateMihomoGeoData: (signal) => request('/api/mihomo/geodata/update', { method: 'POST', body: {}, signal }),
   uploadMihomoMMDB: (file) => {
     const body = new FormData()
     body.append('file', file)

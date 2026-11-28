@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"fmt"
+	"html"
 	"io"
 	"log"
 	"net"
@@ -319,6 +320,12 @@ func (p *Proxy) serveGroup(groupID string, w http.ResponseWriter, r *http.Reques
 		http.Error(w, "此服务只允许 HTTPS，请使用已配置的外网 HTTPS 端口", http.StatusUpgradeRequired)
 		return
 	}
+	if route.route.Maintenance {
+		outcome = "maintenance"
+		message += "；维护模式"
+		writeMaintenanceResponse(w, r, route.route)
+		return
+	}
 	rejectProtection := func(code, retry int) bool {
 		if code == 0 {
 			return false
@@ -409,6 +416,37 @@ func (r proxyRoute) firewallDecision(remote string) (bool, FirewallHit) {
 		return false, FirewallHit{ID: r.firewall.id, Name: r.firewall.name, Kind: "invalid_source", Reason: "来源 IP 无效"}
 	}
 	return r.firewall.decision(addr.Unmap())
+}
+
+func writeMaintenanceResponse(w http.ResponseWriter, r *http.Request, route Route) {
+	serviceName := strings.TrimSpace(route.Name)
+	if serviceName == "" {
+		serviceName = route.Host
+	}
+	notice := strings.TrimSpace(route.MaintenanceMessage)
+	if notice == "" {
+		notice = "该服务正在维护升级，请稍后再试。"
+	}
+	w.Header().Set("Retry-After", "60")
+	w.Header().Set("Cache-Control", "no-store")
+	if r.Method == http.MethodHead {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		return
+	}
+	accept := strings.ToLower(r.Header.Get("Accept"))
+	if strings.Contains(accept, "application/json") && !strings.Contains(accept, "text/html") {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = fmt.Fprintf(w, "{\"status\":503,\"maintenance\":true,\"service\":%q,\"message\":%q}", serviceName, notice)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusServiceUnavailable)
+	escapedName := html.EscapeString(serviceName)
+	escapedNotice := html.EscapeString(notice)
+	escapedHost := html.EscapeString(route.Host)
+	_, _ = io.WriteString(w, `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>服务维护中 · `+escapedName+`</title><style>:root{color-scheme:light dark;--bg:#f1f5f9;--card:#ffffff;--ink:#0f172a;--muted:#64748b;--line:#e2e8f0;--accent:#f59e0b;--pill:rgba(245,158,11,.14)}@media(prefers-color-scheme:dark){:root{--bg:#090d16;--card:#111827;--ink:#f8fafc;--muted:#94a3b8;--line:#1e293b;--accent:#fbbf24;--pill:rgba(251,191,36,.14)}}*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif}.card{width:min(460px,100%);background:var(--card);border:1px solid var(--line);border-radius:16px;padding:28px;box-shadow:0 12px 32px rgba(15,23,42,.08)}.pill{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;font-size:12px;font-weight:600;color:var(--accent);background:var(--pill)}.dot{width:7px;height:7px;border-radius:50%;background:currentColor}h1{margin:14px 0 8px;font-size:20px;line-height:1.35}p{margin:0;font-size:14px;line-height:1.6;color:var(--muted);overflow-wrap:anywhere}.meta{margin-top:20px;padding-top:14px;border-top:1px solid var(--line);display:flex;justify-content:space-between;gap:8px;font-size:12px;color:var(--muted);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;flex-wrap:wrap}</style></head><body><main class="card"><span class="pill"><span class="dot"></span>503 · 服务维护中</span><h1>`+escapedName+`</h1><p>`+escapedNotice+`</p><div class="meta"><span>`+escapedHost+`</span><span>GateHome</span></div></main></body></html>`)
 }
 
 func (s *Proxy) SetLogs(logs *Logs) { s.logs = logs }

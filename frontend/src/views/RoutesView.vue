@@ -132,7 +132,7 @@
             v-for="route in items"
             :key="route.id || routeKey(route)"
             class="route-card"
-            :class="{ inactive: !route.enabled }"
+            :class="{ inactive: !route.enabled, maintenance: route.enabled && route.maintenance }"
           >
             <div class="card-head">
               <div class="app-icon-wrap" :class="routeCategoryClass(route)">
@@ -175,7 +175,8 @@
                 <ArrowRight :size="14" /><span class="info-text mono-text">{{ route.upstream }}</span>
               </div>
             </div>
-            <div v-if="route.firewall_id || route.auth.enabled || !accessURL(route)" class="feature-badges">
+            <div v-if="route.maintenance || route.firewall_id || route.auth.enabled || !accessURL(route)" class="feature-badges">
+              <span v-if="route.maintenance" class="feature-badge maint"><Wrench :size="10" /> 维护中</span>
               <span v-if="!accessURL(route)" class="feature-badge protocol">
                 {{ route.tls ? 'HTTPS' : 'HTTP' }} 端口未配置
               </span>
@@ -205,6 +206,17 @@
               <span class="service-protocol">{{ route.tls ? 'HTTPS' : 'HTTP' }}</span>
               <div class="action-btn-group">
                 <RouterLink class="btn btn-ghost btn-sm" :to="{ path: '/traffic', query: { rule: route.id } }">查看流量</RouterLink>
+                <button
+                  v-if="route.enabled"
+                  type="button"
+                  class="btn btn-ghost btn-sm"
+                  :class="{ 'text-warn': route.maintenance }"
+                  :disabled="isSavingConfig"
+                  :title="route.maintenance ? '结束维护模式并恢复正常转发' : '开启维护模式（返回 503 提示页并暂停告警）'"
+                  @click="toggleMaintenance(route)"
+                >
+                  <Wrench :size="13" /> {{ route.maintenance ? '恢复' : '维护' }}
+                </button>
                 <button class="btn btn-ghost btn-sm" :disabled="isSavingConfig" @click="openRoute(route)">
                   <Edit3 :size="13" /> 编辑
                 </button>
@@ -301,7 +313,21 @@
             <span>启用独立访问账户保护</span>
             <input v-model="routeDraft.auth.enabled" name="auth_enabled" type="checkbox" />
           </label>
+          <label class="toggle-row">
+            <span>维护模式（返回 503 维护页并暂停断线告警）</span>
+            <input v-model="routeDraft.maintenance" name="maintenance" type="checkbox" />
+          </label>
         </div>
+        <label v-if="routeOpen && routeDraft.maintenance" class="form-group">
+          维护提示说明（可选）
+          <input
+            v-model="routeDraft.maintenance_message"
+            name="maintenance_message"
+            class="form-input"
+            maxlength="300"
+            placeholder="例如：正在升级服务，预计 10 分钟后恢复"
+          />
+        </label>
         <fieldset v-if="routeOpen && routeDraft.auth.enabled" class="auth-fields">
           <label class="form-group"
             >访问用户名<input
@@ -518,7 +544,7 @@
       <div class="modal-body">
         <div class="health-diagnostic-card">
           <div class="diagnostic-header">
-            <span class="diagnostic-badge" :class="healthDetail?.status >= 200 && healthDetail?.status < 400 ? 'status-ok' : 'status-bad'">
+            <span class="diagnostic-badge" :class="healthDetail?.healthy ? 'status-ok' : 'status-bad'">
               {{ healthDetail?.label || '等待检测' }}
             </span>
             <span v-if="healthDetail?.duration_ms" class="diagnostic-latency mono-text">
@@ -587,6 +613,7 @@ import {
   Plus,
   Search,
   Trash2,
+  Wrench,
   X
 } from 'lucide-vue-next'
 import SpotlightCard from '@/components/SpotlightCard.vue'
@@ -725,12 +752,16 @@ function groupState(group) {
 function routeHealth(route) {
   if (!route.enabled) return '路由已停用'
   if (!proxyGroups.value.find((group) => group.id === route.group_id)?.enabled) return '反代组已停用'
+  if (route.maintenance) return '维护中'
   const result = health.value?.routes?.[route.id]
   return result ? `${result.label}${result.healthy ? ` · ${result.duration_ms} ms` : ''}` : '等待上游探测'
 }
 function healthTone(route) {
   const result = health.value?.routes?.[route.id]
-  if (!route.enabled || !proxyGroups.value.find(group => group.id === route.group_id)?.enabled || !result?.checked_at || result.state === 'disabled')
+  if (!route.enabled || !proxyGroups.value.find(group => group.id === route.group_id)?.enabled)
+    return 'badge-neutral'
+  if (route.maintenance) return 'badge-warn'
+  if (!result?.checked_at || result.state === 'disabled')
     return 'badge-neutral'
   return result.healthy ? 'badge-ok' : 'badge-bad'
 }
@@ -801,8 +832,12 @@ function openRoute(route) {
         enabled: true,
         firewall_id: '',
         image: '',
+        maintenance: false,
+        maintenance_message: '',
         auth: { enabled: false, username: '', failure_limit: 5, freeze_seconds: 3600 }
       }
+  routeDraft.value.maintenance = Boolean(routeDraft.value.maintenance)
+  routeDraft.value.maintenance_message = routeDraft.value.maintenance_message || ''
   routeDraft.value.auth = {
     ...routeDraft.value.auth,
     failure_limit: routeDraft.value.auth.failure_limit || 5
@@ -842,6 +877,8 @@ async function saveRoute() {
       host: resolvedHost.value,
       name: routeDraft.value.name.trim(),
       upstream: routeDraft.value.upstream.trim(),
+      maintenance: Boolean(routeDraft.value.maintenance),
+      maintenance_message: (routeDraft.value.maintenance_message || '').trim(),
       auth: { ...routeDraft.value.auth, freeze_seconds: Number(freezeMinutes.value) * 60 }
     }
     const credentials = {}
@@ -920,6 +957,22 @@ async function changeItem(collection, record, remove = false) {
 function toggleRoute(route, event) {
   event.target.checked = route.enabled
   return changeItem('routes', route)
+}
+async function toggleMaintenance(route) {
+  if (isSavingConfig.value) return
+  const snap = structuredClone(gatewayConfigSnapshot.value)
+  const id = route.id || routeKey(route)
+  const nextMaintenance = !route.maintenance
+  try {
+    await saveConfig(snap, replaceConfigItem(snap, 'routes', { ...route, maintenance: nextMaintenance }, id))
+    await saved(
+      nextMaintenance
+        ? `已开启「${route.name || route.host}」维护模式`
+        : `已结束「${route.name || route.host}」维护模式`
+    )
+  } catch (err) {
+    toast.error(err.message)
+  }
 }
 function toggleGroup(group) {
   return changeItem('groups', group)
@@ -1298,6 +1351,7 @@ onUnmounted(() => {
 .feature-badge.protocol { background: var(--strip-bg); color: var(--muted); border: 1px solid var(--line); }
 .feature-badge.fw { background: rgba(99, 102, 241, 0.12); color: var(--brand-light); border: 1px solid rgba(99, 102, 241, 0.2); }
 .feature-badge.auth { background: rgba(245, 158, 11, 0.12); color: var(--warn); border: 1px solid rgba(245, 158, 11, 0.2); }
+.feature-badge.maint { background: rgba(245, 158, 11, 0.16); color: var(--warn); border: 1px solid rgba(245, 158, 11, 0.35); }
 .feature-badge.ws { background: rgba(6, 182, 212, 0.12); color: var(--brand-cyan); border: 1px solid rgba(6, 182, 212, 0.2); }
 
 .service-heading { min-width: 0; flex: 1; display: grid; gap: 3px; }
@@ -1324,6 +1378,7 @@ onUnmounted(() => {
 .latency-val.zero { color: var(--faint); }
 .action-btn-group { display: flex; gap: 4px; }
 .text-bad { color: var(--bad) !important; }
+.text-warn { color: var(--warn) !important; }
 
 .empty-state {
   padding: 60px 20px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 10px;

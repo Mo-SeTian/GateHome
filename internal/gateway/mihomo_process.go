@@ -96,6 +96,7 @@ type mihomoManager struct {
 	onAlert            func(key, kind, resource string, failing bool, failure, recovery string, now time.Time)
 	onClearAlerts      func(keys ...string)
 	autoUpdateAttempts map[string]time.Time
+	geoUpdateAttempt   time.Time
 	adminLogs          *Logs
 	fetchSubFn         func(context.Context, string) ([]byte, int64, int64, int64, int64, error)
 }
@@ -1157,6 +1158,47 @@ func (m *mihomoManager) RunAutoUpdateTick(ctx context.Context, now time.Time) {
 			})
 		}
 	}
+
+	m.mu.Lock()
+	geoEnabled := m.cfg.Settings.GeoAutoUpdateEnabled
+	cfgCopy := m.cfg
+	lastGeoAttempt := m.geoUpdateAttempt
+	m.mu.Unlock()
+	if geoEnabled && now.Sub(lastGeoAttempt) >= time.Hour && m.store != nil {
+		geo := m.geoDataStatus(cfgCopy)
+		geoDue := !geo.CountryMMDB.Installed || !geo.GeoIP.Installed || !geo.GeoSite.Installed || geo.NextUpdateAt.IsZero() || !now.Before(geo.NextUpdateAt)
+		if geoDue {
+			m.mu.Lock()
+			m.geoUpdateAttempt = now
+			m.mu.Unlock()
+			started := time.Now()
+			reqCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+			updatedGeo, geoErr := m.UpdateAllGeoData(reqCtx, m.store.Snapshot())
+			cancel()
+			msg := "Mihomo Geo 规则库定时自动更新成功 (" + updatedGeo.CountryMMDB.Version + ")"
+			if geoErr != nil {
+				msg = "Mihomo Geo 规则库定时自动更新失败: " + geoErr.Error()
+			}
+			m.logs.add(msg)
+			if geoErr == nil {
+				m.mu.Lock()
+				running := m.running
+				m.mu.Unlock()
+				if running {
+					_ = m.Reload()
+				}
+			}
+			if adminLogs != nil {
+				adminLogs.Add(LogEntry{
+					Category:   "admin",
+					Action:     "Mihomo Geo 自动更新",
+					OK:         geoErr == nil,
+					DurationMS: time.Since(started).Milliseconds(),
+					Message:    msg,
+				})
+			}
+		}
+	}
 }
 
 func (m *mihomoManager) EvaluateSubscriptionAlerts(now time.Time) {
@@ -1165,31 +1207,41 @@ func (m *mihomoManager) EvaluateSubscriptionAlerts(now time.Time) {
 	}
 	m.mu.Lock()
 	subs := append([]MihomoSubscription(nil), m.cfg.Subscriptions...)
+	warnPct := effectiveSubWarnRemainingPct(m.cfg.Settings)
+	warnDays := effectiveSubWarnExpireDays(m.cfg.Settings)
 	m.mu.Unlock()
 
 	for _, sub := range subs {
 		if sub.Expire > 0 {
-			exp := time.Unix(sub.Expire, 0)
-			failing := !exp.After(now.Add(3 * 24 * time.Hour))
-			msg := fmt.Sprintf("订阅将于 %s 到期", exp.Local().Format("2006-01-02 15:04"))
-			if !exp.After(now) {
-				msg = "订阅已过期"
+			if warnDays <= 0 {
+				m.notifyAlert("mihomo-expire/"+sub.ID, "mihomo", sub.Name, false, "", "订阅有效期已恢复", now)
+			} else {
+				exp := time.Unix(sub.Expire, 0)
+				failing := !exp.After(now.Add(time.Duration(warnDays) * 24 * time.Hour))
+				msg := fmt.Sprintf("订阅将于 %s 到期", exp.Local().Format("2006-01-02 15:04"))
+				if !exp.After(now) {
+					msg = "订阅已过期"
+				}
+				m.notifyAlert("mihomo-expire/"+sub.ID, "mihomo", sub.Name, failing, msg, "订阅有效期已恢复", now)
 			}
-			m.notifyAlert("mihomo-expire/"+sub.ID, "mihomo", sub.Name, failing, msg, "订阅有效期已恢复", now)
 		}
 		if sub.Total > 0 {
-			remaining := sub.Total - (sub.Upload + sub.Download)
-			if remaining < 0 {
-				remaining = 0
+			if warnPct <= 0 {
+				m.notifyAlert("mihomo-quota/"+sub.ID, "mihomo", sub.Name, false, "", "订阅流量余量已恢复", now)
+			} else {
+				remaining := sub.Total - (sub.Upload + sub.Download)
+				if remaining < 0 {
+					remaining = 0
+				}
+				ratio := float64(remaining) / float64(sub.Total)
+				failing := remaining == 0 || ratio*100 <= float64(warnPct)
+				pct := int(ratio * 100)
+				msg := fmt.Sprintf("订阅剩余流量不足 %d%%（剩余 %d%%）", warnPct, pct)
+				if remaining == 0 {
+					msg = "订阅流量已耗尽"
+				}
+				m.notifyAlert("mihomo-quota/"+sub.ID, "mihomo", sub.Name, failing, msg, "订阅流量余量已恢复", now)
 			}
-			ratio := float64(remaining) / float64(sub.Total)
-			failing := remaining == 0 || ratio <= 0.10
-			pct := int(ratio * 100)
-			msg := fmt.Sprintf("订阅剩余流量不足 10%%（剩余 %d%%）", pct)
-			if remaining == 0 {
-				msg = "订阅流量已耗尽"
-			}
-			m.notifyAlert("mihomo-quota/"+sub.ID, "mihomo", sub.Name, failing, msg, "订阅流量余量已恢复", now)
 		}
 	}
 }

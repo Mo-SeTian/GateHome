@@ -29,6 +29,7 @@ const (
 	maxZashboardExtractBytes  = 96 << 20
 	maxZashboardExtractFiles  = 2000
 	maxMihomoMMDBBytes        = 32 << 20
+	maxMihomoGeoDatBytes      = 64 << 20
 )
 
 var mmdbMetadataMarker = []byte{0xab, 0xcd, 0xef, 'M', 'a', 'x', 'M', 'i', 'n', 'd', '.', 'c', 'o', 'm'}
@@ -560,6 +561,111 @@ func (m *mihomoManager) mmdbPath() string {
 	return filepath.Join(m.dir, "country.mmdb")
 }
 
+func (m *mihomoManager) geoipPath() string {
+	return filepath.Join(m.dir, "geoip.dat")
+}
+
+func (m *mihomoManager) geositePath() string {
+	return filepath.Join(m.dir, "geosite.dat")
+}
+
+func (m *mihomoManager) geoMetaPath() string {
+	return filepath.Join(m.dir, "geodata-meta.json")
+}
+
+type mihomoGeoMeta struct {
+	Version   string    `json:"version,omitempty"`
+	Source    string    `json:"source,omitempty"`
+	UpdatedAt time.Time `json:"updated_at,omitzero"`
+	LastError string    `json:"last_error,omitempty"`
+}
+
+type mihomoGeoFileInfo struct {
+	Installed bool      `json:"installed"`
+	Size      int64     `json:"size,omitempty"`
+	UpdatedAt time.Time `json:"updated_at,omitzero"`
+	Version   string    `json:"version,omitempty"`
+}
+
+type mihomoGeoDataStatus struct {
+	CountryMMDB   mihomoGeoFileInfo `json:"country_mmdb"`
+	GeoIP         mihomoGeoFileInfo `json:"geoip"`
+	GeoSite       mihomoGeoFileInfo `json:"geosite"`
+	AutoUpdate    bool              `json:"auto_update"`
+	IntervalHours int               `json:"interval_hours"`
+	NextUpdateAt  time.Time         `json:"next_update_at,omitzero"`
+	Source        string            `json:"source,omitempty"`
+	LastError     string            `json:"last_error,omitempty"`
+}
+
+func (m *mihomoManager) readGeoMeta() mihomoGeoMeta {
+	var meta mihomoGeoMeta
+	if raw, err := os.ReadFile(m.geoMetaPath()); err == nil {
+		_ = json.Unmarshal(raw, &meta)
+	}
+	return meta
+}
+
+func (m *mihomoManager) saveGeoMeta(meta mihomoGeoMeta) {
+	_ = os.MkdirAll(m.dir, 0700)
+	if data, err := json.MarshalIndent(meta, "", "  "); err == nil {
+		_ = atomicWrite(m.geoMetaPath(), append(data, '\n'))
+	}
+}
+
+func isValidGeoDatFile(path string) (bool, int64, time.Time) {
+	info, err := os.Stat(path)
+	if err != nil || info.IsDir() {
+		return false, 0, time.Time{}
+	}
+	size := info.Size()
+	if size < 1024 || size > maxMihomoGeoDatBytes {
+		return false, 0, time.Time{}
+	}
+	return true, size, info.ModTime()
+}
+
+func (m *mihomoManager) geoDataStatus(cfg MihomoConfig) mihomoGeoDataStatus {
+	meta := m.readGeoMeta()
+	mmdbOK, mmdbSize, mmdbTime := m.mmdbStatus()
+	geoipOK, geoipSize, geoipTime := isValidGeoDatFile(m.geoipPath())
+	geositeOK, geositeSize, geositeTime := isValidGeoDatFile(m.geositePath())
+	verFor := func(installed bool, updatedAt time.Time) string {
+		if !installed {
+			return ""
+		}
+		if meta.Version != "" {
+			return meta.Version
+		}
+		if !updatedAt.IsZero() {
+			return updatedAt.Local().Format("20060102")
+		}
+		return ""
+	}
+	intervalHours := effectiveGeoUpdateIntervalHours(cfg.Settings)
+	status := mihomoGeoDataStatus{
+		CountryMMDB:   mihomoGeoFileInfo{Installed: mmdbOK, Size: mmdbSize, UpdatedAt: mmdbTime, Version: verFor(mmdbOK, mmdbTime)},
+		GeoIP:         mihomoGeoFileInfo{Installed: geoipOK, Size: geoipSize, UpdatedAt: geoipTime, Version: verFor(geoipOK, geoipTime)},
+		GeoSite:       mihomoGeoFileInfo{Installed: geositeOK, Size: geositeSize, UpdatedAt: geositeTime, Version: verFor(geositeOK, geositeTime)},
+		AutoUpdate:    cfg.Settings.GeoAutoUpdateEnabled,
+		IntervalHours: intervalHours,
+		Source:        meta.Source,
+		LastError:     meta.LastError,
+	}
+	if status.AutoUpdate && mmdbOK && geoipOK && geositeOK {
+		oldest := mmdbTime
+		for _, t := range []time.Time{geoipTime, geositeTime} {
+			if !t.IsZero() && (oldest.IsZero() || t.Before(oldest)) {
+				oldest = t
+			}
+		}
+		if !oldest.IsZero() {
+			status.NextUpdateAt = oldest.Add(time.Duration(intervalHours) * time.Hour)
+		}
+	}
+	return status
+}
+
 func isValidMMDBData(raw []byte) bool {
 	if len(raw) < 1024 || len(raw) > maxMihomoMMDBBytes {
 		return false
@@ -616,6 +722,12 @@ func (m *mihomoManager) installMMDBData(raw []byte) (int64, error) {
 	if err := atomicWrite(m.mmdbPath(), raw); err != nil {
 		return 0, err
 	}
+	meta := m.readGeoMeta()
+	meta.UpdatedAt = time.Now().UTC()
+	if meta.Version == "" {
+		meta.Version = time.Now().Format("20060102")
+	}
+	m.saveGeoMeta(meta)
 	return int64(len(raw)), nil
 }
 
@@ -625,18 +737,18 @@ func allowedMMDBHost(u *url.URL) bool {
 	}
 	switch strings.ToLower(u.Hostname()) {
 	case "fastly.jsdelivr.net", "testingcf.jsdelivr.net", "cdn.jsdelivr.net",
-		"github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com", "github-releases.githubusercontent.com":
+		"github.com", "api.github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com", "github-releases.githubusercontent.com":
 		return true
 	}
 	return false
 }
 
-func (m *mihomoManager) DownloadMMDB(ctx context.Context, state State) (int64, string, error) {
+func (m *mihomoManager) downloadGeoAsset(ctx context.Context, state State, filename, targetPath string, maxBytes int64, validator func([]byte) bool) (int64, string, error) {
 	client := outboundClient(state, 30*time.Second)
 	defer closeClient(client)
 	client.CheckRedirect = func(r *http.Request, via []*http.Request) error {
 		if len(via) >= 5 || !allowedMMDBHost(r.URL) {
-			return errors.New("GeoIP 下载重定向地址不受信任")
+			return errors.New("Geo 规则库下载重定向地址不受信任")
 		}
 		r.Header.Del("Authorization")
 		r.Header.Del("Cookie")
@@ -644,10 +756,10 @@ func (m *mihomoManager) DownloadMMDB(ctx context.Context, state State) (int64, s
 	}
 
 	mirrors := []string{
-		"https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/country.mmdb",
-		"https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/country.mmdb",
-		"https://cdn.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/country.mmdb",
-		"https://github.com/MetaCubeX/meta-rules-dat/releases/latest/download/country.mmdb",
+		"https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/" + filename,
+		"https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/" + filename,
+		"https://cdn.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/" + filename,
+		"https://github.com/MetaCubeX/meta-rules-dat/releases/latest/download/" + filename,
 	}
 
 	var lastErr error
@@ -656,7 +768,7 @@ func (m *mihomoManager) DownloadMMDB(ctx context.Context, state State) (int64, s
 		if err != nil || !allowedMMDBHost(u) {
 			continue
 		}
-		attemptCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+		attemptCtx, cancel := context.WithTimeout(ctx, 25*time.Second)
 		req, err := http.NewRequestWithContext(attemptCtx, http.MethodGet, mirrorURL, nil)
 		if err != nil {
 			cancel()
@@ -676,26 +788,120 @@ func (m *mihomoManager) DownloadMMDB(ctx context.Context, state State) (int64, s
 			lastErr = fmt.Errorf("%s 返回 HTTP %d", u.Hostname(), resp.StatusCode)
 			continue
 		}
-		raw, readErr := io.ReadAll(io.LimitReader(resp.Body, maxMihomoMMDBBytes+1))
+		raw, readErr := io.ReadAll(io.LimitReader(resp.Body, maxBytes+1))
 		resp.Body.Close()
 		cancel()
 		if readErr != nil {
 			lastErr = readErr
 			continue
 		}
-		if int64(len(raw)) > maxMihomoMMDBBytes {
-			lastErr = errors.New("country.mmdb 文件超过 32 MiB 限制")
+		if int64(len(raw)) > maxBytes {
+			lastErr = fmt.Errorf("%s 文件超过 %d MiB 限制", filename, maxBytes>>20)
 			continue
 		}
-		size, installErr := m.installMMDBData(raw)
-		if installErr != nil {
-			lastErr = installErr
+		if len(raw) < 1024 || (validator != nil && !validator(raw)) {
+			lastErr = fmt.Errorf("无效的 %s 文件（格式校验未通过）", filename)
 			continue
 		}
-		return size, u.Hostname(), nil
+		if err := os.MkdirAll(m.dir, 0700); err != nil {
+			return 0, "", err
+		}
+		_ = os.Chmod(m.dir, 0700)
+		if err := atomicWrite(targetPath, raw); err != nil {
+			lastErr = err
+			continue
+		}
+		return int64(len(raw)), u.Hostname(), nil
 	}
 	if lastErr == nil {
 		lastErr = errors.New("无可用下载镜像")
 	}
-	return 0, "", fmt.Errorf("country.mmdb 下载失败 (%v)，请在「端口与核心」手动上传 country.mmdb", lastErr)
+	return 0, "", fmt.Errorf("%s 下载失败 (%v)", filename, lastErr)
+}
+
+func (m *mihomoManager) fetchLatestGeoVersion(ctx context.Context, state State) string {
+	client := outboundClient(state, 5*time.Second)
+	defer closeClient(client)
+	reqCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, "https://api.github.com/repos/MetaCubeX/meta-rules-dat/releases/latest", nil)
+	if err != nil {
+		return time.Now().Format("20060102")
+	}
+	req.Header.Set("User-Agent", "GateHome/"+Version)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return time.Now().Format("20060102")
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return time.Now().Format("20060102")
+	}
+	var release struct {
+		TagName string `json:"tag_name"`
+	}
+	if json.NewDecoder(io.LimitReader(resp.Body, 128<<10)).Decode(&release) == nil && strings.TrimSpace(release.TagName) != "" {
+		return strings.TrimSpace(release.TagName)
+	}
+	return time.Now().Format("20060102")
+}
+
+func (m *mihomoManager) DownloadMMDB(ctx context.Context, state State) (int64, string, error) {
+	size, host, err := m.downloadGeoAsset(ctx, state, "country.mmdb", m.mmdbPath(), maxMihomoMMDBBytes, isValidMMDBData)
+	if err != nil {
+		return 0, "", fmt.Errorf("%v，请在「端口与核心」手动上传 country.mmdb", err)
+	}
+	meta := m.readGeoMeta()
+	meta.Source = host
+	meta.UpdatedAt = time.Now().UTC()
+	if meta.Version == "" {
+		meta.Version = time.Now().Format("20060102")
+	}
+	m.saveGeoMeta(meta)
+	return size, host, nil
+}
+
+func (m *mihomoManager) UpdateAllGeoData(ctx context.Context, state State) (mihomoGeoDataStatus, error) {
+	assets := []struct {
+		name      string
+		path      string
+		maxBytes  int64
+		validator func([]byte) bool
+	}{
+		{"country.mmdb", m.mmdbPath(), maxMihomoMMDBBytes, isValidMMDBData},
+		{"geoip.dat", m.geoipPath(), maxMihomoGeoDatBytes, nil},
+		{"geosite.dat", m.geositePath(), maxMihomoGeoDatBytes, nil},
+	}
+	var sources []string
+	var errs []string
+	for _, asset := range assets {
+		_, host, err := m.downloadGeoAsset(ctx, state, asset.name, asset.path, asset.maxBytes, asset.validator)
+		if err != nil {
+			errs = append(errs, err.Error())
+		} else if host != "" && !strings.Contains(strings.Join(sources, ","), host) {
+			sources = append(sources, host)
+		}
+	}
+	meta := m.readGeoMeta()
+	if len(sources) > 0 {
+		meta.Source = strings.Join(sources, ", ")
+		meta.UpdatedAt = time.Now().UTC()
+		meta.Version = m.fetchLatestGeoVersion(ctx, state)
+	}
+	if len(errs) > 0 {
+		meta.LastError = strings.Join(errs, "；")
+	} else {
+		meta.LastError = ""
+	}
+	m.saveGeoMeta(meta)
+
+	m.mu.Lock()
+	cfgCopy := m.cfg
+	m.mu.Unlock()
+	status := m.geoDataStatus(cfgCopy)
+	if len(errs) > 0 {
+		return status, errors.New(meta.LastError)
+	}
+	return status, nil
 }

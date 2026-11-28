@@ -42,7 +42,9 @@ type Route struct {
 	TLS        bool            `json:"tls"`
 	FirewallID string          `json:"firewall_id"`
 	Auth       RouteAuthConfig `json:"auth"`
-	Access     *Access         `json:"access,omitempty"` // Original on-disk access policy, migrated on load.
+	Maintenance        bool            `json:"maintenance,omitempty"`
+	MaintenanceMessage string          `json:"maintenance_message,omitempty"`
+	Access             *Access         `json:"access,omitempty"` // Original on-disk access policy, migrated on load.
 }
 
 type FirewallGroup struct {
@@ -969,6 +971,9 @@ func Validate(c Config) error {
 		}
 		if len(r.Name) > 100 {
 			return errors.New("服务名称过长")
+		}
+		if len([]rune(r.MaintenanceMessage)) > 300 || strings.ContainsRune(r.MaintenanceMessage, '\x00') {
+			return errors.New("维护提示说明长度不能超过 300 字")
 		}
 		if r.Access != nil {
 			return errors.New("旧版访问策略已迁移，请刷新后选择防火墙")

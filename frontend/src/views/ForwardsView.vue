@@ -86,6 +86,14 @@
         <p v-if="forward.protocol !== 'tcp'" class="traffic-tag">
           UDP 空闲超时 {{ forward.udp_idle_seconds || 300 }} 秒
         </p>
+        <div class="forward-health-row">
+          <span class="forward-health-label"><HeartPulse :size="13" aria-hidden="true" />上游可达性</span>
+          <span
+            class="badge forward-health-badge"
+            :class="forwardHealthTone(forward)"
+            :title="forwardHealthMap[forward.id]?.message || ''"
+          >{{ forwardHealthText(forward) }}</span>
+        </div>
         <div v-if="liveTraffic.get(forward.id)" class="forward-traffic" :data-forward-id="forward.id">
           <div class="forward-traffic-head">
             <span>当前监听 · 近 5 秒平均</span>
@@ -216,9 +224,10 @@
 import { newID } from '@/api/ids'
 import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowRight, Edit3, Plus, Search, Trash2, X } from 'lucide-vue-next'
+import { ArrowRight, Edit3, HeartPulse, Plus, Search, Trash2, X } from 'lucide-vue-next'
 import SpotlightCard from '@/components/SpotlightCard.vue'
 import RestartNotice from '@/components/RestartNotice.vue'
+import { adminApi } from '@/api/admin'
 import { forwardState, replaceConfigItem } from '@/api/configuration'
 import { formatByteRate } from '@/api/reports'
 import { useGatewayStatus, useStatusPolling } from '@/composables/useGatewayStatus'
@@ -291,6 +300,7 @@ const filteredForwards = computed(() => {
 })
 const loading = ref(false)
 const loadError = ref('')
+const forwardHealthMap = ref({})
 const dialog = ref(null)
 const snapshot = shallowRef(null)
 const originalId = ref(null)
@@ -302,12 +312,31 @@ const controller = new AbortController()
 function firewallName(id) {
   return gatewayConfig.value?.firewalls.find((item) => item.id === id)?.name || '不限制来源 IP'
 }
+function forwardHealthText(forward) {
+  if (!forward.enabled) return '未检测'
+  if (forward.protocol === 'udp') return 'UDP 不探测'
+  const row = forwardHealthMap.value[forward.id]
+  if (!row || row.state === 'disabled') return '等待检测'
+  return row.healthy ? `${row.label} · ${row.duration_ms} ms` : row.label
+}
+function forwardHealthTone(forward) {
+  if (!forward.enabled || forward.protocol === 'udp') return 'badge-neutral'
+  const row = forwardHealthMap.value[forward.id]
+  if (!row || !row.checked_at || row.state === 'disabled' || row.state === 'udp_unsupported') return 'badge-neutral'
+  return row.healthy ? 'badge-ok' : 'badge-bad'
+}
+async function refreshHealth() {
+  try {
+    const res = await adminApi.serviceHealth(controller.signal)
+    if (!controller.signal.aborted) forwardHealthMap.value = res?.forwards ?? {}
+  } catch {}
+}
 async function reload() {
   if (loading.value || isSavingConfig.value) return
   loading.value = true
   loadError.value = ''
   try {
-    await Promise.all([refreshConfig(controller.signal), refreshStatus(controller.signal)])
+    await Promise.all([refreshConfig(controller.signal), refreshStatus(controller.signal), refreshHealth()])
   } catch (err) {
     if (!controller.signal.aborted) loadError.value = err.message
   } finally {
@@ -407,9 +436,23 @@ watch(
   { immediate: true }
 )
 
-onMounted(reload)
+let healthTimer
+const onForwardsVisibility = () => {
+  if (!document.hidden && !controller.signal.aborted) refreshHealth()
+}
+onMounted(() => {
+  reload()
+  document.addEventListener('visibilitychange', onForwardsVisibility)
+  healthTimer = setInterval(() => {
+    if (!document.hidden) refreshHealth()
+  }, 30000)
+})
 useStatusPolling()
-onUnmounted(() => controller.abort())
+onUnmounted(() => {
+  document.removeEventListener('visibilitychange', onForwardsVisibility)
+  clearInterval(healthTimer)
+  controller.abort()
+})
 </script>
 
 <style scoped>
@@ -511,6 +554,23 @@ onUnmounted(() => controller.abort())
 .forward-traffic-head a { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
 .forward-traffic-line { font-variant-numeric: tabular-nums; }
 .forward-traffic-line strong { min-width: 28px; color: var(--ink); }
+.forward-health-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.forward-health-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.forward-health-badge {
+  white-space: nowrap;
+}
 
 .pipeline-box {
   background: var(--strip-bg);

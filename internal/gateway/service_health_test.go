@@ -234,6 +234,82 @@ func TestServiceHealthCustomAlertDelay(t *testing.T) {
 	}
 }
 
+func TestServiceHealthFallbacksAndErrorMessages(t *testing.T) {
+	// 1. Upstream drops TCP connection on HEAD but serves 200 on GET.
+	headReset := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "HEAD" {
+			if hj, ok := w.(http.Hijacker); ok {
+				if conn, _, err := hj.Hijack(); err == nil {
+					conn.Close()
+					return
+				}
+			}
+		}
+		w.WriteHeader(200)
+	}))
+	defer headReset.Close()
+	if res := probeServiceHealth(context.Background(), headReset.URL); !res.Healthy || res.State != "healthy" {
+		t.Fatalf("expected HEAD reset fallback to GET to succeed, got %+v", res)
+	}
+
+	// 2. Upstream returns 404 on HEAD and rejects Range requests, but returns 200 on plain GET.
+	head404NoRange := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "HEAD" {
+			w.WriteHeader(404)
+			return
+		}
+		if r.Header.Get("Range") != "" {
+			w.WriteHeader(416)
+			return
+		}
+		w.WriteHeader(200)
+	}))
+	defer head404NoRange.Close()
+	if res := probeServiceHealth(context.Background(), head404NoRange.URL); !res.Healthy || res.State != "healthy" {
+		t.Fatalf("expected HEAD 404 without Range GET fallback to succeed, got %+v", res)
+	}
+
+	// 3. HTTP upstream rejects raw IP Host header (drops connection / 404) but accepts proxied route Host.
+	hostChecked := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.EqualFold(r.Host, "sunpanel.example.test") {
+			if hj, ok := w.(http.Hijacker); ok {
+				if conn, _, err := hj.Hijack(); err == nil {
+					conn.Close()
+					return
+				}
+			}
+			w.WriteHeader(404)
+			return
+		}
+		w.WriteHeader(200)
+	}))
+	defer hostChecked.Close()
+	if res := probeServiceHealthWithOptions(context.Background(), hostChecked.URL, "sunpanel.example.test", nil, nil); !res.Healthy || res.State != "healthy" {
+		t.Fatalf("expected route Host fallback to succeed, got %+v", res)
+	}
+
+	// 4. Unbound port reports clear connection refused diagnostic.
+	closed := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	closedURL := closed.URL
+	closed.Close()
+	if res := probeServiceHealth(context.Background(), closedURL); res.Healthy || res.State != "connection_error" || !strings.Contains(res.Message, "上游拒绝连接") {
+		t.Fatalf("expected clear ECONNREFUSED diagnostic, got %+v", res)
+	}
+
+	// 5. Server dropping every probe connection reports clear peer-reset diagnostic.
+	alwaysDrop := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if hj, ok := w.(http.Hijacker); ok {
+			if conn, _, err := hj.Hijack(); err == nil {
+				conn.Close()
+			}
+		}
+	}))
+	defer alwaysDrop.Close()
+	if res := probeServiceHealth(context.Background(), alwaysDrop.URL); res.Healthy || res.State != "connection_error" || !strings.Contains(res.Message, "主动断开") {
+		t.Fatalf("expected clear peer-reset diagnostic, got %+v", res)
+	}
+}
+
 func TestPanelHealthRequiresLoginAndSavedOwnedIDs(t *testing.T) {
 	var targetCalls atomic.Int32
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { targetCalls.Add(1); w.WriteHeader(200) }))
@@ -317,5 +393,126 @@ func TestPanelHealthRequiresLoginAndSavedOwnedIDs(t *testing.T) {
 	}
 	if adminHits.Load() != 0 {
 		t.Fatalf("sunPanelSiteHealth dialed internal admin port %d times", adminHits.Load())
+	}
+}
+
+func TestServiceHealthMaintenanceModePausesProbingAndAlerts(t *testing.T) {
+	var upstreamHits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamHits.Add(1)
+		w.WriteHeader(500)
+	}))
+	defer srv.Close()
+
+	a, _ := testAdmin(t)
+	snap := a.store.Snapshot()
+	route := Route{
+		ID:          "r-maint",
+		GroupID:     snap.Config.Groups[0].ID,
+		Name:        "MaintApp",
+		Host:        "maint.example.test",
+		Upstream:    srv.URL,
+		Enabled:     true,
+		Maintenance: true,
+	}
+	cfg := snap.Config
+	cfg.Groups[0].Enabled = true
+	cfg.Groups[0].HTTPPort = 18080
+	cfg.Routes = []Route{route}
+	if err := a.store.Update(cfg, nil, snap.Revision); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.store.changeWebhook(func(s *State) bool {
+		s.Alerts.Enabled = true
+		s.Alerts.Events = []string{"upstream"}
+		return true
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate an active prior failure before enabling maintenance.
+	a.health.mu.Lock()
+	a.health.events = map[string]healthEventState{
+		route.ID: {upstream: route.Upstream, failures: 3, firstFailedAt: time.Now().Add(-5 * time.Minute), down: true},
+	}
+	a.health.mu.Unlock()
+
+	results := a.routeServiceHealth(context.Background())
+	if upstreamHits.Load() != 0 {
+		t.Fatalf("maintenance mode must not dial upstream, got %d hits", upstreamHits.Load())
+	}
+	if res := results[route.ID]; res.State != "maintenance" || res.Label != "维护中" {
+		t.Fatalf("expected maintenance health state, got %+v", res)
+	}
+	a.health.mu.Lock()
+	ev := a.health.events[route.ID]
+	a.health.mu.Unlock()
+	if ev.failures != 0 || ev.down || !ev.firstFailedAt.IsZero() {
+		t.Fatalf("expected paused maintenance state to reset failure counters, got %+v", ev)
+	}
+	if len(a.store.Snapshot().Alerts.Pending) != 0 {
+		t.Fatalf("expected no alert queued when entering maintenance, got %+v", a.store.Snapshot().Alerts.Pending)
+	}
+}
+
+func TestForwardTCPHealthProbeAndAlertDelay(t *testing.T) {
+	live := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) }))
+	liveAddr := strings.TrimPrefix(live.URL, "http://")
+	defer live.Close()
+
+	closed := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	closedAddr := strings.TrimPrefix(closed.URL, "http://")
+	closed.Close()
+
+	if res := probeTCPHealth(context.Background(), liveAddr); !res.Healthy || res.State != "healthy" || res.Label != "TCP 可达" {
+		t.Fatalf("expected live TCP upstream healthy, got %+v", res)
+	}
+	if res := probeTCPHealth(context.Background(), closedAddr); res.Healthy || res.State != "connection_error" {
+		t.Fatalf("expected closed TCP upstream error, got %+v", res)
+	}
+
+	a, _ := testAdmin(t)
+	snap := a.store.Snapshot()
+	cfg := snap.Config
+	cfg.ServiceHealth = ServiceHealthConfig{Enabled: true, Interval: 60, AlertDelaySeconds: 180}
+	cfg.Forwards = []PortForward{
+		{ID: "fwd-tcp", Name: "SSH 转发", Protocol: "tcp", ListenPort: 29122, Upstream: liveAddr, Enabled: true},
+		{ID: "fwd-udp", Name: "DNS 转发", Protocol: "udp", ListenPort: 29153, Upstream: closedAddr, Enabled: true},
+		{ID: "fwd-off", Name: "停用转发", Protocol: "tcp", ListenPort: 29123, Upstream: closedAddr, Enabled: false},
+	}
+	if err := a.store.Update(cfg, nil, snap.Revision); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.store.changeWebhook(func(s *State) bool {
+		s.Alerts.Enabled = true
+		s.Alerts.Events = []string{"upstream"}
+		return true
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	results := a.forwardServiceHealth(context.Background())
+	if !results["fwd-tcp"].Healthy || results["fwd-udp"].State != "udp_unsupported" || results["fwd-off"].State != "disabled" {
+		t.Fatalf("unexpected forwardServiceHealth results: %+v", results)
+	}
+
+	// Verify alert delay + recovery lifecycle for forward health transitions.
+	fwd := cfg.Forwards[0]
+	t0 := time.Now().UTC().Add(time.Minute)
+	failAt := func(off time.Duration) {
+		a.recordForwardHealthTransition(fwd, serviceHealthResult{State: "connection_error", Label: "连接失败", CheckedAt: t0.Add(off)})
+	}
+	failAt(0)
+	failAt(120 * time.Second)
+	if a.health.events["forward/"+fwd.ID].down || len(a.store.Snapshot().Alerts.Pending) != 0 {
+		t.Fatal("forward failure shorter than alert delay triggered early alert")
+	}
+	failAt(180 * time.Second)
+	if !a.health.events["forward/"+fwd.ID].down || len(a.store.Snapshot().Alerts.Pending) != 1 || a.store.Snapshot().Alerts.Pending[0].Type != "upstream" {
+		t.Fatalf("expected upstream alert after 180s forward outage, got down=%v pending=%+v", a.health.events["forward/"+fwd.ID].down, a.store.Snapshot().Alerts.Pending)
+	}
+	a.recordForwardHealthTransition(fwd, serviceHealthResult{State: "healthy", Label: "TCP 可达", Healthy: true, CheckedAt: t0.Add(240 * time.Second)})
+	if a.health.events["forward/"+fwd.ID].down || len(a.store.Snapshot().Alerts.Pending) != 2 || a.store.Snapshot().Alerts.Pending[1].Status != "resolved" {
+		t.Fatalf("expected resolved alert after forward recovery, got pending=%+v", a.store.Snapshot().Alerts.Pending)
 	}
 }

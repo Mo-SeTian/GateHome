@@ -104,7 +104,11 @@ func (a *Admin) runtimeInventory(config Config) ([]runtimeListener, []runtimeRou
 				}
 			}
 			row.State = "unbound"
-			if len(row.Entries) > 0 {
+			if live.route.Maintenance {
+				row.State = "maintenance"
+				row.Health = &serviceHealthResult{State: "maintenance", Label: "维护中", Message: "已开启维护模式，健康探测与故障告警已暂停"}
+				row.Down = false
+			} else if len(row.Entries) > 0 {
 				row.State = "unchecked"
 				if options.Enabled {
 					row.State = "pending"

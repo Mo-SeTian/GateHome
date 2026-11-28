@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -102,6 +103,14 @@ type serviceHealthCache struct {
 	historyDirty bool
 }
 
+func isPeerResetError(err error) bool {
+	return errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, syscall.ECONNRESET)
+}
+
+func isHealthyProbeStatus(code int) bool {
+	return (code >= 200 && code < 400) || code == 401 || code == 403
+}
+
 func healthError(err error) (string, string) {
 	var unknown x509.UnknownAuthorityError
 	var invalid x509.CertificateInvalidError
@@ -121,11 +130,27 @@ func healthError(err error) (string, string) {
 	if errors.Is(err, context.Canceled) {
 		return "cancelled", "检测已取消"
 	}
+	if errors.Is(err, syscall.ECONNREFUSED) {
+		return "connection_error", "上游拒绝连接（目标端口未监听或被防火墙拦截），请检查服务状态与监听地址"
+	}
+	if errors.Is(err, syscall.EHOSTUNREACH) || errors.Is(err, syscall.ENETUNREACH) {
+		return "connection_error", "服务器网络无法路由至上游主机，请检查网段连通性或容器网络模式"
+	}
+	if isPeerResetError(err) {
+		return "connection_error", "上游建立连接后主动断开，请检查 HTTP/HTTPS 协议是否匹配或上游是否限制探测请求"
+	}
+	if msg := err.Error(); strings.Contains(msg, "HTTP response to HTTPS client") || strings.Contains(msg, "malformed HTTP response") {
+		return "connection_error", "协议不匹配或响应非标准 HTTP，请检查上游地址应为 http:// 还是 https://"
+	}
 	return "connection_error", "服务器无法连接上游，请检查地址、端口与服务状态"
 }
 
 func probeServiceHealth(ctx context.Context, raw string) serviceHealthResult {
 	return probeServiceHealthWithBlockedPorts(ctx, raw, nil, nil)
+}
+
+func probeServiceHealthWithBlockedPorts(ctx context.Context, raw string, blockedPorts map[int]bool, localAddrs map[netip.Addr]bool) serviceHealthResult {
+	return probeServiceHealthWithOptions(ctx, raw, "", blockedPorts, localAddrs)
 }
 
 func isBlockedInternalTargetURL(target *url.URL, blockedPorts map[int]bool, localAddrs map[netip.Addr]bool) bool {
@@ -147,7 +172,7 @@ func isBlockedInternalTargetURL(target *url.URL, blockedPorts map[int]bool, loca
 	return false
 }
 
-func probeServiceHealthWithBlockedPorts(ctx context.Context, raw string, blockedPorts map[int]bool, localAddrs map[netip.Addr]bool) serviceHealthResult {
+func probeServiceHealthWithOptions(ctx context.Context, raw, requestHost string, blockedPorts map[int]bool, localAddrs map[netip.Addr]bool) serviceHealthResult {
 	started := time.Now()
 	result := serviceHealthResult{CheckedAt: started.UTC()}
 	finish := func() serviceHealthResult { result.DurationMS = time.Since(started).Milliseconds(); return result }
@@ -160,7 +185,7 @@ func probeServiceHealthWithBlockedPorts(ctx context.Context, raw string, blocked
 		result.State, result.Label, result.Message = "invalid", "地址受限", "禁止探测 GateHome 管理或内部服务端口"
 		return finish()
 	}
-	ctx, cancel := context.WithTimeout(ctx, 2500*time.Millisecond)
+	ctx, cancel := context.WithTimeout(ctx, 4*time.Second)
 	defer cancel()
 	transport := &http.Transport{Proxy: nil, TLSHandshakeTimeout: 2 * time.Second, MaxResponseHeaderBytes: 32 << 10, DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
 		host, portStr, err := net.SplitHostPort(address)
@@ -183,7 +208,7 @@ func probeServiceHealthWithBlockedPorts(ctx context.Context, raw string, blocked
 		}
 		var last error
 		for _, ip := range ips {
-			conn, err := (&net.Dialer{Timeout: time.Second}).DialContext(ctx, network, net.JoinHostPort(ip.String(), portStr))
+			conn, err := (&net.Dialer{Timeout: 2 * time.Second}).DialContext(ctx, network, net.JoinHostPort(ip.String(), portStr))
 			if err == nil {
 				return conn, nil
 			}
@@ -193,15 +218,36 @@ func probeServiceHealthWithBlockedPorts(ctx context.Context, raw string, blocked
 	}}
 	defer transport.CloseIdleConnections()
 	client := &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	request, _ := http.NewRequestWithContext(ctx, "HEAD", target.String(), nil)
-	request.Header.Set("User-Agent", "GateHome-Health/1")
-	response, err := client.Do(request)
-	if err == nil && (response.StatusCode == 405 || response.StatusCode == 501) {
-		response.Body.Close()
-		request, _ = http.NewRequestWithContext(ctx, "GET", target.String(), nil)
-		request.Header.Set("Range", "bytes=0-0")
+	doProbe := func(method, hostHeader string) (*http.Response, error) {
+		request, err := http.NewRequestWithContext(ctx, method, target.String(), nil)
+		if err != nil {
+			return nil, err
+		}
 		request.Header.Set("User-Agent", "GateHome-Health/1")
-		response, err = client.Do(request)
+		if hostHeader != "" {
+			request.Host = hostHeader
+		}
+		return client.Do(request)
+	}
+	response, err := doProbe("HEAD", "")
+	if isPeerResetError(err) || (err == nil && (response.StatusCode == 400 || response.StatusCode == 404 || response.StatusCode == 405 || response.StatusCode == 501)) {
+		if response != nil {
+			response.Body.Close()
+		}
+		response, err = doProbe("GET", "")
+	}
+	if target.Scheme == "http" && requestHost != "" && !strings.EqualFold(requestHost, target.Host) {
+		if isPeerResetError(err) || (err == nil && (response.StatusCode == 400 || response.StatusCode == 403 || response.StatusCode == 404 || response.StatusCode == 421)) {
+			altResp, altErr := doProbe("GET", requestHost)
+			if altErr == nil && (err != nil || isHealthyProbeStatus(altResp.StatusCode)) {
+				if response != nil {
+					response.Body.Close()
+				}
+				response, err = altResp, nil
+			} else if altResp != nil {
+				altResp.Body.Close()
+			}
+		}
 	}
 	if err != nil {
 		result.State, result.Message = healthError(err)
@@ -231,6 +277,60 @@ func probeServiceHealthWithBlockedPorts(ctx context.Context, raw string, blocked
 	return finish()
 }
 
+func probeTCPHealth(ctx context.Context, upstream string) serviceHealthResult {
+	started := time.Now()
+	result := serviceHealthResult{CheckedAt: started.UTC()}
+	finish := func() serviceHealthResult { result.DurationMS = time.Since(started).Milliseconds(); return result }
+	host, portStr, err := net.SplitHostPort(strings.TrimSpace(upstream))
+	if err != nil || host == "" {
+		result.State, result.Label, result.Message = "invalid", "地址无效", "TCP 目标地址须包含主机和端口"
+		return finish()
+	}
+	port, portErr := strconv.Atoi(portStr)
+	if portErr != nil || port < 1 || port > 65535 {
+		result.State, result.Label, result.Message = "invalid", "端口无效", "TCP 目标端口须为 1–65535"
+		return finish()
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
+	defer cancel()
+	ips, err := net.DefaultResolver.LookupNetIP(probeCtx, "ip", host)
+	if err != nil {
+		result.State, result.Message = healthError(err)
+		result.Label = map[string]string{"dns_error": "DNS 异常", "timeout": "响应超时", "connection_error": "连接失败", "cancelled": "已取消"}[result.State]
+		if result.Label == "" {
+			result.Label = "连接失败"
+		}
+		return finish()
+	}
+	for _, ip := range ips {
+		ip = ip.Unmap()
+		if ip.IsUnspecified() || !allowedServiceIP(ip) {
+			result.State, result.Label, result.Message = "invalid", "地址受限", "禁止探测受限或保留地址"
+			return finish()
+		}
+	}
+	var lastErr error
+	dialer := &net.Dialer{Timeout: 2 * time.Second}
+	for _, ip := range ips {
+		conn, dialErr := dialer.DialContext(probeCtx, "tcp", net.JoinHostPort(ip.String(), portStr))
+		if dialErr == nil {
+			_ = conn.Close()
+			result.State, result.Label, result.Message, result.Healthy = "healthy", "TCP 可达", "TCP 端口握手成功", true
+			return finish()
+		}
+		lastErr = dialErr
+	}
+	if lastErr == nil {
+		lastErr = errors.New("no resolved addresses")
+	}
+	result.State, result.Message = healthError(lastErr)
+	result.Label = map[string]string{"tls_untrusted": "证书异常", "dns_error": "DNS 异常", "timeout": "响应超时", "connection_error": "连接失败", "cancelled": "已取消"}[result.State]
+	if result.Label == "" {
+		result.Label = "连接失败"
+	}
+	return finish()
+}
+
 // Verify every redirect before allowing a browser probe to follow it, without
 // changing ordinary health checks or exposing untrusted TLS to a WebView.
 func (a *Admin) browserProbeHealth(ctx context.Context, raw string) serviceHealthResult {
@@ -251,14 +351,84 @@ func (a *Admin) browserProbeHealthWithPolicy(ctx context.Context, raw, cachePref
 }
 
 func (a *Admin) cachedServiceHealth(ctx context.Context, raw string, ttl time.Duration) serviceHealthResult {
-	return a.cachedServiceHealthWithPolicy(ctx, raw, ttl, "", nil, nil)
+	return a.cachedServiceHealthWithOptions(ctx, raw, "", ttl, "", nil, nil)
+}
+
+func (a *Admin) cachedServiceHealthForRoute(ctx context.Context, raw, requestHost string, ttl time.Duration) serviceHealthResult {
+	return a.cachedServiceHealthWithOptions(ctx, raw, requestHost, ttl, "", nil, nil)
 }
 
 func (a *Admin) cachedServiceHealthWithPolicy(ctx context.Context, raw string, ttl time.Duration, cachePrefix string, blockedPorts map[int]bool, localAddrs map[netip.Addr]bool) serviceHealthResult {
+	return a.cachedServiceHealthWithOptions(ctx, raw, "", ttl, cachePrefix, blockedPorts, localAddrs)
+}
+
+func (a *Admin) cachedServiceHealthWithOptions(ctx context.Context, raw, requestHost string, ttl time.Duration, cachePrefix string, blockedPorts map[int]bool, localAddrs map[netip.Addr]bool) serviceHealthResult {
 	if target, err := url.Parse(raw); err == nil && isBlockedInternalTargetURL(target, blockedPorts, localAddrs) {
 		return serviceHealthResult{State: "invalid", Label: "地址受限", Message: "禁止探测 GateHome 管理或内部服务端口", CheckedAt: time.Now().UTC()}
 	}
 	cacheKey := cachePrefix + raw
+	if requestHost != "" {
+		cacheKey += "|host=" + strings.ToLower(requestHost)
+	}
+	cache := &a.health
+	cache.mu.Lock()
+	if cache.results == nil {
+		cache.results = map[string]serviceHealthResult{}
+		cache.pending = map[string]*healthPending{}
+		cache.slots = make(chan struct{}, 6)
+	}
+	if result, ok := cache.results[cacheKey]; ok && time.Since(result.CheckedAt) < ttl {
+		cache.mu.Unlock()
+		return result
+	}
+	if pending := cache.pending[cacheKey]; pending != nil {
+		cache.mu.Unlock()
+		select {
+		case <-pending.done:
+			return pending.result
+		case <-ctx.Done():
+			return serviceHealthResult{State: "cancelled", Label: "已取消"}
+		}
+	}
+	pending := &healthPending{done: make(chan struct{})}
+	cache.pending[cacheKey] = pending
+	slots := cache.slots
+	cache.mu.Unlock()
+	go func() {
+		probeCtx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+		defer cancel()
+		var result serviceHealthResult
+		select {
+		case slots <- struct{}{}:
+			result = probeServiceHealthWithOptions(probeCtx, raw, requestHost, blockedPorts, localAddrs)
+			<-slots
+		case <-probeCtx.Done():
+			result = serviceHealthResult{State: "cancelled", Label: "已取消"}
+		}
+		cache.mu.Lock()
+		pending.result = result
+		if result.State != "cancelled" {
+			cache.results[cacheKey] = result
+		}
+		for key, row := range cache.results {
+			if time.Since(row.CheckedAt) > 30*time.Minute {
+				delete(cache.results, key)
+			}
+		}
+		delete(cache.pending, cacheKey)
+		close(pending.done)
+		cache.mu.Unlock()
+	}()
+	select {
+	case <-pending.done:
+		return pending.result
+	case <-ctx.Done():
+		return serviceHealthResult{State: "cancelled", Label: "已取消"}
+	}
+}
+
+func (a *Admin) cachedTCPHealth(ctx context.Context, upstream string, ttl time.Duration) serviceHealthResult {
+	cacheKey := "tcp|" + strings.TrimSpace(upstream)
 	cache := &a.health
 	cache.mu.Lock()
 	if cache.results == nil {
@@ -289,7 +459,7 @@ func (a *Admin) cachedServiceHealthWithPolicy(ctx context.Context, raw string, t
 		var result serviceHealthResult
 		select {
 		case slots <- struct{}{}:
-			result = probeServiceHealthWithBlockedPorts(probeCtx, raw, blockedPorts, localAddrs)
+			result = probeTCPHealth(probeCtx, upstream)
 			<-slots
 		case <-probeCtx.Done():
 			result = serviceHealthResult{State: "cancelled", Label: "已取消"}
@@ -316,6 +486,43 @@ func (a *Admin) cachedServiceHealthWithPolicy(ctx context.Context, raw string, t
 	}
 }
 
+func (a *Admin) forwardServiceHealth(ctx context.Context) map[string]serviceHealthResult {
+	config := a.store.Snapshot().Config
+	options := serviceHealthOptions(config)
+	results := map[string]serviceHealthResult{}
+	var mu sync.Mutex
+	var work sync.WaitGroup
+	for _, forward := range config.Forwards {
+		if !options.Enabled || !forward.Enabled {
+			mu.Lock()
+			results[forward.ID] = serviceHealthResult{State: "disabled", Label: "未检测"}
+			mu.Unlock()
+			continue
+		}
+		if strings.EqualFold(forward.Protocol, "udp") {
+			mu.Lock()
+			results[forward.ID] = serviceHealthResult{
+				State:   "udp_unsupported",
+				Label:   "UDP 不探测",
+				Message: "UDP 无连接协议不支持主动握手探测",
+			}
+			mu.Unlock()
+			continue
+		}
+		work.Add(1)
+		go func(forward PortForward) {
+			defer work.Done()
+			result := a.cachedTCPHealth(ctx, forward.Upstream, time.Duration(options.Interval)*time.Second)
+			mu.Lock()
+			results[forward.ID] = result
+			mu.Unlock()
+			a.recordForwardHealthTransition(forward, result)
+		}(forward)
+	}
+	work.Wait()
+	return results
+}
+
 func (a *Admin) routeServiceHealth(ctx context.Context) map[string]serviceHealthResult {
 	config := a.store.Snapshot().Config
 	options := serviceHealthOptions(config)
@@ -324,6 +531,18 @@ func (a *Admin) routeServiceHealth(ctx context.Context) map[string]serviceHealth
 	var work sync.WaitGroup
 	for _, route := range config.Routes {
 		group, exists := config.Group(route.GroupID)
+		if route.Enabled && exists && group.Enabled && route.Maintenance {
+			a.pauseHealthEvent("route/" + route.ID)
+			a.pauseHealthEvent(route.ID)
+			mu.Lock()
+			results[route.ID] = serviceHealthResult{
+				State:   "maintenance",
+				Label:   "维护中",
+				Message: "已开启维护模式，健康探测与故障告警已暂停",
+			}
+			mu.Unlock()
+			continue
+		}
 		if !options.Enabled || !route.Enabled || !exists || !group.Enabled {
 			mu.Lock()
 			results[route.ID] = serviceHealthResult{State: "disabled", Label: "未检测"}
@@ -333,7 +552,7 @@ func (a *Admin) routeServiceHealth(ctx context.Context) map[string]serviceHealth
 		work.Add(1)
 		go func(route Route) {
 			defer work.Done()
-			result := a.cachedServiceHealth(ctx, route.Upstream, time.Duration(options.Interval)*time.Second)
+			result := a.cachedServiceHealthForRoute(ctx, route.Upstream, route.Host, time.Duration(options.Interval)*time.Second)
 			mu.Lock()
 			results[route.ID] = result
 			mu.Unlock()
@@ -342,6 +561,18 @@ func (a *Admin) routeServiceHealth(ctx context.Context) map[string]serviceHealth
 	}
 	work.Wait()
 	return results
+}
+
+func (a *Admin) pauseHealthEvent(key string) {
+	cache := &a.health
+	cache.mu.Lock()
+	if previous, ok := cache.events[key]; ok {
+		previous.failures = 0
+		previous.firstFailedAt = time.Time{}
+		previous.down = false
+		cache.events[key] = previous
+	}
+	cache.mu.Unlock()
 }
 
 func (a *Admin) recordHealthTransition(route Route, result serviceHealthResult) {
@@ -414,9 +645,84 @@ func (a *Admin) recordHealthTransition(route Route, result serviceHealthResult) 
 	}
 }
 
+func (a *Admin) recordForwardHealthTransition(forward PortForward, result serviceHealthResult) {
+	if result.State == "cancelled" {
+		return
+	}
+	alertDelaySeconds := 0
+	if a.store != nil {
+		alertDelaySeconds = serviceHealthOptions(a.store.Snapshot().Config).AlertDelaySeconds
+	}
+	eventKey := "forward/" + forward.ID
+	cache := &a.health
+	cache.mu.Lock()
+	previous := cache.events[eventKey]
+	if !result.CheckedAt.After(previous.result.CheckedAt) {
+		cache.mu.Unlock()
+		return
+	}
+	if previous.upstream != forward.Upstream {
+		previous = healthEventState{upstream: forward.Upstream, down: previous.down}
+	}
+	previous.result = result
+	message := ""
+	alertFiringMessage := "TCP 端口转发上游连续检测失败 · " + result.Label
+	if result.Healthy {
+		if previous.down {
+			message = "TCP 端口转发上游已恢复"
+		}
+		previous.failures = 0
+		previous.firstFailedAt = time.Time{}
+		previous.down = false
+	} else {
+		previous.failures++
+		if previous.firstFailedAt.IsZero() {
+			previous.firstFailedAt = result.CheckedAt
+		}
+		reached := previous.failures >= 2
+		if alertDelaySeconds > 0 {
+			reached = result.CheckedAt.Sub(previous.firstFailedAt) >= time.Duration(alertDelaySeconds)*time.Second
+			alertFiringMessage = "TCP 端口转发上游持续不可达已满 " + formatHealthDelay(alertDelaySeconds) + " · " + result.Label
+		}
+		if reached && !previous.down {
+			previous.down = true
+			if alertDelaySeconds > 0 {
+				message = "TCP 端口转发持续不可达已满 " + formatHealthDelay(alertDelaySeconds)
+			} else {
+				message = "TCP 端口转发连续检测失败"
+			}
+		}
+	}
+	if cache.events == nil {
+		cache.events = make(map[string]healthEventState)
+	}
+	cache.events[eventKey] = previous
+	if message != "" {
+		cache.notices = append(cache.notices, healthNotice{RouteID: eventKey, Time: result.CheckedAt, Message: message + " · " + result.Label, Healthy: result.Healthy})
+		if len(cache.notices) > 60 {
+			cache.notices = append([]healthNotice{}, cache.notices[len(cache.notices)-60:]...)
+		}
+	}
+	shouldAlert := (result.Healthy || previous.down) && a.store != nil
+	cache.mu.Unlock()
+	resource := forward.Name
+	if resource == "" {
+		resource = forward.Upstream
+	} else {
+		resource += " (" + forward.Upstream + ")"
+	}
+	if shouldAlert {
+		a.observeAlert(eventKey, "upstream", resource, !result.Healthy, alertFiringMessage, "TCP 端口转发上游已恢复", result.CheckedAt)
+	}
+	if message != "" && a.logs != nil {
+		a.logs.Add(LogEntry{Category: "admin", Action: "端口转发健康", Target: forward.ID, OK: result.Healthy, DurationMS: result.DurationMS, Message: message + " · " + result.Label})
+	}
+}
+
 func (a *Admin) StartServiceHealth(ctx context.Context) {
 	go func() {
 		a.routeServiceHealth(ctx)
+		a.forwardServiceHealth(ctx)
 		a.flushHealthHistory()
 		ticker := time.NewTicker(10 * time.Second)
 		defer ticker.Stop()
@@ -428,6 +734,7 @@ func (a *Admin) StartServiceHealth(ctx context.Context) {
 			case <-ticker.C:
 				if serviceHealthOptions(a.store.Snapshot().Config).Enabled {
 					a.routeServiceHealth(ctx)
+					a.forwardServiceHealth(ctx)
 				}
 				a.flushHealthHistory()
 			}
@@ -439,10 +746,16 @@ func (a *Admin) serviceHealthRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/service-health/{id}/history", a.requireAuth(a.routeHistory))
 	mux.HandleFunc("GET /api/service-health", a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
 		routes := a.routeServiceHealth(r.Context())
+		forwards := a.forwardServiceHealth(r.Context())
 		a.health.mu.Lock()
 		notices := append([]healthNotice{}, a.health.notices...)
 		a.health.mu.Unlock()
-		jsonResponse(w, 200, map[string]any{"options": serviceHealthOptions(a.store.Snapshot().Config), "routes": routes, "notices": notices})
+		jsonResponse(w, 200, map[string]any{
+			"options":  serviceHealthOptions(a.store.Snapshot().Config),
+			"routes":   routes,
+			"forwards": forwards,
+			"notices":  notices,
+		})
 	}))
 }
 

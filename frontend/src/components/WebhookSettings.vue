@@ -258,7 +258,7 @@ const eventOptions = computed(() => {
     { id: 'backup', label: 'WebDAV 备份失败', desc: '定时或手动上传加密备份至远程目录失败时立即告警' },
     { id: 'certificate', label: '证书即将到期', desc: '正式签发证书剩余有效期不足 7 天时推送续期提醒' },
     { id: 'ddns', label: 'DDNS 同步失败', desc: '动态域名解析检查或更新失败时推送告警，恢复后通知' },
-    { id: 'mihomo', label: 'Mihomo 订阅与核心异常', desc: '代理核心异常退出、订阅自动更新失败、距到期 ≤ 3 天或剩余流量 ≤ 10% 时提醒' },
+    { id: 'mihomo', label: 'Mihomo 订阅与核心异常', desc: '代理核心异常退出、订阅自动更新失败，以及订阅到期或剩余流量触发预警阈值时提醒' },
     { id: 'security', label: '安全防护与登录冻结', desc: '反代独立账号连续验证失败触发自动冻结或管理登录触发限流时实时提醒' }
   ]
 })

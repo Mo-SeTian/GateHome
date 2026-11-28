@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -198,5 +200,103 @@ func TestMihomoAutoUpdateValidationTickRollbackAndAlerts(t *testing.T) {
 	active := a.store.Snapshot().NoticeHistory.Active
 	if active["mihomo-sub/"+subID] || active["mihomo-expire/"+subID] || active["mihomo-quota/"+subID] {
 		t.Fatalf("expected deleted subscription alert keys cleared, got %+v", active)
+	}
+}
+
+func TestMihomoCustomAlertThresholdsAndGeoDataStatus(t *testing.T) {
+	a, h := testAdmin(t)
+	cookie := loginForTest(t, h)
+	if err := a.store.changeWebhook(func(s *State) bool {
+		s.Alerts.Enabled = true
+		s.Alerts.Events = []string{"mihomo"}
+		return true
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now()
+	a.mihomo.mu.Lock()
+	a.mihomo.cfg.Subscriptions = []MihomoSubscription{{
+		ID:       "sub-custom",
+		Name:     "CustomThresholdSub",
+		Total:    1000,
+		Download: 750, // 25% remaining
+		Expire:   now.Add(10 * 24 * time.Hour).Unix(),
+	}}
+	a.mihomo.mu.Unlock()
+
+	// Default 10% / 3 days should NOT fire for 25% remaining & 10 days expiry.
+	a.mihomo.EvaluateSubscriptionAlerts(now)
+	if len(a.store.Snapshot().Alerts.Pending) != 0 {
+		t.Fatalf("expected no alerts with default thresholds, got %+v", a.store.Snapshot().Alerts.Pending)
+	}
+
+	// Invalid thresholds must be rejected with 400.
+	badRes := adminRequest(h, "PUT", "/api/mihomo/settings", map[string]any{
+		"settings": map[string]any{
+			"mixed_port": 17890, "mode": "rule", "log_level": "info", "dns_enhanced_mode": "keep",
+			"sub_warn_remaining_pct": 100,
+		},
+	}, cookie, "")
+	if badRes.Code != 400 {
+		t.Fatalf("expected 400 for invalid sub_warn_remaining_pct, got %d", badRes.Code)
+	}
+
+	// Raise custom thresholds to 30% remaining & 14 days expiry -> both fire immediately!
+	okRes := adminRequest(h, "PUT", "/api/mihomo/settings", map[string]any{
+		"settings": map[string]any{
+			"mixed_port": 17890, "mode": "rule", "log_level": "info", "dns_enhanced_mode": "keep",
+			"sub_warn_remaining_pct":    30,
+			"sub_warn_expire_days":      14,
+			"geo_auto_update_enabled":   true,
+			"geo_update_interval_hours": 72,
+		},
+	}, cookie, "")
+	if okRes.Code != 200 {
+		t.Fatalf("save custom settings failed: %d %s", okRes.Code, okRes.Body.String())
+	}
+	pending := a.store.Snapshot().Alerts.Pending
+	if len(pending) != 2 {
+		t.Fatalf("expected 2 firing alerts for custom thresholds (30%%, 14d), got %+v", pending)
+	}
+
+	// Setting both thresholds to 0 disables warnings and resolves active alerts.
+	zeroRes := adminRequest(h, "PUT", "/api/mihomo/settings", map[string]any{
+		"settings": map[string]any{
+			"mixed_port": 17890, "mode": "rule", "log_level": "info", "dns_enhanced_mode": "keep",
+			"sub_warn_remaining_pct":    0,
+			"sub_warn_expire_days":      0,
+			"geo_auto_update_enabled":   true,
+			"geo_update_interval_hours": 72,
+		},
+	}, cookie, "")
+	if zeroRes.Code != 200 {
+		t.Fatalf("save disabled thresholds failed: %d", zeroRes.Code)
+	}
+	if active := a.store.Snapshot().Alerts.Active; active["mihomo-quota/sub-custom"] || active["mihomo-expire/sub-custom"] {
+		t.Fatalf("expected disabling thresholds to resolve active alerts, got %+v", active)
+	}
+
+	// Populate GeoIP / GeoSite / MMDB files + metadata and verify geodata status snapshot & next update calculation.
+	validMMDB := make([]byte, 2048)
+	copy(validMMDB[len(validMMDB)-len(mmdbMetadataMarker)-4:], mmdbMetadataMarker)
+	if _, err := a.mihomo.installMMDBData(validMMDB); err != nil {
+		t.Fatal(err)
+	}
+	dummyDat := make([]byte, 2048)
+	if err := os.WriteFile(filepath.Join(a.mihomo.dir, "geoip.dat"), dummyDat, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(a.mihomo.dir, "geosite.dat"), dummyDat, 0600); err != nil {
+		t.Fatal(err)
+	}
+	a.mihomo.saveGeoMeta(mihomoGeoMeta{Version: "20261128", Source: "testingcf.jsdelivr.net", UpdatedAt: now})
+
+	snap := a.mihomo.statusSnapshot()
+	if !snap.GeoData.CountryMMDB.Installed || !snap.GeoData.GeoIP.Installed || !snap.GeoData.GeoSite.Installed {
+		t.Fatalf("expected all 3 geo files installed, got %+v", snap.GeoData)
+	}
+	if snap.GeoData.CountryMMDB.Version != "20261128" || snap.GeoData.IntervalHours != 72 || snap.GeoData.NextUpdateAt.IsZero() {
+		t.Fatalf("unexpected geodata metadata/schedule: %+v", snap.GeoData)
 	}
 }

@@ -49,7 +49,8 @@ type mihomoStatusResponse struct {
 	BinaryPath             string                     `json:"binary_path,omitempty"`
 	MMDBInstalled          bool                       `json:"mmdb_installed"`
 	MMDBSize               int64                      `json:"mmdb_size,omitempty"`
-	MMDBUpdatedAt          time.Time                  `json:"mmdb_updated_at,omitempty"`
+	MMDBUpdatedAt          time.Time                  `json:"mmdb_updated_at,omitzero"`
+	GeoData                mihomoGeoDataStatus        `json:"geodata"`
 	ZashboardInstalled     bool                       `json:"zashboard_installed"`
 	ZashboardVersion       string                     `json:"zashboard_version,omitempty"`
 	LANIP                  string                     `json:"lan_ip"`
@@ -107,7 +108,8 @@ func (m *mihomoManager) statusSnapshot() mihomoStatusResponse {
 		}
 	}
 	zashInstalled, zashVersion := m.zashboardStatus()
-	mmdbInstalled, mmdbSize, mmdbUpdatedAt := m.mmdbStatus()
+	geoData := m.geoDataStatus(cfgCopy)
+	mmdbInstalled, mmdbSize, mmdbUpdatedAt := geoData.CountryMMDB.Installed, geoData.CountryMMDB.Size, geoData.CountryMMDB.UpdatedAt
 	outboundURL := ""
 	takeoverActive := false
 	if running && cfgCopy.TakeoverOutbound {
@@ -137,6 +139,7 @@ func (m *mihomoManager) statusSnapshot() mihomoStatusResponse {
 		MMDBInstalled:          mmdbInstalled,
 		MMDBSize:               mmdbSize,
 		MMDBUpdatedAt:          mmdbUpdatedAt,
+		GeoData:                geoData,
 		ZashboardInstalled:     zashInstalled,
 		ZashboardVersion:       zashVersion,
 		LANIP:                  detectLANIP(),
@@ -212,6 +215,7 @@ func (a *Admin) mihomoRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/mihomo/backup", a.requireAuth(a.handleMihomoExportBackup))
 	mux.HandleFunc("POST /api/mihomo/restore", a.requireAuth(a.handleMihomoRestoreBackup))
 	mux.HandleFunc("POST /api/mihomo/geodata/download", a.requireAuth(a.handleMihomoDownloadMMDB))
+	mux.HandleFunc("POST /api/mihomo/geodata/update", a.requireAuth(a.handleMihomoUpdateGeoData))
 	mux.HandleFunc("POST /api/mihomo/geodata/upload", a.requireAuth(a.handleMihomoUploadMMDB))
 	mux.HandleFunc("POST /api/mihomo/zashboard/download", a.requireAuth(a.handleMihomoDownloadZashboard))
 	mux.HandleFunc("GET /api/mihomo/logs", a.requireAuth(a.handleMihomoLogs))
@@ -292,7 +296,19 @@ func (a *Admin) handleMihomoSettings(w http.ResponseWriter, r *http.Request) {
 		next.Settings.AuthUsername != m.cfg.Settings.AuthUsername ||
 		next.Settings.AuthPassword != m.cfg.Settings.AuthPassword
 
-	next.ManualOverride = false
+	runtimeConfigChanged := portsOrCtrlChanged ||
+		next.Enabled != m.cfg.Enabled ||
+		next.TakeoverOutbound != m.cfg.TakeoverOutbound ||
+		next.Settings.Mode != m.cfg.Settings.Mode ||
+		next.Settings.LogLevel != m.cfg.Settings.LogLevel ||
+		next.Settings.IPv6 != m.cfg.Settings.IPv6 ||
+		next.Settings.UnifiedDelay != m.cfg.Settings.UnifiedDelay ||
+		next.Settings.TCPConcurrent != m.cfg.Settings.TCPConcurrent ||
+		next.Settings.DNSEnhancedMode != m.cfg.Settings.DNSEnhancedMode
+
+	if runtimeConfigChanged {
+		next.ManualOverride = false
+	}
 	prev := m.cfg
 	m.cfg = next
 	if err := saveMihomoConfig(m.dir, m.cfg); err != nil {
@@ -301,15 +317,17 @@ func (a *Admin) handleMihomoSettings(w http.ResponseWriter, r *http.Request) {
 		apiError(w, 500, "保存配置失败: "+err.Error())
 		return
 	}
-	if err := m.synthesizeAndWriteLocked(); err != nil {
-		m.mu.Unlock()
-		apiError(w, 500, "生成 runtime.yaml 失败: "+err.Error())
-		return
+	if runtimeConfigChanged {
+		if err := m.synthesizeAndWriteLocked(); err != nil {
+			m.mu.Unlock()
+			apiError(w, 500, "生成 runtime.yaml 失败: "+err.Error())
+			return
+		}
 	}
 	running := m.running
 	m.mu.Unlock()
 
-	if running {
+	if running && runtimeConfigChanged {
 		var applyErr error
 		if portsOrCtrlChanged {
 			applyErr = m.Restart()
@@ -321,6 +339,7 @@ func (a *Admin) handleMihomoSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	m.EvaluateSubscriptionAlerts(time.Now())
 	jsonResponse(w, 200, m.statusSnapshot())
 }
 
@@ -1527,6 +1546,34 @@ func (a *Admin) handleMihomoDownloadMMDB(w http.ResponseWriter, r *http.Request)
 		"size":   size,
 		"source": source,
 		"status": a.mihomo.statusSnapshot(),
+	})
+}
+
+func (a *Admin) handleMihomoUpdateGeoData(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
+	defer cancel()
+	started := time.Now()
+	geo, err := a.mihomo.UpdateAllGeoData(ctx, a.store.Snapshot())
+	if err != nil {
+		if a.logs != nil {
+			a.logs.Add(LogEntry{Category: "admin", Action: "Mihomo Geo 更新", OK: false, DurationMS: time.Since(started).Milliseconds(), Message: err.Error()})
+		}
+		apiError(w, 502, "Geo 规则库更新失败: "+err.Error())
+		return
+	}
+	a.mihomo.mu.Lock()
+	running := a.mihomo.running
+	a.mihomo.mu.Unlock()
+	if running {
+		_ = a.mihomo.Reload()
+	}
+	if a.logs != nil {
+		a.logs.Add(LogEntry{Category: "admin", Action: "Mihomo Geo 更新", OK: true, DurationMS: time.Since(started).Milliseconds(), Message: "GeoIP / GeoSite 规则库已更新 (" + geo.CountryMMDB.Version + ")"})
+	}
+	jsonResponse(w, 200, map[string]any{
+		"ok":      true,
+		"geodata": geo,
+		"status":  a.mihomo.statusSnapshot(),
 	})
 }
 

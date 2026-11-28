@@ -406,3 +406,78 @@ func parseTrustedProxiesOrEmpty(t *testing.T, raw []string) []netip.Prefix {
 	}
 	return parsed
 }
+
+func TestProxyRouteMaintenanceMode(t *testing.T) {
+	var upstreamHits int
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamHits++
+		w.WriteHeader(200)
+	}))
+	defer upstream.Close()
+
+	denyFirewall := Firewall{
+		ID: "fw-deny", Name: "DenyAll", DefaultAction: "deny",
+		Groups: []FirewallGroup{{Name: "allow-test", Match: "include", Action: "allow", CIDRs: []string{"203.0.113.0/24"}}},
+	}
+	route := Route{
+		ID:                 "maint-1",
+		GroupID:            "default",
+		Name:               "Nextcloud <云盘>",
+		Host:               "cloud.example.test",
+		Upstream:           upstream.URL,
+		Enabled:            true,
+		FirewallID:         "fw-deny",
+		Maintenance:        true,
+		MaintenanceMessage: "正在升级数据库 <script>alert(1)</script>",
+	}
+	p := NewProxy(Config{
+		Groups:    []ProxyGroup{{ID: "default", Name: "Default", Enabled: true, HTTPPort: 80}},
+		Firewalls: []Firewall{denyFirewall},
+		Routes:    []Route{route},
+	}, nil)
+
+	// 1. Firewall still rejects disallowed source IP before revealing maintenance page.
+	deniedReq := httptest.NewRequest("GET", "http://cloud.example.test/", nil)
+	deniedReq.Host = "cloud.example.test"
+	deniedReq.RemoteAddr = "198.51.100.10:1234"
+	deniedRec := httptest.NewRecorder()
+	p.ServeHTTP(deniedRec, deniedReq)
+	if deniedRec.Code != http.StatusForbidden || upstreamHits != 0 {
+		t.Fatalf("expected firewall 403 before maintenance, got code=%d hits=%d", deniedRec.Code, upstreamHits)
+	}
+
+	// 2. Allowed source gets 503 HTML maintenance page with escaped content and never hits upstream.
+	htmlReq := httptest.NewRequest("GET", "http://cloud.example.test/", nil)
+	htmlReq.Host = "cloud.example.test"
+	htmlReq.RemoteAddr = "203.0.113.5:1234"
+	htmlReq.Header.Set("Accept", "text/html")
+	htmlRec := httptest.NewRecorder()
+	p.ServeHTTP(htmlRec, htmlReq)
+	body := htmlRec.Body.String()
+	if htmlRec.Code != http.StatusServiceUnavailable || htmlRec.Header().Get("Retry-After") != "60" ||
+		!strings.Contains(body, "503 · 服务维护中") || !strings.Contains(body, "&lt;script&gt;alert(1)&lt;/script&gt;") ||
+		strings.Contains(body, "<script>alert(1)") || upstreamHits != 0 {
+		t.Fatalf("unexpected maintenance HTML response: code=%d body=%s hits=%d", htmlRec.Code, body, upstreamHits)
+	}
+
+	// 3. JSON client receives 503 structured JSON payload.
+	jsonReq := httptest.NewRequest("GET", "http://cloud.example.test/api/ping", nil)
+	jsonReq.Host = "cloud.example.test"
+	jsonReq.RemoteAddr = "203.0.113.5:1234"
+	jsonReq.Header.Set("Accept", "application/json")
+	jsonRec := httptest.NewRecorder()
+	p.ServeHTTP(jsonRec, jsonReq)
+	if jsonRec.Code != http.StatusServiceUnavailable || !strings.Contains(jsonRec.Body.String(), `"maintenance":true`) || upstreamHits != 0 {
+		t.Fatalf("unexpected maintenance JSON response: code=%d body=%s", jsonRec.Code, jsonRec.Body.String())
+	}
+
+	// 4. HEAD request returns 503 with empty body.
+	headReq := httptest.NewRequest("HEAD", "http://cloud.example.test/", nil)
+	headReq.Host = "cloud.example.test"
+	headReq.RemoteAddr = "203.0.113.5:1234"
+	headRec := httptest.NewRecorder()
+	p.ServeHTTP(headRec, headReq)
+	if headRec.Code != http.StatusServiceUnavailable || headRec.Body.Len() != 0 {
+		t.Fatalf("unexpected HEAD maintenance response: code=%d bodyLen=%d", headRec.Code, headRec.Body.Len())
+	}
+}
