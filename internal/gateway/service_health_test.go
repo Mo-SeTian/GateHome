@@ -156,6 +156,84 @@ func TestServiceHealthNotificationsAreDeduplicated(t *testing.T) {
 	}
 }
 
+func TestServiceHealthCustomAlertDelay(t *testing.T) {
+	a, _ := testAdmin(t)
+	snap := a.store.Snapshot()
+	for _, invalid := range []int{-1, 15, 29, 86401} {
+		cfg := snap.Config
+		cfg.ServiceHealth = ServiceHealthConfig{Enabled: true, Interval: 60, AlertDelaySeconds: invalid}
+		if Validate(cfg) == nil {
+			t.Fatalf("expected validation error for alert_delay_seconds=%d", invalid)
+		}
+	}
+	for _, valid := range []int{0, 30, 300, 86400} {
+		cfg := snap.Config
+		cfg.ServiceHealth = ServiceHealthConfig{Enabled: true, Interval: 60, AlertDelaySeconds: valid}
+		if err := Validate(cfg); err != nil {
+			t.Fatalf("expected valid config for alert_delay_seconds=%d: %v", valid, err)
+		}
+	}
+
+	cfg := snap.Config
+	cfg.ServiceHealth = ServiceHealthConfig{Enabled: true, Interval: 60, AlertDelaySeconds: 300}
+	if err := a.store.Update(cfg, nil, snap.Revision); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.store.changeWebhook(func(s *State) bool {
+		s.Alerts.Enabled = true
+		s.Alerts.Events = []string{"upstream"}
+		return true
+	}); err != nil {
+		t.Fatal(err)
+	}
+	route := Route{ID: "delay-route", Host: "delay.example.test", Upstream: "http://127.0.0.1/"}
+	t0 := time.Now().UTC()
+	failAt := func(offset time.Duration) {
+		a.recordHealthTransition(route, serviceHealthResult{
+			State: "timeout", Label: "响应超时", CheckedAt: t0.Add(offset),
+		})
+	}
+	passAt := func(offset time.Duration) {
+		a.recordHealthTransition(route, serviceHealthResult{
+			State: "healthy", Healthy: true, CheckedAt: t0.Add(offset),
+		})
+	}
+
+	failAt(0)
+	failAt(60 * time.Second)
+	failAt(120 * time.Second)
+	failAt(240 * time.Second)
+	if a.health.events[route.ID].down || len(a.health.notices) != 0 || len(a.store.Snapshot().Alerts.Pending) != 0 {
+		t.Fatal("failures shorter than custom delay triggered early alert")
+	}
+
+	// Recovery before reaching delay resets failure window cleanly.
+	passAt(260 * time.Second)
+	if !a.health.events[route.ID].firstFailedAt.IsZero() || a.health.events[route.ID].failures != 0 || len(a.health.notices) != 0 {
+		t.Fatal("healthy probe did not reset failure timer")
+	}
+
+	failAt(300 * time.Second)
+	failAt(540 * time.Second)
+	if a.health.events[route.ID].down || len(a.health.notices) != 0 {
+		t.Fatal("240s since new failure series should not trigger 300s delay alert")
+	}
+
+	failAt(600 * time.Second)
+	if !a.health.events[route.ID].down || len(a.health.notices) != 1 || !strings.Contains(a.health.notices[0].Message, "5 分钟") {
+		t.Fatalf("expected outage notice after 300s continuous failures, got down=%v notices=%+v", a.health.events[route.ID].down, a.health.notices)
+	}
+	alerts := a.store.Snapshot().Alerts
+	if !alerts.Active["route/"+route.ID] || len(alerts.Pending) != 1 || alerts.Pending[0].Type != "upstream" {
+		t.Fatalf("expected active upstream alert, got active=%v pending=%+v", alerts.Active, alerts.Pending)
+	}
+
+	passAt(660 * time.Second)
+	if a.health.events[route.ID].down || !a.health.events[route.ID].firstFailedAt.IsZero() || len(a.health.notices) != 2 || !a.health.notices[1].Healthy {
+		t.Fatalf("expected clean recovery after custom delay outage, got notices=%+v", a.health.notices)
+	}
+}
+
 func TestPanelHealthRequiresLoginAndSavedOwnedIDs(t *testing.T) {
 	var targetCalls atomic.Int32
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { targetCalls.Add(1); w.WriteHeader(200) }))

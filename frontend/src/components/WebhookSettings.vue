@@ -120,7 +120,16 @@
             :disabled="busy"
           />
           <div class="event-copy">
-            <label :for="'alert-event-' + channel + '-' + option.id">{{ option.label }}</label>
+            <div class="event-title-row">
+              <label :for="'alert-event-' + channel + '-' + option.id">{{ option.label }}</label>
+              <router-link
+                v-if="option.id === 'upstream'"
+                to="/routes?health=:settings"
+                class="event-config-link"
+              >
+                设置通知延迟 →
+              </router-link>
+            </div>
             <span>{{ option.desc }}</span>
           </div>
         </div>
@@ -153,10 +162,31 @@
 import { computed, onMounted, onBeforeUnmount, ref } from 'vue'
 import SecretInput from './SecretInput.vue'
 import { adminApi } from '@/api/admin'
+import { useGatewayStatus } from '@/composables/useGatewayStatus'
 
 const props = defineProps({ channel: { type: String, default: 'webhook' } })
 const emit = defineEmits(['loaded'])
 const wx = props.channel === 'wxpusher'
+const { gatewayConfig, refreshConfig } = useGatewayStatus()
+
+function formatAlertDelay(seconds) {
+  const s = Math.max(0, Math.floor(Number(seconds) || 0))
+  if (s >= 3600) {
+    const hours = Math.floor(s / 3600)
+    const mins = Math.floor((s % 3600) / 60)
+    const rem = s % 60
+    let text = `${hours} 小时`
+    if (mins > 0) text += ` ${mins} 分钟`
+    if (rem > 0) text += ` ${rem} 秒`
+    return text
+  }
+  if (s >= 60) {
+    const mins = Math.floor(s / 60)
+    const rem = s % 60
+    return rem === 0 ? `${mins} 分钟` : `${mins} 分 ${rem} 秒`
+  }
+  return `${s} 秒`
+}
 
 const webhookFormats = [
   {
@@ -218,14 +248,20 @@ const webhookFormats = [
   }
 ]
 
-const eventOptions = [
-  { id: 'upstream', label: '反代上游连续失败', desc: '连续 2 次健康探测超时或失败时推送一次，恢复后再通知' },
-  { id: 'backup', label: 'WebDAV 备份失败', desc: '定时或手动上传加密备份至远程目录失败时立即告警' },
-  { id: 'certificate', label: '证书即将到期', desc: '正式签发证书剩余有效期不足 7 天时推送续期提醒' },
-  { id: 'ddns', label: 'DDNS 同步失败', desc: '动态域名解析检查或更新失败时推送告警，恢复后通知' },
-  { id: 'mihomo', label: 'Mihomo 订阅与核心异常', desc: '代理核心异常退出、订阅自动更新失败、距到期 ≤ 3 天或剩余流量 ≤ 10% 时提醒' },
-  { id: 'security', label: '安全防护与登录冻结', desc: '反代独立账号连续验证失败触发自动冻结或管理登录触发限流时实时提醒' }
-]
+const eventOptions = computed(() => {
+  const delay = Number(gatewayConfig.value?.service_health?.alert_delay_seconds) || 0
+  const upstreamDesc = delay >= 30
+    ? `反代上游持续不可达满 ${formatAlertDelay(delay)}（${delay} 秒）后推送一次，恢复后再通知`
+    : '连续 2 次健康探测超时或失败时推送一次，恢复后再通知'
+  return [
+    { id: 'upstream', label: '反代上游连续失败', desc: upstreamDesc },
+    { id: 'backup', label: 'WebDAV 备份失败', desc: '定时或手动上传加密备份至远程目录失败时立即告警' },
+    { id: 'certificate', label: '证书即将到期', desc: '正式签发证书剩余有效期不足 7 天时推送续期提醒' },
+    { id: 'ddns', label: 'DDNS 同步失败', desc: '动态域名解析检查或更新失败时推送告警，恢复后通知' },
+    { id: 'mihomo', label: 'Mihomo 订阅与核心异常', desc: '代理核心异常退出、订阅自动更新失败、距到期 ≤ 3 天或剩余流量 ≤ 10% 时提醒' },
+    { id: 'security', label: '安全防护与登录冻结', desc: '反代独立账号连续验证失败触发自动冻结或管理登录触发限流时实时提醒' }
+  ]
+})
 
 const webhookSample = `{
   "id": "evt_01J...",
@@ -269,7 +305,7 @@ const canTest = computed(() => {
 })
 
 function onCardClick(id, event) {
-  if (busy.value || event.target.closest('input, label')) return
+  if (busy.value || event.target.closest('input, label, a, button')) return
   const index = events.value.indexOf(id)
   if (index >= 0) events.value = events.value.filter(item => item !== id)
   else events.value = [...events.value, id]
@@ -332,7 +368,10 @@ function test() {
   })
 }
 
-onMounted(load)
+onMounted(() => {
+  load()
+  if (!gatewayConfig.value) refreshConfig(controller.signal).catch(() => {})
+})
 onBeforeUnmount(() => controller.abort())
 </script>
 
@@ -365,6 +404,9 @@ onBeforeUnmount(() => controller.abort())
 .event-option.disabled { opacity: 0.6; cursor: not-allowed; }
 .event-option input { margin-top: 2px !important; }
 .event-copy { display: grid; gap: 2px; min-width: 0; flex: 1; }
+.event-title-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px; }
+.event-config-link { font-size: 12px; color: var(--brand); text-decoration: none; font-weight: 500; white-space: nowrap; }
+.event-config-link:hover { text-decoration: underline; }
 .event-copy label { font-size: 13px; font-weight: 600; color: var(--ink); cursor: pointer; overflow-wrap: anywhere; }
 .event-copy span { font-size: 12px; color: var(--muted); line-height: 1.45; overflow-wrap: anywhere; }
 

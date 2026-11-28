@@ -452,6 +452,47 @@
             class="form-input"
             required
         /></label>
+        <div class="form-group">
+          <span>反代不通通知延迟（秒）</span>
+          <div class="delay-presets" role="group" aria-label="通知延迟快捷选项">
+            <button
+              v-for="preset in alertDelayPresets"
+              :key="preset.value"
+              type="button"
+              class="delay-preset-btn"
+              :class="{ active: Number(healthDraft.alert_delay_seconds || 0) === preset.value }"
+              @click="healthDraft.alert_delay_seconds = preset.value"
+            >
+              {{ preset.label }}
+            </button>
+          </div>
+          <input
+            v-model.number="healthDraft.alert_delay_seconds"
+            name="alert_delay_seconds"
+            type="number"
+            min="0"
+            max="86400"
+            step="1"
+            class="form-input"
+          />
+          <p class="form-note">
+            <template v-if="!(Number(healthDraft.alert_delay_seconds) > 0)">
+              默认规则：连续 2 次健康探测失败后触发通知（约 1–2 个检查周期），恢复后再通知。
+            </template>
+            <template v-else-if="Number(healthDraft.alert_delay_seconds) < 30">
+              请输入 0（默认规则）或 30–86400 之间的秒数。
+            </template>
+            <template v-else>
+              持续不通满 {{ formatAlertDelay(Number(healthDraft.alert_delay_seconds)) }}（{{ Number(healthDraft.alert_delay_seconds) }} 秒）后的下一次探测触发通知；期间恢复自动重置计时。
+            </template>
+          </p>
+          <p
+            v-if="Number(healthDraft.alert_delay_seconds) >= 30 && Number(healthDraft.interval) > Number(healthDraft.alert_delay_seconds)"
+            class="form-note delay-warn-note"
+          >
+            当前检查间隔为 {{ healthDraft.interval }} 秒，实际触发不会早于下一次探测。
+          </p>
+        </div>
         <div class="modal-footer">
           <button
             type="button"
@@ -901,18 +942,57 @@ function showHealth(route) {
   healthDetail.value = health.value?.routes?.[route.id] ?? null
   healthDetailDialog.value.showModal()
 }
+const alertDelayPresets = [
+  { label: '默认 (连续 2 次)', value: 0 },
+  { label: '2 分钟', value: 120 },
+  { label: '5 分钟', value: 300 },
+  { label: '10 分钟', value: 600 },
+  { label: '30 分钟', value: 1800 }
+]
+function formatAlertDelay(seconds) {
+  const s = Math.max(0, Math.floor(Number(seconds) || 0))
+  if (s >= 3600) {
+    const hours = Math.floor(s / 3600)
+    const mins = Math.floor((s % 3600) / 60)
+    const rem = s % 60
+    let text = `${hours} 小时`
+    if (mins > 0) text += ` ${mins} 分钟`
+    if (rem > 0) text += ` ${rem} 秒`
+    return text
+  }
+  if (s >= 60) {
+    const mins = Math.floor(s / 60)
+    const rem = s % 60
+    return rem === 0 ? `${mins} 分钟` : `${mins} 分 ${rem} 秒`
+  }
+  return `${s} 秒`
+}
 function openHealthSettings() {
   beginEdit()
-  healthDraft.value = { ...editSnapshot.value.config.service_health }
-  if (!healthDraft.value.interval) healthDraft.value = { enabled: true, interval: 60 }
+  const current = editSnapshot.value.config.service_health || {}
+  healthDraft.value = {
+    enabled: current.interval ? !!current.enabled : true,
+    interval: current.interval || 60,
+    alert_delay_seconds: Number(current.alert_delay_seconds) || 0
+  }
   healthDialog.value.showModal()
 }
 async function saveHealthSettings() {
   if (isSavingConfig.value) return
+  const delay = Number(healthDraft.value.alert_delay_seconds) || 0
+  if (delay !== 0 && (delay < 30 || delay > 86400 || !Number.isInteger(delay))) {
+    formError.value = '反代故障通知延迟需为 0（默认连续 2 次失败）或 30–86400 秒'
+    return
+  }
+  formError.value = ''
   try {
     await saveConfig(editSnapshot.value, {
       ...editSnapshot.value.config,
-      service_health: { ...healthDraft.value }
+      service_health: {
+        enabled: !!healthDraft.value.enabled,
+        interval: Number(healthDraft.value.interval),
+        alert_delay_seconds: delay
+      }
     })
     healthDialog.value.close()
     await saved('健康检查设置已保存')
@@ -1266,6 +1346,26 @@ onUnmounted(() => {
 .toggle-title { font-size: 12.5px; font-weight: 600; color: var(--ink); }
 .toggle-desc { font-size: 11px; color: var(--faint); }
 .auth-sub-fields { padding: 8px 0; border-top: 1px dashed var(--line); margin-top: 4px; }
+.delay-presets { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.delay-preset-btn {
+  padding: 5px 10px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--line);
+  background: var(--strip-bg);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: var(--transition-smooth);
+}
+.delay-preset-btn:hover { color: var(--ink); border-color: var(--card-border-hover); }
+.delay-preset-btn.active {
+  background: rgba(99, 102, 241, 0.14);
+  border-color: var(--brand);
+  color: var(--brand);
+  font-weight: 600;
+}
+.delay-warn-note { color: var(--warn); margin-top: 4px; }
 
 @media (max-width: 640px) {
   .route-group-header { flex-wrap: wrap; padding: 10px 12px; }

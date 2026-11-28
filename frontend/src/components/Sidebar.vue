@@ -49,26 +49,6 @@
           </div>
         </div>
       </nav>
-
-      <!-- Sidebar Footer Status Card -->
-      <div class="sidebar-footer">
-        <div class="status-card">
-          <div class="status-top">
-            <span class="status-indicator">
-              <span class="status-dot" :class="gatewayState.tone === 'pending' ? 'neutral' : gatewayState.tone" />
-              {{ gatewayState.label }}
-            </span>
-            <span class="uptime-text" title="网关运行时长">{{ uptime }}</span>
-          </div>
-          <div class="status-details">
-            <span class="admin-addr" :title="`管理入口 ${adminAddress}`">入口 {{ adminAddress }}</span>
-            <button type="button" class="login-link-btn" :disabled="isLoggingOut" @click="handleLogout" title="退出当前登录">
-              <LogOut :size="12" class="logout-mini-icon" />
-              <span>退出登录</span>
-            </button>
-          </div>
-        </div>
-      </div>
     </aside>
   </div>
 </template>
@@ -80,11 +60,10 @@ import { useRoute } from 'vue-router'
 import { 
   House, GitFork, X, ChevronDown, Sparkles, Cable, LayoutDashboard, Network, ArrowLeftRight, Compass, Images,
   Globe, Lock, Download, ShieldAlert, FileSearch, ScrollText, Ban,
-  Bell, BarChart3, Activity, Bot, RefreshCw, HardDriveDownload, Settings, LogOut
+  Bell, BarChart3, Activity, Bot, RefreshCw, HardDriveDownload, Settings
 } from 'lucide-vue-next'
 import { useAppStore } from '@/composables/useAppStore'
 import { useGatewayStatus } from '@/composables/useGatewayStatus'
-import { useLogout, useSession } from '@/composables/useSession'
 
 const route = useRoute()
 const groups = [
@@ -174,28 +153,10 @@ function dismissSidebar() {
   closeSidebar()
   document.getElementById('mobile-nav-toggle')?.focus()
 }
-const { gatewayStatus, gatewayVersion, gatewayState } = useGatewayStatus()
-const { isLoggingOut } = useSession()
-const logout = useLogout()
-const adminAddress = window.location.host
+const { gatewayStatus, gatewayVersion } = useGatewayStatus()
 const certificatesExpiring = computed(() => (gatewayStatus.value?.certificates ?? []).filter(cert =>
   cert.ready && Date.parse(cert.not_after) <= Date.now() + 30 * 86400000
 ).length)
-const uptime = computed(() => {
-  const seconds = gatewayStatus.value?.uptime_seconds
-  if (seconds == null) return '—'
-  const days = Math.floor(seconds / 86400)
-  const hours = Math.floor(seconds / 3600) % 24
-  const minutes = Math.floor(seconds / 60) % 60
-  if (days) return `${days}天 ${hours}小时`
-  if (hours) return `${hours}小时 ${minutes}分`
-  return minutes ? `${minutes}分` : `${seconds}秒`
-})
-
-const handleLogout = () => {
-  closeSidebar()
-  return logout()
-}
 </script>
 
 <style scoped>
@@ -366,92 +327,6 @@ const handleLogout = () => {
   flex-shrink: 0;
 }
 
-.sidebar-footer {
-  padding: 12px;
-  border-top: 1px solid var(--line);
-  flex-shrink: 0;
-}
-
-.status-card {
-  background: var(--strip-bg);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  padding: 10px 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  box-sizing: border-box;
-}
-
-.status-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.status-indicator {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-weight: 600;
-  font-size: 11.5px;
-  color: var(--ok);
-}
-
-.uptime-text {
-  color: var(--faint);
-  font-family: var(--mono);
-  font-size: 11px;
-}
-
-.status-details {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  color: var(--faint);
-  font-size: 11px;
-}
-
-.admin-addr {
-  flex: 1;
-  min-width: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-family: var(--mono);
-}
-
-.login-link-btn {
-  flex-shrink: 0 !important;
-  white-space: nowrap !important;
-  word-break: keep-all !important;
-  background: transparent;
-  border: none;
-  padding: 2px 6px;
-  border-radius: var(--radius-sm);
-  font-size: 11px;
-  color: var(--brand-light);
-  cursor: pointer;
-  transition: var(--transition-smooth);
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-}
-.login-link-btn:hover {
-  background: rgba(99, 102, 241, 0.12);
-  color: var(--ink);
-}
-.logout-mini-icon {
-  flex-shrink: 0;
-  opacity: 0.85;
-}
-
-.theme-light .login-link-btn,
-.theme-light .status-indicator {
-  color: var(--ink-secondary);
-}
-
 /* ================= Mobile Breakpoints ================= */
 @media (max-width: 1023px) {
   .mobile-backdrop {
@@ -484,9 +359,6 @@ const handleLogout = () => {
     background: rgba(148, 163, 184, 0.12);
   }
   .nav-link, .nav-section-title {
-    min-height: 44px;
-  }
-  .login-link-btn {
     min-height: 44px;
   }
 }

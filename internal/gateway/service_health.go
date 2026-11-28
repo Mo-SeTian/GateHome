@@ -18,15 +18,46 @@ import (
 )
 
 type ServiceHealthConfig struct {
-	Enabled  bool `json:"enabled"`
-	Interval int  `json:"interval"`
+	Enabled           bool `json:"enabled"`
+	Interval          int  `json:"interval"`
+	AlertDelaySeconds int  `json:"alert_delay_seconds,omitempty"`
 }
 
 func serviceHealthOptions(c Config) ServiceHealthConfig {
-	if c.ServiceHealth.Interval == 0 {
-		return ServiceHealthConfig{Enabled: true, Interval: 60}
+	options := c.ServiceHealth
+	if options.Interval == 0 {
+		options.Enabled = true
+		options.Interval = 60
 	}
-	return c.ServiceHealth
+	return options
+}
+
+func formatHealthDelay(seconds int) string {
+	if seconds <= 0 {
+		return "0 秒"
+	}
+	if seconds >= 3600 {
+		hours := seconds / 3600
+		mins := (seconds % 3600) / 60
+		secs := seconds % 60
+		out := strconv.Itoa(hours) + " 小时"
+		if mins > 0 {
+			out += " " + strconv.Itoa(mins) + " 分钟"
+		}
+		if secs > 0 {
+			out += " " + strconv.Itoa(secs) + " 秒"
+		}
+		return out
+	}
+	if seconds >= 60 {
+		mins := seconds / 60
+		secs := seconds % 60
+		if secs == 0 {
+			return strconv.Itoa(mins) + " 分钟"
+		}
+		return strconv.Itoa(mins) + " 分 " + strconv.Itoa(secs) + " 秒"
+	}
+	return strconv.Itoa(seconds) + " 秒"
 }
 
 type serviceHealthResult struct {
@@ -54,10 +85,11 @@ type healthPending struct {
 	result serviceHealthResult
 }
 type healthEventState struct {
-	upstream string
-	result   serviceHealthResult
-	failures int
-	down     bool
+	upstream      string
+	result        serviceHealthResult
+	failures      int
+	firstFailedAt time.Time
+	down          bool
 }
 type serviceHealthCache struct {
 	mu           sync.Mutex
@@ -316,6 +348,10 @@ func (a *Admin) recordHealthTransition(route Route, result serviceHealthResult) 
 	if result.State == "cancelled" {
 		return
 	}
+	alertDelaySeconds := 0
+	if a.store != nil {
+		alertDelaySeconds = serviceHealthOptions(a.store.Snapshot().Config).AlertDelaySeconds
+	}
 	cache := &a.health
 	cache.mu.Lock()
 	previous := cache.events[route.ID]
@@ -330,17 +366,31 @@ func (a *Admin) recordHealthTransition(route Route, result serviceHealthResult) 
 	previous.result = result
 	a.recordHealthSample(route, result)
 	message := ""
+	alertFiringMessage := "反代上游连续检测失败 · " + result.Label
 	if result.Healthy {
 		if previous.down {
 			message = "服务已恢复"
 		}
 		previous.failures = 0
+		previous.firstFailedAt = time.Time{}
 		previous.down = false
 	} else {
 		previous.failures++
-		if previous.failures >= 2 && !previous.down {
+		if previous.firstFailedAt.IsZero() {
+			previous.firstFailedAt = result.CheckedAt
+		}
+		reached := previous.failures >= 2
+		if alertDelaySeconds > 0 {
+			reached = result.CheckedAt.Sub(previous.firstFailedAt) >= time.Duration(alertDelaySeconds)*time.Second
+			alertFiringMessage = "反代上游持续不可达已满 " + formatHealthDelay(alertDelaySeconds) + " · " + result.Label
+		}
+		if reached && !previous.down {
 			previous.down = true
-			message = "服务连续检测失败"
+			if alertDelaySeconds > 0 {
+				message = "服务持续不可达已满 " + formatHealthDelay(alertDelaySeconds)
+			} else {
+				message = "服务连续检测失败"
+			}
 		}
 	}
 	if cache.events == nil {
@@ -357,7 +407,7 @@ func (a *Admin) recordHealthTransition(route Route, result serviceHealthResult) 
 	shouldAlert := (result.Healthy || previous.down) && a.store != nil
 	cache.mu.Unlock()
 	if shouldAlert {
-		a.observeAlert("route/"+route.ID, "upstream", route.Host, !result.Healthy, "反代上游连续检测失败 · "+result.Label, "反代上游已恢复", result.CheckedAt)
+		a.observeAlert("route/"+route.ID, "upstream", route.Host, !result.Healthy, alertFiringMessage, "反代上游已恢复", result.CheckedAt)
 	}
 	if message != "" && a.logs != nil {
 		a.logs.Add(LogEntry{Category: "admin", Action: "服务健康", Target: route.ID, OK: result.Healthy, DurationMS: result.DurationMS, Message: message + " · " + result.Label})

@@ -807,6 +807,9 @@ func Validate(c Config) error {
 	if c.ServiceHealth.Interval != 0 && (c.ServiceHealth.Interval < 30 || c.ServiceHealth.Interval > 86400) {
 		return errors.New("健康检查间隔需为 30–86400 秒")
 	}
+	if c.ServiceHealth.AlertDelaySeconds != 0 && (c.ServiceHealth.AlertDelaySeconds < 30 || c.ServiceHealth.AlertDelaySeconds > 86400) {
+		return errors.New("反代故障通知延迟需为 0（默认连续 2 次失败）或 30–86400 秒")
+	}
 	if err := validateSunPanelListener(c.SunPanel, c.Groups); err != nil {
 		return err
 	}

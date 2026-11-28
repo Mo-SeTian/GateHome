@@ -244,7 +244,11 @@ async function apply(message) {
     }
     const config = { ...snapshot.config }
     if (change.field === 'health_interval') {
-      config.service_health = { enabled: config.service_health?.interval ? config.service_health.enabled : true, interval: Number(change.after) }
+      config.service_health = {
+        ...config.service_health,
+        enabled: config.service_health?.interval ? config.service_health.enabled : true,
+        interval: Number(change.after)
+      }
     } else if (change.field === 'upstream' && config.routes.some(route => route.id === change.id && route.upstream === change.before)) {
       config.routes = config.routes.map(route => route.id === change.id ? { ...route, upstream: change.after } : route)
     } else {
