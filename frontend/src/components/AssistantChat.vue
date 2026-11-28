@@ -1,9 +1,9 @@
 <template>
-  <section class="assistant-chat" :class="{ 'assistant-full': full }" aria-label="网关助手对话">
+  <section class="assistant-chat" :class="{ 'assistant-full': full, 'assistant-embedded': full && embedded }" aria-label="网关助手对话">
     <header class="assistant-header">
       <div class="assistant-heading">
         <Sparkles :size="20" class="assistant-mark" aria-hidden="true" />
-        <h1 v-if="full">网关助手</h1>
+        <h1 v-if="full && !embedded">网关助手</h1>
         <h2 v-else>网关助手</h2>
         <div class="assistant-actions">
           <RouterLink v-if="!full" to="/assistant" class="icon-action-btn" aria-label="打开独立页面" title="打开独立页面"><Maximize2 :size="16" /></RouterLink>
@@ -113,7 +113,7 @@ import MarkdownIt from 'markdown-it'
 import { ArrowUp, Check, ExternalLink, History, Maximize2, Settings2, Sparkles, Square, SquarePen, Trash2, X } from 'lucide-vue-next'
 import { useAssistant } from '@/composables/useAssistant'
 
-const props = defineProps({ full: Boolean })
+const props = defineProps({ full: Boolean, embedded: Boolean })
 const route = useRoute()
 const { panelOpen, draft, messages, settings, providers, provider, model, effortChoice, conversations, conversation,
   sending, applying, error, loadSettings, send, stopGeneration, apply, cancelChange, clearConversation,
@@ -235,8 +235,9 @@ onMounted(() => {
 #assistant-effort-select { flex: none; width: auto !important; min-width: 108px; max-width: 132px; padding: 0 26px 0 8px; text-overflow: ellipsis; }
 .composer-actions button { margin-left: auto; }
 .assistant-full { border: 1px solid var(--line); border-radius: var(--radius-card); overflow: hidden; min-height: 490px; height: calc(100dvh - var(--topbar-h) - 48px); }
+.assistant-full.assistant-embedded { min-height: 460px; height: calc(100dvh - var(--topbar-h) - 188px); }
 .assistant-full .assistant-timeline, .assistant-full .assistant-footer { width: min(100%, 820px); margin-inline: auto; }
-.assistant-full .assistant-heading h1 { font-size: 23px; }
+.assistant-full .assistant-heading h1, .assistant-full.assistant-embedded .assistant-heading h2 { font-size: 20px; }
 .assistant-message.assistant { background: var(--card-bg); border: 1px solid var(--line); border-radius: 4px 14px 14px; padding: 13px 15px; }
 .assistant-markdown { line-height: 1.65; font-size: 14px; overflow-x: auto; }
 .assistant-markdown :deep(> :first-child) { margin-top: 0; }
@@ -288,6 +289,7 @@ onMounted(() => {
   .assistant-suggestions { flex-wrap: nowrap; overflow: auto; scrollbar-width: thin; }
   .assistant-suggestions .btn { flex: none; }
   .assistant-full { min-height: 0; height: calc(100dvh - var(--topbar-h) - 32px); }
+  .assistant-full.assistant-embedded { min-height: 420px; height: calc(100dvh - var(--topbar-h) - 196px); }
 }
 @media (max-width: 400px) {
   .assistant-suggestions { flex-wrap: wrap; overflow: visible; }

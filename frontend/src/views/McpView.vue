@@ -1,6 +1,6 @@
 <template>
-  <div class="report-page animate-fade-in">
-    <header class="report-heading">
+  <div class="report-page" :class="{ 'animate-fade-in': !embedded }">
+    <header v-if="!embedded" class="report-heading">
       <h1>MCP 授权</h1>
       <div class="report-actions">
         <button class="btn btn-secondary" :disabled="busy || loading" @click="load">刷新设置</button
@@ -9,6 +9,12 @@
         </button>
       </div>
     </header>
+    <div v-else class="embedded-actions">
+      <button class="btn btn-secondary" :disabled="busy || loading" @click="load">刷新设置</button
+      ><button class="btn btn-secondary" :disabled="busy || loadingUsers" @click="loadUsers">
+        {{ loadingUsers ? '读取中…' : '刷新 SunPanel 账号' }}
+      </button>
+    </div>
     <p v-if="error" class="report-error" role="alert">{{ error }}</p>
     <p v-if="userError" class="report-warning" role="status">{{ userError }}</p>
     <div v-if="data" class="mcp-layout">
@@ -242,6 +248,9 @@ import { mcpRequest } from '@/api/mcp'
 import { useGatewayStatus } from '@/composables/useGatewayStatus'
 import { useToast } from '@/composables/useToast'
 import '@/styles/reports.css'
+defineProps({
+  embedded: { type: Boolean, default: false }
+})
 const toast = useToast(),
   controller = new AbortController(),
   { refreshConfig } = useGatewayStatus()
@@ -576,16 +585,25 @@ summary {
   align-items: center;
   margin-top: 4px;
 }
+.embedded-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
 .form-actions .btn {
   height: 38px;
 }
 @media (max-width: 640px) {
+  .embedded-actions,
   .report-heading .report-actions {
     display: flex !important;
     flex-wrap: wrap !important;
     gap: 8px !important;
     width: 100% !important;
   }
+  .embedded-actions .btn,
   .report-heading .report-actions .btn {
     flex: 1 1 calc(50% - 4px) !important;
     justify-content: center !important;

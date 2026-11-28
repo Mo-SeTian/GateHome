@@ -330,25 +330,25 @@ const pages = [
     keywords: ['流量', '数据统计', '流量统计', '带宽', '网速', '上传', '下载', 'traffic']
   },
   {
-    title: '网关助手',
+    title: 'AI 与集成 · 网关助手',
     subtitle: '查看网关状态、提出配置变更与查找设置',
     path: '/assistant',
     icon: Bot,
-    keywords: ['AI', '聊天', '智能助手']
+    keywords: ['AI', 'AI 与集成', '聊天', '智能助手', '网关助手']
   },
   {
-    title: '模型接入点',
+    title: 'AI 与集成 · 模型接入点',
     subtitle: '配置并测试 OpenAI 兼容接口',
     path: '/assistant/settings',
     icon: Settings,
-    keywords: ['AI', '模型', 'API', '接入']
+    keywords: ['AI', 'AI 与集成', '模型', 'API', '接入', '模型接入点']
   },
   {
-    title: 'MCP 授权',
+    title: 'AI 与集成 · MCP 授权',
     subtitle: 'Model Context Protocol 接入凭证、权限范围与审计',
-    path: '/mcp',
+    path: '/assistant/mcp',
     icon: Bot,
-    keywords: ['ai', 'mcp', 'claude', 'agent', '智能体', 'token']
+    keywords: ['ai', 'AI 与集成', 'mcp', 'claude', 'agent', '智能体', 'token', 'MCP 授权']
   },
   {
     title: '更新 (Updates)',

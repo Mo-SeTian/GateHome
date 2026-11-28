@@ -83,7 +83,7 @@ function detectPath(category) {
     case 'cert': return '/certificates'
     case 'mihomo': return '/mihomo'
     case 'upstream': return '/runtime'
-    case 'mcp': return '/mcp'
+    case 'mcp': return '/assistant/mcp'
     default: return null
   }
 }

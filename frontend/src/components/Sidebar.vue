@@ -58,9 +58,9 @@ import { useToast } from '@/composables/useToast'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { 
-  House, GitFork, X, ChevronDown, Sparkles, Cable, LayoutDashboard, Network, ArrowLeftRight, Compass, Images,
+  House, GitFork, X, ChevronDown, Sparkles, LayoutDashboard, Network, ArrowLeftRight, Compass, Images,
   Globe, Lock, Download, ShieldAlert, ScrollText,
-  Bell, BarChart3, Activity, Bot, RefreshCw, HardDriveDownload, Settings
+  Bell, BarChart3, Activity, RefreshCw, HardDriveDownload, Settings
 } from 'lucide-vue-next'
 import { useAppStore } from '@/composables/useAppStore'
 import { useGatewayStatus } from '@/composables/useGatewayStatus'
@@ -81,11 +81,8 @@ const groups = [
     ['/runtime', '运行状态', Activity], ['/notifications', '通知中心', Bell],
     ['/logs', '日志与拦截', ScrollText], ['/statistics', '数据统计', BarChart3]
   ] },
-  { label: 'AI 与集成', icon: Sparkles, items: [
-    ['/assistant', '网关助手', Sparkles], ['/assistant/settings', '模型接入点', Cable], ['/mcp', 'MCP 授权', Bot]
-  ] },
   { label: '系统维护', icon: Settings, items: [
-    ['/updates', '更新', RefreshCw], ['/backups', '备份与恢复', HardDriveDownload], ['/settings', '设置', Settings]
+    ['/assistant', 'AI 与集成', Sparkles], ['/updates', '更新', RefreshCw], ['/backups', '备份与恢复', HardDriveDownload], ['/settings', '设置', Settings]
   ] }
 ]
 const groupPreferenceKey = 'gh_sidebar_expanded_groups'

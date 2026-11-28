@@ -327,9 +327,10 @@ try {
     statistics: ['数据统计 · GateHome', ['数据统计', '访问统计']],
     'statistics/traffic': ['流量统计 · GateHome', ['数据统计', '流量统计']],
     traffic: ['流量统计 · GateHome', ['数据统计', '流量统计']],
-    assistant: ['网关助手 · GateHome', ['网关助手']],
-    'assistant/settings': ['模型接入点 · GateHome', ['模型接入点']],
-    mcp: ['MCP 授权 · GateHome', ['MCP 授权']],
+    assistant: ['AI 与集成 · GateHome', ['AI 与集成']],
+    'assistant/settings': ['模型接入点 · GateHome', ['AI 与集成']],
+    'assistant/mcp': ['MCP 授权 · GateHome', ['AI 与集成']],
+    mcp: ['MCP 授权 · GateHome', ['AI 与集成']],
     updates: ['更新 · GateHome', ['版本更新与回滚']],
     backups: ['备份与恢复 · GateHome', ['备份与恢复']],
     settings: ['设置 · GateHome', ['设置']],
@@ -339,7 +340,8 @@ try {
   const redirectTargets = {
     'firewall-logs': 'logs/firewall',
     'ip-blocks': 'logs/ip-blocks',
-    traffic: 'statistics/traffic'
+    traffic: 'statistics/traffic',
+    mcp: 'assistant/mcp'
   }
   async function route(name) {
     const targetName = redirectTargets[name] || name
@@ -1250,13 +1252,16 @@ try {
     'logs/system': 'logs',
     'ip-blocks': 'logs',
     traffic: 'statistics',
-    'statistics/traffic': 'statistics'
+    'statistics/traffic': 'statistics',
+    'assistant/settings': 'assistant',
+    'assistant/mcp': 'assistant',
+    mcp: 'assistant'
   }
   for (const view of [
     'overview', 'routes', 'forwards', 'sunpanel', 'ddns', 'certificates', 'subscriptions', 'access',
     'firewall-logs', 'logs', 'logs/firewall', 'logs/ip-blocks', 'logs/system', 'ip-blocks',
     'statistics', 'statistics/traffic', 'traffic',
-    'assistant', 'assistant/settings', 'mcp', 'updates', 'backups', 'settings'
+    'assistant', 'assistant/settings', 'assistant/mcp', 'mcp', 'updates', 'backups', 'settings'
   ]) {
     await route(view)
     const expectedSidebar = canonicalSidebar[view] || view
@@ -1362,6 +1367,25 @@ try {
       const logAfter = await logTabs.boundingBox()
       for (const k of ['x', 'y', 'width', 'height']) {
         assert.ok(Math.abs(logBefore[k] - logAfter[k]) <= 1, `logs .hub-tabs ${k} shifted at width=${width} (${tabName}): ${logBefore[k]} vs ${logAfter[k]}`)
+      }
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true, `${expectedHash} overflow at width=${width}`)
+    }
+
+    await route('assistant')
+    await settleAnimations()
+    const aiTabs = page.locator('.ai-hub .hub-tabs')
+    const aiBefore = await aiTabs.boundingBox()
+    for (const [tabName, expectedHash] of [
+      ['模型接入点', '#/assistant/settings'],
+      ['MCP 授权', '#/assistant/mcp'],
+      ['网关助手', '#/assistant']
+    ]) {
+      await aiTabs.getByRole('tab', { name: tabName }).click()
+      await page.waitForFunction(hash => window.location.hash === hash, expectedHash)
+      await settleAnimations()
+      const aiAfter = await aiTabs.boundingBox()
+      for (const k of ['x', 'y', 'width', 'height']) {
+        assert.ok(Math.abs(aiBefore[k] - aiAfter[k]) <= 1, `ai .hub-tabs ${k} shifted at width=${width} (${tabName}): ${aiBefore[k]} vs ${aiAfter[k]}`)
       }
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true, `${expectedHash} overflow at width=${width}`)
     }
@@ -1787,7 +1811,7 @@ try {
         assert.ok(close.width >= 44 && close.height >= 44)
       }
       const groups = navigation.locator('.nav-group')
-      assert.equal(await groups.count(), 6)
+      assert.equal(await groups.count(), 5)
       const service = navigation.getByRole('button', { name: '服务接入', exact: true })
       await service.click()
       assert.equal(await service.getAttribute('aria-expanded'), 'false')
@@ -1795,7 +1819,7 @@ try {
         const toggle = group.getByRole('button')
         if (await toggle.getAttribute('aria-expanded') === 'false') await toggle.click()
       }
-      assert.equal(await navigation.getByRole('link').count(), 21)
+      assert.equal(await navigation.getByRole('link').count(), 19)
       if (width < 1024)
         assert.ok(await navigation.locator('.nav-link, .nav-section-title').evaluateAll(controls => controls.every(control => control.getBoundingClientRect().height >= 44)))
       if (theme === 'light') await page.waitForFunction(() => {
@@ -1822,7 +1846,7 @@ try {
       }
     }
   }
-  console.log('PASS sidebar: both themes, 21 links in six collapsible groups and 44px mobile targets from 320px to 1440px')
+  console.log('PASS sidebar: both themes, 19 links in five collapsible groups and 44px mobile targets from 320px to 1440px')
 
   await page.setViewportSize({ width: 1440, height: 1000 })
   const wireGuardSocket = createSocket('udp4')

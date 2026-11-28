@@ -1,6 +1,6 @@
 <template>
   <div class="report-page">
-    <header class="report-heading">
+    <header v-if="!embedded" class="report-heading">
       <h1>模型接入点</h1>
       <RouterLink class="btn btn-secondary" to="/assistant">打开网关助手</RouterLink>
     </header>
@@ -73,6 +73,10 @@ import '@/styles/reports.css'
 import { computed, onMounted, ref } from 'vue'
 import { Plus, RefreshCw } from 'lucide-vue-next'
 import { useAssistant } from '@/composables/useAssistant'
+
+defineProps({
+  embedded: { type: Boolean, default: false }
+})
 
 const { settings, loadSettings, saveSettings, testSettings, listModels } = useAssistant()
 const draft = ref(null)

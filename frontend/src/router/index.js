@@ -130,18 +130,26 @@ const routes = [
     redirect: to => ({ path: '/statistics/traffic', query: to.query })
   },
   {
-    path: '/assistant', name: 'Assistant', component: () => import('@/components/AssistantChat.vue'),
-    props: { full: true }, meta: { title: '网关助手', icon: 'Sparkles' }
+    path: '/assistant',
+    name: 'Assistant',
+    component: () => import('@/views/AiHubView.vue'),
+    meta: { title: 'AI 与集成', icon: 'Sparkles', aiTab: 'chat' }
   },
   {
-    path: '/assistant/settings', name: 'AssistantSettings', component: () => import('@/views/AssistantSettingsView.vue'),
-    meta: { title: '模型接入点', icon: 'Settings' }
+    path: '/assistant/settings',
+    name: 'AssistantSettings',
+    component: () => import('@/views/AiHubView.vue'),
+    meta: { title: '模型接入点', icon: 'Settings', aiTab: 'settings' }
+  },
+  {
+    path: '/assistant/mcp',
+    name: 'Mcp',
+    component: () => import('@/views/AiHubView.vue'),
+    meta: { title: 'MCP 授权', icon: 'Bot', aiTab: 'mcp' }
   },
   {
     path: '/mcp',
-    name: 'Mcp',
-    component: () => import('@/views/McpView.vue'),
-    meta: { title: 'MCP 授权', icon: 'Bot' }
+    redirect: to => ({ path: '/assistant/mcp', query: to.query })
   },
   {
     path: '/updates',

@@ -61,7 +61,7 @@ import { useToast } from '@/composables/useToast'
 const AssistantChat = defineAsyncComponent(() => import('@/components/AssistantChat.vue'))
 const route = useRoute()
 const { panelOpen, resetAssistant } = useAssistant()
-const showAssistant = computed(() => panelOpen.value && route.name !== 'Assistant' && route.name !== 'AssistantSettings')
+const showAssistant = computed(() => panelOpen.value && !['Assistant', 'AssistantSettings', 'Mcp'].includes(route.name))
 const assistantDrawer = ref(null)
 const overlayLayout = window.matchMedia('(max-width: 1279px)')
 const narrowLayout = ref(overlayLayout.matches)
@@ -77,11 +77,11 @@ watch(assistantOverlay, async (open, old, onCleanup) => {
   await nextTick()
   if (!current) return
   if (open) assistantDrawer.value?.focus()
-  else if (returnFocus && !panelOpen.value && route.name !== 'Assistant' && route.name !== 'AssistantSettings')
+  else if (returnFocus && !panelOpen.value && !['Assistant', 'AssistantSettings', 'Mcp'].includes(route.name))
     document.querySelector('button[aria-label="网关助手"]')?.focus()
 })
 watch(() => route.name, name => {
-  if (name === 'Assistant' || name === 'AssistantSettings') panelOpen.value = false
+  if (name === 'Assistant' || name === 'AssistantSettings' || name === 'Mcp') panelOpen.value = false
 })
 const { theme, closeCmdk, closeSidebar } = useAppStore()
 const { isAuthenticated } = useSession()
